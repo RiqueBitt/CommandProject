@@ -112,7 +112,7 @@ function ChatBody({ chat }: { chat: ReturnType<typeof useChat> }) {
   return (
     <>
       <div className="msgs" aria-live="polite">
-        {chat.messages.length === 0 && <p className="faint small">Ninguém falou nada ainda. Diga oi!</p>}
+        {chat.messages.length === 0 && <Empty icon="forum" title="Tudo quieto por aqui">Ninguém falou nada ainda. Diga oi!</Empty>}
         {chat.messages.map((m, i) => (
           <div key={i} className="msg"><b>{m.nick}</b>{m.text}<time>{new Date(m.at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</time></div>
         ))}
@@ -194,8 +194,12 @@ function Rooms({ base, nick, joined, onJoined }: { base: string; nick: string; j
         <button className="btn sm text" onClick={load}><Icon name="refresh" /></button>
         {!hosting.room && <button className="btn primary sm" onClick={() => setCreating(true)}><Icon name="add" /> Criar sala</button>}
       </div>
-      {err && <Notice kind="err">{err}</Notice>}
-      {rooms === null ? <div className="bar indeterminate"><i /></div> : rooms.length === 0 ? (
+      {err ? (
+        <div className="card"><Empty icon="cloud_off" title="Sem conexão com o servidor"
+          action={<div className="row"><button className="btn" onClick={load}><Icon name="refresh" /> Tentar de novo</button><button className="btn text" onClick={() => useStore.getState().go("settings")}><Icon name="dns" /> Configurar servidor</button></div>}>
+          {err} As partidas continuam pelo lobby da Steam; salas e chat voltam quando o servidor responder.
+        </Empty></div>
+      ) : rooms === null ? <div className="bar indeterminate"><i /></div> : rooms.length === 0 ? (
         <div className="card"><Empty icon="weekend" title="Nenhuma sala aberta">Crie uma e chame a galera pelo chat.</Empty></div>
       ) : (
         <div className="room-grid">

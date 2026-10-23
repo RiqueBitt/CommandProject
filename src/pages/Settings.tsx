@@ -92,6 +92,10 @@ export default function SettingsPage() {
                 <div className="txt"><b>Aplicar o perfil antes de jogar</b><span>O botão Jogar instala e remove os mods do perfil ativo antes de abrir o jogo.</span></div>
                 <Switch checked={s.applyBeforeLaunch} onChange={(v) => setS({ ...s, applyBeforeLaunch: v })} label="Aplicar antes de jogar" />
               </div>
+              <div className="setting-row">
+                <div className="txt"><b>Modelo 3D na tela inicial</b><span>Mostra uma unidade do seu jogo girando na tela inicial (lida da sua instalação). Clique no nome dela para trocar.</span></div>
+                <Switch checked={s.showcase} onChange={(v) => setS({ ...s, showcase: v })} label="Modelo 3D na tela inicial" />
+              </div>
               <MemoryMode onChange={(v) => setS({ ...s, keepLargeAddress: v })} />
               <div className="setting-row">
                 <div className="txt"><b>Voltar ao original quando o jogo fechar</b><span>Útil se você também joga sem o launcher ou usa “Verificar integridade” da Steam.</span></div>

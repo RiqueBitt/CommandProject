@@ -59,7 +59,7 @@ let profiles: T.ProfileSet = {
 let settings: T.Settings = {
   gamePath: null, launchMode: "steam", launchArgs: [], applyBeforeLaunch: true, restoreOnExit: false,
   hubUrls: ["https://hub.exemplo.com/index.json"], pythonPath: null, checkModUpdates: true, onboarded: true,
-  serverUrl: "http://localhost:8787", nickname: "Rique", checkAppUpdates: true, keepLargeAddress: false,
+  serverUrl: "http://localhost:8787", nickname: "Rique", checkAppUpdates: true, keepLargeAddress: false, showcaseUnit: null, showcase: true,
 };
 
 const game: T.GameInstall = {
@@ -373,6 +373,7 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       for (let i = 0; i <= 40; i += 4) { mockEvents.emit("cp://progress", { task: "hd", step: i, total: 40, message: `units/uel${String(100 + i).padStart(4, "0")}/albedo.dds (faltam ~0:${String(40 - i).padStart(2, "0")})` }); await sleep(150); }
       return r({ ...mods[0], id: "texturas-hd", name: (a.opts as T.EnhanceOptions).name, category: "textures" });
     }
+    case "showcase": return r(null); // sem jogo no navegador: a tela mostra o robô de reserva
     case "laa_status": return r(laaStatus());
     case "laa_set": laa.enabled = Boolean(a.enabled); return r(laaStatus());
     case "shaders_status": return r(shaderStatus());

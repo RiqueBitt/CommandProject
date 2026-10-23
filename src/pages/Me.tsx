@@ -122,6 +122,7 @@ export default function Me() {
               })}
             </div>
           </div>
+          <Explore />
         </div>
       </div>
       {creating && <NewProfile onClose={() => setCreating(false)} />}
@@ -149,5 +150,31 @@ export function NickModal({ onClose }: { onClose: () => void }) {
         <footer><button type="button" className="btn text" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!valid}>Salvar</button></footer>
       </form>
     </Modal>
+  );
+}
+
+/** Atalhos ilustrados para o que o CommandProject faz (preenche a tela "Eu" com algo útil). */
+function Explore() {
+  const { go, setStudioTab } = useStore.getState();
+  const items: { icon: string; title: string; text: string; tint: string; action: () => void }[] = [
+    { icon: "auto_awesome", title: "Shaders", text: "Nitidez, brilho e cores vivas sem dessincronizar o multiplayer.", tint: "163 230 53", action: () => go("library") },
+    { icon: "hd", title: "Texturas HD", text: "Amplie as texturas do seu jogo com um clique no Estúdio.", tint: "56 189 248", action: () => { setStudioTab("hd"); go("studio"); } },
+    { icon: "map", title: "Criar mapas", text: "Posicione bases e gere mapas jogáveis com o SC2 Map Toolkit.", tint: "245 184 75", action: () => { setStudioTab("maps"); go("studio"); } },
+    { icon: "hub", title: "Jogar online", text: "Salas, chat e perfis de mods iguais para todo mundo.", tint: "167 139 250", action: () => go("multiplayer") },
+  ];
+  return (
+    <section className="col" style={{ gap: 12, marginTop: 26 }}>
+      <div className="section-head" style={{ marginBottom: 0 }}><Icon name="explore" /><h2>Explore</h2></div>
+      <div className="explore-grid">
+        {items.map((i) => (
+          <button key={i.title} className="explore" style={{ ["--tint" as string]: i.tint }} onClick={i.action}>
+            <span className="ico"><Icon name={i.icon} /></span>
+            <b>{i.title}</b>
+            <span className="muted small">{i.text}</span>
+            <Icon name="arrow_forward" className="go" />
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }

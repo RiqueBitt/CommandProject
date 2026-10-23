@@ -35,6 +35,10 @@ pub struct Settings {
     pub check_app_updates: bool,
     /// Manter o "modo 4 GB" (Large Address Aware): reaplica antes de jogar se a Steam restaurar o .exe.
     pub keep_large_address: bool,
+    /// Unidade mostrada em 3D na tela inicial (`None` = Comandante).
+    pub showcase_unit: Option<String>,
+    /// Mostrar o modelo 3D na tela inicial.
+    pub showcase: bool,
 }
 
 impl Default for Settings {
@@ -53,6 +57,8 @@ impl Default for Settings {
             nickname: String::new(),
             check_app_updates: true,
             keep_large_address: false,
+            showcase_unit: None,
+            showcase: true,
         }
     }
 }

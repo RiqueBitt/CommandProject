@@ -151,7 +151,7 @@ export default function Maps() {
         </div>
 
         {!terrain ? (
-          <div className="card"><Empty title="Escolha um terreno">Ele vira a base do seu mapa: relevo, água e texturas vêm do jogo.</Empty></div>
+          <div className="card"><Empty icon="terrain" title="Escolha um terreno">Ele vira a base do seu mapa: relevo, água e texturas vêm do jogo.</Empty></div>
         ) : (
           <div className="grid-2" style={{ gridTemplateColumns: "minmax(360px, 1fr) 340px", alignItems: "start" }}>
             <div className="col">

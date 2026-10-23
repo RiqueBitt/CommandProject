@@ -18,6 +18,9 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// (arquivo .scd, entrada .scm, textura albedo) de uma unidade.
+pub type UnitModel = (PathBuf, String, Option<String>);
+
 pub struct Workspace {
     pub data_dir: PathBuf,
     pub resources_dir: Option<PathBuf>,
@@ -502,6 +505,53 @@ impl Workspace {
         game::launch_plan(self.game()?, self.settings.launch_mode, &self.settings.launch_args)
     }
 
+    // ---------------------------------------------------------------- vitrine da tela inicial
+
+    /// Modelos de unidade disponíveis (id → (arquivo .scd, entrada .scm, textura albedo)).
+    pub fn unit_models(&mut self) -> Result<std::collections::BTreeMap<String, UnitModel>> {
+        let mut out = std::collections::BTreeMap::new();
+        let mut files: HashMap<String, Vec<(PathBuf, String)>> = HashMap::new();
+        // os .scd montados por último vencem: percorre do primeiro para o último e sobrescreve
+        for src in self.stock_sources()? {
+            let mut scd = crate::scd::Scd::open(&src)?;
+            for e in scd.entries()? {
+                if e.is_dir || !e.key.starts_with("/units/") {
+                    continue;
+                }
+                let mut parts = e.key.trim_start_matches('/').split('/');
+                let (Some(_), Some(id)) = (parts.next(), parts.next()) else {
+                    continue;
+                };
+                files
+                    .entry(id.to_string())
+                    .or_default()
+                    .push((src.clone(), e.name.clone()));
+            }
+        }
+        for (id, list) in files {
+            let lower = |n: &str| n.to_ascii_lowercase();
+            let scm = list
+                .iter()
+                .filter(|(_, n)| lower(n).ends_with(".scm"))
+                .min_by_key(|(_, n)| (!lower(n).contains("lod0"), n.len()));
+            let Some((src, scm)) = scm else { continue };
+            let albedo = list
+                .iter()
+                .filter(|(s, n)| s == src && lower(n).ends_with(".dds"))
+                .filter(|(_, n)| {
+                    let l = lower(n);
+                    !l.contains("normal") && !l.contains("spec") && !l.contains("mask") && !l.contains("lod1")
+                })
+                .min_by_key(|(_, n)| {
+                    let l = lower(n);
+                    (!(l.contains("albedo") || l.contains("diffuse")), n.len())
+                })
+                .map(|(_, n)| n.clone());
+            out.insert(id.to_ascii_lowercase(), (src.clone(), scm.clone(), albedo));
+        }
+        Ok(out)
+    }
+
     // ---------------------------------------------------------------- shaders (ReShade)
 
     /// Pasta do executável do jogo (onde o ReShade e os shaders ficam).
@@ -633,5 +683,53 @@ pub fn default_data_dir() -> PathBuf {
         home.join("Library/Application Support").join(APP_IDENTIFIER)
     } else {
         home.join(".local/share").join(APP_IDENTIFIER)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::tests::make_scd;
+
+    #[test]
+    fn finds_unit_models_and_albedo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("SC2");
+        let gd = game.join("gamedata");
+        std::fs::create_dir_all(game.join("bin")).unwrap();
+        std::fs::write(game.join("bin/SupremeCommander2.exe"), b"MZ").unwrap();
+        let scm = crate::scm::write(&crate::scm::tests::cube()).unwrap();
+        let dds = crate::dds::encode(
+            &crate::dds::Rgba {
+                width: 8,
+                height: 8,
+                pixels: [90u8, 120, 200, 255].repeat(64),
+            },
+            crate::dds::DdsFormat::Dxt1,
+            1,
+            crate::dds::Quality::Fast,
+        )
+        .unwrap();
+        make_scd(
+            &gd.join("units.scd"),
+            &[
+                ("units/uul0001/uul0001_lod0.scm", &scm),
+                ("units/uul0001/uul0001_lod1.scm", &scm),
+                ("units/uul0001/uul0001_normalsts.dds", &dds),
+                ("units/uul0001/uul0001_albedo.dds", &dds),
+                ("units/ucl0103/ucl0103_lod0.scm", &scm),
+                ("units/ucl0103/ucl0103_albedo.dds", &dds),
+                ("units/ucl0103/ucl0103_unit.bp", b"UnitBlueprint {}"),
+            ],
+        );
+        make_scd(&gd.join("lua.scd"), &[("lua/x.lua", b"--")]);
+        let mut ws = Workspace::open(&tmp.path().join("data"), None).unwrap();
+        ws.set_game_path(Some(game)).unwrap();
+        ws.scan_baseline(&mut |_| {}).unwrap();
+        let m = ws.unit_models().unwrap();
+        assert_eq!(m.keys().cloned().collect::<Vec<_>>(), vec!["ucl0103", "uul0001"]);
+        let (_, scm_name, albedo) = &m["uul0001"];
+        assert_eq!(scm_name, "units/uul0001/uul0001_lod0.scm");
+        assert_eq!(albedo.as_deref(), Some("units/uul0001/uul0001_albedo.dds"));
     }
 }

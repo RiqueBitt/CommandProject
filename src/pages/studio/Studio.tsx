@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "../../components/ui";
 import { api } from "../../lib/api";
+import { useStore } from "../../lib/store";
 import type { Project } from "../../lib/types";
 import Explorer from "./Explorer";
 import Maps from "./Maps";
@@ -18,7 +19,11 @@ const TABS: { id: Tab; label: string; icon: string; hint: string }[] = [
 ];
 
 export default function Studio() {
-  const [tab, setTab] = useState<Tab>("projects");
+  const [tab, setTab] = useState<Tab>(() => {
+    const t = useStore.getState().studioTab as Tab | null;
+    useStore.getState().setStudioTab(null);
+    return t ?? "projects";
+  });
   const [projects, setProjects] = useState<Project[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
 

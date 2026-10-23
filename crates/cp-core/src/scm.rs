@@ -658,7 +658,7 @@ fn compute_tangents(verts: &mut [Vertex], idx: &[u16]) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     pub fn cube() -> Model {

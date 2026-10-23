@@ -23,6 +23,9 @@ interface State {
   palette: boolean;
   appUpdate: AppUpdate | null;
   go: (p: Page) => void;
+  /** Aba a abrir no Estúdio na próxima visita (ex.: "hd"). */
+  studioTab: string | null;
+  setStudioTab: (t: string | null) => void;
   back: () => void;
   setPalette: (open: boolean) => void;
   refresh: () => Promise<void>;
@@ -48,6 +51,8 @@ export const useStore = create<State>((set, get) => ({
   history: [],
   palette: false,
   appUpdate: null,
+  studioTab: null,
+  setStudioTab: (studioTab) => set({ studioTab }),
   go: (page) => set((s) => (s.page === page ? {} : { page, history: [...s.history.slice(-30), s.page] })),
   back: () => set((s) => (s.history.length ? { page: s.history[s.history.length - 1], history: s.history.slice(0, -1) } : {})),
   setPalette: (palette) => set({ palette }),

@@ -4,6 +4,7 @@ import { Empty, Field, Icon, Menu, MenuItem, Modal, Notice, TaskProgress } from 
 import { api, confirmDialog, openUrl, pickFile } from "../lib/api";
 import { fmtDate, plural, useStore } from "../lib/store";
 import type { ConflictReport, ShaderStatus, UpdateInfo } from "../lib/types";
+import { EnhancementsCard, HomeShowcase } from "./HomeExtras";
 
 export default function Home() {
   const d = useStore((s) => s.dashboard);
@@ -93,9 +94,21 @@ export default function Home() {
     );
   }
 
+  const contentCard = (
+<div className={settings?.showcase ? "card content-inline" : "content-card"}>
+      <span className="tabline">Conteúdo</span>
+      <button className="content-line" onClick={() => go("library")}><Icon name="extension" /> {plural(active.length, "mod ativo", "mods ativos")}<Icon name="chevron_right" className="go" /></button>
+      <button className="content-line" onClick={() => go("library")}><Icon name="map" /> {plural(count("maps"), "mapa", "mapas")} e {plural(count("ui"), "mod de interface", "mods de interface")}<Icon name="chevron_right" className="go" /></button>
+      <button className="content-line" onClick={() => go("library")}><Icon name="auto_awesome" /> {shaders?.packInstalled && shaders.preset ? `Shaders: ${shaders.presets.find((p) => p.id === shaders.preset)?.name}` : "Shaders: deixar o jogo mais bonito"}<Icon name="chevron_right" className="go" /></button>
+      <button className="content-line" onClick={() => go("hub")}><Icon name="download" /> Baixar mais mods<Icon name="chevron_right" className="go" /></button>
+      <button className="content-line" onClick={() => setLink(true)}><Icon name="link" /> Instalar de um link<Icon name="chevron_right" className="go" /></button>
+    </div>
+  );
+
   return (
     <>
-      <div className="scroll">
+      <HomeShowcase />
+      <div className={`scroll ${settings?.showcase ? "home-scroll" : ""}`}>
         <div className="page home-body">
           <div className="head">
             <div className="grow">
@@ -136,7 +149,9 @@ export default function Home() {
           {working && <div className="card pad" style={{ maxWidth: 720 }}><TaskProgress task={busy.purge ? "purge" : "apply"} label="Preparando os arquivos do jogo…" /></div>}
           {d.gameRunning && <Notice kind="warn">Feche o jogo para aplicar mudanças: o SC2 só lê os arquivos .scd quando abre.</Notice>}
 
-          <div className="grid">
+          <div className={settings?.showcase ? "home-col" : "grid"}>
+            <EnhancementsCard />
+            {settings?.showcase && contentCard}
             <section className="card pad">
               <div className="card-title"><Icon name="checklist" style={{ color: "var(--primary)" }} /><h3>Antes de jogar</h3></div>
               {changes === 0 && pending.warnings.length === 0 ? (
@@ -195,14 +210,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="content-card">
-        <span className="tabline">Conteúdo</span>
-        <button className="content-line" onClick={() => go("library")}><Icon name="extension" /> {plural(active.length, "mod ativo", "mods ativos")}<Icon name="chevron_right" className="go" /></button>
-        <button className="content-line" onClick={() => go("library")}><Icon name="map" /> {plural(count("maps"), "mapa", "mapas")} e {plural(count("ui"), "mod de interface", "mods de interface")}<Icon name="chevron_right" className="go" /></button>
-        <button className="content-line" onClick={() => go("library")}><Icon name="auto_awesome" /> {shaders?.packInstalled && shaders.preset ? `Shaders: ${shaders.presets.find((p) => p.id === shaders.preset)?.name}` : "Shaders: deixar o jogo mais bonito"}<Icon name="chevron_right" className="go" /></button>
-        <button className="content-line" onClick={() => go("hub")}><Icon name="download" /> Baixar mais mods<Icon name="chevron_right" className="go" /></button>
-        <button className="content-line" onClick={() => setLink(true)}><Icon name="link" /> Instalar de um link<Icon name="chevron_right" className="go" /></button>
-      </div>
+      {!settings?.showcase && contentCard}
 
       <div className="launch-wrap">
         {!working && settings?.applyBeforeLaunch && changes > 0 && <span className="launch-note">aplica {plural(changes, "alteração", "alterações")} antes de abrir</span>}

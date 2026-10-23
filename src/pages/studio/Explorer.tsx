@@ -34,7 +34,7 @@ export default function Explorer({ projects, target, setTarget }: { projects: Pr
   }, [entries, query]);
 
   if (!archives) return <div className="card pad"><div className="bar indeterminate"><i /></div></div>;
-  if (!archives.length) return <div className="card"><Empty title="Pasta do jogo não encontrada">Configure a pasta do jogo em Configurações.</Empty></div>;
+  if (!archives.length) return <div className="card"><Empty icon="travel_explore" title="Pasta do jogo não encontrada">Configure a pasta do jogo em Configurações.</Empty></div>;
 
   return (
     <div className="studio">
@@ -77,7 +77,7 @@ export default function Explorer({ projects, target, setTarget }: { projects: Pr
         {archive && entry ? (
           <EntryPreview key={archive + entry} archive={archive} entry={entry} projects={projects} target={target} setTarget={setTarget} />
         ) : (
-          <Empty title="Escolha um arquivo">
+          <Empty icon="folder_open" title="Escolha um arquivo">
             Navegue pelos .scd do jogo. Lua e blueprints abrem como texto, texturas como imagem e modelos em 3D. Os arquivos mostrados são sempre os originais, mesmo que um mod os substitua.
           </Empty>
         )}
@@ -141,7 +141,7 @@ function EntryPreview({ archive, entry, projects, target, setTarget }: { archive
               <LuaEditor value={text.text} readOnly />
             </>
           ) : (
-            <Empty title={text.compiled ? "Lua compilado" : "Arquivo binário"}>
+            <Empty icon={text.compiled ? "lock" : "description"} title={text.compiled ? "Lua compilado" : "Arquivo binário"}>
               {text.compiled ? "Este arquivo é bytecode. A versão em texto costuma estar em uncompiled_lua.scd." : `${fmtBytes(text.size)}. Use Exportar para abrir em outro programa.`}
             </Empty>
           ))}

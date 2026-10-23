@@ -72,6 +72,8 @@ export interface Settings {
   nickname: string;
   checkAppUpdates: boolean;
   keepLargeAddress: boolean;
+  showcaseUnit?: string | null;
+  showcase: boolean;
 }
 
 export interface ServerInfo { name: string; motd: string; version: string; rooms: number; online: number; hub: boolean }
@@ -181,3 +183,5 @@ export interface EnhanceOptions { name: string; groups: { group: string; mode: E
 export interface EnhancePreview { before: string; after: string; info: DdsInfo; width: number; height: number; class: "color" | "normal" | "data" | "skip" }
 
 export interface LaaStatus { exe: string; is64bit: boolean; enabled: boolean; patchedByUs: boolean; revertedByUpdate: boolean; steamStub: boolean }
+
+export interface Showcase { unit: string; mesh: MeshView; albedo?: string | null; units: string[] }

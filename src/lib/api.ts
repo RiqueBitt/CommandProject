@@ -152,6 +152,7 @@ export const api = {
   enhanceGroups: () => call<T.EnhanceGroup[]>("enhance_groups"),
   enhancePreview: (entry: string, mode: T.EnhanceMode, opts: T.EnhanceOptions) => call<T.EnhancePreview>("enhance_preview", { entry, mode, opts }),
   buildEnhance: (opts: T.EnhanceOptions, enable = true) => call<T.Manifest>("build_enhance", { opts, enable }),
+  showcase: (unit?: string | null) => call<T.Showcase | null>("showcase", { unit: unit ?? null }),
   laaStatus: () => call<T.LaaStatus | null>("laa_status"),
   laaSet: (enabled: boolean) => call<T.LaaStatus>("laa_set", { enabled }),
   shadersStatus: () => call<T.ShaderStatus | null>("shaders_status"),

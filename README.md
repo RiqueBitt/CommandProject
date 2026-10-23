@@ -7,6 +7,13 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
 
 ## O que ele faz
 
+**Tela inicial**
+- Uma unidade do seu jogo em 3D, com a textura original, girando sobre uma plataforma luminosa
+  (arraste para girar; troque a unidade ou esconda o modelo). O modelo é lido da sua instalação na
+  hora de mostrar: o launcher não copia nem distribui arquivos do jogo. Sem o jogo, aparece um robô
+  original do CommandProject.
+- Card de **Aprimoramentos** (Shaders, Texturas HD, memória) com atalhos para cada um.
+
 **Jogar**
 - Encontra o jogo sozinho (bibliotecas da Steam, GOG ou pasta escolhida).
 - Botão **Jogar**: aplica o perfil de mods e abre pela Steam (`steam://rungameid/40100`) ou pelo executável.

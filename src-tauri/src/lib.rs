@@ -106,6 +106,7 @@ pub fn run() {
             commands::enhance_groups,
             commands::enhance_preview,
             commands::build_enhance,
+            commands::showcase,
             commands::laa_status,
             commands::laa_set,
             commands::shaders_status,

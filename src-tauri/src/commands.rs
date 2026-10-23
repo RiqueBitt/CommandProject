@@ -1339,3 +1339,61 @@ pub async fn laa_set(state: State<'_, AppState>, enabled: bool) -> R<cp_core::la
     })
     .await
 }
+
+// ---------------------------------------------------------------- vitrine 3D da tela inicial
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Showcase {
+    unit: String,
+    mesh: cp_core::scm::MeshView,
+    albedo: Option<String>,
+    units: Vec<String>,
+}
+
+/// Lê da instalação do usuário o modelo 3D de uma unidade e a textura dela (nada é copiado).
+/// Sem `unit`, usa a escolha salva ou o Comandante (ACU). `None` se o jogo não tem modelos.
+#[tauri::command]
+pub async fn showcase(state: State<'_, AppState>, unit: Option<String>) -> R<Option<Showcase>> {
+    with_ws(&state.ws, move |ws| {
+        if ws.game().is_err() {
+            return Ok(None);
+        }
+        let models = ws.unit_models()?;
+        if models.is_empty() {
+            return Ok(None);
+        }
+        let wanted = unit
+            .or_else(|| ws.settings.showcase_unit.clone())
+            .map(|u| u.to_ascii_lowercase());
+        let pick = wanted
+            .filter(|u| models.contains_key(u))
+            .or_else(|| {
+                ["uul0001", "ucl0001", "uil0001"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .find(|u| models.contains_key(u))
+            })
+            .or_else(|| models.keys().find(|k| k.ends_with("0001")).cloned())
+            .or_else(|| models.keys().next().cloned())
+            .expect("há modelos");
+        let (src, scm, albedo) = &models[&pick];
+        let mut scd = cp_core::scd::Scd::open(src)?;
+        let mesh = cp_core::scm::view(&cp_core::scm::read(&scd.read(scm)?)?);
+        let albedo = match albedo {
+            Some(n) => scd
+                .read(n)
+                .ok()
+                .and_then(|d| texture_view(&d, None).ok())
+                .map(|t| t.png),
+            None => None,
+        };
+        Ok(Some(Showcase {
+            unit: pick,
+            mesh,
+            albedo,
+            units: models.keys().cloned().collect(),
+        }))
+    })
+    .await
+}

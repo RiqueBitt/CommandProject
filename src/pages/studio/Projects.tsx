@@ -77,7 +77,7 @@ export default function Projects({ projects, current, setCurrent, reload, openEx
             <button className="btn sm" onClick={openExplorer}><Icon name="add" size={17} /> Do jogo</button>
           </div>
           {files.length === 0 ? (
-            <Empty title="Projeto vazio">Abra “Arquivos do jogo”, escolha o que quer mudar e use “Copiar para o projeto”.</Empty>
+            <Empty icon="create_new_folder" title="Projeto vazio">Abra “Arquivos do jogo”, escolha o que quer mudar e use “Copiar para o projeto”.</Empty>
           ) : (
             <div className="tree" role="listbox" aria-label="Arquivos do projeto">
               {files.map((f) => {
@@ -96,7 +96,7 @@ export default function Projects({ projects, current, setCurrent, reload, openEx
           {project && file ? (
             <FileEditor key={project.id + file.path} project={project} file={file} onChanged={loadFiles} />
           ) : (
-            <Empty title="Nenhum arquivo selecionado" />
+            <Empty icon="touch_app" title="Nenhum arquivo selecionado">Escolha um arquivo na lista ao lado.</Empty>
           )}
         </div>
       </div>
@@ -227,7 +227,7 @@ function FileEditor({ project, file, onChanged }: { project: Project; file: Proj
           )}
           {file.kind === "model" && mesh && <ModelViewer mesh={mesh} />}
           {!isText && file.kind !== "texture" && file.kind !== "model" && (
-            <Empty title="Sem editor para este tipo">Ele vai junto no mod do jeito que está.</Empty>
+            <Empty icon="inventory_2" title="Sem editor para este tipo">Ele vai junto no mod do jeito que está.</Empty>
           )}
         </Suspense>
       </div>
