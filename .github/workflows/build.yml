@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.0
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -27,9 +27,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: Núcleo (Rust)
+        shell: bash
         run: |
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
+          # em caso de erro, o resumo vira anotação (visível sem abrir o log)
+          report() { msg=$(grep -E "$2" -A10 "$1" | head -120 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g'); echo "::error title=$3::$msg"; exit 1; }
+          cargo clippy --workspace --all-targets -- -D warnings > clippy.log 2>&1 || report clippy.log '^(error|warning)' clippy
+          cargo test --workspace > test.log 2>&1 || report test.log 'panicked|FAILED|^error|failures:' testes
+          grep "test result" test.log
       - name: Ponte do toolkit de mapas (jogo sintético)
         run: python tools/test_maptk_bridge.py
       - name: Interface
@@ -44,7 +48,7 @@ jobs:
       PYTHON_EMBED: "3.12.10"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
