@@ -121,7 +121,7 @@ export interface ScdEntry { name: string; key: string; size: number; compressed:
 export interface EntryView { kind: string; size: number; text?: string | null; compiled: boolean; warnings: string[]; textFrom?: string | null }
 
 export type DdsFormat = "dxt1" | "dxt3" | "dxt5" | "ati1" | "ati2" | "bgra8" | "bgrx8" | "bgr8" | "rgb565" | "l8";
-export interface DdsInfo { width: number; height: number; mipCount: number; format: DdsFormat; isCubemap: boolean }
+export interface DdsInfo { width: number; height: number; mipCount: number; format: DdsFormat; isCubemap: boolean; isVolume?: boolean }
 export interface TextureView { info: DdsInfo; png: string }
 export interface ColorAdjust {
   hue: number; saturation: number; brightness: number; contrast: number; tint?: [number, number, number] | null; tintStrength: number;
@@ -185,7 +185,7 @@ export interface ShaderStatus {
 }
 
 export type EnhanceMode = "upscale" | "sharpen" | "skip";
-export interface SizeBucket { width: number; height: number; format: string; mipmaps: boolean; skip: boolean; count: number }
+export interface SizeBucket { width: number; height: number; format: string; mipmaps: boolean; skip: boolean; keepSize: boolean; count: number }
 export interface EnhanceGroup { group: string; textures: number; bytes: number; suggested: EnhanceMode; sample: string[]; buckets: SizeBucket[] }
 export interface EnhanceOptions { name: string; groups: { group: string; mode: EnhanceMode }[]; scale: number; maxSize: number; sharpness: number; deblock: number; quality: "fast" | "normal" | "best" }
 export interface EnhancePreview { before: string; after: string; info: DdsInfo; width: number; height: number; class: "color" | "normal" | "data" | "skip" }

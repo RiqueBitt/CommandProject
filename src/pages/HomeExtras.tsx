@@ -3,6 +3,7 @@ import { Icon, Modal } from "../components/ui";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
 import type { LaaStatus, ShaderStatus, Showcase } from "../lib/types";
+import { hdOutdated } from "../lib/hd";
 
 const Showcase3D = lazy(() => import("../components/Showcase3D"));
 
@@ -127,8 +128,8 @@ export function EnhancementsCard() {
     },
     {
       icon: "hd", title: "Texturas HD", on: !!hd?.enabled,
-      value: hd ? (hd.enabled ? "Ativas" : "Desligadas") : "Gerar no Estúdio",
-      action: () => { if (hd) go("library"); else { setStudioTab("hd"); go("studio"); } },
+      value: hd ? (hdOutdated(hd.manifest.version) ? "Gerar de novo" : hd.enabled ? "Ativas" : "Desligadas") : "Gerar no Estúdio",
+      action: () => { if (hd && !hdOutdated(hd.manifest.version)) go("library"); else { setStudioTab("hd"); go("studio"); } },
     },
     {
       icon: "memory", title: "Memória", on: !!laa?.enabled,

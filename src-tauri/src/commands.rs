@@ -1325,6 +1325,7 @@ pub async fn build_enhance(
         let import = ImportOptions {
             id: Some("texturas-hd".into()),
             name: Some(opts.name.clone()),
+            version: Some(cp_core::enhance::GENERATOR_VERSION.into()),
             category: Some(Category::Textures),
             description: Some(format!(
                 "{} texturas ampliadas ({}x, até {} px) e {} com nitidez melhorada, geradas no Estúdio a partir das originais. {:.0} MB → {:.0} MB.{}",

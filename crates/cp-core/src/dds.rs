@@ -81,6 +81,7 @@ pub struct DdsInfo {
     pub mip_count: u32,
     pub format: DdsFormat,
     pub is_cubemap: bool,
+    pub is_volume: bool,
 }
 
 /// Imagem RGBA8 em memória.
@@ -149,6 +150,8 @@ pub fn info(data: &[u8]) -> Result<DdsInfo> {
         mip_count,
         format,
         is_cubemap: caps2 & 0x200 != 0,
+        // textura 3D (tabelas de cor .ccc e nuvens de luz pcloud): só a 1ª fatia seria lida
+        is_volume: caps2 & 0x20_0000 != 0 || (u32_at(data, 8) & 0x80_0000 != 0 && u32_at(data, 24) > 1),
     })
 }
 

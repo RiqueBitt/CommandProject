@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Compare, Empty, Field, Icon, Notice, TaskProgress } from "../../components/ui";
 import { api } from "../../lib/api";
 import { fmtBytes, useStore } from "../../lib/store";
+import { hdOutdated } from "../../lib/hd";
 import type { EnhanceGroup, EnhanceMode, EnhanceOptions, EnhancePreview } from "../../lib/types";
 
 const MODE_LABEL: Record<EnhanceMode, string> = { upscale: "Ampliar + nitidez", sharpen: "Só nitidez", skip: "Não mexer" };
@@ -42,7 +43,7 @@ function estimate(groups: EnhanceGroup[], modes: Record<string, EnhanceMode>, sc
     if (m === "skip") continue;
     for (const b of g.buckets) {
       if (b.skip) continue;
-      const [tw, th] = targetSize(b.width, b.height, m, scale, maxSize);
+      const [tw, th] = targetSize(b.width, b.height, b.keepSize && m === "upscale" ? "sharpen" : m, scale, maxSize);
       count += b.count;
       if (tw !== b.width) upscaled += b.count;
       before += b.count * ddsBytes(b.width, b.height, b.format, b.mipmaps);
@@ -55,6 +56,7 @@ function estimate(groups: EnhanceGroup[], modes: Record<string, EnhanceMode>, sc
 export default function TexturesHd() {
   const { run, refreshMods, go } = useStore.getState();
   const busy = useStore((s) => s.busy.hd);
+  const hdMod = useStore((s) => s.mods.find((m) => m.manifest.id === "texturas-hd"));
   const [groups, setGroups] = useState<EnhanceGroup[] | null>(null);
   const [modes, setModes] = useState<Record<string, EnhanceMode>>({});
   const [opts, setOpts] = useState<Omit<EnhanceOptions, "groups">>({ name: "Texturas HD", scale: 2, maxSize: 2048, sharpness: 0.6, deblock: 0.5, quality: "normal" });
@@ -107,9 +109,15 @@ export default function TexturesHd() {
 
   return (
     <div className="col" style={{ gap: 16 }}>
+      {hdOutdated(hdMod?.manifest.version) && (
+        <Notice kind="warn">
+          Suas Texturas HD foram geradas por uma versão antiga, que deixava alguns mapas verdes e os ícones de massa gigantes.
+          Clique em <b>Gerar Texturas HD</b> de novo para substituir.
+        </Notice>
+      )}
       <Notice kind="info">
         Lê as texturas <b>originais</b> do seu jogo, aumenta a resolução e recupera nitidez, sem inventar detalhes falsos, e gera um mod que você liga e desliga na biblioteca.
-        É só visual: <b>não dessincroniza o multiplayer</b>. A interface fica em "só nitidez" porque o jogo desenha muitas imagens dela no tamanho da própria textura.
+        É só visual: <b>não dessincroniza o multiplayer</b>. Ícones, marcadores e a interface nunca são ampliados (o jogo desenha no tamanho da própria textura), e tabelas de cor e iluminação dos mapas ficam intactas.
       </Notice>
 
       <div className="grid-2" style={{ gridTemplateColumns: "minmax(340px, 440px) 1fr", alignItems: "start" }}>

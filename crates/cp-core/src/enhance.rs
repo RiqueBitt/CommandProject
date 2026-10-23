@@ -25,6 +25,10 @@ use crate::dds::{self, DdsFormat, DdsInfo, Quality, Rgba};
 use crate::error::{Error, Result};
 use crate::scd::{Scd, ScdBuilder};
 
+/// Versão do gerador gravada no mod. 2.x: não mexe em tabelas de cor/iluminação (volumes 3D)
+/// nem amplia ícones desenhados na tela. Mods 1.x deixavam mapas verdes e ícones gigantes.
+pub const GENERATOR_VERSION: &str = "2.0.0";
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
@@ -103,11 +107,41 @@ pub fn default_mode(group: &str) -> Mode {
     }
 }
 
+/// Pastas cujas texturas são dados do motor (tabelas de cor, iluminação pré-calculada,
+/// texturas de teste e de editor): mexer nelas muda a cor ou a luz do jogo inteiro.
+fn is_engine_data(k: &str) -> bool {
+    let k = k.trim_start_matches('/');
+    k.starts_with("textures/colorcorrection/")
+        || k.starts_with("textures/engine/")
+        || k.contains(".ccc.")
+        || k.contains("pcloud")
+        || (k.starts_with("maps/") && k.contains("/lighting/"))
+}
+
+/// Texturas desenhadas na tela no tamanho em pixels (ícones, marcadores estratégicos, splats,
+/// molduras de seleção, imagens do lobby): ampliar faria o ícone ficar maior no jogo.
+/// Elas podem ganhar nitidez, mas mantêm o tamanho.
+pub fn keeps_size(key: &str, info: &DdsInfo) -> bool {
+    let k = key.to_ascii_lowercase();
+    let k = k.trim_start_matches('/');
+    let file = k.rsplit('/').next().unwrap_or(k);
+    let screen_dir = ["textures/ui/", "textures/splats/", "textures/decals/", "/icons/", "strategicicons"]
+        .iter()
+        .any(|d| k.starts_with(d) || k.contains(d));
+    let screen_name = ["icon", "bracket", "marker", "strategic", "cursor", "mapshot", "mapimage", "minimap", "font"]
+        .iter()
+        .any(|t| file.contains(t));
+    // texturas soltas na raiz de /textures/ são elementos de interface do motor
+    let root = k.starts_with("textures/") && k.matches('/').count() == 1;
+    // sem mipmaps = não é usada em superfície 3D (que precisa de mips): é desenhada na tela
+    screen_dir || screen_name || root || info.mip_count <= 1
+}
+
 /// Classifica pelo nome e pelo formato.
 pub fn classify(key: &str, info: &DdsInfo) -> TextureClass {
     let k = key.to_ascii_lowercase();
     let file = k.rsplit('/').next().unwrap_or(&k);
-    if info.is_cubemap || info.width.min(info.height) < 8 {
+    if info.is_cubemap || info.is_volume || info.width.min(info.height) < 8 || is_engine_data(&k) {
         return TextureClass::Skip;
     }
     const TABLES: &[&str] = &[
@@ -141,6 +175,8 @@ pub struct SizeBucket {
     pub mipmaps: bool,
     /// Tipos que não mudam (tabelas, cubemaps, formatos não suportados) contam como "skip".
     pub skip: bool,
+    /// Desenhada na tela no tamanho em pixels (ícones): nunca é ampliada.
+    pub keep_size: bool,
     pub count: usize,
 }
 
@@ -155,8 +191,8 @@ pub struct GroupSummary {
     pub buckets: Vec<SizeBucket>,
 }
 
-/// (largura, altura, formato, tem mipmaps, não muda)
-type BucketKey = (u32, u32, String, bool, bool);
+/// (largura, altura, formato, tem mipmaps, não muda, mantém o tamanho)
+type BucketKey = (u32, u32, String, bool, bool, bool);
 
 /// Grupos de texturas dos arquivos originais, com tamanhos e formatos (lê só o cabeçalho de cada DDS).
 pub fn groups(sources: &[PathBuf]) -> Result<Vec<GroupSummary>> {
@@ -176,9 +212,10 @@ pub fn groups(sources: &[PathBuf]) -> Result<Vec<GroupSummary>> {
                     format!("{:?}", info.format).to_ascii_lowercase(),
                     info.mip_count > 1,
                     skip,
+                    keeps_size(&t.key, &info),
                 )
             }
-            Err(_) => (0, 0, "?".into(), false, true),
+            Err(_) => (0, 0, "?".into(), false, true, true),
         };
         let g = group_of(&t.key);
         let (e, buckets) = map.entry(g.clone()).or_insert_with(|| {
@@ -206,12 +243,13 @@ pub fn groups(sources: &[PathBuf]) -> Result<Vec<GroupSummary>> {
         .map(|(mut g, b)| {
             g.buckets = b
                 .into_iter()
-                .map(|((width, height, format, mipmaps, skip), count)| SizeBucket {
+                .map(|((width, height, format, mipmaps, skip, keep_size), count)| SizeBucket {
                     width,
                     height,
                     format,
                     mipmaps,
                     skip,
+                    keep_size,
                     count,
                 })
                 .collect();
@@ -261,6 +299,15 @@ fn mode_for(opts: &EnhanceOptions, group: &str) -> Mode {
         .unwrap_or_else(|| default_mode(group))
 }
 
+/// Modo aplicado de fato: texturas desenhadas no tamanho em pixels nunca são ampliadas.
+pub fn effective_mode(key: &str, info: &DdsInfo, mode: Mode) -> Mode {
+    if mode == Mode::Upscale && keeps_size(key, info) {
+        Mode::Sharpen
+    } else {
+        mode
+    }
+}
+
 /// Tamanho final de uma textura.
 pub fn target_size(w: u32, h: u32, mode: Mode, opts: &EnhanceOptions) -> (u32, u32) {
     if mode != Mode::Upscale {
@@ -292,6 +339,7 @@ pub fn enhance_dds(key: &str, data: &[u8], mode: Mode, opts: &EnhanceOptions) ->
     if class == TextureClass::Skip {
         return Ok(None);
     }
+    let mode = effective_mode(key, &info, mode);
     let (tw, th) = target_size(info.width, info.height, mode, opts);
     let upscaled = (tw, th) != (info.width, info.height);
     if !upscaled && (class != TextureClass::Color || opts.sharpness <= 0.0 && opts.deblock <= 0.0) {
@@ -690,6 +738,7 @@ pub type Preview = (Vec<u8>, Vec<u8>, DdsInfo, (u32, u32));
 pub fn preview(key: &str, data: &[u8], mode: Mode, opts: &EnhanceOptions) -> Result<Preview> {
     let (info, img) = dds::decode(data)?;
     let class = classify(key, &info);
+    let mode = effective_mode(key, &info, mode);
     let (tw, th) = if class == TextureClass::Skip {
         (info.width, info.height)
     } else {
@@ -824,6 +873,7 @@ mod tests {
             mip_count: 1,
             format: f,
             is_cubemap: false,
+            is_volume: false,
         };
         assert_eq!(
             classify("/units/uel0101/uel0101_albedo.dds", &info(512, DdsFormat::Dxt1)),
@@ -864,6 +914,60 @@ mod tests {
     }
 
     #[test]
+    fn never_touches_engine_data_nor_grows_screen_icons() {
+        let info = |w, mips, volume| DdsInfo {
+            width: w,
+            height: w,
+            mip_count: mips,
+            format: DdsFormat::Dxt5,
+            is_cubemap: false,
+            is_volume: volume,
+        };
+        // tabelas de cor 3D e iluminação dos mapas (deixavam o jogo todo verde)
+        for k in [
+            "/textures/ColorCorrection/SC2_U01_Fog_001.ccc.win.dds",
+            "/maps/SC2_MP_002/lighting/pcloud_up.win.dds",
+            "/maps/SC2_MP_204/lighting/RNM_MP_204_A_0.win.dds",
+            "/textures/Engine/waves.win.dds",
+        ] {
+            assert_eq!(classify(k, &info(256, 9, false)), TextureClass::Skip, "{k}");
+        }
+        assert_eq!(classify("/units/x/x_albedo.dds", &info(32, 1, true)), TextureClass::Skip);
+        // ícones e marcadores desenhados em pixels não crescem (o "Ma" gigante)
+        for k in [
+            "/textures/Splats/mass_strategic.dds",
+            "/textures/selection_bracket_player_sm.dds",
+            "/maps/SC2_MP_002/SC2_MP_002_ui_mapimage.dds",
+            "/textures/ui/common/game/strategicicons/icon_structure_mass_rest.dds",
+        ] {
+            assert_eq!(effective_mode(k, &info(64, 7, false), Mode::Upscale), Mode::Sharpen, "{k}");
+        }
+        // sem mipmaps: desenhada na tela
+        assert_eq!(effective_mode("/props/x/x_albedo.dds", &info(256, 1, false), Mode::Upscale), Mode::Sharpen);
+        // textura 3D de unidade continua sendo ampliada
+        assert_eq!(effective_mode("/units/uef/uul0001/uul0001_albedo.dds", &info(512, 10, false), Mode::Upscale), Mode::Upscale);
+    }
+
+    #[test]
+    fn reads_volume_flag_from_header() {
+        let mut d = vec![0u8; 128];
+        d[0..4].copy_from_slice(b"DDS ");
+        d[4..8].copy_from_slice(&124u32.to_le_bytes());
+        d[8..12].copy_from_slice(&(0x1007u32 | 0x80_0000).to_le_bytes());
+        d[12..16].copy_from_slice(&32u32.to_le_bytes());
+        d[16..20].copy_from_slice(&32u32.to_le_bytes());
+        d[24..28].copy_from_slice(&32u32.to_le_bytes());
+        d[76..80].copy_from_slice(&32u32.to_le_bytes());
+        d[80..84].copy_from_slice(&0x41u32.to_le_bytes());
+        d[88..92].copy_from_slice(&32u32.to_le_bytes());
+        d[92..96].copy_from_slice(&0xff0000u32.to_le_bytes());
+        d[104..108].copy_from_slice(&0xff000000u32.to_le_bytes());
+        d[112..116].copy_from_slice(&0x20_0000u32.to_le_bytes());
+        let i = dds::info(&d).unwrap();
+        assert!(i.is_volume);
+    }
+
+    #[test]
     fn builds_mod_with_only_changed_textures() {
         let tmp = tempfile::tempdir().unwrap();
         let gt = ground_truth(64);
@@ -889,6 +993,7 @@ mod tests {
                 format: "dxt1".into(),
                 mipmaps: true,
                 skip: false,
+                keep_size: false,
                 count: 1
             }]
         );
