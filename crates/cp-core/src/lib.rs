@@ -17,6 +17,7 @@ pub mod library;
 pub mod lua;
 pub mod manifest;
 pub mod maptk;
+pub mod menu_theme;
 pub mod profile;
 pub mod scd;
 pub mod scm;
@@ -25,6 +26,7 @@ pub mod shaders;
 pub mod studio;
 pub mod sync;
 pub mod toc;
+pub mod ttf;
 pub mod vdf;
 pub mod workspace;
 

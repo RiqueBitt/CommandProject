@@ -40,6 +40,9 @@ def main():
     for name in ("Natural", "Vivido", "Cinematico", "Desligado"):
         if f"shaders/presets/{name}.ini" not in targets:
             bad.append(f"shaders/presets/{name}.ini não entra no instalador")
+    for name in ("Roboto-Bold.ttf", "Roboto-Medium.ttf", "OFL.txt"):
+        if f"fonts/{name}" not in targets:
+            bad.append(f"fonts/{name} não entra no instalador")
     if bad:
         print("\n".join(bad))
         return 1

@@ -1348,6 +1348,94 @@ pub async fn build_enhance(
     .await
 }
 
+// ---------------------------------------------------------------- menu moderno
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemePreview {
+    key: String,
+    before: String,
+    after: String,
+    width: u32,
+    height: u32,
+}
+
+/// Texturas do menu principal antes e depois do tema, para montar a prévia na interface.
+#[tauri::command]
+pub async fn menu_theme_preview(
+    state: State<'_, AppState>,
+    opts: cp_core::menu_theme::ThemeOptions,
+) -> R<Vec<ThemePreview>> {
+    with_ws(&state.ws, move |ws| {
+        let mut sources: Vec<_> = ws
+            .stock_sources()?
+            .into_iter()
+            .rev()
+            .filter_map(|p| cp_core::scd::Scd::open(&p).ok())
+            .collect();
+        let mut out = Vec::new();
+        for rel in cp_core::menu_theme::PREVIEW_KEYS {
+            let entry = format!("{}{rel}", cp_core::menu_theme::FRONTEND);
+            let Some(data) = sources.iter_mut().find_map(|s| s.read(&entry).ok()) else { continue };
+            let key = cp_core::scd::normalize_key(&entry);
+            let Some(kind) = cp_core::menu_theme::kind_of(&key) else { continue };
+            let (info, img) = dds::decode(&data)?;
+            let after = cp_core::menu_theme::theme_image(&img, kind, info.format, &opts);
+            out.push(ThemePreview {
+                key: rel.to_string(),
+                before: data_url("image/png", &dds::to_png(&img)?),
+                after: data_url("image/png", &dds::to_png(&after)?),
+                width: info.width,
+                height: info.height,
+            });
+        }
+        if out.is_empty() {
+            return Err(cp_core::Error::Other("as texturas do menu não foram encontradas nos arquivos do jogo".into()));
+        }
+        Ok(out)
+    })
+    .await
+}
+
+/// Gera o mod "Menu moderno" a partir das texturas e fontes do jogo e coloca na biblioteca.
+#[tauri::command]
+pub async fn build_menu_theme(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    opts: cp_core::menu_theme::ThemeOptions,
+    enable: bool,
+) -> R<Manifest> {
+    with_ws(&state.ws, move |ws| {
+        let dest = ws.data_dir.join("cache").join("theme").join("zz_cp_menu_moderno.scd");
+        let fonts = if opts.fonts { ws.fonts_dir()? } else { std::path::PathBuf::new() };
+        let res = cp_core::menu_theme::build(&ws.stock_sources()?, &fonts, &opts, &dest, &mut |i, n, name| {
+            if i % 8 == 0 || i == n {
+                emit_progress(&app, "theme", i, n, name.to_string());
+            }
+        })?;
+        let import = ImportOptions {
+            id: Some("menu-moderno".into()),
+            name: Some(opts.name.clone()),
+            version: Some(cp_core::menu_theme::THEME_VERSION.into()),
+            category: Some(Category::Ui),
+            description: Some(format!(
+                "Menus do jogo no estilo do CommandProject: {} texturas com mais nitidez ({} com as cores novas){}. Gerado no seu computador a partir dos arquivos do jogo.{}",
+                res.textures,
+                res.recolored,
+                if res.fonts > 0 { format!(" e a fonte Roboto em {} arquivo(s)", res.fonts) } else { String::new() },
+                if res.failed.is_empty() { String::new() } else { format!(" {} não puderam ser lidos.", res.failed.len()) }
+            )),
+            multiplayer: Some(cp_core::manifest::MpPolicy::Local),
+            replace: true,
+            ..Default::default()
+        };
+        let m = ws.import_mod(&res.archive, &import, enable)?;
+        let _ = std::fs::remove_file(&res.archive);
+        Ok(m)
+    })
+    .await
+}
+
 // ---------------------------------------------------------------- modo 4 GB
 
 #[tauri::command]

@@ -193,3 +193,7 @@ export interface EnhancePreview { before: string; after: string; info: DdsInfo; 
 export interface LaaStatus { exe: string; is64bit: boolean; enabled: boolean; patchedByUs: boolean; revertedByUpdate: boolean; steamStub: boolean }
 
 export interface Showcase { unit: string; mesh: MeshView; albedo?: string | null; units: string[] }
+
+/** Tema "Menu moderno" para os menus do jogo. */
+export interface ThemeOptions { name: string; recolor: boolean; fonts: boolean; accent: string; sharpness: number; deblock: number }
+export interface ThemePreview { key: string; before: string; after: string; width: number; height: number }

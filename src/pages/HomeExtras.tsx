@@ -119,6 +119,7 @@ export function EnhancementsCard() {
     api.laaStatus().then(setLaa).catch(() => setLaa(null));
   }, []);
   const hd = mods.find((m) => m.manifest.id === "texturas-hd");
+  const theme = mods.find((m) => m.manifest.id === "menu-moderno");
   const shaderName = shaders?.packInstalled && shaders.preset ? shaders.presets.find((p) => p.id === shaders.preset)?.name : null;
   const items = [
     {
@@ -130,6 +131,11 @@ export function EnhancementsCard() {
       icon: "hd", title: "Texturas HD", on: !!hd?.enabled,
       value: hd ? (hdOutdated(hd.manifest.version) ? "Gerar de novo" : hd.enabled ? "Ativas" : "Desligadas") : "Gerar no Estúdio",
       action: () => { if (hd && !hdOutdated(hd.manifest.version)) go("library"); else { setStudioTab("hd"); go("studio"); } },
+    },
+    {
+      icon: "format_paint", title: "Menu do jogo", on: !!theme?.enabled,
+      value: theme ? (theme.enabled ? "Moderno" : "Original") : "Repaginar",
+      action: () => go("library"),
     },
     {
       icon: "memory", title: "Memória", on: !!laa?.enabled,

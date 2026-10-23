@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { ConflictsModal, InstallLinkModal } from "../components/dialogs";
-import { Empty, Field, Icon, Menu, MenuItem, Modal, Notice, TaskProgress } from "../components/ui";
+import { Empty, Field, Icon, Menu, MenuItem, Modal, ModThumb, Notice, Switch, TaskProgress } from "../components/ui";
 import { api, confirmDialog, openUrl, pickFile } from "../lib/api";
 import { fmtDate, plural, useStore } from "../lib/store";
-import type { ConflictReport, ShaderStatus, UpdateInfo } from "../lib/types";
+import { CATEGORY_LABEL, type ConflictReport, type ModView, type ShaderStatus, type UpdateInfo } from "../lib/types";
 import { EnhancementsCard, HomeShowcase } from "./HomeExtras";
+import { CATEGORY_ICON } from "./Library";
 
 export default function Home() {
   const d = useStore((s) => s.dashboard);
@@ -21,6 +22,13 @@ export default function Home() {
   const [shaders, setShaders] = useState<ShaderStatus | null>(null);
   useEffect(() => { api.shadersStatus().then(setShaders).catch(() => setShaders(null)); }, []);
   const menuBtn = useRef<HTMLButtonElement>(null);
+  const [homeTab, setHomeTab] = useState<"content" | "mods">(() => {
+    try { return localStorage.getItem("cp.homeTab") === "mods" ? "mods" : "content"; } catch { return "content"; }
+  });
+  const chooseTab = (t: "content" | "mods") => {
+    setHomeTab(t);
+    try { localStorage.setItem("cp.homeTab", t); } catch { /* sem armazenamento: só não lembra a aba */ }
+  };
 
   useEffect(() => {
     if (!settings?.checkModUpdates || (!settings.hubUrls.length && !settings.serverUrl)) return;
@@ -94,14 +102,24 @@ export default function Home() {
     );
   }
 
+  const shaderName = shaders?.packInstalled && shaders.preset ? shaders.presets.find((p) => p.id === shaders.preset)?.name : null;
   const contentCard = (
-<div className={settings?.showcase ? "card content-inline" : "content-card"}>
-      <span className="tabline">Conteúdo</span>
-      <button className="content-line" onClick={() => go("library")}><Icon name="extension" /> {plural(active.length, "mod ativo", "mods ativos")}<Icon name="chevron_right" className="go" /></button>
-      <button className="content-line" onClick={() => go("library")}><Icon name="map" /> {plural(count("maps"), "mapa", "mapas")} e {plural(count("ui"), "mod de interface", "mods de interface")}<Icon name="chevron_right" className="go" /></button>
-      <button className="content-line" onClick={() => go("library")}><Icon name="auto_awesome" /> {shaders?.packInstalled && shaders.preset ? `Shaders: ${shaders.presets.find((p) => p.id === shaders.preset)?.name}` : "Shaders: deixar o jogo mais bonito"}<Icon name="chevron_right" className="go" /></button>
-      <button className="content-line" onClick={() => go("hub")}><Icon name="download" /> Baixar mais mods<Icon name="chevron_right" className="go" /></button>
-      <button className="content-line" onClick={() => setLink(true)}><Icon name="link" /> Instalar de um link<Icon name="chevron_right" className="go" /></button>
+    <div className={settings?.showcase ? "card content-inline" : "content-card"}>
+      <div className="tablines" role="tablist" aria-label="Tela inicial">
+        <button role="tab" className="tabline" aria-selected={homeTab === "content"} onClick={() => chooseTab("content")}>Conteúdo</button>
+        <button role="tab" className="tabline" aria-selected={homeTab === "mods"} onClick={() => chooseTab("mods")}>Mods <span className="tab-count">{active.length + (shaderName ? 1 : 0)}</span></button>
+      </div>
+      {homeTab === "content" ? (
+        <div role="tabpanel">
+          <button className="content-line" onClick={() => chooseTab("mods")}><Icon name="extension" /> {plural(active.length, "mod ativo", "mods ativos")}<Icon name="chevron_right" className="go" /></button>
+          <button className="content-line" onClick={() => go("library")}><Icon name="map" /> {plural(count("maps"), "mapa", "mapas")} e {plural(count("ui"), "mod de interface", "mods de interface")}<Icon name="chevron_right" className="go" /></button>
+          <button className="content-line" onClick={() => go("library")}><Icon name="auto_awesome" /> {shaderName ? `Shaders: ${shaderName}` : "Shaders: deixar o jogo mais bonito"}<Icon name="chevron_right" className="go" /></button>
+          <button className="content-line" onClick={() => go("hub")}><Icon name="download" /> Baixar mais mods<Icon name="chevron_right" className="go" /></button>
+          <button className="content-line" onClick={() => setLink(true)}><Icon name="link" /> Instalar de um link<Icon name="chevron_right" className="go" /></button>
+        </div>
+      ) : (
+        <ActiveMods mods={active} shaderName={shaderName ?? null} />
+      )}
     </div>
   );
 
@@ -236,6 +254,51 @@ export default function Home() {
       {link && <InstallLinkModal onClose={() => setLink(false)} />}
       {rename && <RenameProfile onClose={() => setRename(false)} />}
     </>
+  );
+}
+
+/** Aba "Mods" da tela inicial: o que está ligado no perfil, com atalho para desligar. */
+function ActiveMods({ mods, shaderName }: { mods: ModView[]; shaderName: string | null }) {
+  const { run, refresh, go } = useStore.getState();
+  const busy = useStore((s) => s.busy);
+  const sorted = [...mods].sort((a, b) => (a.order ?? 999) - (b.order ?? 999) || a.manifest.name.localeCompare(b.manifest.name));
+  if (!sorted.length && !shaderName) {
+    return (
+      <div role="tabpanel" className="mods-empty">
+        <Icon name="extension_off" />
+        <span>Nenhum mod ligado neste perfil.</span>
+        <button className="btn sm tonal" onClick={() => go("hub")}><Icon name="download" /> Baixar mods</button>
+      </div>
+    );
+  }
+  return (
+    <div role="tabpanel" className="mods-tab">
+      <div className="mods-list">
+        {shaderName && (
+          <button className="mod-line" onClick={() => go("library")}>
+            <span className="mod-ico builtin"><Icon name="auto_awesome" /></span>
+            <span className="grow"><b>Shaders</b><span className="faint"> {shaderName}</span><span className="sub">ReShade · só visual</span></span>
+            <Icon name="chevron_right" className="go" />
+          </button>
+        )}
+        {sorted.map((m) => (
+          <div key={m.manifest.id} className="mod-line">
+            <button className="mod-open" onClick={() => go("library")} aria-label={`Abrir ${m.manifest.name} na biblioteca`}>
+              <ModThumb name={m.manifest.name} icon={m.icon} size={30} />
+              <span className="grow">
+                <b>{m.manifest.name}</b><span className="faint"> {m.manifest.version}</span>
+                <span className="sub"><Icon name={CATEGORY_ICON[m.manifest.category]} size={13} /> {CATEGORY_LABEL[m.manifest.category]}{m.manifest.multiplayer === "local" ? " · só visual" : ""}</span>
+              </span>
+            </button>
+            <Switch checked label={`Desligar ${m.manifest.name}`} disabled={busy["mod:" + m.manifest.id]} onChange={async () => {
+              await run("mod:" + m.manifest.id, () => api.setModEnabled(m.manifest.id, false), `${m.manifest.name} desligado. Vale na próxima vez que abrir o jogo.`);
+              await refresh();
+            }} />
+          </div>
+        ))}
+      </div>
+      <button className="content-line" onClick={() => go("library")}><Icon name="library_books" /> Ver todos na biblioteca<Icon name="chevron_right" className="go" /></button>
+    </div>
   );
 }
 

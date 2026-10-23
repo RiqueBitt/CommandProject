@@ -488,7 +488,7 @@ button.chip[aria-pressed="true"] { background: var(--primary); color: var(--on-p
 .content-inline { padding: 10px 6px 6px; }
 .content-inline .tabline { display: inline-block; margin: 0 10px 6px; font-weight: 500; border-bottom: 2px solid var(--warn); padding-bottom: 2px; }
 .home-col { display: flex; flex-direction: column; gap: 14px; width: min(40%, 520px); min-width: 340px; }
-.enh-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.enh-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 8px; }
 .enh { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px; border-radius: 10px; border: 1px solid transparent;
   background: var(--surface-bright); color: var(--text); cursor: pointer; text-align: left; font: inherit; transition: background .15s, border-color .15s, transform .15s; }
 .enh:hover { background: var(--surface-light); transform: translateY(-1px); }
@@ -568,3 +568,48 @@ button.chip[aria-pressed="true"] { background: var(--primary); color: var(--on-p
 .map-side { gap: 12px; position: sticky; top: 12px; }
 .side-group { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
 .side-group > .overline { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- abas da tela inicial (Conteúdo / Mods) ---------- */
+.tablines { display: flex; gap: 2px; margin: 0 4px 6px; }
+.content-card .tablines .tabline, .content-inline .tablines .tabline, .tablines .tabline {
+  display: inline-flex; align-items: center; gap: 6px; margin: 0 6px; padding: 0 0 3px; border: 0; border-bottom: 2px solid transparent;
+  background: none; color: var(--muted); font: inherit; font-weight: 500; cursor: pointer; transition: color .15s, border-color .15s;
+}
+.tablines .tabline:hover { color: var(--text); }
+.tablines .tabline[aria-selected="true"] { color: var(--text); border-bottom-color: var(--warn); }
+.tab-count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: rgba(255,255,255,.08); color: var(--muted); font-size: 11.5px; display: inline-grid; place-items: center; font-variant-numeric: tabular-nums; }
+.tabline[aria-selected="true"] .tab-count { background: color-mix(in srgb, var(--primary) 22%, transparent); color: var(--primary); }
+.mods-tab { display: flex; flex-direction: column; }
+.mods-list { display: flex; flex-direction: column; max-height: 236px; overflow: auto; padding-right: 2px; }
+.mod-line { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px 6px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text); text-align: left; font-size: 13.5px; }
+button.mod-line { cursor: pointer; }
+.mod-line:hover { background: rgba(255, 255, 255, .06); }
+.mod-line .go { margin-left: auto; font-size: 18px; color: var(--faint); }
+.mod-open { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; padding: 0; }
+.mod-open .grow, .mod-line .grow { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mod-line b { font-weight: 500; }
+.mod-line .sub { display: flex; align-items: center; gap: 4px; color: var(--faint); font-size: 12px; margin-top: 1px; }
+.mod-line .thumb { border-radius: 7px; font-size: 12px; flex: none; }
+.mod-ico { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; flex: none; background: color-mix(in srgb, var(--primary) 16%, var(--surface-bright)); color: var(--primary); }
+.mod-ico .mi { font-size: 18px; }
+.mods-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px 10px 14px; color: var(--muted); font-size: 13.5px; text-align: center; }
+.mods-empty > .mi { font-size: 30px; color: var(--faint); }
+
+/* ---------- Menu moderno (tema do menu do jogo) ---------- */
+.menu-mock { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); background: #05080c; isolation: isolate; }
+.menu-mock .mm-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .55; z-index: -2; }
+.menu-mock .mm-top { position: absolute; left: 0; right: 0; top: 0; height: 22%; width: 100%; object-fit: fill; opacity: .9; z-index: -1; }
+.menu-mock .mm-logo { position: absolute; left: 5%; top: 6%; width: 30%; }
+.menu-mock .mm-tag { position: absolute; right: 4%; top: 7%; width: 30%; height: 9%; display: flex; align-items: center; padding-left: 4%; color: #e6edf3; font-size: clamp(9px, 1.1vw, 13px); }
+.menu-mock .mm-tag img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; z-index: -1; }
+.menu-mock .mm-line { position: absolute; left: 4%; right: 4%; top: 22%; height: 2px; width: 92%; object-fit: fill; }
+.menu-mock .mm-btns { position: absolute; left: 5%; top: 28%; width: 38%; display: flex; flex-direction: column; gap: 3%; height: 64%; }
+.menu-mock .mm-btn { position: relative; flex: 1; max-height: 15%; display: flex; align-items: center; padding-left: 9%; color: #e6edf3; font-weight: 700; letter-spacing: .04em; font-size: clamp(9px, 1.2vw, 15px); }
+.menu-mock .mm-btn img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; z-index: -1; }
+.menu-mock.original .mm-btn, .menu-mock.original .mm-tag { font-family: "Arial Narrow", "Roboto Condensed", Arial, sans-serif; }
+.menu-mock.modern .mm-btn, .menu-mock.modern .mm-tag { font-family: Roboto, sans-serif; letter-spacing: .06em; }
+.menu-mock .mm-label { position: absolute; right: 10px; bottom: 8px; padding: 3px 9px; border-radius: 99px; background: rgba(0,0,0,.55); color: #fff; font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; }
+.accent-swatches { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.accent-swatch { width: 26px; height: 26px; border-radius: 99px; border: 2px solid transparent; cursor: pointer; box-shadow: inset 0 0 0 2px rgba(0,0,0,.35); }
+.accent-swatch[aria-pressed="true"] { border-color: var(--text); }
+.accent-swatches input[type="color"] { width: 30px; height: 28px; border: 0; padding: 0; background: none; cursor: pointer; }

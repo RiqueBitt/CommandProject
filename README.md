@@ -61,6 +61,13 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
   desenhe passagens sobre a água, ligue a borda rochosa e ajuste a economia. Tudo com desfazer
   (Ctrl+Z). O toolkit verifica se todo ponto é navegável e se as bases se alcançam antes de gerar.
 
+**Menu moderno (repaginada nos menus do jogo)**
+- Mod do próprio launcher, gerado no seu computador a partir dos arquivos do jogo: menu principal,
+  opções, escaramuça, salas e resumo da partida com as cores do launcher (ou outra cor de destaque),
+  imagens com mais nitidez e a fonte Roboto no lugar da MagistralTT. Cores de facção e de time ficam
+  intactas. Liga e desliga na biblioteca como qualquer mod; não afeta o multiplayer.
+- A tela inicial do launcher tem a aba **Mods**, com o que está ligado no perfil e atalho para desligar.
+
 **Shaders (deixa o jogo mais bonito)**
 - Mod de pós-processamento próprio para o ReShade (DirectX 9): anti-serrilhado, nitidez adaptativa,
   relevo no terreno, bloom nas explosões e correção de cor. Presets **Natural**, **Vívido** e **Cinemático**.

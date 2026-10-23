@@ -606,6 +606,15 @@ impl Workspace {
         Ok(crate::shaders::Shaders::new(self.game_bin_dir()?, pack, &self.data_dir))
     }
 
+    /// Fontes que acompanham o launcher (tema "Menu moderno").
+    pub fn fonts_dir(&self) -> Result<PathBuf> {
+        self.resources_dir
+            .as_ref()
+            .map(|r| r.join("fonts"))
+            .filter(|p| p.join("Roboto-Bold.ttf").is_file())
+            .ok_or_else(|| Error::Other("as fontes do tema não estão instaladas junto com o app".into()))
+    }
+
     // ---------------------------------------------------------------- estúdio de mapas
 
     pub fn map_bridge(&self) -> Result<Bridge> {

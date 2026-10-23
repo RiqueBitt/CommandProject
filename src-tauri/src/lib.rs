@@ -118,6 +118,8 @@ pub fn run() {
             commands::maptk_run,
             commands::maptk_build,
             commands::maptk_terrain3d,
+            commands::menu_theme_preview,
+            commands::build_menu_theme,
             commands::open_path,
         ])
         .run(tauri::generate_context!())

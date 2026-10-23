@@ -373,6 +373,39 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       for (let i = 0; i <= 40; i += 4) { mockEvents.emit("cp://progress", { task: "hd", step: i, total: 40, message: `units/uel${String(100 + i).padStart(4, "0")}/albedo.dds (faltam ~0:${String(40 - i).padStart(2, "0")})` }); await sleep(150); }
       return r({ ...mods[0], id: "texturas-hd", name: (a.opts as T.EnhanceOptions).name, category: "textures" });
     }
+    case "menu_theme_preview": {
+      const o = a.opts as T.ThemeOptions;
+      const img = (w: number, h: number, draw: (g: CanvasRenderingContext2D, after: boolean) => void, after: boolean) => {
+        const c = document.createElement("canvas"); c.width = w; c.height = h; draw(c.getContext("2d")!, after); return c.toDataURL();
+      };
+      const accent = o.recolor ? o.accent : "#4f8fe0";
+      const hover = o.recolor ? o.accent : "#e08a2a";
+      const grad = (g: CanvasRenderingContext2D, w: number, h: number, a: string, b: string) => { const x = g.createLinearGradient(0, 0, 0, h); x.addColorStop(0, a); x.addColorStop(1, b); g.fillStyle = x; g.fillRect(0, 0, w, h); };
+      const btn = (isHover: boolean) => (g: CanvasRenderingContext2D, after: boolean) => {
+        const col = after ? (isHover ? hover : accent) : isHover ? "#e08a2a" : "#4f8fe0";
+        grad(g, 256, 40, "#20262e", "#12161b"); g.strokeStyle = col; g.lineWidth = 2; g.strokeRect(1, 1, 254, 38);
+        g.fillStyle = col; g.globalAlpha = .35; g.fillRect(0, 0, 256 * (isHover ? 1 : .55), 40); g.globalAlpha = 1;
+        g.beginPath(); g.moveTo(240, 4); g.lineTo(252, 20); g.lineTo(240, 36); g.fillStyle = col; g.fill();
+      };
+      const items: [string, number, number, (g: CanvasRenderingContext2D, after: boolean) => void][] = [
+        ["blue_overlay.dds", 128, 512, (g, after) => grad(g, 128, 512, "#05070a", after && o.recolor ? "#2a2f26" : "#3f7fd0")],
+        ["top_blue_grad.dds", 256, 32, (g, after) => grad(g, 256, 32, after && o.recolor ? "#3a4030" : "#2a5aa0", "rgba(0,0,0,0)")],
+        ["line03.dds", 64, 4, (g, after) => { g.fillStyle = after ? accent : "#4f8fe0"; g.fillRect(0, 0, 64, 4); }],
+        ["mainmenu/btn_u.dds", 256, 40, btn(false)],
+        ["mainmenu/btn_o.dds", 256, 40, btn(true)],
+        ["mainmenu/gamertag_bg.dds", 256, 32, (g) => grad(g, 256, 32, "#1a1f25", "#0b0e12")],
+        ["mainmenu/sc_logo.dds", 256, 64, (g) => { g.fillStyle = "#d8dde3"; g.font = "bold 30px Arial"; g.fillText("SUPREME", 8, 30); g.fillText("COMMANDER 2", 8, 60); }],
+      ];
+      return r(items.map(([key, w, h, d]) => ({ key, width: w, height: h, before: img(w, h, d, false), after: img(w, h, d, true) })));
+    }
+    case "build_menu_theme": {
+      for (let i = 0; i <= 380; i += 38) { mockEvents.emit("cp://progress", { task: "theme", step: i, total: 380, message: `textures/ui/common/pc/frontend/common/button${String(i % 12).padStart(2, "0")}_u.dds` }); await sleep(120); }
+      const o = a.opts as T.ThemeOptions;
+      const m = manifest("menu-moderno", o.name, "1.0.0", "ui", ["zz_cp_menu_moderno.scd"], { source: { kind: "studio" } });
+      const i = mods.findIndex((x) => x.id === m.id);
+      if (i >= 0) mods[i] = m; else { mods.push(m); active().mods.push({ id: m.id, enabled: true }); }
+      return r(m);
+    }
     case "showcase": return r(null); // sem jogo no navegador: a tela mostra o robô de reserva
     case "laa_status": return r(laaStatus());
     case "laa_set": laa.enabled = Boolean(a.enabled); return r(laaStatus());

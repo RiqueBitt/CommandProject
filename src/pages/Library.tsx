@@ -1,3 +1,4 @@
+import MenuThemeCard from "../components/MenuThemeCard";
 import ShadersCard from "../components/ShadersCard";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -91,6 +92,7 @@ export default function Library() {
         </div>
 
         <ShadersCard />
+        <MenuThemeCard />
 
         <div className="row wrap" style={{ gap: 12 }}>
           <div className="search-bar" style={{ width: 340 }}>

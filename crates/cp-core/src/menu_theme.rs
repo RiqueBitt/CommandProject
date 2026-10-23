@@ -1,0 +1,440 @@
+//! "Menu moderno": tema para os menus do jogo, gerado no computador do jogador a partir das
+//! texturas e fontes originais (nada do jogo é distribuído).
+//!
+//! * Texturas de `textures/ui/common/pc/frontend/` (menu principal, opções, escaramuça, salas,
+//!   resumo): ganham nitidez e trocam o azul/laranja pelo verde-limão do launcher; fundos viram
+//!   cinza-escuro neutro. Imagens com cor de facção/time, logos, medalhas e avatares só ganham nitidez.
+//! * Fontes: a MagistralTT (títulos e botões) vira Roboto, a mesma do launcher. O arquivo
+//!   novo leva o nome interno da original, então o jogo a encontra sem mudar nenhum Lua.
+
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
+
+use crate::dds::{self, Quality, Rgba};
+use crate::enhance::{self, EnhanceOptions, TextureClass};
+use crate::error::{Error, Result};
+use crate::scd::{Scd, ScdBuilder};
+use crate::ttf;
+
+/// Versão do tema gravada no mod (a interface oferece regerar quando muda).
+pub const THEME_VERSION: &str = "1.0.0";
+pub const FRONTEND: &str = "textures/ui/common/pc/frontend/";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ThemeOptions {
+    pub name: String,
+    /// Troca as cores (azul/laranja → cor de destaque; fundos → cinza-escuro).
+    pub recolor: bool,
+    /// Troca a fonte dos títulos e botões pela Roboto.
+    pub fonts: bool,
+    /// Cor de destaque (#rrggbb).
+    pub accent: String,
+    /// Nitidez (0..1.5) e remoção de blocos DXT (0..1).
+    pub sharpness: f32,
+    pub deblock: f32,
+}
+
+impl Default for ThemeOptions {
+    fn default() -> Self {
+        ThemeOptions {
+            name: "Menu moderno".into(),
+            recolor: true,
+            fonts: true,
+            accent: "#a3e635".into(),
+            sharpness: 0.5,
+            deblock: 0.5,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    /// Botões, barras, linhas, setas, ícones: a cor vira a de destaque.
+    Accent,
+    /// Painéis e degradês de fundo: cinza-escuro com um toque da cor de destaque.
+    Background,
+    /// Cores com significado (facções, times, medalhas, logos): só nitidez.
+    Keep,
+}
+
+/// Papel de uma textura no tema (`None` = fora do menu).
+pub fn kind_of(key: &str) -> Option<Kind> {
+    let k = key.to_ascii_lowercase().replace('\\', "/");
+    let k = k.trim_start_matches('/');
+    let rel = k.strip_prefix(FRONTEND)?;
+    if !rel.ends_with(".dds") {
+        return None;
+    }
+    let file = rel.rsplit('/').next().unwrap_or(rel);
+    const KEEP: &[&str] = &[
+        "teamcolors/", "campaign/cybran", "campaign/illuminate", "campaign/uef", "campaign/ops/",
+        "faction_", "avatar", "sc_logo", "logo_", "medal_", "star_", "victory", "defeat", "op_completed",
+        "op_failed", "op_incomplete", "line_red", "mic_", "maps/", "whitebg", "blank",
+    ];
+    if KEEP.iter().any(|p| rel.contains(p)) {
+        return Some(Kind::Keep);
+    }
+    if file.contains("bg") || file.contains("overlay") || file.contains("grad") || file.starts_with("scrollwindow") {
+        return Some(Kind::Background);
+    }
+    Some(Kind::Accent)
+}
+
+pub fn parse_hex(c: &str) -> Option<[u8; 3]> {
+    let c = c.trim().trim_start_matches('#');
+    if c.len() != 6 {
+        return None;
+    }
+    let v = u32::from_str_radix(c, 16).ok()?;
+    Some([(v >> 16) as u8, (v >> 8) as u8, v as u8])
+}
+
+fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let d = max - min;
+    let h = if d <= 1e-6 {
+        0.0
+    } else if max == r {
+        60.0 * ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        60.0 * ((b - r) / d + 2.0)
+    } else {
+        60.0 * ((r - g) / d + 4.0)
+    };
+    (h, if max <= 1e-6 { 0.0 } else { d / max }, max)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    let c = v * s;
+    let hp = (h.rem_euclid(360.0)) / 60.0;
+    let x = c * (1.0 - (hp.rem_euclid(2.0) - 1.0).abs());
+    let (r, g, b) = match hp as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = v - c;
+    (r + m, g + m, b + m)
+}
+
+/// Faixas de matiz trocadas nos elementos de destaque: azuis/cianos e laranjas/âmbar do jogo.
+fn is_theme_hue(h: f32) -> bool {
+    (165.0..=268.0).contains(&h) || (14.0..=56.0).contains(&h)
+}
+
+/// Aplica o tema de cores a uma imagem.
+pub fn recolor(img: &mut Rgba, kind: Kind, accent: [u8; 3]) {
+    if kind == Kind::Keep {
+        return;
+    }
+    let (ah, as_, _) = rgb_to_hsv(accent[0] as f32 / 255.0, accent[1] as f32 / 255.0, accent[2] as f32 / 255.0);
+    for p in img.pixels.chunks_exact_mut(4) {
+        let (h, s, v) = rgb_to_hsv(p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0);
+        let (nh, ns, nv) = match kind {
+            Kind::Accent if s >= 0.08 && is_theme_hue(h) => {
+                // mantém o brilho (relevo do botão) e aproxima a saturação da cor de destaque
+                (ah, (s * 0.6 + as_ * 0.4).min(1.0) * s.min(0.35) / 0.35, v)
+            }
+            Kind::Background if s >= 0.04 => (ah, s * 0.12, v * 0.45),
+            Kind::Background => (h, s, v * 0.8),
+            _ => continue,
+        };
+        let (r, g, b) = hsv_to_rgb(nh, ns, nv);
+        p[0] = (r * 255.0).round().clamp(0.0, 255.0) as u8;
+        p[1] = (g * 255.0).round().clamp(0.0, 255.0) as u8;
+        p[2] = (b * 255.0).round().clamp(0.0, 255.0) as u8;
+    }
+}
+
+fn enhance_opts(opts: &ThemeOptions) -> EnhanceOptions {
+    EnhanceOptions {
+        sharpness: opts.sharpness.clamp(0.0, 1.5),
+        deblock: opts.deblock.clamp(0.0, 1.0),
+        ..EnhanceOptions::default()
+    }
+}
+
+/// Imagem do tema (mesmo tamanho): nitidez e, se pedido, cores novas.
+pub fn theme_image(img: &Rgba, kind: Kind, format: dds::DdsFormat, opts: &ThemeOptions) -> Rgba {
+    let mut out = if opts.sharpness > 0.0 || opts.deblock > 0.0 {
+        enhance::enhance_image(img, TextureClass::Color, img.width, img.height, format, &enhance_opts(opts))
+    } else {
+        img.clone()
+    };
+    if opts.recolor {
+        recolor(&mut out, kind, parse_hex(&opts.accent).unwrap_or([163, 230, 53]));
+    }
+    out
+}
+
+/// Versão do tema de uma textura DDS do menu (`None` se ela não muda).
+pub fn theme_dds(key: &str, data: &[u8], opts: &ThemeOptions) -> Result<Option<Vec<u8>>> {
+    let Some(kind) = kind_of(key) else { return Ok(None) };
+    let (info, img) = dds::decode(data)?;
+    if info.is_cubemap || info.is_volume || info.width.min(info.height) < 4 {
+        return Ok(None);
+    }
+    let recolors = opts.recolor && kind != Kind::Keep;
+    let sharpens = (opts.sharpness > 0.0 || opts.deblock > 0.0) && info.width.min(info.height) >= 8;
+    if !recolors && !sharpens {
+        return Ok(None);
+    }
+    let out = theme_image(&img, kind, info.format, opts);
+    if out.pixels == img.pixels {
+        return Ok(None);
+    }
+    let mips = if info.mip_count <= 1 { 1 } else { 0 };
+    dds::encode(&out, info.format, mips, Quality::Normal).map(Some)
+}
+
+/// Qual Roboto substitui uma fonte do jogo (`None` = a fonte fica).
+pub fn font_replacement(original: &[u8]) -> Option<&'static str> {
+    let f = ttf::Font::parse(original).ok()?;
+    let family = f.family().to_ascii_lowercase();
+    if !family.contains("magistral") {
+        return None;
+    }
+    let bold = family.contains("black") || f.weight() >= 600 || f.subfamily().to_ascii_lowercase().contains("bold");
+    Some(if bold { "Roboto-Bold.ttf" } else { "Roboto-Medium.ttf" })
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeResult {
+    pub archive: PathBuf,
+    pub textures: usize,
+    pub recolored: usize,
+    pub fonts: usize,
+    pub failed: Vec<String>,
+}
+
+struct Entry {
+    src: PathBuf,
+    index: usize,
+    name: String,
+    key: String,
+}
+
+/// Entradas do menu e das fontes nos arquivos do jogo (o último montado vence).
+fn entries(sources: &[PathBuf], fonts: bool) -> Result<Vec<Entry>> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for src in sources.iter().rev() {
+        let mut scd = Scd::open(src)?;
+        for (index, e) in scd.entries()?.into_iter().enumerate() {
+            if e.is_dir || !seen.insert(e.key.clone()) {
+                continue;
+            }
+            let font = fonts && e.key.starts_with("/fonts/") && e.key.ends_with(".ttf");
+            if font || kind_of(&e.key).is_some() {
+                out.push(Entry { src: src.clone(), index, name: e.name, key: e.key });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.src.cmp(&b.src).then(a.index.cmp(&b.index)));
+    Ok(out)
+}
+
+/// Gera o `.scd` do tema. `fonts_dir` tem as Roboto que acompanham o launcher.
+pub fn build(
+    sources: &[PathBuf],
+    fonts_dir: &Path,
+    opts: &ThemeOptions,
+    dest: &Path,
+    progress: &mut dyn FnMut(usize, usize, &str),
+) -> Result<ThemeResult> {
+    let todo = entries(sources, opts.fonts)?;
+    if todo.iter().all(|e| !e.key.ends_with(".dds")) {
+        return Err(Error::Other("as texturas do menu não foram encontradas nos arquivos do jogo".into()));
+    }
+    let total = todo.len();
+    let mut b = ScdBuilder::create(dest)?;
+    let mut res = ThemeResult { archive: PathBuf::new(), textures: 0, recolored: 0, fonts: 0, failed: vec![] };
+    let mut open: Option<(PathBuf, Scd)> = None;
+    let mut done = 0;
+    for batch in todo.chunks(32) {
+        let mut raw = Vec::with_capacity(batch.len());
+        for e in batch {
+            if open.as_ref().map(|(p, _)| p != &e.src).unwrap_or(true) {
+                open = Some((e.src.clone(), Scd::open(&e.src)?));
+            }
+            raw.push((e, open.as_mut().expect("aberto").1.read_at(e.index)?));
+        }
+        let processed: Vec<_> = raw
+            .par_iter()
+            .map(|(e, data)| {
+                let r = if e.key.ends_with(".ttf") {
+                    match font_replacement(data) {
+                        Some(file) => std::fs::read(fonts_dir.join(file))
+                            .map_err(|err| Error::Other(format!("fonte {file} não encontrada: {err}")))
+                            .and_then(|new| ttf::adopt_identity(&new, data))
+                            .map(Some),
+                        None => Ok(None),
+                    }
+                } else {
+                    theme_dds(&e.key, data, opts)
+                };
+                (*e, r)
+            })
+            .collect();
+        for (e, r) in processed {
+            done += 1;
+            progress(done, total, &e.name);
+            match r {
+                Ok(Some(bytes)) => {
+                    b.add_bytes(&e.name, &bytes)?;
+                    if e.key.ends_with(".ttf") {
+                        res.fonts += 1;
+                    } else {
+                        res.textures += 1;
+                        if opts.recolor && kind_of(&e.key) != Some(Kind::Keep) {
+                            res.recolored += 1;
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => res.failed.push(format!("{}: {err}", e.name)),
+            }
+        }
+    }
+    if res.textures + res.fonts == 0 {
+        return Err(Error::Other("nada mudou com essas opções".into()));
+    }
+    res.archive = b.finish()?;
+    Ok(res)
+}
+
+/// Texturas usadas na prévia do menu principal na interface.
+pub const PREVIEW_KEYS: &[&str] = &[
+    "blue_overlay.dds",
+    "top_blue_grad.dds",
+    "line03.dds",
+    "mainmenu/btn_u.dds",
+    "mainmenu/btn_o.dds",
+    "mainmenu/gamertag_bg.dds",
+    "mainmenu/sc_logo.dds",
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn px(r: u8, g: u8, b: u8) -> Rgba {
+        Rgba { width: 1, height: 1, pixels: vec![r, g, b, 255] }
+    }
+
+    #[test]
+    fn sorts_menu_textures_by_role() {
+        let k = |p: &str| kind_of(&format!("/textures/ui/common/pc/frontend/{p}"));
+        assert_eq!(k("mainmenu/btn_o.dds"), Some(Kind::Accent));
+        assert_eq!(k("options/bg_tl.dds"), Some(Kind::Background));
+        assert_eq!(k("blue_overlay02.dds"), Some(Kind::Background));
+        assert_eq!(k("skirmish/teamcolors/tc05.dds"), Some(Kind::Keep));
+        assert_eq!(k("campaign/cybran_u.dds"), Some(Kind::Keep));
+        assert_eq!(k("mainmenu/sc_logo.dds"), Some(Kind::Keep));
+        assert_eq!(kind_of("/textures/ui/common/game/bg.dds"), None);
+        assert_eq!(kind_of("/units/uef/a.dds"), None);
+    }
+
+    #[test]
+    fn blue_and_orange_become_accent_but_greys_and_reds_stay() {
+        let lime = [163, 230, 53];
+        let hue = |img: &Rgba| rgb_to_hsv(img.pixels[0] as f32 / 255.0, img.pixels[1] as f32 / 255.0, img.pixels[2] as f32 / 255.0);
+        for (r, g, b) in [(60, 120, 220), (230, 140, 30)] {
+            let mut i = px(r, g, b);
+            recolor(&mut i, Kind::Accent, lime);
+            let (h, s, _) = hue(&i);
+            assert!((h - 82.0).abs() < 4.0 && s > 0.4, "{r},{g},{b} → {:?}", i.pixels);
+        }
+        for (r, g, b) in [(128, 128, 128), (200, 40, 40)] {
+            let mut i = px(r, g, b);
+            recolor(&mut i, Kind::Accent, lime);
+            assert_eq!(i.pixels, vec![r, g, b, 255]);
+        }
+        // fundo azul vira cinza-escuro quase neutro
+        let mut bg = px(70, 140, 240);
+        recolor(&mut bg, Kind::Background, lime);
+        let (_, s, v) = hue(&bg);
+        assert!(s < 0.25 && v < 0.65, "{:?}", bg.pixels);
+        // facções ficam como estão
+        let mut keep = px(70, 140, 240);
+        recolor(&mut keep, Kind::Keep, lime);
+        assert_eq!(keep.pixels, vec![70, 140, 240, 255]);
+    }
+
+    #[test]
+    fn hsv_roundtrip() {
+        for (r, g, b) in [(0.1, 0.5, 0.9), (0.9, 0.2, 0.3), (0.5, 0.5, 0.5), (0.64, 0.9, 0.21)] {
+            let (h, s, v) = rgb_to_hsv(r, g, b);
+            let (r2, g2, b2) = hsv_to_rgb(h, s, v);
+            assert!((r - r2).abs() < 1e-4 && (g - g2).abs() < 1e-4 && (b - b2).abs() < 1e-4);
+        }
+        assert_eq!(parse_hex("#a3e635"), Some([163, 230, 53]));
+        assert_eq!(parse_hex("xyz"), None);
+    }
+
+    #[test]
+    fn builds_theme_mod_with_textures_and_fonts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let blue = Rgba { width: 16, height: 16, pixels: [60u8, 120, 220, 255].repeat(256) };
+        let dxt = dds::encode(&blue, dds::DdsFormat::Dxt1, 0, Quality::Fast).unwrap();
+        let magistral = crate::ttf::tests::tiny_font("MagistralTT", "Bold", 700, true);
+        let arial = crate::ttf::tests::tiny_font("Arial", "Regular", 400, false);
+        let src = tmp.path().join("textures.scd");
+        let mut w = ScdBuilder::create(&src).unwrap();
+        w.add_bytes("textures\\ui\\common\\pc\\frontend\\mainmenu\\btn_u.dds", &dxt).unwrap();
+        w.add_bytes("textures\\ui\\common\\pc\\frontend\\skirmish\\teamcolors\\tc01.dds", &dxt).unwrap();
+        w.add_bytes("textures\\ui\\common\\game\\hud.dds", &dxt).unwrap();
+        w.add_bytes("fonts\\MGS65__U.TTF", &magistral).unwrap();
+        w.add_bytes("fonts\\ARIAL.TTF", &arial).unwrap();
+        w.finish().unwrap();
+        let fonts = tmp.path().join("fonts");
+        std::fs::create_dir_all(&fonts).unwrap();
+        let roboto = crate::ttf::tests::tiny_font("Roboto", "Bold", 700, true);
+        std::fs::write(fonts.join("Roboto-Bold.ttf"), &roboto).unwrap();
+        std::fs::write(fonts.join("Roboto-Medium.ttf"), &roboto).unwrap();
+
+        let dest = tmp.path().join("out/zz_menu.scd");
+        let r = build(&[src], &fonts, &ThemeOptions::default(), &dest, &mut |_, _, _| {}).unwrap();
+        // a cor de time é lisa: nitidez não muda nada, então não entra no mod
+        assert_eq!((r.textures, r.recolored, r.fonts), (1, 1, 1), "{:?}", r.failed);
+        let mut out = Scd::open(&r.archive).unwrap();
+        let names: Vec<String> = out.entries().unwrap().into_iter().map(|e| e.key).collect();
+        assert!(names.contains(&"/fonts/mgs65__u.ttf".to_string()), "{names:?}");
+        assert!(!names.iter().any(|n| n.contains("arial") || n.contains("/game/")));
+        let font = ttf::Font::parse(&out.read("fonts\\MGS65__U.TTF").unwrap()).unwrap();
+        assert_eq!(font.family(), "MagistralTT");
+        let (_, img) = dds::decode(&out.read("textures\\ui\\common\\pc\\frontend\\mainmenu\\btn_u.dds").unwrap()).unwrap();
+        let (h, _, _) = rgb_to_hsv(img.pixels[0] as f32 / 255.0, img.pixels[1] as f32 / 255.0, img.pixels[2] as f32 / 255.0);
+        assert!((h - 82.0).abs() < 12.0, "botão ficou verde-limão: {:?}", &img.pixels[..4]);
+    }
+
+    /// CP_THEME_SAMPLES=pasta com .dds do menu (nome com "__" no lugar de "/"), CP_THEME_OUT=saída:
+    /// grava antes/depois em PNG para conferir o tema com texturas de verdade.
+    #[test]
+    fn real_samples_if_available() {
+        let (Ok(dir), Ok(out)) = (std::env::var("CP_THEME_SAMPLES"), std::env::var("CP_THEME_OUT")) else { return };
+        std::fs::create_dir_all(&out).unwrap();
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            let name = p.file_name().unwrap().to_string_lossy().replace("__", "/");
+            let key = format!("/{FRONTEND}{name}");
+            let data = std::fs::read(&p).unwrap();
+            let (info, before) = dds::decode(&data).unwrap();
+            let kind = kind_of(&key).unwrap();
+            let after = theme_image(&before, kind, info.format, &ThemeOptions::default());
+            let stem = p.file_stem().unwrap().to_string_lossy().to_string();
+            std::fs::write(format!("{out}/{stem}.a.png"), dds::to_png(&before).unwrap()).unwrap();
+            std::fs::write(format!("{out}/{stem}.b.png"), dds::to_png(&after).unwrap()).unwrap();
+        }
+    }
+}
