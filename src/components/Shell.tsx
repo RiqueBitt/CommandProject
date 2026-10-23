@@ -13,7 +13,7 @@ export function SystemBar() {
         <Icon name="search" size={19} /> Ação rápida <span className="kbd">Ctrl+K</span>
       </button>
       <button className="sys-btn" onClick={() => go("studio")} title="Estúdio"><Icon name="construction" size={19} /> Estúdio</button>
-      <button className="sys-btn" onClick={() => openUrl("https://github.com/RiqueBitt/-Commandproject#readme")}>
+      <button className="sys-btn" onClick={() => openUrl("https://github.com/RiqueBitt/CommandProject#readme")}>
         <Icon name="help_center" size={19} /> Ajuda
       </button>
       <button className="winbtn" onClick={() => windowAction("minimize")} aria-label="Minimizar"><Icon name="remove" size={18} /></button>

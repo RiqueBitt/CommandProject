@@ -65,8 +65,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: .
-          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-          releaseName: "CommandProject ${{ github.ref_name }}"
+          # em push na main (ou tag) cria a tag v<versão> e publica o release com o .exe
+          tagName: ${{ github.event_name != 'pull_request' && 'v__VERSION__' || '' }}
+          releaseName: "CommandProject v__VERSION__"
           releaseBody: "Instalador para Windows. O launcher avisa sozinho quando sair uma versão nova."
           releaseDraft: false
           prerelease: false

@@ -1,6 +1,6 @@
 // Aviso de nova versão do launcher (GitHub Releases do próprio projeto).
 
-export const REPO = "RiqueBitt/-Commandproject";
+export const REPO = "RiqueBitt/CommandProject";
 export const RELEASES_URL = `https://github.com/${REPO}/releases`;
 
 function parts(v: string) {
