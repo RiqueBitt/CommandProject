@@ -244,7 +244,15 @@ impl Shaders {
                 format!("{PRESET_DIR}/{id}.ini"),
             ));
         }
-        for (src, rel) in files {
+        for (mut src, rel) in files {
+            if !src.is_file() {
+                // instaladores até a 0.7.0 achatavam `presets/` dentro da pasta do pacote
+                if let Some(flat) = src.file_name().map(|n| self.pack.join(n)) {
+                    if flat.is_file() {
+                        src = flat;
+                    }
+                }
+            }
             if !src.is_file() {
                 return Err(Error::Other(format!(
                     "arquivo do pacote de shaders não encontrado: {}",
@@ -721,6 +729,26 @@ mod tests {
             "preset anterior restaurado: {ini}"
         );
         assert!(tmp.path().join("data/shaders/removido/d3d9.dll").is_file());
+    }
+
+    #[test]
+    fn accepts_flattened_pack() {
+        // instaladores antigos gravavam os presets direto na pasta do pacote
+        let tmp = tempfile::tempdir().unwrap();
+        let flat = tmp.path().join("pack");
+        std::fs::create_dir_all(&flat).unwrap();
+        std::fs::copy(pack().join("CommandProject.fx"), flat.join("CommandProject.fx")).unwrap();
+        for e in std::fs::read_dir(pack().join("presets")).unwrap() {
+            let e = e.unwrap();
+            std::fs::copy(e.path(), flat.join(e.file_name())).unwrap();
+        }
+        let bin = tmp.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("d3d9.dll"), b"MZ....R\0e\0S\0h\0a\0d\0e\0....").unwrap();
+        let sh = Shaders::new(bin.clone(), flat, &tmp.path().join("data"));
+        let st = sh.apply(Some("Natural")).unwrap();
+        assert_eq!(st.preset.as_deref(), Some("Natural"));
+        assert!(bin.join("CommandProject-presets/Natural.ini").is_file());
     }
 
     #[test]

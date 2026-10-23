@@ -42,6 +42,8 @@ jobs:
           path: target/shaders/*.hlsl
       - name: Ponte do toolkit de mapas (jogo sintético)
         run: python tools/test_maptk_bridge.py
+      - name: Arquivos que entram no instalador
+        run: python tools/check_resources.py
       - name: Interface
         run: |
           npm ci
