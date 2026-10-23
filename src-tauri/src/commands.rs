@@ -1121,6 +1121,37 @@ pub async fn maptk_run(
     .await
 }
 
+/// Relevo do terreno para o editor 3D, com o minimapa original convertido em PNG (textura).
+#[tauri::command]
+pub async fn maptk_terrain3d(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    terrain: String,
+    size: Option<u32>,
+) -> R<serde_json::Value> {
+    with_ws(&state.ws, move |ws| {
+        let input = serde_json::json!({ "terrain": terrain, "size": size.unwrap_or(256).clamp(32, 512) });
+        let mut out = ws.run_map_tool("terrain3d", &input, &mut |ev| {
+            if let BridgeEvent::Progress { message, .. } = ev {
+                emit_progress(&app, "maptk", 0, 0, message.clone());
+            }
+        })?;
+        let texture = out
+            .get("minimapDds")
+            .and_then(|v| v.as_str())
+            .and_then(|b| base64::engine::general_purpose::STANDARD.decode(b).ok())
+            .and_then(|dds_bytes| dds::decode(&dds_bytes).ok())
+            .and_then(|(_, img)| dds::to_png(&img).ok())
+            .map(|png| data_url("image/png", &png));
+        if let Some(obj) = out.as_object_mut() {
+            obj.remove("minimapDds");
+            obj.insert("texture".into(), texture.map_or(serde_json::Value::Null, serde_json::Value::String));
+        }
+        Ok(out)
+    })
+    .await
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MapBuild {

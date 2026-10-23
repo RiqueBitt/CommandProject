@@ -56,8 +56,10 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
 - **Skin de interface**: recolore a HUD inteira em lote (matiz, saturação, brilho, contraste,
   tingimento), com prévia antes/depois. Gera um mod só com as texturas alteradas.
 - **Mapas**: integra o [SC2 Map Toolkit](https://github.com/plutonics72/supcom2-map-toolkit).
-  Escolha um terreno, clique para posicionar as bases, desenhe passagens sobre a água e gere o
-  mapa. O toolkit verifica se todo ponto é navegável e se as bases se alcançam antes de gerar.
+  Editor em **3D** (relevo do terreno com a textura do jogo, água e câmera livre) ou 2D. Coloque bases
+  e **pontos de extração de massa**, esculpa morros, vales, planaltos, áreas planas e rampas,
+  desenhe passagens sobre a água, ligue a borda rochosa e ajuste a economia. Tudo com desfazer
+  (Ctrl+Z). O toolkit verifica se todo ponto é navegável e se as bases se alcançam antes de gerar.
 
 **Shaders (deixa o jogo mais bonito)**
 - Mod de pós-processamento próprio para o ReShade (DirectX 9): anti-serrilhado, nitidez adaptativa,

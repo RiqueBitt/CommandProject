@@ -420,6 +420,31 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       if (c === "examples") return r({ examples: [{ key: "duel_1v1", spec: { terrain: "SC2_MP_101", scenario_id: "SC2_MP_101D", name: "[2] Duel (1v1)", anchors: { "1": [350, 554], "2": [676, 554] }, teams: [[1], [2]], economy: { base_mass: 4, sites: 4, per_site: 2 }, norush: 55, patch: null } }] });
       return r({});
     }
+    case "maptk_terrain3d": {
+      const size = (a.size as number) ?? 256, grid = 1024, step = grid / size;
+      const field = (x: number, z: number) => {
+        const h = Math.sin(x / 122) * Math.cos(z / 94) + Math.sin((x + z) / 180);
+        const river = Math.abs(x - 600 - Math.sin(z / 80) * 60);
+        return Math.max(18, 44 + h * 14 - Math.max(0, 70 - river) * 0.42);
+      };
+      const buf = new Uint8Array((size + 1) * (size + 1) * 2);
+      for (let j = 0, k = 0; j <= size; j++) for (let i = 0; i <= size; i++, k += 2) {
+        const v = Math.round(field(i * step, j * step) * 128);
+        buf[k] = v & 255; buf[k + 1] = v >> 8;
+      }
+      let bin = "";
+      for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+      const cv = document.createElement("canvas");
+      cv.width = cv.height = 512;
+      const g = cv.getContext("2d")!;
+      for (let y = 0; y < 512; y += 2) for (let x = 0; x < 512; x += 2) {
+        const hgt = field(x * 2, y * 2);
+        const n = Math.sin(x * 0.9) * Math.cos(y * 1.3) * 4;
+        g.fillStyle = hgt < 33 ? `hsl(200,30%,${30 + n}%)` : hgt < 36 ? `hsl(42,35%,${52 + n}%)` : `hsl(${95 - (hgt - 40) * 1.5},${30 + n}%,${30 + (hgt - 36) * 0.7 + n}%)`;
+        g.fillRect(x, y, 2, 2);
+      }
+      return r({ terrain: a.terrain, grid, size, heights: btoa(bin), heightScale: 1 / 128, yMin: 18, yMax: 72, waterLevel: 34, texture: cv.toDataURL() });
+    }
     case "maptk_build": {
       const steps = ["terrain SC2_MP_002 (Open Palms), 3 layers, land layer L0", "placeable cells: 18211", "min spawn separation: 420", "total mass points: 52", "VERIFIED: all 52 positions navigable; all spawns mutually reachable", "packaged: _cp_meumapa.scd (0.1 MB)"];
       for (const [i, s] of steps.entries()) { mockEvents.emit("cp://progress", { task: "map", step: i + 1, total: 0, message: s }); await sleep(260); }
@@ -427,7 +452,8 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       const m = manifest("mapa-" + spec.scenario_id.toLowerCase(), spec.name, "1.0.0", "maps", ["_cp_meumapa.scd"], { source: { kind: "studio" } });
       mods.push(m);
       active().mods.push({ id: m.id, enabled: true });
-      return r({ result: { mass: 52, sites: 9 }, manifest: m });
+      const extra = ((a.spec as { extra_mass?: unknown[] }).extra_mass ?? []).length;
+      return r({ result: { mass: 52, sites: 9, extraMass: extra, warnings: extra ? ["massa 1 movida para (412, 380): o ponto escolhido não era plano/seco"] : [] }, manifest: m });
     }
     default:
       throw new Error(`mock: comando não simulado: ${cmd}`);

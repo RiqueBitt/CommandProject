@@ -1,12 +1,36 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Empty, Field, Notice, Switch, Icon } from "../../components/ui";
+import type { Marker } from "../../components/MapView3D";
 import { api, onProgress } from "../../lib/api";
 import { useStore } from "../../lib/store";
-import type { MaptkStatus, Terrain, TerrainPreview } from "../../lib/types";
+import type { MapBuildResult, MaptkStatus, Terrain, TerrainPreview } from "../../lib/types";
+import {
+  applyRelief, decodeHeights, EMPTY_EDITS, heightAt, meanInDisc, RELIEF_LABEL, reliefShape, round1,
+  type Edits, type Pt, type Relief, type Relief3D, type ReliefKind,
+} from "./mapEdit";
 
-type Tool = "spawn" | "seed" | "bridge" | "erase";
-type Pt = [number, number];
+const MapView3D = lazy(() => import("../../components/MapView3D"));
+
+type Tool = "orbit" | "spawn" | "mass" | ReliefKind | "bridge" | "seed" | "erase";
 const TEAM_COLORS = ["#5aa9e6", "#e5534b", "#7bd88f", "#c78bff"];
+const RELIEF_COLOR: Record<ReliefKind, string> = { hill: "#e3a857", valley: "#4fa3e0", plateau: "#d97757", flatten: "#c9d1d9", ramp: "#f2b33d" };
+const RELIEF_ICON: Record<ReliefKind, string> = { hill: "filter_hdr", valley: "water", plateau: "landscape", flatten: "straighten", ramp: "stairs" };
+const isRelief = (t: Tool): t is ReliefKind => t in RELIEF_LABEL;
+const MAX_MASS = 200;
+
+const TOOLS: { id: Tool; icon: string; label: string; hint: string }[] = [
+  { id: "orbit", icon: "3d_rotation", label: "Câmera", hint: "Arraste para girar. Botão do meio move, roda dá zoom. Nas outras ferramentas o botão direito também gira." },
+  { id: "spawn", icon: "flag", label: "Bases", hint: "Clique para colocar a base inicial de cada jogador (até 8)." },
+  { id: "mass", icon: "diamond", label: "Massa", hint: "Clique para colocar pontos de extração de massa. Pontos em chão inclinado ou na água vão para o chão plano mais próximo." },
+  { id: "hill", icon: RELIEF_ICON.hill, label: "Morro", hint: "Clique ou arraste para subir o terreno em rampa suave: dá para andar até o topo." },
+  { id: "valley", icon: RELIEF_ICON.valley, label: "Vale", hint: "Clique ou arraste para cavar. Abaixo do nível da água vira lago ou rio." },
+  { id: "plateau", icon: RELIEF_ICON.plateau, label: "Planalto", hint: "Levanta um platô de topo plano com paredes íngremes (obstáculo). Use uma Rampa para dar acesso." },
+  { id: "flatten", icon: RELIEF_ICON.flatten, label: "Aplainar", hint: "Nivela a área na altura média: bom para abrir espaço de construção." },
+  { id: "ramp", icon: RELIEF_ICON.ramp, label: "Rampa", hint: "Arraste do ponto baixo ao alto: liga um platô ao chão com uma subida que dá para andar." },
+  { id: "bridge", icon: "route", label: "Passagem", hint: "Arraste um retângulo sobre a água para criar um vau que as unidades atravessam." },
+  { id: "seed", icon: "my_location", label: "Partida", hint: "Ponto de onde a navegação é recalculada; todo chão alcançável a partir dele vira jogável." },
+  { id: "erase", icon: "layers_clear", label: "Apagar", hint: "Clique sobre um item ou edição de relevo para removê-lo." },
+];
 
 function slugId(name: string) {
   const s = name.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 12);
@@ -21,13 +45,20 @@ export default function Maps() {
   const [kind, setKind] = useState<"skirmish" | "campaign" | "all">("skirmish");
   const [terrain, setTerrain] = useState<Terrain | null>(null);
   const [preview, setPreview] = useState<TerrainPreview | null>(null);
+  const [relief3d, setRelief3d] = useState<Relief3D | null>(null);
+  const [view, setView] = useState<"3d" | "2d">("3d");
+  const [skin, setSkin] = useState<"game" | "nav">("game");
+  const [exag, setExag] = useState(1.5);
   const [tool, setTool] = useState<Tool>("spawn");
-  const [spawns, setSpawns] = useState<Pt[]>([]);
-  const [seed, setSeed] = useState<Pt | null>(null);
-  const [bridges, setBridges] = useState<[number, number, number, number][]>([]);
+  const [radius, setRadius] = useState(60);
+  const [strength, setStrength] = useState(20);
+  const [hist, setHist] = useState<{ cur: Edits; past: Edits[]; future: Edits[] }>({ cur: EMPTY_EDITS, past: [], future: [] });
+  const edits = hist.cur;
   const [drag, setDrag] = useState<{ a: Pt; b: Pt } | null>(null);
+  const [cursor2d, setCursor2d] = useState<Pt | null>(null);
   const [name, setName] = useState("Meu mapa");
   const [teams, setTeams] = useState<"2" | "ffa">("2");
+  const [baseMass, setBaseMass] = useState(4);
   const [sites, setSites] = useState(8);
   const [perSite, setPerSite] = useState(3);
   const [norush, setNorush] = useState(70);
@@ -35,9 +66,11 @@ export default function Maps() {
   const [maxSlope, setMaxSlope] = useState(6);
   const [waterMargin, setWaterMargin] = useState(4);
   const [smooth, setSmooth] = useState(false);
+  const [rugged, setRugged] = useState(false);
   const [minimap, setMinimap] = useState<"donor" | "desert" | "snow" | "dark">("donor");
   const [strip, setStrip] = useState<"moving" | "all" | "none">("moving");
   const [log, setLog] = useState<string[]>([]);
+  const [lastBuild, setLastBuild] = useState<MapBuildResult | null>(null);
   const stage = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,67 +88,193 @@ export default function Maps() {
   const pickTerrain = async (t: Terrain) => {
     setTerrain(t);
     setPreview(null);
-    setSpawns([]);
-    setSeed(null);
-    setBridges([]);
+    setRelief3d(null);
+    setHist({ cur: EMPTY_EDITS, past: [], future: [] });
+    setLastBuild(null);
     setPatch(t.kind === "campaign" || t.navmesh === "pocket");
-    setPreview((await run("preview", () => api.maptkPreview(t.id, 512))) ?? null);
+    const [p, r] = await Promise.all([
+      run("preview", () => api.maptkPreview(t.id, 512)),
+      run("terrain3d", () => api.maptkTerrain3d(t.id, 256)),
+    ]);
+    setPreview(p ?? null);
+    if (r) {
+      setRelief3d({ size: r.size, grid: r.grid, heights: decodeHeights(r.heights, r.heightScale), waterLevel: r.waterLevel, yMin: r.yMin, yMax: r.yMax, texture: r.texture });
+    } else setView("2d");
   };
 
-  const grid = preview?.grid ?? 1024;
-  const toWorld = (e: React.MouseEvent): Pt => {
+  const grid = relief3d?.grid ?? preview?.grid ?? 1024;
+  const water = relief3d?.waterLevel ?? preview?.waterLevel ?? 0;
+  const heights = useMemo(
+    () => (relief3d ? applyRelief(relief3d, relief3d.heights, edits.relief, rugged, water) : null),
+    [relief3d, edits.relief, rugged, water],
+  );
+
+  // histórico: cada clique/traço é um passo desfazível
+  const commit = useCallback((fn: (e: Edits) => Edits) => {
+    setHist((h) => {
+      const n = fn(h.cur);
+      return n === h.cur ? h : { cur: n, past: [...h.past.slice(-80), h.cur], future: [] };
+    });
+  }, []);
+  /** muda o passo atual sem criar outro (continuação de um traço) */
+  const amend = useCallback((fn: (e: Edits) => Edits) => setHist((h) => ({ ...h, cur: fn(h.cur) })), []);
+  const undo = useCallback(() => setHist((h) => (h.past.length ? { cur: h.past[h.past.length - 1], past: h.past.slice(0, -1), future: [h.cur, ...h.future] } : h)), []);
+  const redo = useCallback(() => setHist((h) => (h.future.length ? { cur: h.future[0], past: [...h.past, h.cur], future: h.future.slice(1) } : h)), []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || (e.target as HTMLElement)?.matches?.("input, textarea, select")) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redo(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
+
+  // estado atual acessível nos eventos do ponteiro (que vêm do canvas 3D)
+  const ctx = useRef({ tool, radius, strength, heights, relief3d, edits, drag });
+  ctx.current = { tool, radius, strength, heights, relief3d, edits, drag };
+  const stroke = useRef<Pt | null>(null);
+
+  const hAt = (p: Pt) => {
+    const { heights: h, relief3d: r } = ctx.current;
+    return h && r ? heightAt(r, h, p[0], p[1]) : water;
+  };
+
+  const reliefOp = (k: ReliefKind, p: Pt): Relief | null => {
+    const { radius: rad, strength: s, heights: h, relief3d: r } = ctx.current;
+    const [x, z] = p;
+    const y = hAt(p);
+    if (k === "hill") return { kind: k, op: ["cone", x, z, rad, round1(y + s), "raise"] };
+    if (k === "valley") return { kind: k, op: ["cone", x, z, rad, round1(Math.max(0, y - s)), "lower"] };
+    if (k === "plateau") return { kind: k, op: ["disc", x, z, rad, round1(y + s), "raise"] };
+    if (k === "flatten") return { kind: k, op: ["disc", x, z, rad, round1(h && r ? meanInDisc(r, h, x, z, rad) : y), "set"] };
+    return null;
+  };
+
+  const eraseAt = (p: Pt, e: Edits): Edits => {
+    const near = (q: Pt, d = 26) => Math.hypot(q[0] - p[0], q[1] - p[1]) < d;
+    const spawns = e.spawns.filter((q) => !near(q));
+    const mass = e.mass.filter((q) => !near(q, 18));
+    const bridges = e.bridges.filter(([x0, x1, z0, z1]) => !(p[0] >= x0 && p[0] <= x1 && p[1] >= z0 && p[1] <= z1));
+    const seed = e.seed && near(e.seed) ? null : e.seed;
+    let relief = e.relief;
+    if (spawns.length === e.spawns.length && mass.length === e.mass.length && bridges.length === e.bridges.length && seed === e.seed) {
+      // nenhum marcador: remove a edição de relevo mais recente sob o cursor
+      for (let i = relief.length - 1; i >= 0; i--) {
+        const sh = reliefShape(relief[i].op);
+        const inside = sh.rect ? p[0] >= sh.rect[0] && p[0] <= sh.rect[1] && p[1] >= sh.rect[2] && p[1] <= sh.rect[3] : near(sh.c, sh.r);
+        if (inside) { relief = relief.filter((_, j) => j !== i); break; }
+      }
+    }
+    return { spawns, mass, bridges, seed, relief };
+  };
+
+  const onPointer = useCallback((type: "down" | "move" | "up", p: Pt | null) => {
+    const { tool: t, radius: rad, drag: d } = ctx.current;
+    if (t === "orbit") return;
+    if (t === "ramp" || t === "bridge") {
+      if (type === "down" && p) setDrag({ a: p, b: p });
+      else if (type === "move" && p && d) setDrag({ ...d, b: p });
+      else if (type === "up" && d) {
+        const b = p ?? d.b;
+        setDrag(null);
+        let [x0, x1] = [d.a[0], b[0]].sort((u, v) => u - v);
+        let [z0, z1] = [d.a[1], b[1]].sort((u, v) => u - v);
+        if (t === "bridge") {
+          if (x1 - x0 > 6 && z1 - z0 > 6) commit((e) => ({ ...e, bridges: [...e.bridges, [x0, x1, z0, z1]] }));
+          return;
+        }
+        if (Math.hypot(b[0] - d.a[0], b[1] - d.a[1]) < 16) return;
+        // rampa traçada como linha: garante uma largura transitável
+        const alongX = x1 - x0 >= z1 - z0;
+        const minW = Math.max(24, Math.round(rad / 2));
+        if (alongX && z1 - z0 < minW) { const c = (z0 + z1) / 2; z0 = Math.round(c - minW / 2); z1 = Math.round(c + minW / 2); }
+        if (!alongX && x1 - x0 < minW) { const c = (x0 + x1) / 2; x0 = Math.round(c - minW / 2); x1 = Math.round(c + minW / 2); }
+        const ya = hAt(d.a), yb = hAt(b);
+        const aLow = alongX ? d.a[0] <= b[0] : d.a[1] <= b[1];
+        const [lo, hi] = aLow ? [ya, yb] : [yb, ya];
+        commit((e) => ({ ...e, relief: [...e.relief, { kind: "ramp", op: ["ramp", x0, z0, x1, z1, round1(lo), round1(hi), "set"] }] }));
+      }
+      return;
+    }
+    if (!p) { if (type === "up") stroke.current = null; return; }
+    if (type === "up") { stroke.current = null; return; }
+    if (t === "spawn" && type === "down") commit((e) => (e.spawns.length >= 8 ? e : { ...e, spawns: [...e.spawns, p] }));
+    else if (t === "mass" && type === "down") commit((e) => (e.mass.length >= MAX_MASS ? e : { ...e, mass: [...e.mass, p] }));
+    else if (t === "seed" && type === "down") commit((e) => ({ ...e, seed: p }));
+    else if (t === "erase" && type === "down") commit((e) => eraseAt(p, e));
+    else if (isRelief(t)) {
+      if (type === "down") {
+        stroke.current = p;
+        const r = reliefOp(t, p);
+        if (r) commit((e) => ({ ...e, relief: [...e.relief, r] }));
+      } else if (stroke.current && Math.hypot(p[0] - stroke.current[0], p[1] - stroke.current[1]) > rad * 0.45 && ctx.current.edits.relief.length < 400) {
+        // arrastar pinta uma cordilheira/rio: faz parte do mesmo passo do histórico
+        stroke.current = p;
+        const r = reliefOp(t, p);
+        if (r) amend((e) => ({ ...e, relief: [...e.relief, r] }));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commit, amend]);
+
+  // 2D: mesmas ações, com coordenadas vindas do mouse sobre a imagem
+  const toWorld = (e: React.PointerEvent): Pt => {
     const r = stage.current!.getBoundingClientRect();
     const x = Math.round(((e.clientX - r.left) / r.width) * grid);
     const z = Math.round(((e.clientY - r.top) / r.height) * grid);
-    return [Math.max(8, Math.min(grid - 8, x)), Math.max(8, Math.min(grid - 8, z))];
+    return [Math.max(0, Math.min(grid, x)), Math.max(0, Math.min(grid, z))];
   };
+  const down2d = useRef(false);
 
-  const onDown = (e: React.MouseEvent) => {
-    const p = toWorld(e);
-    if (tool === "bridge") setDrag({ a: p, b: p });
-    else if (tool === "spawn") setSpawns((s) => (s.length >= 8 ? s : [...s, p]));
-    else if (tool === "seed") setSeed(p);
-    else if (tool === "erase") {
-      const near = (q: Pt) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 28;
-      setSpawns((s) => s.filter((q) => !near(q)));
-      setBridges((b) => b.filter(([x0, x1, z0, z1]) => !(p[0] >= x0 && p[0] <= x1 && p[1] >= z0 && p[1] <= z1)));
-      if (seed && near(seed)) setSeed(null);
-    }
-  };
-  const onMove = (e: React.MouseEvent) => drag && setDrag({ ...drag, b: toWorld(e) });
-  const onUp = () => {
-    if (!drag) return;
-    const [x0, x1] = [drag.a[0], drag.b[0]].sort((a, b) => a - b);
-    const [z0, z1] = [drag.a[1], drag.b[1]].sort((a, b) => a - b);
-    if (x1 - x0 > 6 && z1 - z0 > 6) setBridges((b) => [...b, [x0, x1, z0, z1]]);
-    setDrag(null);
-  };
+  const team = (i: number) => (teams === "ffa" ? i : i < Math.ceil(edits.spawns.length / 2) ? 0 : 1);
+  const lobbyName = `[${edits.spawns.length}] ${name.trim()}`;
+  const editsTerrain = edits.relief.length > 0 || rugged || edits.bridges.length > 0;
+  const usePatch = patch || editsTerrain;
 
-  const team = (i: number) => (teams === "ffa" ? i : i < Math.ceil(spawns.length / 2) ? 0 : 1);
-  const lobbyName = `[${spawns.length}] ${name.trim()}`;
   const spec = useMemo(() => {
     if (!terrain) return null;
+    const { spawns, mass, bridges, seed, relief } = edits;
     const anchors = Object.fromEntries(spawns.map((p, i) => [String(i + 1), p]));
     const ids = spawns.map((_, i) => i + 1);
     const teamList = teams === "ffa" ? ids.map((i) => [i]) : [ids.filter((_, i) => team(i) === 0), ids.filter((_, i) => team(i) === 1)];
     const s: Record<string, unknown> = {
       terrain: terrain.id, scenario_id: slugId(name), name: lobbyName, anchors, teams: teamList,
-      economy: { base_mass: 4, sites, per_site: perSite }, norush,
-      patch: patch ? { max_slope: maxSlope, water_margin: waterMargin, seed: seed ?? spawns[0] ?? [512, 512], causeways: bridges } : null,
+      economy: { base_mass: baseMass, sites, per_site: perSite }, norush,
+      patch: usePatch ? { max_slope: maxSlope, water_margin: waterMargin, seed: seed ?? spawns[0] ?? [grid / 2, grid / 2], causeways: bridges } : null,
     };
+    if (relief.length) s.sculpt = relief.map((r) => r.op);
+    if (mass.length) s.extra_mass = mass;
+    if (rugged) s.rugged_edges = {};
     if (smooth) s.smooth = { keep_slope: maxSlope, water_margin: waterMargin, mode: "level" };
     if (minimap !== "donor") s.minimap = minimap;
-    if (patch) s.strip_props = strip === "none" ? false : strip;
+    if (usePatch) s.strip_props = strip === "none" ? false : strip;
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [terrain, spawns, teams, name, sites, perSite, norush, patch, maxSlope, waterMargin, seed, bridges, smooth, minimap, strip]);
+  }, [terrain, edits, teams, name, baseMass, sites, perSite, norush, usePatch, maxSlope, waterMargin, rugged, smooth, minimap, strip, grid]);
 
   const build = async () => {
     if (!spec) return;
     setLog([]);
+    setLastBuild(null);
     const r = await run("map", () => api.maptkBuild(spec), (x) => `"${x.manifest.name}" gerado, verificado e ativado na biblioteca.`);
-    if (r) await refreshMods();
+    if (r) {
+      setLastBuild(r.result);
+      await refreshMods();
+    }
   };
+
+  const markers: Marker[] = useMemo(
+    () => edits.spawns.map((p, i) => ({ p, color: TEAM_COLORS[team(i) % 4], label: String(i + 1) })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [edits.spawns, teams],
+  );
+  const brushColor = isRelief(tool) ? RELIEF_COLOR[tool] : tool === "erase" ? "#e5534b" : "#a3e635";
+  const brush = useMemo(
+    () => (tool === "orbit" ? null : isRelief(tool) && tool !== "ramp" ? { shape: "circle" as const, radius, color: brushColor } : { shape: "point" as const, color: brushColor }),
+    [tool, radius, brushColor],
+  );
 
   if (!status) return <div className="card pad"><div className="bar indeterminate"><i /></div></div>;
   if (!status.ready) {
@@ -127,13 +286,17 @@ export default function Maps() {
   }
 
   const list = (terrains ?? []).filter((t) => kind === "all" || t.kind === kind);
+  const active = TOOLS.find((t) => t.id === tool)!;
+  const image2d = skin === "game" && relief3d?.texture ? relief3d.texture : preview?.dataUrl;
+  const hasDepth = isRelief(tool) && tool !== "flatten" && tool !== "ramp";
+
   return (
     <div className="col" style={{ gap: 16 }}>
       <Notice kind="info">
         Feito com o <b>SC2 Map Toolkit</b> (plutonics72, MIT): ele monta o mapa sobre um terreno do jogo, posiciona massa só em chão construível e
-        <b> recusa gerar</b> se algum ponto ficar inalcançável. Mapas de campanha precisam do modo “abrir terreno”, que reescreve a malha de navegação.
+        <b> recusa gerar</b> se algum ponto ficar inalcançável. Esculpir o relevo refaz a navegação automaticamente.
       </Notice>
-      <div className="studio" style={{ gridTemplateColumns: "280px 1fr" }}>
+      <div className="studio" style={{ gridTemplateColumns: "260px 1fr" }}>
         <div className="card">
           <div className="chips" style={{ padding: 12 }}>
             {(["skirmish", "campaign", "all"] as const).map((k) => (
@@ -151,40 +314,138 @@ export default function Maps() {
         </div>
 
         {!terrain ? (
-          <div className="card"><Empty icon="terrain" title="Escolha um terreno">Ele vira a base do seu mapa: relevo, água e texturas vêm do jogo.</Empty></div>
+          <div className="card"><Empty icon="terrain" title="Escolha um terreno">Ele vira a base do seu mapa: relevo, água e texturas vêm do jogo. Depois é só esculpir, colocar bases e massa.</Empty></div>
         ) : (
-          <div className="grid-2" style={{ gridTemplateColumns: "minmax(360px, 1fr) 340px", alignItems: "start" }}>
-            <div className="col">
-              <div className="row wrap" role="toolbar" aria-label="Ferramentas">
-                <button className={`btn sm ${tool === "spawn" ? "primary" : ""}`} onClick={() => setTool("spawn")}><Icon name="flag" size={17} /> Bases ({spawns.length}/8)</button>
-                {patch && <button className={`btn sm ${tool === "seed" ? "primary" : ""}`} onClick={() => setTool("seed")}><Icon name="my_location" size={17} /> Ponto de partida</button>}
-                {patch && <button className={`btn sm ${tool === "bridge" ? "primary" : ""}`} onClick={() => setTool("bridge")}><Icon name="route" size={17} /> Passagem</button>}
-                <button className={`btn sm ${tool === "erase" ? "primary" : ""}`} onClick={() => setTool("erase")}><Icon name="layers_clear" size={17} /> Apagar</button>
+          <div className="map-editor">
+            <div className="col" style={{ gap: 10, minWidth: 0 }}>
+              <div className="map-tools" role="toolbar" aria-label="Ferramentas">
+                {TOOLS.filter((t) => t.id !== "orbit" || view === "3d").map((t) => (
+                  <button key={t.id} className="map-tool" aria-pressed={tool === t.id} title={t.hint} onClick={() => setTool(t.id)}
+                    style={isRelief(t.id) ? { ["--tc" as string]: RELIEF_COLOR[t.id] } : undefined}>
+                    <Icon name={t.icon} size={19} />
+                    <span>{t.label}{t.id === "spawn" ? ` ${edits.spawns.length}/8` : t.id === "mass" && edits.mass.length ? ` ${edits.mass.length}` : ""}</span>
+                  </button>
+                ))}
+                <span className="map-tools-sep" />
+                <button className="btn icon-btn sm-icon" title="Desfazer (Ctrl+Z)" aria-label="Desfazer" disabled={!hist.past.length} onClick={undo}><Icon name="undo" /></button>
+                <button className="btn icon-btn sm-icon" title="Refazer (Ctrl+Y)" aria-label="Refazer" disabled={!hist.future.length} onClick={redo}><Icon name="redo" /></button>
               </div>
-              <div className="map-stage" ref={stage} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
-                role="application" aria-label="Mapa: clique para posicionar">
-                {preview ? <img src={preview.dataUrl} alt={`Terreno ${terrain.id}`} draggable={false} /> : <div className="bar indeterminate" style={{ margin: 20 }}><i /></div>}
-                <svg viewBox={`0 0 ${grid} ${grid}`}>
-                  {bridges.map(([x0, x1, z0, z1], i) => <rect key={i} x={x0} y={z0} width={x1 - x0} height={z1 - z0} fill="rgba(242,179,61,.25)" stroke="#f2b33d" strokeWidth={3} strokeDasharray="10 6" />)}
-                  {drag && <rect x={Math.min(drag.a[0], drag.b[0])} y={Math.min(drag.a[1], drag.b[1])} width={Math.abs(drag.b[0] - drag.a[0])} height={Math.abs(drag.b[1] - drag.a[1])} fill="rgba(242,179,61,.2)" stroke="#f2b33d" strokeWidth={3} />}
-                  {seed && <g stroke="#fff" strokeWidth={4}><line x1={seed[0] - 18} y1={seed[1]} x2={seed[0] + 18} y2={seed[1]} /><line x1={seed[0]} y1={seed[1] - 18} x2={seed[0]} y2={seed[1] + 18} /></g>}
-                  {spawns.map((p, i) => (
-                    <g key={i}>
-                      <circle cx={p[0]} cy={p[1]} r={26} fill={TEAM_COLORS[team(i) % 4]} stroke="#0d1b26" strokeWidth={5} />
-                      <text x={p[0]} y={p[1] + 10} textAnchor="middle" fontSize={30} fontWeight={700} fill="#0d1b26" fontFamily="Chakra Petch">{i + 1}</text>
-                    </g>
-                  ))}
-                </svg>
+
+              <div className="map-brush">
+                <Icon name={active.icon} style={{ color: isRelief(tool) ? RELIEF_COLOR[tool] : "var(--primary)" }} />
+                <span className="muted small" style={{ flex: 1, minWidth: 200 }}>{active.hint}</span>
+                {isRelief(tool) && tool !== "ramp" && (
+                  <label className="range" style={{ gridTemplateColumns: "44px 120px 36px" }}><span>Raio</span>
+                    <input type="range" min={12} max={200} value={radius} onChange={(e) => setRadius(Number(e.target.value))} /><output>{radius}</output></label>
+                )}
+                {tool === "ramp" && (
+                  <label className="range" style={{ gridTemplateColumns: "56px 120px 36px" }}><span>Largura</span>
+                    <input type="range" min={24} max={200} value={radius} onChange={(e) => setRadius(Number(e.target.value))} /><output>{Math.max(24, Math.round(radius / 2))}</output></label>
+                )}
+                {hasDepth && (
+                  <label className="range" style={{ gridTemplateColumns: "48px 120px 36px" }}><span>{tool === "valley" ? "Fundo" : "Altura"}</span>
+                    <input type="range" min={2} max={80} value={strength} onChange={(e) => setStrength(Number(e.target.value))} /><output>{strength}</output></label>
+                )}
               </div>
-              <div className="legend">
-                <span><i style={{ background: "#7f9a6f" }} />chão onde unidades andam</span>
-                <span><i style={{ background: "#9c5450" }} />bloqueado</span>
-                <span><i style={{ background: "#2f5f8c" }} />água</span>
-                {preview && <span>{preview.navigablePct.toString().replace(".", ",")}% navegável hoje</span>}
+
+              <div className="map-view">
+                <div className="map-view-bar">
+                  <div className="seg" role="group" aria-label="Visualização">
+                    <button className="btn" aria-pressed={view === "3d"} disabled={!relief3d} onClick={() => setView("3d")}><Icon name="view_in_ar" size={17} /> 3D</button>
+                    <button className="btn" aria-pressed={view === "2d"} onClick={() => { setView("2d"); if (tool === "orbit") setTool("spawn"); }}><Icon name="map" size={17} /> 2D</button>
+                  </div>
+                  <div className="seg" role="group" aria-label="Textura">
+                    <button className="btn" aria-pressed={skin === "game"} disabled={!relief3d?.texture} onClick={() => setSkin("game")}><Icon name="texture" size={17} /> Textura do jogo</button>
+                    <button className="btn" aria-pressed={skin === "nav"} onClick={() => setSkin("nav")}><Icon name="grid_on" size={17} /> Navegação</button>
+                  </div>
+                  {view === "3d" && (
+                    <label className="range" style={{ gridTemplateColumns: "54px 90px 34px", marginLeft: "auto" }}><span>Relevo</span>
+                      <input type="range" min={1} max={4} step={0.25} value={exag} onChange={(e) => setExag(Number(e.target.value))} /><output>{exag}×</output></label>
+                  )}
+                </div>
+
+                {view === "3d" && relief3d && heights ? (
+                  <Suspense fallback={<div className="map-3d"><div className="bar indeterminate" style={{ margin: 20 }}><i /></div></div>}>
+                    <MapView3D
+                      size={relief3d.size} grid={relief3d.grid} heights={heights} waterLevel={water}
+                      texture={skin === "game" ? relief3d.texture : preview?.dataUrl ?? null} exaggeration={exag}
+                      spawns={markers} mass={edits.mass} bridges={edits.bridges} seed={edits.seed}
+                      brush={brush} drag={drag} orbit={tool === "orbit"} onPointer={onPointer}
+                    />
+                  </Suspense>
+                ) : view === "3d" ? (
+                  <div className="map-3d"><div className="bar indeterminate" style={{ margin: 20 }}><i /></div></div>
+                ) : (
+                  <div className="map-stage" ref={stage}
+                    onPointerDown={(e) => { if (e.button !== 0) return; down2d.current = true; e.currentTarget.setPointerCapture(e.pointerId); onPointer("down", toWorld(e)); }}
+                    onPointerMove={(e) => { const p = toWorld(e); setCursor2d(p); if (down2d.current) onPointer("move", p); }}
+                    onPointerUp={(e) => { if (!down2d.current) return; down2d.current = false; onPointer("up", toWorld(e)); }}
+                    onPointerLeave={() => setCursor2d(null)}
+                    role="application" aria-label="Mapa: clique para editar">
+                    {image2d ? <img src={image2d} alt={`Terreno ${terrain.id}`} draggable={false} /> : <div className="bar indeterminate" style={{ margin: 20 }}><i /></div>}
+                    <svg viewBox={`0 0 ${grid} ${grid}`}>
+                      {edits.relief.map((r, i) => {
+                        const sh = reliefShape(r.op), c = RELIEF_COLOR[r.kind];
+                        return sh.rect
+                          ? <rect key={i} x={sh.rect[0]} y={sh.rect[2]} width={sh.rect[1] - sh.rect[0]} height={sh.rect[3] - sh.rect[2]} fill={`${c}33`} stroke={c} strokeWidth={3} />
+                          : <circle key={i} cx={sh.c[0]} cy={sh.c[1]} r={sh.r} fill={`${c}26`} stroke={c} strokeWidth={2.5} />;
+                      })}
+                      {edits.bridges.map(([x0, x1, z0, z1], i) => <rect key={i} x={x0} y={z0} width={x1 - x0} height={z1 - z0} fill="rgba(242,179,61,.25)" stroke="#f2b33d" strokeWidth={3} strokeDasharray="10 6" />)}
+                      {drag && <rect x={Math.min(drag.a[0], drag.b[0])} y={Math.min(drag.a[1], drag.b[1])} width={Math.abs(drag.b[0] - drag.a[0])} height={Math.abs(drag.b[1] - drag.a[1])} fill="rgba(242,179,61,.2)" stroke="#f2b33d" strokeWidth={3} />}
+                      {edits.seed && <g stroke="#fff" strokeWidth={4}><line x1={edits.seed[0] - 18} y1={edits.seed[1]} x2={edits.seed[0] + 18} y2={edits.seed[1]} /><line x1={edits.seed[0]} y1={edits.seed[1] - 18} x2={edits.seed[0]} y2={edits.seed[1] + 18} /></g>}
+                      {edits.mass.map((p, i) => <path key={i} d={`M${p[0]} ${p[1] - 13}L${p[0] + 9} ${p[1]}L${p[0]} ${p[1] + 13}L${p[0] - 9} ${p[1]}Z`} fill="#7bd88f" stroke="#0d1b26" strokeWidth={3} />)}
+                      {edits.spawns.map((p, i) => (
+                        <g key={i}>
+                          <circle cx={p[0]} cy={p[1]} r={26} fill={TEAM_COLORS[team(i) % 4]} stroke="#0d1b26" strokeWidth={5} />
+                          <text x={p[0]} y={p[1] + 10} textAnchor="middle" fontSize={30} fontWeight={700} fill="#0d1b26" fontFamily="Chakra Petch">{i + 1}</text>
+                        </g>
+                      ))}
+                      {cursor2d && brush && <circle cx={cursor2d[0]} cy={cursor2d[1]} r={brush.shape === "circle" ? brush.radius : 10} fill="none" stroke={brush.color} strokeWidth={3} />}
+                    </svg>
+                  </div>
+                )}
+                <div className="legend">
+                  {skin === "nav" ? (
+                    <>
+                      <span><i style={{ background: "#7f9a6f" }} />chão onde unidades andam</span>
+                      <span><i style={{ background: "#9c5450" }} />bloqueado</span>
+                      <span><i style={{ background: "#2f5f8c" }} />água</span>
+                      {preview && <span>{preview.navigablePct.toString().replace(".", ",")}% navegável no original</span>}
+                    </>
+                  ) : (
+                    <>
+                      <span><i style={{ background: "#7bd88f", transform: "rotate(45deg) scale(.8)" }} />massa manual</span>
+                      <span><i style={{ background: TEAM_COLORS[0], borderRadius: 99 }} />bases</span>
+                      <span>água no nível {round1(water).toString().replace(".", ",")}</span>
+                      {edits.relief.length > 0 && <span>a prévia do relevo é aproximada; o jogo usa a malha completa</span>}
+                    </>
+                  )}
+                </div>
               </div>
+
+              {edits.relief.length > 0 && (
+                <section className="card pad col" style={{ gap: 8 }}>
+                  <div className="row" style={{ justifyContent: "space-between" }}>
+                    <b>Relevo esculpido ({edits.relief.length})</b>
+                    <button className="btn text sm" onClick={() => commit((e) => ({ ...e, relief: [] }))}><Icon name="clear_all" size={17} /> Limpar relevo</button>
+                  </div>
+                  <div className="relief-list">
+                    {edits.relief.map((r, i) => {
+                      const sh = reliefShape(r.op);
+                      return (
+                        <span key={i} className="relief-chip" style={{ ["--tc" as string]: RELIEF_COLOR[r.kind] }}>
+                          <Icon name={RELIEF_ICON[r.kind]} size={15} />
+                          {RELIEF_LABEL[r.kind]} <span className="faint">{Math.round(sh.c[0])}, {Math.round(sh.c[1])}</span>
+                          <button aria-label={`Remover ${RELIEF_LABEL[r.kind]}`} onClick={() => commit((e) => ({ ...e, relief: e.relief.filter((_, j) => j !== i) }))}><Icon name="close" size={14} /></button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
             </div>
 
-            <section className="card pad col">
+            <section className="card pad col map-side">
               <Field label="Nome no lobby" hint={`Aparece como “${lobbyName}”. Id: ${slugId(name)}`}>
                 <input className="input" value={name} maxLength={48} onChange={(e) => setName(e.target.value)} />
               </Field>
@@ -194,34 +455,52 @@ export default function Maps() {
                   <option value="ffa">Todos contra todos</option>
                 </select>
               </Field>
-              <div className="grid-2" style={{ gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <Field label="Expansões"><input className="input" type="number" min={0} max={20} value={sites} onChange={(e) => setSites(Number(e.target.value))} /></Field>
-                <Field label="Massa por expansão"><input className="input" type="number" min={1} max={6} value={perSite} onChange={(e) => setPerSite(Number(e.target.value))} /></Field>
+
+              <div className="side-group">
+                <span className="overline"><Icon name="diamond" size={15} /> Economia</span>
+                <div className="grid-2" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                  <Field label="Na base"><input className="input" type="number" min={0} max={8} value={baseMass} onChange={(e) => setBaseMass(Number(e.target.value))} /></Field>
+                  <Field label="Expansões"><input className="input" type="number" min={0} max={20} value={sites} onChange={(e) => setSites(Number(e.target.value))} /></Field>
+                  <Field label="Por expansão"><input className="input" type="number" min={1} max={6} value={perSite} onChange={(e) => setPerSite(Number(e.target.value))} /></Field>
+                </div>
+                <p className="faint small">
+                  Massa automática: {baseMass} por base e {sites}×{perSite} nas expansões. Manual: {edits.mass.length} ponto{edits.mass.length === 1 ? "" : "s"} (ferramenta Massa).
+                </p>
               </div>
               <Field label="Raio sem ataque inicial"><input className="input" type="number" min={0} max={200} value={norush} onChange={(e) => setNorush(Number(e.target.value))} /></Field>
-              <div className="setting-row">
-                <div className="txt"><b>Abrir terreno</b><span className="muted small">Reescreve a navegação para todo o chão firme virar área jogável. Obrigatório em mapas de campanha.</span></div>
-                <Switch checked={patch} onChange={setPatch} label="Abrir terreno" />
-              </div>
-              {patch && (
-                <>
-                  <div className="grid-2" style={{ gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    <Field label="Inclinação máxima"><input className="input" type="number" step={0.5} min={1} max={20} value={maxSlope} onChange={(e) => setMaxSlope(Number(e.target.value))} /></Field>
-                    <Field label="Margem da água"><input className="input" type="number" step={0.5} min={0} max={20} value={waterMargin} onChange={(e) => setWaterMargin(Number(e.target.value))} /></Field>
+
+              <div className="side-group">
+                <span className="overline"><Icon name="terrain" size={15} /> Terreno</span>
+                <div className="setting-row">
+                  <div className="txt"><b>Borda rochosa</b><span className="muted small">Fecha o mapa com uma faixa de rochas intransponível (visível em mapas de escaramuça).</span></div>
+                  <Switch checked={rugged} onChange={setRugged} label="Borda rochosa" />
+                </div>
+                <div className="setting-row">
+                  <div className="txt"><b>Aplainar para construir</b><span className="muted small">Nivela o chão suave do mapa inteiro; mantém penhascos e água.</span></div>
+                  <Switch checked={smooth} onChange={setSmooth} label="Aplainar terreno" />
+                </div>
+                <div className="setting-row">
+                  <div className="txt">
+                    <b>Abrir terreno</b>
+                    <span className="muted small">{editsTerrain ? "Ligado automaticamente: o relevo mudou, então a navegação é refeita." : "Reescreve a navegação para todo o chão firme virar área jogável. Obrigatório em mapas de campanha."}</span>
                   </div>
-                  <Field label="Objetos animados do cenário">
-                    <select className="select" value={strip} onChange={(e) => setStrip(e.target.value as typeof strip)}>
-                      <option value="moving">Parar os que se movem</option>
-                      <option value="all">Remover todos</option>
-                      <option value="none">Manter como estão</option>
-                    </select>
-                  </Field>
-                  <p className="faint small">Use “Passagem” para desenhar um vau atravessando água entre duas margens.</p>
-                </>
-              )}
-              <div className="setting-row">
-                <div className="txt"><b>Aplainar para construir</b><span className="muted small">Nivela o chão suave para dar para construir; mantém penhascos e água.</span></div>
-                <Switch checked={smooth} onChange={setSmooth} label="Aplainar terreno" />
+                  <Switch checked={usePatch} onChange={setPatch} disabled={editsTerrain} label="Abrir terreno" />
+                </div>
+                {usePatch && (
+                  <>
+                    <div className="grid-2" style={{ gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      <Field label="Inclinação máxima"><input className="input" type="number" step={0.5} min={1} max={20} value={maxSlope} onChange={(e) => setMaxSlope(Number(e.target.value))} /></Field>
+                      <Field label="Margem da água"><input className="input" type="number" step={0.5} min={0} max={20} value={waterMargin} onChange={(e) => setWaterMargin(Number(e.target.value))} /></Field>
+                    </div>
+                    <Field label="Objetos animados do cenário">
+                      <select className="select" value={strip} onChange={(e) => setStrip(e.target.value as typeof strip)}>
+                        <option value="moving">Parar os que se movem</option>
+                        <option value="all">Remover todos</option>
+                        <option value="none">Manter como estão</option>
+                      </select>
+                    </Field>
+                  </>
+                )}
               </div>
               <Field label="Minimapa do lobby">
                 <select className="select" value={minimap} onChange={(e) => setMinimap(e.target.value as typeof minimap)}>
@@ -231,10 +510,16 @@ export default function Maps() {
                   <option value="dark">Gerar: rocha escura</option>
                 </select>
               </Field>
-              {spawns.length < 2 && <Notice kind="info">Clique no mapa para colocar pelo menos duas bases.</Notice>}
-              <button className="btn primary" disabled={spawns.length < 2 || !name.trim() || busy.map} onClick={build}>
+              {edits.spawns.length < 2 && <Notice kind="info">Coloque pelo menos duas bases com a ferramenta Bases.</Notice>}
+              <button className="btn primary" disabled={edits.spawns.length < 2 || !name.trim() || busy.map} onClick={build}>
                 <Icon name="construction" size={19} /> {busy.map ? "Gerando e verificando…" : "Gerar mapa"}
               </button>
+              {lastBuild && (
+                <Notice kind={lastBuild.warnings?.length ? "warn" : "ok"}>
+                  {typeof lastBuild.mass === "number" ? <><b>{lastBuild.mass + (lastBuild.extraMass ?? 0)}</b> pontos de massa no total{lastBuild.extraMass ? `, ${lastBuild.extraMass} colocados por você` : ""}. </> : null}
+                  {lastBuild.warnings?.length ? <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>{lastBuild.warnings.slice(0, 8).map((w, i) => <li key={i}>{w}</li>)}</ul> : "Tudo verificado e alcançável."}
+                </Notice>
+              )}
               {log.length > 0 && <div className="log mono small">{log.map((l, i) => <div key={i}>{l}</div>)}</div>}
             </section>
           </div>

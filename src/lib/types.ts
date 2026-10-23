@@ -148,6 +148,14 @@ export interface Terrain {
   id: string; archive: string; kind: "skirmish" | "campaign" | "other"; name?: string | null; biome?: string | null;
   waterY?: number | null; openness?: number | null; navmesh?: string | null; players?: number | null; notes?: string | null;
 }
+/** Relevo amostrado para o editor 3D (alturas em base64, u16 little-endian). */
+export interface Terrain3D {
+  terrain: string; grid: number; size: number; heights: string; heightScale: number;
+  yMin: number; yMax: number; waterLevel: number; texture: string | null;
+}
+export interface MapBuildResult {
+  mass?: number; sites?: number; warnings?: string[]; extraMass?: number; [k: string]: unknown;
+}
 export interface TerrainPreview {
   path: string; dataUrl: string; terrain: string; grid: number; size: number; nLayers: number; landLayer: number;
   waterLevel: number; navigablePct: number;

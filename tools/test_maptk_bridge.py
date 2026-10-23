@@ -174,7 +174,10 @@ def main():
 
         # escultura + massa manual: força PATCH (navegação refeita) e grava os marcadores extras
         spec3 = dict(spec, scenario_id="SC2_CPSCULPT", name="[2] Teste Relevo",
-                     sculpt=[["cone", 512, 300, 60, 45.0, "raise"], ["disc", 512, 720, 40, 20.0, "set"]],
+                     sculpt=[["cone", 512.4, 300, 60, 45.0, "raise"], ["disc", 512, 720, 40, 20.0, "set"],
+                             ["cone", 700, 500, 50, 12.5, "lower"], ["disc", 300, 700, 30.6, 30, "raise"],
+                             ["ramp", 520, 690, 600, 720, 20.0, 30.0, "set"]],
+                     rugged_edges={},
                      extra_mass=[[400, 500], [300, 300]])
         res3, log3 = run("build", {"spec": spec3}, gd, out)
         with zipfile.ZipFile(res3["scd"]) as zf:
@@ -184,7 +187,8 @@ def main():
         assert "maps/SC2_CPSCULPT/SC2_CPSCULPT.hfield.win.bdf" in names3, names3
         assert save.count("'Mass X") == 2, "massa manual nos marcadores"
         assert res3["extraMass"] == 2, res3
-        assert any("sculpted heightfield" in l for l in log3), log3
+        assert any("sculpted heightfield: 5" in l for l in log3), log3
+        assert any("ruggedized" in l for l in log3), log3
         print("escultura + massa manual ok:", res3["mass"], "massa automática +", res3["extraMass"], "manual")
 
         bad = dict(spec, scenario_id="meu mapa")

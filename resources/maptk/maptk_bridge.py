@@ -259,9 +259,32 @@ def _clean_spec(spec):
     for key in ("sculpt", "flatten"):
         if spec.get(key):
             spec[key] = [tuple(op) for op in spec[key]]
+    # coordenadas e raios são células inteiras do heightfield; alturas podem ser fracionárias
+    n_int = dict(disc=3, cone=3, rect=4, ramp=4)
+    clean = []
     for op in spec.get("sculpt") or []:
-        if op[0] not in ("disc", "cone", "rect", "ramp") or op[-1] not in ("set", "raise", "lower"):
+        if op[0] not in n_int or op[-1] not in ("set", "raise", "lower"):
             raise ValueError(f"operação de relevo inválida: {op}")
+        k = n_int[op[0]]
+        clean.append((op[0], *(int(round(float(v))) for v in op[1:1 + k]),
+                      *(float(v) for v in op[1 + k:-1]), op[-1]))
+    if clean:
+        spec["sculpt"] = clean
+    flat = []
+    for op in spec.get("flatten") or []:
+        if op[0] not in ("disc", "rect"):
+            raise ValueError(f"região de aplainar inválida: {op}")
+        flat.append((op[0], *(int(round(float(v))) for v in op[1:])))
+    if flat:
+        spec["flatten"] = flat
+    if len(clean) + len(flat) > 400:
+        raise ValueError("no máximo 400 edições de relevo")
+    # borda rochosa: true/{} do launcher viram os parâmetros padrão (dict vazio seria "desligado" no make_map)
+    rugged = spec.get("rugged_edges")
+    if rugged is True or isinstance(rugged, dict):
+        spec["rugged_edges"] = dict(dict(margin=40), **(rugged if isinstance(rugged, dict) else {}))
+    else:
+        spec.pop("rugged_edges", None)
     spec["extra_mass"] = [(float(p[0]), float(p[1])) for p in spec.get("extra_mass") or []]
     if len(spec["extra_mass"]) > 200:
         raise ValueError("no máximo 200 pontos de massa manuais")
