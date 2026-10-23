@@ -27,7 +27,7 @@ export function ColorSliders({ value, onChange }: { value: ColorAdjust; onChange
             onChange({ ...value, tint: [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number], tintStrength: value.tintStrength || 0.5 });
           }} />
       </label>
-      <button className="btn ghost sm" style={{ alignSelf: "flex-start" }} onClick={() => onChange(IDENTITY)}>Zerar ajustes</button>
+      <button className="btn text sm" style={{ alignSelf: "flex-start" }} onClick={() => onChange(IDENTITY)}>Zerar ajustes</button>
     </div>
   );
 }

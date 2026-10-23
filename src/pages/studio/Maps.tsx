@@ -1,6 +1,5 @@
-import { Crosshair, Eraser, Flag, Hammer, Map as MapIcon, Route } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Empty, Field, Notice, Switch } from "../../components/ui";
+import { Empty, Field, Notice, Switch, Icon } from "../../components/ui";
 import { api, onProgress } from "../../lib/api";
 import { useStore } from "../../lib/store";
 import type { MaptkStatus, Terrain, TerrainPreview } from "../../lib/types";
@@ -118,11 +117,11 @@ export default function Maps() {
     if (r) await refreshMods();
   };
 
-  if (!status) return <div className="panel pad"><div className="bar indeterminate"><i /></div></div>;
+  if (!status) return <div className="card pad"><div className="bar indeterminate"><i /></div></div>;
   if (!status.ready) {
     return (
-      <div className="panel">
-        <Empty icon={<MapIcon size={36} color="var(--faint)" />} title="O Estúdio de Mapas precisa do Python">{status.message}</Empty>
+      <div className="card">
+        <Empty icon="map" title="O Estúdio de Mapas precisa do Python">{status.message}</Empty>
       </div>
     );
   }
@@ -135,7 +134,7 @@ export default function Maps() {
         <b> recusa gerar</b> se algum ponto ficar inalcançável. Mapas de campanha precisam do modo “abrir terreno”, que reescreve a malha de navegação.
       </Notice>
       <div className="studio" style={{ gridTemplateColumns: "280px 1fr" }}>
-        <div className="panel">
+        <div className="card">
           <div className="chips" style={{ padding: 12 }}>
             {(["skirmish", "campaign", "all"] as const).map((k) => (
               <button key={k} className="chip" aria-pressed={kind === k} onClick={() => setKind(k)}>{k === "skirmish" ? "Escaramuça" : k === "campaign" ? "Campanha" : "Todos"}</button>
@@ -152,15 +151,15 @@ export default function Maps() {
         </div>
 
         {!terrain ? (
-          <div className="panel"><Empty title="Escolha um terreno">Ele vira a base do seu mapa: relevo, água e texturas vêm do jogo.</Empty></div>
+          <div className="card"><Empty title="Escolha um terreno">Ele vira a base do seu mapa: relevo, água e texturas vêm do jogo.</Empty></div>
         ) : (
           <div className="grid-2" style={{ gridTemplateColumns: "minmax(360px, 1fr) 340px", alignItems: "start" }}>
             <div className="col">
               <div className="row wrap" role="toolbar" aria-label="Ferramentas">
-                <button className={`btn sm ${tool === "spawn" ? "primary" : ""}`} onClick={() => setTool("spawn")}><Flag size={14} /> Bases ({spawns.length}/8)</button>
-                {patch && <button className={`btn sm ${tool === "seed" ? "primary" : ""}`} onClick={() => setTool("seed")}><Crosshair size={14} /> Ponto de partida</button>}
-                {patch && <button className={`btn sm ${tool === "bridge" ? "primary" : ""}`} onClick={() => setTool("bridge")}><Route size={14} /> Passagem</button>}
-                <button className={`btn sm ${tool === "erase" ? "primary" : ""}`} onClick={() => setTool("erase")}><Eraser size={14} /> Apagar</button>
+                <button className={`btn sm ${tool === "spawn" ? "primary" : ""}`} onClick={() => setTool("spawn")}><Icon name="flag" size={17} /> Bases ({spawns.length}/8)</button>
+                {patch && <button className={`btn sm ${tool === "seed" ? "primary" : ""}`} onClick={() => setTool("seed")}><Icon name="my_location" size={17} /> Ponto de partida</button>}
+                {patch && <button className={`btn sm ${tool === "bridge" ? "primary" : ""}`} onClick={() => setTool("bridge")}><Icon name="route" size={17} /> Passagem</button>}
+                <button className={`btn sm ${tool === "erase" ? "primary" : ""}`} onClick={() => setTool("erase")}><Icon name="layers_clear" size={17} /> Apagar</button>
               </div>
               <div className="map-stage" ref={stage} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
                 role="application" aria-label="Mapa: clique para posicionar">
@@ -185,7 +184,7 @@ export default function Maps() {
               </div>
             </div>
 
-            <section className="panel pad col">
+            <section className="card pad col">
               <Field label="Nome no lobby" hint={`Aparece como “${lobbyName}”. Id: ${slugId(name)}`}>
                 <input className="input" value={name} maxLength={48} onChange={(e) => setName(e.target.value)} />
               </Field>
@@ -200,7 +199,7 @@ export default function Maps() {
                 <Field label="Massa por expansão"><input className="input" type="number" min={1} max={6} value={perSite} onChange={(e) => setPerSite(Number(e.target.value))} /></Field>
               </div>
               <Field label="Raio sem ataque inicial"><input className="input" type="number" min={0} max={200} value={norush} onChange={(e) => setNorush(Number(e.target.value))} /></Field>
-              <div className="check-row">
+              <div className="setting-row">
                 <div className="txt"><b>Abrir terreno</b><span className="muted small">Reescreve a navegação para todo o chão firme virar área jogável. Obrigatório em mapas de campanha.</span></div>
                 <Switch checked={patch} onChange={setPatch} label="Abrir terreno" />
               </div>
@@ -220,7 +219,7 @@ export default function Maps() {
                   <p className="faint small">Use “Passagem” para desenhar um vau atravessando água entre duas margens.</p>
                 </>
               )}
-              <div className="check-row">
+              <div className="setting-row">
                 <div className="txt"><b>Aplainar para construir</b><span className="muted small">Nivela o chão suave para dar para construir; mantém penhascos e água.</span></div>
                 <Switch checked={smooth} onChange={setSmooth} label="Aplainar terreno" />
               </div>
@@ -234,7 +233,7 @@ export default function Maps() {
               </Field>
               {spawns.length < 2 && <Notice kind="info">Clique no mapa para colocar pelo menos duas bases.</Notice>}
               <button className="btn primary" disabled={spawns.length < 2 || !name.trim() || busy.map} onClick={build}>
-                <Hammer size={16} /> {busy.map ? "Gerando e verificando…" : "Gerar mapa"}
+                <Icon name="construction" size={19} /> {busy.map ? "Gerando e verificando…" : "Gerar mapa"}
               </button>
               {log.length > 0 && <div className="log mono small">{log.map((l, i) => <div key={i}>{l}</div>)}</div>}
             </section>

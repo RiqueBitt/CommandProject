@@ -1,6 +1,5 @@
-import { ArrowLeft, CopyPlus, Download, FolderArchive, Search } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { Empty, Notice } from "../../components/ui";
+import { Empty, Notice, Icon } from "../../components/ui";
 import { api, pickSave } from "../../lib/api";
 import { fmtBytes, useStore } from "../../lib/store";
 import type { ArchiveInfo, EntryView, MeshView, Project, ScdEntry, TextureView } from "../../lib/types";
@@ -34,17 +33,17 @@ export default function Explorer({ projects, target, setTarget }: { projects: Pr
     return q ? entries.filter((e) => e.key.includes(q)) : entries;
   }, [entries, query]);
 
-  if (!archives) return <div className="panel pad"><div className="bar indeterminate"><i /></div></div>;
-  if (!archives.length) return <div className="panel"><Empty title="Pasta do jogo não encontrada">Configure a pasta do jogo em Configurações.</Empty></div>;
+  if (!archives) return <div className="card pad"><div className="bar indeterminate"><i /></div></div>;
+  if (!archives.length) return <div className="card"><Empty title="Pasta do jogo não encontrada">Configure a pasta do jogo em Configurações.</Empty></div>;
 
   return (
     <div className="studio">
-      <div className="panel">
+      <div className="card">
         {!archive ? (
           <div className="tree" role="listbox" aria-label="Arquivos .scd">
             {archives.map((a) => (
               <button key={a.name} className="tree-item" onClick={() => setArchive(a.name)}>
-                <FolderArchive size={15} />
+                <Icon name="folder_zip" size={18} />
                 <span className="nm" style={{ flex: 1 }}>{a.name}</span>
                 <span className="faint small">{a.origin === "stock" ? fmtBytes(a.size) : a.modId ?? "mod"}</span>
               </button>
@@ -53,20 +52,20 @@ export default function Explorer({ projects, target, setTarget }: { projects: Pr
         ) : (
           <>
             <div className="viewer-head">
-              <button className="btn ghost icon-btn" onClick={() => setArchive(null)} aria-label="Voltar"><ArrowLeft size={16} /></button>
+              <button className="btn text icon-btn" onClick={() => setArchive(null)} aria-label="Voltar"><Icon name="arrow_back" size={19} /></button>
               <span className="path"><b>{archive}</b></span>
             </div>
-            <div className="search" style={{ padding: "10px 12px 4px" }}>
-              <Search size={16} style={{ left: 22, top: 19 }} />
+            <div className="search-bar" style={{ margin: "10px 12px 4px" }}>
+              <Icon name="search" size={19} />
               <input className="input" style={{ width: "100%" }} placeholder="Filtrar: ui/game, .dds, uel0101…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Filtrar arquivos" />
             </div>
             <p className="faint small" style={{ padding: "2px 14px" }}>{filtered.length.toLocaleString("pt-BR")} arquivo(s){filtered.length > LIMIT ? `, mostrando ${LIMIT} — refine o filtro` : ""}</p>
             <div className="tree" role="listbox" aria-label="Conteúdo">
               {filtered.slice(0, LIMIT).map((e) => {
-                const Icon = FILE_ICON[kindOf(e.key) as keyof typeof FILE_ICON];
+                const ico = FILE_ICON[kindOf(e.key)];
                 return (
                   <button key={e.key} role="option" className="tree-item" aria-selected={entry === e.name} onClick={() => setEntry(e.name)} title={e.key}>
-                    <Icon size={14} /><span className="nm">{e.key}</span>
+                    <Icon name={ico} /><span className="nm">{e.key}</span>
                   </button>
                 );
               })}
@@ -74,7 +73,7 @@ export default function Explorer({ projects, target, setTarget }: { projects: Pr
           </>
         )}
       </div>
-      <div className="panel viewer">
+      <div className="card viewer">
         {archive && entry ? (
           <EntryPreview key={archive + entry} archive={archive} entry={entry} projects={projects} target={target} setTarget={setTarget} />
         ) : (
@@ -124,11 +123,11 @@ function EntryPreview({ archive, entry, projects, target, setTarget }: { archive
               {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <button className="btn sm primary" disabled={!target} onClick={() => run("override", () => api.projectOverride(target!, archive, entry), "Copiado para o projeto — edite em “Meus projetos”.")}>
-              <CopyPlus size={14} /> Copiar para o projeto
+              <Icon name="library_add" size={17} /> Copiar para o projeto
             </button>
           </>
         )}
-        <button className="btn sm" onClick={() => exportAs("raw")}><Download size={14} /> Exportar</button>
+        <button className="btn sm" onClick={() => exportAs("raw")}><Icon name="download" size={17} /> Exportar</button>
         {kind === "texture" && <button className="btn sm" onClick={() => exportAs("png")}>PNG</button>}
         {kind === "model" && <><button className="btn sm" onClick={() => exportAs("obj")}>OBJ</button><button className="btn sm" onClick={() => exportAs("glb")}>GLB</button></>}
       </div>
@@ -136,7 +135,12 @@ function EntryPreview({ archive, entry, projects, target, setTarget }: { archive
       <div className="viewer-body">
         {error && <div style={{ padding: 16 }}><Notice kind="err">{error}</Notice></div>}
         <Suspense fallback={<div className="muted" style={{ padding: 16 }}>Carregando…</div>}>
-          {text && (text.text != null ? <LuaEditor value={text.text} readOnly /> : (
+          {text && (text.text != null ? (
+            <>
+              {text.textFrom && <div style={{ padding: "10px 14px 0" }}><Notice kind="info">Este Lua é bytecode no jogo; mostrando a versão em texto de <b>{text.textFrom}</b>.</Notice></div>}
+              <LuaEditor value={text.text} readOnly />
+            </>
+          ) : (
             <Empty title={text.compiled ? "Lua compilado" : "Arquivo binário"}>
               {text.compiled ? "Este arquivo é bytecode. A versão em texto costuma estar em uncompiled_lua.scd." : `${fmtBytes(text.size)}. Use Exportar para abrir em outro programa.`}
             </Empty>

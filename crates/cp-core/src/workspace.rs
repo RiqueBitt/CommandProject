@@ -415,6 +415,25 @@ impl Workspace {
         Ok(out)
     }
 
+    /// Para um Lua compilado (bytecode), procura a versão em texto que o jogo traz em
+    /// `uncompiled_lua.scd` (caminho `/uncompiled/...`). Devolve (arquivo, bytes).
+    pub fn uncompiled_version(&mut self, entry: &str) -> Result<Option<(String, Vec<u8>)>> {
+        let key = crate::scd::normalize_key(entry);
+        let candidates = [format!("/uncompiled{key}"), key.clone()];
+        for src in self.stock_sources()?.iter().rev() {
+            let Ok(mut scd) = Scd::open(src) else { continue };
+            for c in &candidates {
+                if let Ok(data) = scd.read(c) {
+                    if !crate::lua::inspect(&data).compiled {
+                        let name = src.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        return Ok(Some((name, data)));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
     // ---------------------------------------------------------------- multiplayer
 
     pub fn fingerprint(&mut self) -> Result<Fingerprint> {
@@ -544,7 +563,7 @@ impl Workspace {
 }
 
 /// Identificador do app (o mesmo do `tauri.conf.json`).
-pub const APP_IDENTIFIER: &str = "club.project.commandproject";
+pub const APP_IDENTIFIER: &str = "io.github.riquebitt.commandproject";
 
 /// Pasta de dados compartilhada entre o app e a CLI.
 /// `CP_DATA` sobrescreve (útil para testes e instalações portáteis).

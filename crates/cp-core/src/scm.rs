@@ -414,9 +414,22 @@ pub fn to_glb(m: &Model) -> Vec<u8> {
     out
 }
 
+/// Como os vértices importados são presos aos ossos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rigging {
+    /// Cada vértice novo herda o osso do vértice mais próximo do modelo original — partes
+    /// remodeladas no mesmo lugar (torre, canhão, esteiras) continuam animando.
+    Auto,
+    /// Tudo preso a um único osso.
+    Bone(u8),
+}
+
 /// Importa a geometria de um OBJ para dentro de um modelo existente, mantendo o esqueleto.
-/// Todos os vértices novos ficam presos ao osso `bone` (EXPERIMENTAL: sem pesos/animação por parte).
-pub fn replace_geometry_from_obj(base: &Model, obj: &str, bone: u8) -> Result<Model> {
+pub fn replace_geometry_from_obj(base: &Model, obj: &str, rigging: Rigging) -> Result<Model> {
+    let bone = match rigging {
+        Rigging::Bone(b) => b,
+        Rigging::Auto => 0,
+    };
     let mut pos: Vec<[f32; 3]> = Vec::new();
     let mut uv: Vec<[f32; 2]> = Vec::new();
     let mut nrm: Vec<[f32; 3]> = Vec::new();
@@ -508,11 +521,96 @@ pub fn replace_geometry_from_obj(base: &Model, obj: &str, bone: u8) -> Result<Mo
         return Err(Error::Format("o OBJ não tem faces".into()));
     }
     compute_tangents(&mut verts, &indices);
+    if rigging == Rigging::Auto && !base.vertices.is_empty() {
+        let grid = NearestGrid::new(&base.vertices);
+        for v in &mut verts {
+            v.bones = [
+                base.vertices[grid.nearest(&base.vertices, v.position)].bones[0],
+                0,
+                0,
+                0,
+            ];
+        }
+    }
+    let max_bone = verts.iter().map(|v| v.bones[0] as u32).max().unwrap_or(0);
     let mut m = base.clone();
     m.vertices = verts;
     m.indices = indices;
-    m.weighted_bones = m.weighted_bones.max(bone as u32 + 1);
+    m.weighted_bones = m.weighted_bones.max(max_bone + 1);
     Ok(m)
+}
+
+/// Grade uniforma para achar o vértice original mais próximo sem comparar todos com todos.
+struct NearestGrid {
+    min: [f32; 3],
+    cell: f32,
+    dims: [i32; 3],
+    cells: std::collections::HashMap<(i32, i32, i32), Vec<usize>>,
+}
+
+impl NearestGrid {
+    fn new(vs: &[Vertex]) -> Self {
+        let mut min = [f32::MAX; 3];
+        let mut max = [f32::MIN; 3];
+        for v in vs {
+            for k in 0..3 {
+                min[k] = min[k].min(v.position[k]);
+                max[k] = max[k].max(v.position[k]);
+            }
+        }
+        let diag = ((max[0] - min[0]).powi(2) + (max[1] - min[1]).powi(2) + (max[2] - min[2]).powi(2)).sqrt();
+        let cell = (diag / 48.0).max(1e-4);
+        let dims = [0, 1, 2].map(|k| ((max[k] - min[k]) / cell) as i32 + 1);
+        let mut cells: std::collections::HashMap<(i32, i32, i32), Vec<usize>> = Default::default();
+        let g = NearestGrid {
+            min,
+            cell,
+            dims,
+            cells: Default::default(),
+        };
+        for (i, v) in vs.iter().enumerate() {
+            cells.entry(g.key(v.position)).or_default().push(i);
+        }
+        NearestGrid { cells, ..g }
+    }
+    fn key(&self, p: [f32; 3]) -> (i32, i32, i32) {
+        let c = |k: usize| (((p[k] - self.min[k]) / self.cell) as i32).clamp(0, self.dims[k] - 1);
+        (c(0), c(1), c(2))
+    }
+    fn nearest(&self, vs: &[Vertex], p: [f32; 3]) -> usize {
+        let (cx, cy, cz) = self.key(p);
+        let d2 = |i: usize| {
+            let q = vs[i].position;
+            (q[0] - p[0]).powi(2) + (q[1] - p[1]).powi(2) + (q[2] - p[2]).powi(2)
+        };
+        let mut best = (f32::MAX, 0usize);
+        let max_r = self.dims.iter().copied().max().unwrap_or(1);
+        for r in 0..=max_r {
+            for x in cx - r..=cx + r {
+                for y in cy - r..=cy + r {
+                    for z in cz - r..=cz + r {
+                        let on_shell = (x - cx).abs() == r || (y - cy).abs() == r || (z - cz).abs() == r;
+                        if !on_shell {
+                            continue;
+                        }
+                        if let Some(list) = self.cells.get(&(x, y, z)) {
+                            for &i in list {
+                                let d = d2(i);
+                                if d < best.0 {
+                                    best = (d, i);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // achou algo e a próxima casca está mais longe que o melhor: pode parar
+            if best.0 < f32::MAX && (r as f32 * self.cell).powi(2) > best.0 {
+                break;
+            }
+        }
+        best.1
+    }
 }
 
 /// Tangentes/binormais por triângulo (necessárias para normal maps).
@@ -620,7 +718,7 @@ mod tests {
     fn obj_export_import() {
         let m = cube();
         let obj = to_obj(&m, "cubo");
-        let re = replace_geometry_from_obj(&m, &obj, 1).unwrap();
+        let re = replace_geometry_from_obj(&m, &obj, Rigging::Bone(1)).unwrap();
         assert_eq!(re.vertices.len(), 4);
         assert_eq!(re.indices.len(), 6);
         assert_eq!(re.bones.len(), 2, "esqueleto mantido");
@@ -628,8 +726,33 @@ mod tests {
         assert!((re.vertices[0].position[0] - m.vertices[0].position[0]).abs() < 1e-6);
         // quads são triangulados
         let quad = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\n";
-        assert_eq!(replace_geometry_from_obj(&m, quad, 0).unwrap().indices.len(), 6);
-        assert!(replace_geometry_from_obj(&m, quad, 9).is_err());
+        assert_eq!(
+            replace_geometry_from_obj(&m, quad, Rigging::Bone(0))
+                .unwrap()
+                .indices
+                .len(),
+            6
+        );
+        assert!(replace_geometry_from_obj(&m, quad, Rigging::Bone(9)).is_err());
+    }
+
+    #[test]
+    fn auto_rigging_follows_original_bones() {
+        // modelo original: metade de baixo no osso 0 (chassi), metade de cima no osso 1 (torre)
+        let mut m = cube();
+        let mut top = m.vertices.clone();
+        for v in &mut top {
+            v.position[1] = 2.0;
+            v.bones = [1, 0, 0, 0];
+        }
+        m.vertices.extend(top);
+        m.indices.extend([4, 5, 6, 4, 6, 7]);
+        // OBJ remodelado: um triângulo perto do chão e outro lá em cima
+        let obj = "v 0 0.1 0\nv 0.5 0.1 0\nv 0 0.1 0.5\nv 0 1.9 0\nv 0.5 1.9 0\nv 0 1.9 0.5\nf 1 2 3\nf 4 5 6\n";
+        let re = replace_geometry_from_obj(&m, obj, Rigging::Auto).unwrap();
+        let bones: Vec<u8> = re.vertices.iter().map(|v| v.bones[0]).collect();
+        assert_eq!(bones, [0, 0, 0, 1, 1, 1]);
+        assert_eq!(re.weighted_bones, 2);
     }
 
     #[test]

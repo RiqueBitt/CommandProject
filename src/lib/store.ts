@@ -2,7 +2,9 @@ import { create } from "zustand";
 import { api, onProgress } from "./api";
 import type * as T from "./types";
 
-export type Page = "home" | "library" | "hub" | "multiplayer" | "studio" | "settings";
+export type Page = "me" | "home" | "library" | "hub" | "multiplayer" | "studio" | "settings";
+
+export interface AppUpdate { version: string; url: string; notes: string }
 
 export interface Toast { id: number; kind: "ok" | "error" | "info"; text: string }
 
@@ -17,7 +19,12 @@ interface State {
   /** progresso por tarefa (apply, purge, hub:<id>, skin, map...) */
   progress: Record<string, T.ProgressEvent>;
   busy: Record<string, boolean>;
+  history: Page[];
+  palette: boolean;
+  appUpdate: AppUpdate | null;
   go: (p: Page) => void;
+  back: () => void;
+  setPalette: (open: boolean) => void;
   refresh: () => Promise<void>;
   refreshMods: () => Promise<void>;
   toast: (kind: Toast["kind"], text: string) => void;
@@ -38,7 +45,12 @@ export const useStore = create<State>((set, get) => ({
   toasts: [],
   progress: {},
   busy: {},
-  go: (page) => set({ page }),
+  history: [],
+  palette: false,
+  appUpdate: null,
+  go: (page) => set((s) => (s.page === page ? {} : { page, history: [...s.history.slice(-30), s.page] })),
+  back: () => set((s) => (s.history.length ? { page: s.history[s.history.length - 1], history: s.history.slice(0, -1) } : {})),
+  setPalette: (palette) => set({ palette }),
   refresh: async () => {
     const [dashboard, profiles, settings] = await Promise.all([api.dashboard(), api.getProfiles(), api.getSettings()]);
     set({ dashboard, profiles, settings });

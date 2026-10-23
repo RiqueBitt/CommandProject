@@ -58,7 +58,8 @@ let profiles: T.ProfileSet = {
 
 let settings: T.Settings = {
   gamePath: null, launchMode: "steam", launchArgs: [], applyBeforeLaunch: true, restoreOnExit: false,
-  hubUrls: ["https://projectclub.shardweb.app/hub/supcom2/index.json"], pythonPath: null, checkModUpdates: true, onboarded: true,
+  hubUrls: ["https://hub.exemplo.com/index.json"], pythonPath: null, checkModUpdates: true, onboarded: true,
+  serverUrl: "http://localhost:8787", nickname: "Rique", checkAppUpdates: true,
 };
 
 const game: T.GameInstall = {
@@ -88,7 +89,7 @@ async function progress(task: string, steps: string[]) {
 }
 
 const hubIndex: T.HubIndex = {
-  schema: 1, name: "Project Club — Mods de SC2", sourceUrl: settings.hubUrls[0], updatedAt: "2026-10-20T12:00:00Z",
+  schema: 1, name: "Hub da comunidade SC2", sourceUrl: settings.hubUrls[0], updatedAt: "2026-10-20T12:00:00Z",
   mods: [
     { id: "storm", name: "STORM Rework", summary: "Economia e pesquisa repensadas, com novas experimentais.", description: "", authors: ["Comunidade STORM"], category: "gameplay", tags: ["rework"], screenshots: [], downloads: 1840, rating: 4.7,
       versions: [{ version: "3.2.0", changelog: "Novas experimentais Illuminate; correção de desync em partidas 4v4.", requiresDlc: true, multiplayer: "sync", dependencies: [], conflicts: [], package: { url: "storm-3.2.0.zip", sha256: sha("storm320"), size: 48_000_000, kind: "zip" } }] },
@@ -138,7 +139,7 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
   await sleep(120);
   const r = (v: unknown) => v as R;
   switch (cmd) {
-    case "app_info": return r({ version: "0.1.0", dataDir: "%APPDATA%\\club.project.commandproject", resourcesDir: null, os: "browser" });
+    case "app_info": return r({ version: "0.1.0", dataDir: "%APPDATA%\\io.github.riquebitt.commandproject", resourcesDir: null, os: "browser" });
     case "recover": return r(null);
     case "dashboard": {
       const p = plan();
@@ -289,6 +290,15 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     case "preview_model":
     case "project_model":
     case "project_import_obj": return r(cubeMesh());
+    case "install_from_url": {
+      for (let i = 0; i <= 100; i += 20) { mockEvents.emit("cp://progress", { task: "link", step: i, total: 100, message: "Baixando" }); await sleep(80); }
+      const name = decodeURIComponent(String(a.url).split("/").pop() || "mod").replace(/\.(zip|scd)$/i, "");
+      const m = manifest(name.toLowerCase().replace(/[^a-z0-9]+/g, "-"), name, "1.0.0", "other", [name + ".scd"], { source: { kind: "link", url: String(a.url) } });
+      mods.push(m);
+      if (a.enable) active().mods.push({ id: m.id, enabled: true });
+      return r(m);
+    }
+    case "project_save_painted": return r({ width: 256, height: 256, mipCount: 9, format: "dxt5", isCubemap: false });
     case "project_adjust_texture": return r({ info: { width: 256, height: 256, mipCount: 9, format: "dxt5", isCubemap: false }, png: gradientPng(200 + ((a.adjust as T.ColorAdjust).hue ?? 0)) });
     case "project_export":
     case "export_entry":

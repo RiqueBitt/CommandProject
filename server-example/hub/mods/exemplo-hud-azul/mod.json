@@ -1,0 +1,8 @@
+{
+  "name": "HUD Azul (exemplo)",
+  "summary": "Troque este exemplo pelos seus mods: cada pasta de versão leva um .zip ou .scd.",
+  "authors": ["Comunidade"],
+  "category": "ui",
+  "tags": ["exemplo"],
+  "license": "MIT"
+}

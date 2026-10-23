@@ -1,11 +1,13 @@
 import { lazy, Suspense, useEffect } from "react";
-import { Sidebar, TitleBar } from "./components/Shell";
+import { CommandPalette, Rail, SystemBar } from "./components/Shell";
 import { Toasts } from "./components/ui";
 import { api, onEvent } from "./lib/api";
 import { errorText, useStore } from "./lib/store";
+import { checkAppUpdate } from "./lib/update";
 import Home from "./pages/Home";
-import Library from "./pages/Library";
 import Hub from "./pages/Hub";
+import Library from "./pages/Library";
+import Me from "./pages/Me";
 import Multiplayer from "./pages/Multiplayer";
 import SettingsPage from "./pages/Settings";
 
@@ -25,6 +27,13 @@ export default function App() {
         const info = await api.appInfo();
         useStore.setState({ info });
         await refresh();
+        if (useStore.getState().settings?.checkAppUpdates) {
+          const up = await checkAppUpdate(info.version);
+          if (up) {
+            useStore.setState({ appUpdate: up });
+            toast("info", `CommandProject ${up.version} disponível — veja em Configurações.`);
+          }
+        }
       } catch (e) {
         toast("error", errorText(e));
       }
@@ -42,22 +51,22 @@ export default function App() {
 
   return (
     <div className="app">
-      <TitleBar />
-      <div className="body">
-        <Sidebar />
-        <main className="main">
-          {page === "home" && <Home />}
-          {page === "library" && <Library />}
-          {page === "hub" && <Hub />}
-          {page === "multiplayer" && <Multiplayer />}
-          {page === "studio" && (
-            <Suspense fallback={<div className="page muted">Carregando o Estúdio…</div>}>
-              <Studio />
-            </Suspense>
-          )}
-          {page === "settings" && <SettingsPage />}
-        </main>
-      </div>
+      <SystemBar />
+      <Rail />
+      <main className="main">
+        {page === "me" && <Me />}
+        {page === "home" && <Home />}
+        {page === "library" && <Library />}
+        {page === "hub" && <Hub />}
+        {page === "multiplayer" && <Multiplayer />}
+        {page === "studio" && (
+          <Suspense fallback={<div className="page muted">Carregando o Estúdio…</div>}>
+            <Studio />
+          </Suspense>
+        )}
+        {page === "settings" && <SettingsPage />}
+      </main>
+      <CommandPalette />
       <Toasts />
     </div>
   );

@@ -124,6 +124,15 @@ pub async fn save_settings(state: State<'_, AppState>, settings: Settings) -> R<
         for u in &settings.hub_urls {
             hub::check_url(u)?;
         }
+        let mut settings = settings;
+        settings.server_url = settings
+            .server_url
+            .map(|u| u.trim().trim_end_matches('/').to_string())
+            .filter(|u| !u.is_empty());
+        if let Some(u) = &settings.server_url {
+            hub::check_url(u)?;
+        }
+        settings.nickname = settings.nickname.trim().chars().take(20).collect();
         ws.settings = settings;
         ws.save_settings()?;
         ws.refresh_game();
@@ -453,9 +462,15 @@ pub struct HubError {
 
 #[tauri::command]
 pub async fn hub_fetch(state: State<'_, AppState>, urls: Option<Vec<String>>) -> R<HubFetch> {
-    let urls = match urls {
-        Some(u) => u,
-        None => with_ws(&state.ws, |ws| Ok(ws.settings.hub_urls.clone())).await?,
+    let (urls, server_hub) = match urls {
+        Some(u) => (u, None),
+        None => {
+            with_ws(&state.ws, |ws| {
+                let server = ws.settings.server_url.as_ref().map(|s| format!("{s}/hub/index.json"));
+                Ok((ws.settings.hub_urls.clone(), server))
+            })
+            .await?
+        }
     };
     let mut indexes = Vec::new();
     let mut errors = Vec::new();
@@ -466,6 +481,19 @@ pub async fn hub_fetch(state: State<'_, AppState>, urls: Option<Vec<String>>) ->
                 url,
                 message: e.to_string(),
             }),
+        }
+    }
+    // o servidor da comunidade pode ou não publicar um hub: se não publicar, não é erro
+    if let Some(url) = server_hub {
+        if !indexes.iter().any(|i| i.source_url == url) {
+            match hub::fetch_index(&url).await {
+                Ok(i) => indexes.push(i),
+                Err(e) if e.to_string().contains("404") => {}
+                Err(e) => errors.push(HubError {
+                    url,
+                    message: e.to_string(),
+                }),
+            }
         }
     }
     *state.hubs.lock().unwrap_or_else(|p| p.into_inner()) = indexes.clone();
@@ -560,6 +588,8 @@ pub struct EntryView {
     text: Option<String>,
     compiled: bool,
     warnings: Vec<String>,
+    /// Quando o arquivo é bytecode, a versão em texto veio deste .scd.
+    text_from: Option<String>,
 }
 
 fn entry_view(path: &str, data: &[u8]) -> EntryView {
@@ -583,6 +613,7 @@ fn entry_view(path: &str, data: &[u8]) -> EntryView {
             vec![]
         },
         text,
+        text_from: None,
     }
 }
 
@@ -595,7 +626,14 @@ pub async fn read_entry(
 ) -> R<EntryView> {
     with_ws(&state.ws, move |ws| {
         let d = ws.read_entry(&archive, &entry, original.unwrap_or(false))?;
-        Ok(entry_view(&entry, &d))
+        let mut v = entry_view(&entry, &d);
+        if v.compiled {
+            if let Some((from, text)) = ws.uncompiled_version(&entry)? {
+                v.text = Some(String::from_utf8_lossy(&text).into_owned());
+                v.text_from = Some(from);
+            }
+        }
+        Ok(v)
     })
     .await
 }
@@ -734,7 +772,15 @@ pub async fn project_write_text(state: State<'_, AppState>, id: String, path: St
 pub async fn project_override(state: State<'_, AppState>, id: String, archive: String, entry: String) -> R<String> {
     with_ws(&state.ws, move |ws| {
         let src = ws.original_archive(&archive)?;
-        ws.studio.override_from_archive(&id, &src, &entry)
+        let key = ws.studio.override_from_archive(&id, &src, &entry)?;
+        // Lua compilado não dá para editar: usa a versão em texto do próprio jogo
+        let data = ws.studio.read_file(&id, &key)?;
+        if cp_core::lua::inspect(&data).compiled {
+            if let Some((_, text)) = ws.uncompiled_version(&entry)? {
+                ws.studio.write_file(&id, &key, &text)?;
+            }
+        }
+        Ok(key)
     })
     .await
 }
@@ -772,6 +818,61 @@ pub async fn project_import_png(state: State<'_, AppState>, req: PngImport) -> R
     .await
 }
 
+/// Salva uma textura pintada no editor do app (PNG em base64), mantendo formato DDS e mipmaps.
+#[tauri::command]
+pub async fn project_save_painted(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    png_base64: String,
+) -> R<dds::DdsInfo> {
+    with_ws(&state.ws, move |ws| {
+        let b64 = png_base64.split(',').next_back().unwrap_or_default();
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .map_err(|_| cp_core::Error::Format("imagem inválida".into()))?;
+        let reference = ws.studio.read_file(&id, &path).ok();
+        ws.studio
+            .import_png_as_dds(&id, &path, &png, reference.as_deref(), true)
+    })
+    .await
+}
+
+/// Instala um mod a partir de um link direto (.scd/.zip).
+#[tauri::command]
+pub async fn install_from_url(app: AppHandle, state: State<'_, AppState>, url: String, enable: bool) -> R<Manifest> {
+    let cache = with_ws(&state.ws, |ws| Ok(ws.data_dir.join("cache").join("links"))).await?;
+    let mut last = 0u64;
+    let app2 = app.clone();
+    let path = hub::download_url(&url, &cache, &mut move |p| {
+        let pct = (p.downloaded * 100).checked_div(p.total).unwrap_or(0);
+        if pct != last {
+            last = pct;
+            emit_progress(&app2, "link", pct as usize, 100, "Baixando");
+        }
+    })
+    .await
+    .map_err(err)?;
+    emit_progress(&app, "link", 100, 100, "Instalando");
+    with_ws(&state.ws, move |ws| {
+        let opts = ImportOptions {
+            source: Some(cp_core::manifest::Source {
+                kind: "link".into(),
+                url: Some(url.clone()),
+                hub_id: None,
+            }),
+            replace: true,
+            ..Default::default()
+        };
+        let m = ws.import_mod(&path, &opts, enable);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        m
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn project_model(state: State<'_, AppState>, id: String, path: String) -> R<cp_core::scm::MeshView> {
     with_ws(&state.ws, move |ws| {
@@ -788,12 +889,16 @@ pub async fn project_import_obj(
     id: String,
     path: String,
     obj_path: String,
-    bone: u8,
+    bone: Option<u8>,
 ) -> R<cp_core::scm::MeshView> {
     with_ws(&state.ws, move |ws| {
         let base = cp_core::scm::read(&ws.studio.read_file(&id, &path)?)?;
         let obj = std::fs::read_to_string(&obj_path).map_err(|e| cp_core::Error::io(&obj_path, e))?;
-        let model = cp_core::scm::replace_geometry_from_obj(&base, &obj, bone)?;
+        let rig = match bone {
+            Some(b) => cp_core::scm::Rigging::Bone(b),
+            None => cp_core::scm::Rigging::Auto,
+        };
+        let model = cp_core::scm::replace_geometry_from_obj(&base, &obj, rig)?;
         ws.studio.write_file(&id, &path, &cp_core::scm::write(&model)?)?;
         Ok(cp_core::scm::view(&model))
     })

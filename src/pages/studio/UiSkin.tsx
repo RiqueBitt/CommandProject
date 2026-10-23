@@ -1,6 +1,5 @@
-import { Paintbrush } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Field, Notice, TaskProgress } from "../../components/ui";
+import { Field, Notice, TaskProgress, Icon } from "../../components/ui";
 import { api } from "../../lib/api";
 import { useStore } from "../../lib/store";
 import type { ColorAdjust, TextureView, UiSkinOptions } from "../../lib/types";
@@ -48,7 +47,7 @@ export default function UiSkin() {
 
   return (
     <div className="grid-2" style={{ gridTemplateColumns: "minmax(320px, 420px) 1fr", alignItems: "start" }}>
-      <section className="panel pad col">
+      <section className="card pad col">
         <h2>Recolorir a interface inteira</h2>
         <p className="muted small">
           Gera um mod só com as texturas alteradas, a partir dos arquivos originais do jogo. É visual: não interfere em partidas multiplayer.
@@ -77,11 +76,11 @@ export default function UiSkin() {
           <button className="btn primary" disabled={!targets?.count || !opts.name.trim()} onClick={async () => {
             await run("skin", () => api.buildUiSkin(opts, true), (m) => `"${m.name}" criada e ativada na biblioteca.`);
             await refreshMods();
-          }}><Paintbrush size={16} /> Gerar skin ({targets?.count.toLocaleString("pt-BR") ?? "…"} texturas)</button>
+          }}><Icon name="brush" size={19} /> Gerar skin ({targets?.count.toLocaleString("pt-BR") ?? "…"} texturas)</button>
         )}
       </section>
 
-      <section className="panel pad col">
+      <section className="card pad col">
         <div className="section-title">
           <h2>Prévia</h2>
           {targets && targets.sample.length > 0 && (

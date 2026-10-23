@@ -52,6 +52,16 @@ export async function confirmDialog(message: string, title = "CommandProject"): 
   return ask(message, { title, kind: "warning", okLabel: "Confirmar", cancelLabel: "Cancelar" });
 }
 
+/** Abre um link no navegador do sistema. */
+export async function openUrl(url: string) {
+  if (!isTauri) {
+    window.open(url, "_blank", "noopener");
+    return;
+  }
+  const { openUrl: open } = await import("@tauri-apps/plugin-opener");
+  await open(url);
+}
+
 export async function windowAction(action: "minimize" | "maximize" | "close") {
   if (!isTauri) return;
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -125,7 +135,10 @@ export const api = {
   projectImportPng: (id: string, path: string, pngPath: string, resize: boolean) =>
     call<T.DdsInfo>("project_import_png", { req: { id, path, pngPath, resize } }),
   projectModel: (id: string, path: string) => call<T.MeshView>("project_model", { id, path }),
-  projectImportObj: (id: string, path: string, objPath: string, bone: number) => call<T.MeshView>("project_import_obj", { id, path, objPath, bone }),
+  projectSavePainted: (id: string, path: string, pngBase64: string) => call<T.DdsInfo>("project_save_painted", { id, path, pngBase64 }),
+  installFromUrl: (url: string, enable = true) => call<T.Manifest>("install_from_url", { url, enable }),
+  /** bone = null: cada vértice herda o osso do ponto mais próximo do modelo original */
+  projectImportObj: (id: string, path: string, objPath: string, bone: number | null) => call<T.MeshView>("project_import_obj", { id, path, objPath, bone }),
   projectExport: (id: string, path: string, dest: string, format: "raw" | "png" | "obj" | "glb") => call<void>("project_export", { id, path, dest, format }),
   projectAdjustTexture: (id: string, path: string, adjust: T.ColorAdjust) => call<T.TextureView>("project_adjust_texture", { id, path, adjust }),
   projectDeleteFile: (id: string, path: string) => call<void>("project_delete_file", { id, path }),

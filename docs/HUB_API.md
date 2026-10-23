@@ -1,23 +1,24 @@
 # Hub de mods — formato do índice
 
-O launcher lê um ou mais **índices JSON** (configurados em *Configurações → Hub de mods*).
-O hub oficial é a aba **Mods** do Project Club: basta o Project Club publicar este arquivo
-(estático ou gerado por uma rota) — o launcher cuida de baixar, verificar e instalar.
+O launcher lê o hub do **servidor da comunidade** (`<servidor>/hub/index.json`, gerado pelo
+`cp-server` a partir de uma pasta) e, opcionalmente, outros **índices JSON** configurados em
+*Configurações → Hub de mods*. Qualquer site pode publicar um índice: um arquivo estático já basta.
+O launcher cuida de baixar, verificar e instalar.
 
 * Só **HTTPS** (HTTP é aceito apenas em `localhost`, para testes).
 * Índice com no máximo 8 MB; pacotes com no máximo 4 GB.
 * Todo pacote é conferido por **tamanho e SHA-256** durante o download. Se não bater,
   o arquivo é descartado e nada é instalado.
 
-Rota sugerida no Project Club: `GET https://<site>/api/hub/supcom2/index.json`
-(cache de alguns minutos é o suficiente; o launcher busca ao abrir e no botão *Atualizar*).
+O launcher busca os índices ao abrir o hub e no botão *Atualizar lista*; um cache de alguns
+minutos no servidor é suficiente.
 
 ## `index.json`
 
 ```jsonc
 {
   "schema": 1,                       // obrigatório; versão do formato
-  "name": "Project Club — Mods de SC2",
+  "name": "Hub da comunidade SC2",
   "updatedAt": "2026-10-23T18:00:00Z",
   "mods": [
     {
@@ -91,8 +92,23 @@ para carregar depois dos arquivos do jogo (e sobrescrevê-los) e `_` para carreg
 
 ## Publicando um mod
 
+**No servidor da comunidade (mais simples)**
+
 1. No Estúdio, gere o mod e clique em **Exportar pacote** (`.zip`).
-2. Calcule o SHA-256 e o tamanho (`sha256sum pacote.zip` / `Get-FileHash pacote.zip`).
-3. Suba o `.zip` (ex.: bucket B2 do Project Club) e acrescente a versão no índice.
+2. Coloque o pacote em `hub/mods/<id>/<versão>/` e, na primeira vez, um `hub/mods/<id>/mod.json`
+   com nome, resumo, autores e categoria (veja [`server-example/hub`](../server-example/hub)).
+3. Pronto: o `cp-server` calcula SHA-256 e tamanho sozinho e relê a pasta a cada ~5 minutos.
+   Para conferir antes, `cp hub-build hub/` mostra o índice gerado e os avisos.
+
+**Em um índice próprio**
+
+1. Exporte o pacote como acima.
+2. Calcule o SHA-256 e o tamanho (`sha256sum pacote.zip` / `Get-FileHash pacote.zip`), ou gere o
+   índice inteiro com `cp hub-build <pasta> index.json`.
+3. Hospede o `.zip` e o `index.json` em qualquer lugar com HTTPS (GitHub Releases, um bucket, seu site).
+
+**Link direto**: para compartilhar um mod sem hub, mande o link do `.scd`/`.zip`. No launcher,
+*Conteúdo → Instalar de um link* (ou `cp link <url>`) baixa, valida e importa. Links que devolvem
+uma página HTML em vez do arquivo são recusados.
 
 Um exemplo completo está em [`hub/example-index.json`](../hub/example-index.json).

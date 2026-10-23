@@ -92,6 +92,8 @@ pub fn run() {
             commands::project_texture,
             commands::project_import_png,
             commands::project_model,
+            commands::project_save_painted,
+            commands::install_from_url,
             commands::project_import_obj,
             commands::project_delete_file,
             commands::project_export,

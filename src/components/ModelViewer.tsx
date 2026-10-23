@@ -104,8 +104,8 @@ export default function ModelViewer({ mesh, texture }: { mesh: MeshView; texture
     };
   }, [mesh, texture]);
 
-  useEffect(() => api.current?.setWire(wire), [wire]);
-  useEffect(() => api.current?.setBones(bones), [bones]);
+  useEffect(() => { api.current?.setWire(wire); }, [wire]);
+  useEffect(() => { api.current?.setBones(bones); }, [bones]);
 
   return (
     <div style={{ position: "relative" }}>

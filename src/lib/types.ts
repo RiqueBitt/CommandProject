@@ -68,7 +68,17 @@ export interface Settings {
   pythonPath?: string | null;
   checkModUpdates: boolean;
   onboarded: boolean;
+  serverUrl?: string | null;
+  nickname: string;
+  checkAppUpdates: boolean;
 }
+
+export interface ServerInfo { name: string; motd: string; version: string; rooms: number; online: number; hub: boolean }
+export interface Room {
+  id: string; name: string; host: string; players: string[]; maxPlayers: number; private: boolean;
+  status: "aguardando" | "em partida"; mods: string[]; fingerprint?: string | null; createdAt: string; syncCode?: string;
+}
+export interface ChatMsg { nick: string; text: string; at: string }
 
 export interface FileStatus {
   name: string; size: number;
@@ -105,7 +115,7 @@ export interface UpdateInfo { id: string; name: string; installed: string; lates
 
 export interface ArchiveInfo { name: string; size: number; origin: FileStatus["origin"]; modId?: string | null }
 export interface ScdEntry { name: string; key: string; size: number; compressed: number; isDir: boolean }
-export interface EntryView { kind: string; size: number; text?: string | null; compiled: boolean; warnings: string[] }
+export interface EntryView { kind: string; size: number; text?: string | null; compiled: boolean; warnings: string[]; textFrom?: string | null }
 
 export type DdsFormat = "dxt1" | "dxt3" | "dxt5" | "ati1" | "ati2" | "bgra8" | "bgrx8" | "bgr8" | "rgb565" | "l8";
 export interface DdsInfo { width: number; height: number; mipCount: number; format: DdsFormat; isCubemap: boolean }

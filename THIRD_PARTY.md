@@ -7,10 +7,11 @@
 | React, Zustand, dnd-kit | interface | MIT |
 | CodeMirror 6 | editor de Lua | MIT |
 | three.js | visualizador 3D | MIT |
-| lucide-react | ícones | ISC |
-| Chakra Petch, Barlow (via Fontsource) | tipografia | SIL Open Font License 1.1 |
+| Material Icons (via Fontsource) | ícones | Apache-2.0 |
+| Roboto (via Fontsource) | tipografia | OFL-1.1 |
 | texpresso | compressão DXT/BC | MIT |
 | zip, image, reqwest, sha2, sysinfo e demais crates | núcleo em Rust | MIT / Apache-2.0 |
+| axum, tokio, tower-http | servidor da comunidade | MIT |
 | Python embutido (python.org, só no instalador do Windows) | executar o toolkit de mapas | PSF License |
 
 Ideias de recursos (sem código copiado): [Definitive Supreme Commander Launcher](https://github.com/ageekhere/Definitive-Supreme-Commander-Launcher)

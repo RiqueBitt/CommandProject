@@ -10,6 +10,7 @@ pub mod fsutil;
 pub mod game;
 pub mod hashcache;
 pub mod hub;
+pub mod hubbuild;
 pub mod library;
 pub mod lua;
 pub mod manifest;

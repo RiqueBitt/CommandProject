@@ -9,3 +9,4 @@ resources/maptk/__pycache__/
 *.scd
 *.log
 .DS_Store
+/data/

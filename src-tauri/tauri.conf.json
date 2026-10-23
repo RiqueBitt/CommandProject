@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "CommandProject",
-  "version": "0.1.0",
-  "identifier": "club.project.commandproject",
+  "version": "0.2.0",
+  "identifier": "io.github.riquebitt.commandproject",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -24,13 +24,13 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https: wss: http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*"
     }
   },
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "publisher": "Project Club",
+    "publisher": "RiqueBitt",
     "category": "Game",
     "shortDescription": "Launcher e hub de mods do Supreme Commander 2",
     "longDescription": "Gerencie, crie e sincronize mods do Supreme Commander 2.",

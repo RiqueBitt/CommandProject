@@ -67,7 +67,7 @@ jobs:
           projectPath: .
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
           releaseName: "CommandProject ${{ github.ref_name }}"
-          releaseBody: "Instalador para Windows. Atualizações chegam pela aba Apps do Project Club."
+          releaseBody: "Instalador para Windows. O launcher avisa sozinho quando sair uma versão nova."
           releaseDraft: true
           prerelease: false
       - uses: actions/upload-artifact@v4

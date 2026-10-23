@@ -31,6 +31,8 @@ USO: cp <comando> [args]
   hub <URL>                   lista os mods de um índice de hub
   hub-install <URL> <ID>      baixa, verifica e instala um mod do hub
   launch                      mostra como o jogo seria iniciado
+  hub-build <PASTA> [SAÍDA]   gera o index.json de uma pasta de hub (hash e tamanho automáticos)
+  link <URL>                  instala um mod de um link direto (.scd/.zip)
 
 Pasta de dados: $CP_DATA ou o padrão do sistema.";
 
@@ -209,6 +211,33 @@ async fn run(args: &[String]) -> cp_core::Result<()> {
             let p = ws.profiles.active().id.clone();
             ws.profiles.set_enabled(&p, &man.id, true)?;
             println!("instalado: {} {}", man.name, man.version);
+        }
+        "hub-build" => {
+            let dir = PathBuf::from(arg(1)?);
+            let (idx, warnings) = cp_core::hubbuild::build_index(&dir, None)?;
+            for w in &warnings {
+                eprintln!("aviso: {w}");
+            }
+            let out = args.get(2).map(PathBuf::from).unwrap_or_else(|| dir.join("index.json"));
+            cp_core::fsutil::write_json(&out, &idx)?;
+            println!("{} mod(s) em {}", idx.mods.len(), out.display());
+        }
+        "link" => {
+            let cache = ws.data_dir.join("cache").join("links");
+            let path = cp_core::hub::download_url(arg(1)?, &cache, &mut |p| {
+                eprint!("\r  baixando {} KB", p.downloaded / 1024)
+            })
+            .await?;
+            eprintln!();
+            let m = ws.import_mod(
+                &path,
+                &ImportOptions {
+                    replace: true,
+                    ..Default::default()
+                },
+                true,
+            )?;
+            println!("instalado: {} ({}) sha256 {}", m.name, m.id, m.files[0].sha256);
         }
         "launch" => print_json(&ws.launch_plan()?),
         other => {

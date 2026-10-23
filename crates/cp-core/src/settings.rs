@@ -19,7 +19,7 @@ pub struct Settings {
     /// Ao fechar o jogo, devolve a pasta ao estado original (útil para jogar sem mods
     /// pela Steam depois, ou para manter a verificação de arquivos da Steam limpa).
     pub restore_on_exit: bool,
-    /// Índices de hub de mods (JSON). O primeiro é o hub oficial do Project Club.
+    /// Índices de hub de mods (JSON). O primeiro é tratado como o hub principal.
     pub hub_urls: Vec<String>,
     /// Python para o Estúdio de Mapas (vazio = embutido ou o do sistema).
     pub python_path: Option<PathBuf>,
@@ -27,6 +27,12 @@ pub struct Settings {
     pub check_mod_updates: bool,
     /// Primeira execução concluída (assistente de boas-vindas).
     pub onboarded: bool,
+    /// Servidor da comunidade (`cp-server`): salas, chat e hub. Ex.: `https://sc2.exemplo.com`.
+    pub server_url: Option<String>,
+    /// Apelido usado nas salas e no chat.
+    pub nickname: String,
+    /// Avisar quando sair uma versão nova do launcher (GitHub Releases).
+    pub check_app_updates: bool,
 }
 
 impl Default for Settings {
@@ -41,6 +47,9 @@ impl Default for Settings {
             python_path: None,
             check_mod_updates: true,
             onboarded: false,
+            server_url: None,
+            nickname: String::new(),
+            check_app_updates: true,
         }
     }
 }

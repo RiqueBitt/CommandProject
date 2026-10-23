@@ -1,4 +1,4 @@
-//! Hub de mods: índice JSON publicado pelo Project Club (ou qualquer servidor),
+//! Hub de mods: índice JSON publicado pelo servidor da comunidade (`cp-server`) ou qualquer site,
 //! download com verificação SHA-256 e checagem de atualizações.
 //!
 //! Formato do índice: veja `docs/HUB_API.md`.
@@ -26,7 +26,7 @@ pub struct HubIndex {
     #[serde(default)]
     pub mods: Vec<HubMod>,
     /// URL de onde o índice veio (preenchido pelo cliente).
-    #[serde(default, skip_deserializing)]
+    #[serde(default, skip_deserializing, skip_serializing_if = "String::is_empty")]
     pub source_url: String,
 }
 
@@ -269,6 +269,96 @@ pub async fn download(
     Ok(final_path)
 }
 
+/// Baixa um mod de um link direto qualquer (`.scd` ou `.zip`), sem hash conhecido.
+/// Usado no "Instalar de um link": o usuário confirma, e o SHA-256 calculado aqui passa a
+/// ser registrado no manifesto (e entra na assinatura do multiplayer).
+pub async fn download_url(
+    raw_url: &str,
+    cache_dir: &Path,
+    progress: &mut (dyn FnMut(DownloadProgress) + Send),
+) -> Result<PathBuf> {
+    let url = check_url(raw_url)?;
+    let resp = client(&url)?
+        .get(url.clone())
+        .send()
+        .await
+        .map_err(|e| Error::Network(format!("falha no download: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(Error::Network(format!("o link respondeu {}", resp.status())));
+    }
+    let ctype = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ctype.starts_with("text/html") {
+        return Err(Error::Network(
+            "o link abre uma página, não um arquivo — copie o link direto do download (.zip ou .scd)".into(),
+        ));
+    }
+    let total = resp.content_length().unwrap_or(0);
+    if total > MAX_PACKAGE_BYTES {
+        return Err(Error::Network("arquivo grande demais".into()));
+    }
+    // nome: Content-Disposition > último segmento da URL final (após redirecionamentos)
+    let from_header = resp
+        .headers()
+        .get(reqwest::header::CONTENT_DISPOSITION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split("filename=").nth(1))
+        .map(|v| v.trim_matches(['"', '\'', ' ', ';']).to_string());
+    let from_url = resp
+        .url()
+        .path_segments()
+        .and_then(|mut s| s.next_back().map(str::to_string))
+        .map(|s| s.replace("%20", "_"));
+    let mut name = from_header
+        .or(from_url)
+        .and_then(|n| crate::fsutil::safe_file_name(&n).ok())
+        .unwrap_or_else(|| "download".into());
+    let lower = name.to_ascii_lowercase();
+    if !(lower.ends_with(".scd") || lower.ends_with(".zip")) {
+        name.push_str(".zip");
+    }
+    let dir = cache_dir.join(format!("url-{:x}", rand_suffix()));
+    tokio::fs::create_dir_all(&dir).await.map_err(|e| Error::io(&dir, e))?;
+    let dest = dir.join(&name);
+    let mut file = tokio::fs::File::create(&dest).await.map_err(|e| Error::io(&dest, e))?;
+    let mut got: u64 = 0;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| Error::Network(e.to_string()))?;
+        got += chunk.len() as u64;
+        if got > MAX_PACKAGE_BYTES {
+            drop(file);
+            let _ = tokio::fs::remove_dir_all(&dir).await;
+            return Err(Error::Network("arquivo grande demais".into()));
+        }
+        file.write_all(&chunk).await.map_err(|e| Error::io(&dest, e))?;
+        progress(DownloadProgress {
+            downloaded: got,
+            total: total.max(got),
+        });
+    }
+    file.flush().await.map_err(|e| Error::io(&dest, e))?;
+    drop(file);
+    if !crate::scd::looks_like_zip(&dest) {
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        return Err(Error::Format(
+            "o arquivo baixado não é um .zip/.scd válido (.rar e .7z precisam ser extraídos antes)".into(),
+        ));
+    }
+    Ok(dest)
+}
+
+fn rand_suffix() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
+}
+
 /// Instala na biblioteca um pacote já baixado e verificado.
 pub fn install_downloaded(
     library: &Library,
@@ -457,9 +547,32 @@ mod tests {
         assert_eq!(ups[0].latest, "3.1.1");
     }
 
+    #[tokio::test]
+    async fn download_from_plain_link() {
+        let t = tempfile::tempdir().unwrap();
+        let scd_path = t.path().join("x.scd");
+        make_scd(&scd_path, &[("lua/a.lua", b"a")]);
+        let bytes = std::fs::read(&scd_path).unwrap();
+        let base = serve(vec![
+            ("/files/Meu%20Mod.scd", bytes.clone()),
+            ("/pagina", b"<html>oi</html>".to_vec()),
+        ])
+        .await;
+        let p = download_url(&format!("{base}/files/Meu%20Mod.scd"), t.path(), &mut |_| {})
+            .await
+            .unwrap();
+        assert_eq!(p.file_name().unwrap(), "Meu_Mod.scd");
+        assert_eq!(std::fs::read(&p).unwrap(), bytes);
+        // conteúdo que não é zip é recusado
+        let err = download_url(&format!("{base}/pagina"), t.path(), &mut |_| {})
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("não é um .zip"), "{err}");
+    }
+
     #[test]
     fn url_policy() {
-        assert!(check_url("https://projectclub.example/mods.json").is_ok());
+        assert!(check_url("https://hub.exemplo.com/mods.json").is_ok());
         assert!(check_url("http://localhost:8080/x").is_ok());
         assert!(check_url("http://exemplo.com/x").is_err());
         assert!(check_url("file:///etc/passwd").is_err());
