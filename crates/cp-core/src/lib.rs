@@ -24,6 +24,7 @@ pub mod settings;
 pub mod shaders;
 pub mod studio;
 pub mod sync;
+pub mod toc;
 pub mod vdf;
 pub mod workspace;
 

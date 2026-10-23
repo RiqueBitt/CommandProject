@@ -105,8 +105,13 @@ export default function ShadersCard() {
                   <Icon name="download" /> Instalar ReShade e ativar
                 </button>
                 <button className="btn text" onClick={() => void openUrl("https://reshade.me")}><Icon name="open_in_new" /> reshade.me</button>
+                <button className="btn text" onClick={async () => {
+                  const s = await run("shaders", () => api.shadersStatus());
+                  if (s?.reshade) update(await run("shaders", () => api.shadersApply(pick), `ReShade encontrado. Shaders ${chosen?.name ?? ""} ativados.`));
+                  else useStore.getState().toast("info", "Ainda não achei o ReShade na pasta bin do jogo. No instalador, escolha SupremeCommander2.exe e DirectX 9.");
+                }}><Icon name="fact_check" /> Já instalei, verificar</button>
               </div>
-              <p className="faint small">Baixa o instalador oficial (gratuito) do site do ReShade, confere a assinatura digital e instala para DirectX 9. Se o Windows pedir permissão, aceite.</p>
+              <p className="faint small">Baixa o instalador oficial (gratuito) do site do ReShade, confere a assinatura digital e instala para DirectX 9. Se o Windows pedir permissão, aceite. Também dá para instalar pelo site: escolha <b>SupremeCommander2.exe</b>, <b>DirectX 9</b>, pule a escolha de efeitos e clique em "Já instalei".</p>
             </div>
           ) : (
             <div className="row wrap">

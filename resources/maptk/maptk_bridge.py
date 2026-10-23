@@ -187,6 +187,39 @@ def cmd_preview(inp):
     )
 
 
+def cmd_terrain3d(inp):
+    """Relevo amostrado (para o editor 3D) + nível da água + minimapa original do terreno (textura)."""
+    import array
+    import base64
+    sm = _toolkit()
+    tid = inp["terrain"]
+    size = max(32, min(512, int(inp.get("size", 256))))
+    emit("progress", message=f"Carregando relevo de {tid}…")
+    t = sm.Terrain(tid)
+    hw = t.HW
+    step = (hw - 1) / size
+    out = array.array("H")
+    for j in range(size + 1):
+        z = min(hw - 1, round(j * step))
+        row = z * hw
+        for i in range(size + 1):
+            out.append(t.H[row + min(hw - 1, round(i * step))])
+    if sys.byteorder != "little":
+        out.byteswap()
+    mm = t.raw.get("minimap.win.dds")
+    return dict(
+        terrain=tid,
+        grid=t.grid,
+        size=size,
+        heights=base64.b64encode(out.tobytes()).decode("ascii"),
+        heightScale=1 / 128.0,
+        yMin=min(t.H) / 128.0,
+        yMax=max(t.H) / 128.0,
+        waterLevel=sm._water_level(t),
+        minimapDds=base64.b64encode(mm).decode("ascii") if mm else None,
+    )
+
+
 def cmd_examples(_inp):
     import make_map
     out = []
@@ -226,15 +259,81 @@ def _clean_spec(spec):
     for key in ("sculpt", "flatten"):
         if spec.get(key):
             spec[key] = [tuple(op) for op in spec[key]]
+    for op in spec.get("sculpt") or []:
+        if op[0] not in ("disc", "cone", "rect", "ramp") or op[-1] not in ("set", "raise", "lower"):
+            raise ValueError(f"operação de relevo inválida: {op}")
+    spec["extra_mass"] = [(float(p[0]), float(p[1])) for p in spec.get("extra_mass") or []]
+    if len(spec["extra_mass"]) > 200:
+        raise ValueError("no máximo 200 pontos de massa manuais")
+    # relevo esculpido muda onde as unidades andam: a navegação precisa ser refeita (modo PATCH)
+    edits_terrain = bool(spec.get("sculpt") or spec.get("flatten") or spec.get("rugged_edges"))
+    if edits_terrain and not spec.get("patch"):
+        first = next(iter(spec["anchors"].values()))
+        spec["patch"] = dict(max_slope=6.0, water_margin=4.0, seed=first, causeways=[])
     if spec.get("playable_area"):
         spec["playable_area"] = tuple(int(v) for v in spec["playable_area"])
     return spec
+
+
+def _hooks(sm, spec, state):
+    """Extensões do CommandProject sobre o toolkit, sem alterar os arquivos dele:
+    * malha visual acompanha o relevo esculpido (em mapas de campanha a superfície é uma malha pronta);
+    * pontos de massa colocados à mão entram nos marcadores, no chão plano e seco mais próximo."""
+    orig_init, orig_set, orig_save = sm.Terrain.__init__, sm.Terrain.set_hfield, sm.make_save
+
+    def init(self, *a, **k):
+        orig_init(self, *a, **k)
+        state["t"] = self
+
+    def set_hfield(self, new):
+        old = self.raw["hfield.win.bdf"]
+        try:
+            H1, _ = sm.hfield_heights(new)
+            tb, moved = sm.resample_mesh_heights(self.raw["terrain.win.bdf"], old, new,
+                                                 bvh_min_y=min(H1) / 128.0 - 5, bvh_max_y=max(H1) / 128.0 + 5)
+            self.raw["terrain.win.bdf"] = tb
+            if moved:
+                emit("progress", message=f"malha visual ajustada ao relevo novo ({moved} vértices)")
+        except Exception as e:  # noqa: BLE001 — terrenos de escaramuça desenham direto do heightfield
+            emit("progress", message=f"malha visual não ajustada ({e}); o relevo usa o heightfield")
+        orig_set(self, new)
+
+    def make_save(blob, n_armies, area=(40, 40, 984, 984)):
+        t = state.get("t")
+        extra = ""
+        if t is not None:
+            for i, (x, z) in enumerate(spec.get("extra_mass") or [], 1):
+                px, pz = _buildable_near(t, x, z)
+                if (px, pz) != (round(x), round(z)):
+                    state["warnings"].append(f"massa {i} movida para ({px}, {pz}): o ponto escolhido não era plano/seco")
+                extra += sm.mass_marker(f"Mass X{i:02d}", px, pz, t.y(px, pz))
+            if spec.get("extra_mass"):
+                emit("progress", message=f"pontos de massa manuais: {len(spec['extra_mass'])}")
+        return orig_save(blob + extra, n_armies, area)
+
+    sm.Terrain.__init__, sm.Terrain.set_hfield, sm.make_save = init, set_hfield, make_save
+    return lambda: setattr(sm.Terrain, "__init__", orig_init) or setattr(sm.Terrain, "set_hfield", orig_set) \
+        or setattr(sm, "make_save", orig_save)
+
+
+def _buildable_near(t, x, z, r=10):
+    """Célula seca e quase plana mais próxima (o extrator de massa precisa de chão plano)."""
+    def ok(cx, cz):
+        return 2 <= cx < t.grid - 2 and 2 <= cz < t.grid - 2 and t.dry(cx, cz) and t.slope_raw(cx, cz) <= 32
+    x, z = round(x), round(z)
+    if ok(x, z):
+        return x, z
+    cand = [(cx, cz) for cx in range(x - r, x + r + 1) for cz in range(z - r, z + r + 1) if ok(cx, cz)]
+    return min(cand, key=lambda p: (p[0] - x) ** 2 + (p[1] - z) ** 2) if cand else (x, z)
 
 
 def cmd_build(inp):
     spec = _clean_spec(inp["spec"])
     import make_map
     make_map.WS = OUT
+    sm = _toolkit()
+    state = {"warnings": []}
+    restore = _hooks(sm, spec, state)
     old = sys.stdout
     sys.stdout = LineCapture()
     try:
@@ -242,14 +341,18 @@ def cmd_build(inp):
     finally:
         sys.stdout.flush()
         sys.stdout = old
+        restore()
     res = _jsonable(res)
     res["spawns"] = {str(k): list(v) for k, v in (res.get("spawns") or {}).items()}
+    res["warnings"] = state["warnings"]
+    res["extraMass"] = len(spec.get("extra_mass") or [])
     res["scenarioId"] = spec["scenario_id"]
     res["name"] = spec["name"]
     return res
 
 
-COMMANDS = dict(ping=cmd_ping, catalog=cmd_catalog, preview=cmd_preview, examples=cmd_examples, build=cmd_build)
+COMMANDS = dict(ping=cmd_ping, catalog=cmd_catalog, preview=cmd_preview, terrain3d=cmd_terrain3d,
+                examples=cmd_examples, build=cmd_build)
 
 
 def main():

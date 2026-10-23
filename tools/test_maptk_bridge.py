@@ -163,6 +163,30 @@ def main():
         print(f"PATCH ok: {res2['navigable_pct']:.1f}% navegável")
 
         # id inválido é recusado com mensagem clara
+        # relevo para o editor 3D: grade amostrada + minimapa (textura)
+        import base64
+        t3, _ = run("terrain3d", {"terrain": TID, "size": 128}, gd, out)
+        hs = base64.b64decode(t3["heights"])
+        assert t3["size"] == 128 and len(hs) == 129 * 129 * 2, (t3["size"], len(hs))
+        assert abs(t3["yMin"] - 20.0) < 0.1 and t3["yMax"] > 24, t3
+        assert t3["minimapDds"] and base64.b64decode(t3["minimapDds"])[:4] == b"DDS ", "minimapa"
+        print("terrain3d ok:", t3["size"], "células, y", t3["yMin"], "→", round(t3["yMax"], 1))
+
+        # escultura + massa manual: força PATCH (navegação refeita) e grava os marcadores extras
+        spec3 = dict(spec, scenario_id="SC2_CPSCULPT", name="[2] Teste Relevo",
+                     sculpt=[["cone", 512, 300, 60, 45.0, "raise"], ["disc", 512, 720, 40, 20.0, "set"]],
+                     extra_mass=[[400, 500], [300, 300]])
+        res3, log3 = run("build", {"spec": spec3}, gd, out)
+        with zipfile.ZipFile(res3["scd"]) as zf:
+            names3 = zf.namelist()
+            save = zf.read("maps/SC2_CPSCULPT/SC2_CPSCULPT_save.lua").decode("latin1")
+        assert "maps/SC2_CPSCULPT/SC2_CPSCULPT.costs.win.bdf" in names3, "relevo exige navegação refeita"
+        assert "maps/SC2_CPSCULPT/SC2_CPSCULPT.hfield.win.bdf" in names3, names3
+        assert save.count("'Mass X") == 2, "massa manual nos marcadores"
+        assert res3["extraMass"] == 2, res3
+        assert any("sculpted heightfield" in l for l in log3), log3
+        print("escultura + massa manual ok:", res3["mass"], "massa automática +", res3["extraMass"], "manual")
+
         bad = dict(spec, scenario_id="meu mapa")
         env = dict(os.environ, SC2_GAMEDATA=gd, SC2_MAP_OUT=out)
         p = subprocess.run([sys.executable, BRIDGE, "build"], input=json.dumps({"spec": bad}).encode(), capture_output=True, env=env)

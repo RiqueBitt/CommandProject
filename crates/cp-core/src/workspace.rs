@@ -518,8 +518,11 @@ impl Workspace {
                 if e.is_dir || !e.key.starts_with("/units/") {
                     continue;
                 }
-                let mut parts = e.key.trim_start_matches('/').split('/');
-                let (Some(_), Some(id)) = (parts.next(), parts.next()) else {
+                // units/<facção>/<UNIDADE>/arquivo: o id é a pasta da unidade
+                let Some((dir, _)) = e.key.rsplit_once('/') else {
+                    continue;
+                };
+                let Some(id) = dir.rsplit('/').next().filter(|d| *d != "units" && !d.is_empty()) else {
                     continue;
                 };
                 files
@@ -533,7 +536,10 @@ impl Workspace {
             let scm = list
                 .iter()
                 .filter(|(_, n)| lower(n).ends_with(".scm"))
-                .min_by_key(|(_, n)| (!lower(n).contains("lod0"), n.len()));
+                .min_by_key(|(_, n)| {
+                    let l = lower(n);
+                    (!l.contains("lod0"), l.contains("lod1") || l.contains("lod2"), n.len())
+                });
             let Some((src, scm)) = scm else { continue };
             let albedo = list
                 .iter()
@@ -713,13 +719,13 @@ mod tests {
         make_scd(
             &gd.join("units.scd"),
             &[
-                ("units/uul0001/uul0001_lod0.scm", &scm),
-                ("units/uul0001/uul0001_lod1.scm", &scm),
-                ("units/uul0001/uul0001_normalsts.dds", &dds),
-                ("units/uul0001/uul0001_albedo.dds", &dds),
-                ("units/ucl0103/ucl0103_lod0.scm", &scm),
-                ("units/ucl0103/ucl0103_albedo.dds", &dds),
-                ("units/ucl0103/ucl0103_unit.bp", b"UnitBlueprint {}"),
+                ("units\\UEF\\UUL0001\\UUL0001_lod1.win.scm", &scm),
+                ("units\\UEF\\UUL0001\\UUL0001_LOD0.win.scm", &scm),
+                ("units\\UEF\\UUL0001\\UUL0001_Normal.win.dds", &dds),
+                ("units\\UEF\\UUL0001\\UUL0001_Diffuse.win.dds", &dds),
+                ("units\\Cybran\\UCL0103\\UCL0103_LOD0.win.scm", &scm),
+                ("units\\Cybran\\UCL0103\\UCL0103_Diffuse.win.dds", &dds),
+                ("units\\Cybran\\UCL0103\\UCL0103_unit.bp", b"UnitBlueprint {}"),
             ],
         );
         make_scd(&gd.join("lua.scd"), &[("lua/x.lua", b"--")]);
@@ -729,7 +735,7 @@ mod tests {
         let m = ws.unit_models().unwrap();
         assert_eq!(m.keys().cloned().collect::<Vec<_>>(), vec!["ucl0103", "uul0001"]);
         let (_, scm_name, albedo) = &m["uul0001"];
-        assert_eq!(scm_name, "units/uul0001/uul0001_lod0.scm");
-        assert_eq!(albedo.as_deref(), Some("units/uul0001/uul0001_albedo.dds"));
+        assert_eq!(scm_name, "units/UEF/UUL0001/UUL0001_LOD0.win.scm");
+        assert_eq!(albedo.as_deref(), Some("units/UEF/UUL0001/UUL0001_Diffuse.win.dds"));
     }
 }

@@ -548,6 +548,31 @@ pub async fn install_reshade(
     ))
 }
 
+/// Decide se a assinatura do instalador é aceitável.
+///
+/// O ReShade assina com um certificado próprio ("CN=ReShade, E=info@reshade.me") que não vem de uma
+/// autoridade instalada no Windows: o resultado é `UnknownError`/`NotTrusted` mesmo com o arquivo
+/// íntegro. Aceitamos esse caso só para esse certificado. Arquivo alterado depois de assinado dá
+/// `HashMismatch`, e arquivo sem assinatura dá `NotSigned`: os dois são recusados.
+pub fn accept_signature(status: &str, subject: &str) -> Result<String> {
+    let reshade_cert = subject.split(',').map(str::trim).any(|p| p == "CN=ReShade")
+        && subject
+            .split(',')
+            .map(str::trim)
+            .any(|p| p.eq_ignore_ascii_case("E=info@reshade.me"));
+    match status {
+        "Valid" => Ok(subject.to_string()),
+        "UnknownError" | "NotTrusted" if reshade_cert => Ok(subject.to_string()),
+        "HashMismatch" => Err(Error::Integrity(
+            "o instalador do ReShade foi alterado depois de assinado; o download foi descartado".into(),
+        )),
+        "NotSigned" => Err(Error::Integrity("o instalador baixado não tem assinatura digital; o download foi descartado".into())),
+        _ => Err(Error::Integrity(format!(
+            "assinatura do instalador do ReShade não reconhecida ({status}, {subject}); instale pelo site reshade.me e clique em \"Já instalei\""
+        ))),
+    }
+}
+
 #[cfg(windows)]
 mod platform {
     use std::os::windows::process::CommandExt;
@@ -573,12 +598,8 @@ mod platform {
             .output()
             .map_err(|e| Error::Other(format!("não consegui verificar a assinatura: {e}")))?;
         let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        match text.split_once('|') {
-            Some(("Valid", subject)) => Ok(subject.to_string()),
-            _ => Err(Error::Integrity(format!(
-                "assinatura do instalador do ReShade inválida ({text})"
-            ))),
-        }
+        let (status, subject) = text.split_once('|').unwrap_or((text.as_str(), ""));
+        super::accept_signature(status, subject)
     }
 
     pub fn run_setup(setup: &Path, game_exe: &Path) -> Result<()> {
@@ -628,6 +649,24 @@ mod tests {
         let d = ensure_search_path("[GENERAL]\nEffectSearchPaths=.\\outra\n");
         assert!(d.contains("EffectSearchPaths=.\\outra,.\\reshade-shaders\\Shaders\\CommandProject"));
         assert!(!ini_remove(&a, "GENERAL", "PresetPath").contains("PresetPath"));
+    }
+
+    #[test]
+    fn signature_rules() {
+        let rs = "CN=ReShade, E=info@reshade.me";
+        assert!(accept_signature("Valid", "CN=Qualquer").is_ok());
+        assert!(
+            accept_signature("UnknownError", rs).is_ok(),
+            "certificado próprio do ReShade"
+        );
+        assert!(accept_signature("NotTrusted", rs).is_ok());
+        assert!(accept_signature("UnknownError", "CN=ReShade Falso, E=info@reshade.me").is_err());
+        assert!(accept_signature("UnknownError", "CN=Outro, E=x@y.z").is_err());
+        assert!(
+            accept_signature("HashMismatch", rs).is_err(),
+            "arquivo alterado nunca passa"
+        );
+        assert!(accept_signature("NotSigned", "").is_err());
     }
 
     #[test]

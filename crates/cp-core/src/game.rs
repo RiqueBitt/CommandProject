@@ -12,19 +12,36 @@ pub const GOG_PRODUCT_ID: &str = "1702120068";
 pub const EXE_NAME: &str = "SupremeCommander2.exe";
 pub const DEFAULT_INSTALL_DIR: &str = "Supreme Commander 2";
 
-/// Arquivos que vêm com o jogo (Steam/GOG, com o DLC Infinite War).
-/// Lista de referência — a fonte de verdade é a linha de base gravada na
-/// primeira varredura, que o usuário confirma na interface.
+/// Arquivos que vêm com o jogo (Steam/GOG, com DLCs), conforme o índice `toc.win.bdf` do SC2.
+/// Os de idioma (`loc_*.scd`) são reconhecidos pelo prefixo.
 pub const KNOWN_STOCK_ARCHIVES: &[&str] = &[
     "bp.scd",
+    "effects.scd",
+    "env.scd",
+    "fonts.scd",
     "lua.scd",
     "maps.scd",
+    "meshes.scd",
+    "projectiles.scd",
+    "props.scd",
     "textures.scd",
-    "units.scd",
+    "ui.scd",
     "uncompiled_lua.scd",
+    "units.scd",
+    "z_diff1.scd",
     "z_dlc1.scd",
+    "z_dlc1_map_shared.scd",
     "z_lua_dlc1.scd",
+    "z_tournament1.scd",
+    "z_uncompiled_lua_dlc1.scd",
+    "z_uncompiled_lua_tournament1.scd",
 ];
+
+/// O arquivo é um dos `.scd` originais do jogo?
+pub fn is_stock_archive(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    KNOWN_STOCK_ARCHIVES.contains(&n.as_str()) || (n.starts_with("loc_") && n.ends_with(".scd"))
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

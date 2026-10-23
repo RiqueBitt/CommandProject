@@ -12,8 +12,8 @@
 //!   para `quarantine/` em vez de ser apagado.
 
 use crate::error::{Error, IoContext, Result};
-use crate::fsutil::{copy_atomic, read_json_or_default, write_json};
-use crate::game::{GameInstall, KNOWN_STOCK_ARCHIVES};
+use crate::fsutil::{copy_atomic, read_json_or_default, sha256_bytes, write_atomic, write_json};
+use crate::game::{is_stock_archive, GameInstall};
 use crate::hashcache::HashCache;
 use crate::library::Library;
 use crate::profile::Profile;
@@ -143,6 +143,18 @@ pub struct FileStatus {
     pub state: String,
 }
 
+/// Estado do índice do jogo mantido pelo launcher.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TocState {
+    /// SHA-256 do índice original do jogo (cópia em `deploy/toc-original.bdf`).
+    original: Option<String>,
+    /// SHA-256 do índice que o launcher gravou por último (`None` = original no lugar).
+    written: Option<String>,
+    /// Quantos arquivos do jogo estão sendo lidos dos .scd de mods.
+    redirected: usize,
+}
+
 pub struct Deployer<'a> {
     pub game: &'a GameInstall,
     pub data_dir: &'a Path,
@@ -172,11 +184,22 @@ impl<'a> Deployer<'a> {
 
     pub fn baseline(&self) -> Result<Option<Baseline>> {
         let p = self.baseline_path();
-        if p.exists() {
-            Ok(Some(crate::fsutil::read_json(&p)?))
-        } else {
-            Ok(None)
+        if !p.exists() {
+            return Ok(None);
         }
+        let mut b: Baseline = crate::fsutil::read_json(&p)?;
+        // versões antigas não conheciam todos os .scd do jogo e os marcavam como "instalados à mão"
+        let mut fixed = false;
+        for f in b.files.values_mut() {
+            if f.kind == BaselineKind::Unmanaged && is_stock_archive(&f.name) {
+                f.kind = BaselineKind::Stock;
+                fixed = true;
+            }
+        }
+        if fixed {
+            write_json(&p, &b)?;
+        }
+        Ok(Some(b))
     }
 
     /// Cria a linha de base se ainda não existir (ou se a pasta do jogo mudou).
@@ -202,7 +225,7 @@ impl<'a> Deployer<'a> {
             });
             let sha = self.hashes.sha256(path)?;
             let size = path.metadata().at(path)?.len();
-            let kind = if KNOWN_STOCK_ARCHIVES.iter().any(|s| s.eq_ignore_ascii_case(&name)) {
+            let kind = if is_stock_archive(&name) {
                 BaselineKind::Stock
             } else {
                 BaselineKind::Unmanaged
@@ -504,6 +527,14 @@ impl<'a> Deployer<'a> {
             self.save_journal(&j)?;
         }
 
+        // 3) índice do jogo: aponta para os .scd do launcher os arquivos que eles substituem
+        progress(Progress {
+            step: total,
+            total,
+            message: "Atualizando o índice de arquivos do jogo".into(),
+        });
+        self.sync_toc(&j)?;
+
         j.profile = profile_id.map(str::to_owned);
         j.deployed_at = Some(chrono::Utc::now().to_rfc3339());
         self.save_journal(&j)?;
@@ -514,6 +545,63 @@ impl<'a> Deployer<'a> {
             message: "Pronto".into(),
         });
         Ok(plan)
+    }
+
+    /// O SC2 procura cada arquivo no índice `toc.win.bdf` (veja [`crate::toc`]); sem atualizá-lo,
+    /// um `.scd` de mod que traz arquivos com o mesmo nome dos originais é ignorado. Recalcula o
+    /// índice a partir do original (guardado na primeira vez) com os `.scd` colocados pelo launcher;
+    /// sem nenhum, devolve o original. Se o índice mudou por fora (atualização ou "verificar
+    /// integridade" da Steam), o novo passa a ser o original.
+    fn sync_toc(&mut self, j: &Journal) -> Result<usize> {
+        let path = self.game.root.join("toc.win.bdf");
+        if !path.is_file() {
+            return Ok(0);
+        }
+        let dir = self.data_dir.join("deploy");
+        let orig_path = dir.join("toc-original.bdf");
+        let state_path = dir.join("toc.json");
+        let current = fs::read(&path).at(&path)?;
+        let cur_sha = sha256_bytes(&current);
+        let mut st: TocState = read_json_or_default(&state_path)?;
+        let original = if st.written.as_deref() == Some(cur_sha.as_str()) && orig_path.is_file() {
+            fs::read(&orig_path).at(&orig_path)?
+        } else {
+            fs::create_dir_all(&dir).at(&dir)?;
+            write_atomic(&orig_path, &current)?;
+            st.original = Some(cur_sha.clone());
+            current.clone()
+        };
+        let mut names: Vec<String> = j.entries.iter().map(|e| e.name.clone()).collect();
+        crate::conflicts::mount_order(&mut names);
+        let mut mods = Vec::new();
+        for n in names {
+            let p = self.game.gamedata.join(&n);
+            let mut scd = crate::scd::Scd::open(&p)?;
+            let entries = scd
+                .entries()?
+                .into_iter()
+                .enumerate()
+                .filter(|(_, e)| !e.is_dir)
+                .map(|(i, e)| crate::toc::ModEntry {
+                    name: e.name,
+                    index: i as u32,
+                    size: e.size.min(u32::MAX as u64) as u32,
+                })
+                .collect();
+            mods.push((n, entries));
+        }
+        let (new, redirected) = if mods.is_empty() {
+            (original, 0)
+        } else {
+            crate::toc::apply_overrides(&original, &mods)?
+        };
+        if new != current {
+            write_atomic(&path, &new)?;
+        }
+        st.written = (redirected > 0).then(|| sha256_bytes(&new));
+        st.redirected = redirected;
+        write_json(&state_path, &st)?;
+        Ok(redirected)
     }
 
     /// Volta a pasta ao estado original (remove tudo que o launcher colocou).
@@ -695,6 +783,63 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn keeps_game_index_in_sync() {
+        let mut e = env();
+        // índice do jogo com "textures/ui/bg.dds" vindo de textures.scd (como no SC2)
+        let toc_path = e.game.root.join("toc.win.bdf");
+        let original = crate::toc::tests::sample();
+        fs::write(&toc_path, &original).unwrap();
+        let src = e.data.join("in");
+        fs::create_dir_all(&src).unwrap();
+        make_scd(
+            &src.join("zz_hd.scd"),
+            &[
+                ("textures/ui/novo.dds", b"x"),
+                ("textures\\ui\\BG.win.dds", b"textura maior"),
+            ],
+        );
+        let m = e.lib.import(&src.join("zz_hd.scd"), &ImportOptions::default()).unwrap();
+        let mut w = vec![];
+        let mut d = Deployer {
+            game: &e.game,
+            data_dir: &e.data,
+            hashes: &mut e.cache,
+        };
+        let targets = d.targets(&e.lib, &profile(&[m.id.as_str()]), &mut w).unwrap();
+        assert_eq!(targets.len(), 1, "{w:?}");
+        d.apply(&targets, Some("p"), &mut |_| {}).unwrap();
+
+        let toc = crate::toc::Toc::parse(&fs::read(&toc_path).unwrap()).unwrap();
+        let archives = toc.archives().unwrap();
+        let bg = toc
+            .files()
+            .unwrap()
+            .into_iter()
+            .find(|f| f.key == "textures/ui/bg.dds")
+            .unwrap();
+        assert_eq!(archives[bg.archive.unwrap() as usize], "gamedata\\zz_hd.scd");
+        assert_eq!(
+            (bg.entry, bg.size, bg.win),
+            (1, 13, true),
+            "entrada 1 do zip, tamanho novo"
+        );
+
+        // reaplicar sem mudanças mantém o índice
+        let patched = fs::read(&toc_path).unwrap();
+        d.apply(&targets, Some("p"), &mut |_| {}).unwrap();
+        assert_eq!(fs::read(&toc_path).unwrap(), patched);
+
+        // "verificar integridade" da Steam devolve o original: o launcher percebe e refaz
+        fs::write(&toc_path, &original).unwrap();
+        d.apply(&targets, Some("p"), &mut |_| {}).unwrap();
+        assert_eq!(fs::read(&toc_path).unwrap(), patched);
+
+        // voltar ao original restaura o índice byte a byte
+        d.purge(&mut |_| {}).unwrap();
+        assert_eq!(fs::read(&toc_path).unwrap(), original);
     }
 
     #[test]
