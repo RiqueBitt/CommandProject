@@ -130,7 +130,7 @@ npm run tauri build      # instalador NSIS (Windows)
 ```
 
 O GitHub Actions (`.github/workflows/build.yml`) roda clippy e os testes, baixa o Python embutido
-oficial e gera o instalador do Windows; em tags `v*` cria um rascunho de release.
+oficial e gera o instalador do Windows; em tags `v*` publica o release com o instalador.
 
 ### CLI
 

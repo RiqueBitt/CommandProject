@@ -68,7 +68,7 @@ jobs:
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
           releaseName: "CommandProject ${{ github.ref_name }}"
           releaseBody: "Instalador para Windows. O launcher avisa sozinho quando sair uma versão nova."
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
       - uses: actions/upload-artifact@v4
         with:
