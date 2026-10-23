@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["crates/cp-core", "crates/cp-cli"]
+exclude = ["src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["RiqueBitt"]
+repository = "https://github.com/RiqueBitt/CommandProject"

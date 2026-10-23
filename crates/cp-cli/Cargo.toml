@@ -1,0 +1,16 @@
+[package]
+name = "cp-cli"
+description = "CommandProject pela linha de comando"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "cp"
+path = "src/main.rs"
+
+[dependencies]
+cp-core = { path = "../cp-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

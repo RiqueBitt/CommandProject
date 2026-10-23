@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "name": "Exemplo de hub (substitua pelos mods reais)",
+  "updatedAt": "2026-10-23T18:00:00Z",
+  "mods": [
+    {
+      "id": "exemplo-hud-azul",
+      "name": "HUD Azul (exemplo)",
+      "summary": "Mod de exemplo para testar o formato do índice.",
+      "authors": ["Project Club"],
+      "category": "ui",
+      "tags": ["exemplo"],
+      "versions": [
+        {
+          "version": "1.0.0",
+          "releasedAt": "2026-10-23T18:00:00Z",
+          "changelog": "Primeira versão.",
+          "multiplayer": "local",
+          "package": {
+            "url": "pkg/exemplo-hud-azul-1.0.0.zip",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "size": 1024,
+            "kind": "zip"
+          }
+        }
+      ]
+    }
+  ]
+}

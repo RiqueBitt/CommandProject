@@ -1,0 +1,11 @@
+node_modules/
+dist/
+target/
+src-tauri/target/
+src-tauri/gen/
+resources/python/*
+!resources/python/README.md
+resources/maptk/__pycache__/
+*.scd
+*.log
+.DS_Store

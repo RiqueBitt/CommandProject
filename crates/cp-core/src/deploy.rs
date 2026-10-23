@@ -1,0 +1,881 @@
+//! Motor de implantação: coloca os `.scd` do perfil ativo na pasta `gamedata`
+//! e sabe desfazer tudo, byte a byte.
+//!
+//! Garantias:
+//! * **Linha de base** — na primeira varredura, cada arquivo da pasta é registrado
+//!   (nome, tamanho, SHA-256) e classificado como original do jogo ou "não gerenciado".
+//! * **Backup antes de substituir** — se um mod troca um arquivo existente (ex.: `lua.scd`),
+//!   o original vai para `backups/<sha256>.scd` (endereçado por conteúdo, sem duplicatas).
+//! * **Diário com intenção** — cada operação grava a intenção antes de tocar no disco e
+//!   o resultado depois. Se o PC desligar no meio, `recover()` termina ou desfaz a operação.
+//! * **Nada é apagado às cegas** — se um arquivo implantado foi alterado por fora, ele vai
+//!   para `quarantine/` em vez de ser apagado.
+
+use crate::error::{Error, IoContext, Result};
+use crate::fsutil::{copy_atomic, read_json_or_default, write_json};
+use crate::game::{GameInstall, KNOWN_STOCK_ARCHIVES};
+use crate::hashcache::HashCache;
+use crate::library::Library;
+use crate::profile::Profile;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
+use std::fs;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BaselineKind {
+    /// Arquivo original do jogo.
+    Stock,
+    /// Estava na pasta antes do launcher (provavelmente um mod instalado à mão).
+    Unmanaged,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BaselineFile {
+    pub name: String,
+    pub sha256: String,
+    pub size: u64,
+    pub kind: BaselineKind,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Baseline {
+    pub created_at: String,
+    pub gamedata: PathBuf,
+    /// chave = nome em minúsculas
+    pub files: BTreeMap<String, BaselineFile>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DeployKind {
+    /// Arquivo novo na pasta.
+    Added,
+    /// Substituiu um arquivo que existia (o original está em `backups/`).
+    Replaced,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Deployed {
+    pub name: String,
+    pub sha256: String,
+    pub mod_id: String,
+    pub mod_version: String,
+    pub kind: DeployKind,
+    /// SHA-256 do original guardado em `backups/` (só para `Replaced`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase", tag = "action")]
+pub enum Pending {
+    Add { entry: Deployed },
+    Remove { entry: Deployed },
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Journal {
+    pub profile: Option<String>,
+    pub deployed_at: Option<String>,
+    pub entries: Vec<Deployed>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending: Option<Pending>,
+}
+
+impl Journal {
+    fn find(&self, name: &str) -> Option<usize> {
+        self.entries.iter().position(|e| e.name.eq_ignore_ascii_case(name))
+    }
+}
+
+/// O que um perfil quer na pasta.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Target {
+    pub name: String,
+    pub source: PathBuf,
+    pub sha256: String,
+    pub mod_id: String,
+    pub mod_version: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Plan {
+    pub add: Vec<String>,
+    pub replace: Vec<String>,
+    pub remove: Vec<String>,
+    pub restore: Vec<String>,
+    pub unchanged: Vec<String>,
+    /// Avisos não fatais (dois mods com o mesmo arquivo, dependência faltando…).
+    pub warnings: Vec<String>,
+}
+
+impl Plan {
+    pub fn is_noop(&self) -> bool {
+        self.add.is_empty() && self.replace.is_empty() && self.remove.is_empty() && self.restore.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Progress {
+    pub step: usize,
+    pub total: usize,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileStatus {
+    pub name: String,
+    pub size: u64,
+    /// "stock" | "unmanaged" | "managed" | "new"
+    pub origin: String,
+    pub mod_id: Option<String>,
+    /// "ok" | "modified" | "missing"
+    pub state: String,
+}
+
+pub struct Deployer<'a> {
+    pub game: &'a GameInstall,
+    pub data_dir: &'a Path,
+    pub hashes: &'a mut HashCache,
+}
+
+impl<'a> Deployer<'a> {
+    fn journal_path(&self) -> PathBuf {
+        self.data_dir.join("deploy").join("journal.json")
+    }
+    fn baseline_path(&self) -> PathBuf {
+        self.data_dir.join("deploy").join("baseline.json")
+    }
+    fn backups_dir(&self) -> PathBuf {
+        self.data_dir.join("backups")
+    }
+    fn quarantine_dir(&self) -> PathBuf {
+        self.data_dir.join("quarantine")
+    }
+
+    pub fn journal(&self) -> Result<Journal> {
+        read_json_or_default(&self.journal_path())
+    }
+    fn save_journal(&self, j: &Journal) -> Result<()> {
+        write_json(&self.journal_path(), j)
+    }
+
+    pub fn baseline(&self) -> Result<Option<Baseline>> {
+        let p = self.baseline_path();
+        if p.exists() {
+            Ok(Some(crate::fsutil::read_json(&p)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Cria a linha de base se ainda não existir (ou se a pasta do jogo mudou).
+    pub fn ensure_baseline(&mut self, progress: &mut dyn FnMut(Progress)) -> Result<Baseline> {
+        if let Some(b) = self.baseline()? {
+            if b.gamedata == self.game.gamedata {
+                return Ok(b);
+            }
+        }
+        let journal = self.journal()?;
+        let archives = self.game.archives()?;
+        let total = archives.len();
+        let mut files = BTreeMap::new();
+        for (i, path) in archives.iter().enumerate() {
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            if journal.find(&name).is_some() {
+                continue; // implantado por nós: não é linha de base
+            }
+            progress(Progress {
+                step: i + 1,
+                total,
+                message: format!("Lendo {name}"),
+            });
+            let sha = self.hashes.sha256(path)?;
+            let size = path.metadata().at(path)?.len();
+            let kind = if KNOWN_STOCK_ARCHIVES.iter().any(|s| s.eq_ignore_ascii_case(&name)) {
+                BaselineKind::Stock
+            } else {
+                BaselineKind::Unmanaged
+            };
+            files.insert(
+                name.to_ascii_lowercase(),
+                BaselineFile {
+                    name,
+                    sha256: sha,
+                    size,
+                    kind,
+                },
+            );
+        }
+        let b = Baseline {
+            created_at: chrono::Utc::now().to_rfc3339(),
+            gamedata: self.game.gamedata.clone(),
+            files,
+        };
+        write_json(&self.baseline_path(), &b)?;
+        self.hashes.save()?;
+        Ok(b)
+    }
+
+    /// O usuário corrige a classificação de um arquivo da linha de base.
+    pub fn set_baseline_kind(&mut self, name: &str, kind: BaselineKind) -> Result<()> {
+        let mut b = self
+            .baseline()?
+            .ok_or_else(|| Error::Other("linha de base ainda não criada".into()))?;
+        let f = b
+            .files
+            .get_mut(&name.to_ascii_lowercase())
+            .ok_or_else(|| Error::Other(format!("{name} não está na linha de base")))?;
+        f.kind = kind;
+        write_json(&self.baseline_path(), &b)
+    }
+
+    /// "Adota" um arquivo não gerenciado: ele passa a pertencer ao mod `mod_id`
+    /// (que já deve ter sido importado na biblioteca com o mesmo arquivo).
+    pub fn adopt(&mut self, name: &str, mod_id: &str, mod_version: &str) -> Result<()> {
+        let mut b = self
+            .baseline()?
+            .ok_or_else(|| Error::Other("linha de base ainda não criada".into()))?;
+        let f = b
+            .files
+            .remove(&name.to_ascii_lowercase())
+            .ok_or_else(|| Error::Other(format!("{name} não está na linha de base")))?;
+        let mut j = self.journal()?;
+        j.entries.push(Deployed {
+            name: f.name,
+            sha256: f.sha256,
+            mod_id: mod_id.into(),
+            mod_version: mod_version.into(),
+            kind: DeployKind::Added,
+            backup: None,
+        });
+        self.save_journal(&j)?;
+        write_json(&self.baseline_path(), &b)
+    }
+
+    /// Calcula os arquivos desejados para um perfil.
+    pub fn targets(&self, library: &Library, profile: &Profile, warnings: &mut Vec<String>) -> Result<Vec<Target>> {
+        let mut by_name: HashMap<String, usize> = HashMap::new();
+        let mut out: Vec<Target> = Vec::new();
+        let enabled = profile.enabled_ids();
+        let mut versions = HashMap::new();
+        for id in &enabled {
+            let m = match library.get(id) {
+                Ok(m) => m,
+                Err(_) => {
+                    warnings.push(format!(
+                        "o mod \"{id}\" está no perfil mas não está instalado — ignorado"
+                    ));
+                    continue;
+                }
+            };
+            versions.insert(m.manifest.id.clone(), m.manifest.version.clone());
+            for f in &m.manifest.files {
+                let t = Target {
+                    name: f.name.clone(),
+                    source: m.file_path(&f.name),
+                    sha256: f.sha256.clone(),
+                    mod_id: m.manifest.id.clone(),
+                    mod_version: m.manifest.version.clone(),
+                };
+                let key = f.name.to_ascii_lowercase();
+                if let Some(&idx) = by_name.get(&key) {
+                    warnings.push(format!(
+                        "\"{}\" e \"{}\" fornecem o mesmo arquivo {} — vale o que vem depois na ordem ({})",
+                        out[idx].mod_id, t.mod_id, f.name, t.mod_id
+                    ));
+                    out[idx] = t;
+                } else {
+                    by_name.insert(key, out.len());
+                    out.push(t);
+                }
+            }
+        }
+        // dependências e conflitos declarados
+        for id in &enabled {
+            let Ok(m) = library.get(id) else { continue };
+            for dep in &m.manifest.dependencies {
+                match versions.get(&dep.id) {
+                    None => warnings.push(format!(
+                        "\"{}\" precisa de \"{}\", que não está ativo",
+                        m.manifest.name, dep.id
+                    )),
+                    Some(v) if !crate::manifest::version_matches(dep.version.as_deref(), v) => warnings.push(format!(
+                        "\"{}\" precisa de \"{}\" {} (ativo: {v})",
+                        m.manifest.name,
+                        dep.id,
+                        dep.version.clone().unwrap_or_default()
+                    )),
+                    _ => {}
+                }
+            }
+            for c in &m.manifest.conflicts {
+                if versions.contains_key(c) {
+                    warnings.push(format!("\"{}\" declara conflito com \"{c}\"", m.manifest.name));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// O que `apply` faria, sem tocar em nada.
+    pub fn plan(&self, targets: &[Target]) -> Result<Plan> {
+        let j = self.journal()?;
+        let mut plan = Plan::default();
+        for e in &j.entries {
+            let wanted = targets.iter().find(|t| t.name.eq_ignore_ascii_case(&e.name));
+            match wanted {
+                Some(t) if t.sha256 == e.sha256 => plan.unchanged.push(e.name.clone()),
+                Some(_) => plan.replace.push(e.name.clone()),
+                None if e.kind == DeployKind::Replaced => plan.restore.push(e.name.clone()),
+                None => plan.remove.push(e.name.clone()),
+            }
+        }
+        for t in targets {
+            if j.find(&t.name).is_none() {
+                if self.game.gamedata.join(&t.name).exists() {
+                    plan.replace.push(t.name.clone());
+                } else {
+                    plan.add.push(t.name.clone());
+                }
+            }
+        }
+        Ok(plan)
+    }
+
+    /// Termina ou desfaz uma operação interrompida (queda de energia, crash).
+    pub fn recover(&mut self) -> Result<Option<String>> {
+        let mut j = self.journal()?;
+        let Some(p) = j.pending.take() else { return Ok(None) };
+        // remove temporários esquecidos
+        if let Ok(rd) = fs::read_dir(&self.game.gamedata) {
+            for e in rd.flatten() {
+                if e.file_name().to_string_lossy().ends_with(".cp-tmp") {
+                    let _ = fs::remove_file(e.path());
+                }
+            }
+        }
+        let msg = match p {
+            Pending::Add { entry } => {
+                let path = self.game.gamedata.join(&entry.name);
+                let on_disk = if path.exists() {
+                    Some(self.hashes.sha256(&path)?)
+                } else {
+                    None
+                };
+                if on_disk.as_deref() == Some(entry.sha256.as_str()) {
+                    j.entries.push(entry.clone());
+                    format!("implantação de {} concluída após interrupção", entry.name)
+                } else {
+                    // a cópia não terminou: garante o original no lugar
+                    if let (DeployKind::Replaced, Some(b)) = (entry.kind, &entry.backup) {
+                        if on_disk.as_deref() != Some(b.as_str()) {
+                            self.restore_backup(b, &path)?;
+                        }
+                    }
+                    format!("implantação de {} desfeita após interrupção", entry.name)
+                }
+            }
+            Pending::Remove { entry } => {
+                self.remove_one(&entry)?;
+                format!("remoção de {} concluída após interrupção", entry.name)
+            }
+        };
+        self.save_journal(&j)?;
+        self.hashes.save()?;
+        Ok(Some(msg))
+    }
+
+    /// Faz a pasta do jogo ficar exatamente como os `targets` pedem.
+    pub fn apply(
+        &mut self,
+        targets: &[Target],
+        profile_id: Option<&str>,
+        progress: &mut dyn FnMut(Progress),
+    ) -> Result<Plan> {
+        self.recover()?;
+        let baseline = self.ensure_baseline(progress)?;
+        let mut plan = self.plan(targets)?;
+        let total = plan.add.len() + plan.replace.len() + plan.remove.len() + plan.restore.len();
+        let mut step = 0;
+        let mut j = self.journal()?;
+
+        // 1) remover/restaurar o que não é mais desejado ou mudou de versão
+        let stale: Vec<Deployed> = j
+            .entries
+            .iter()
+            .filter(|e| {
+                !targets
+                    .iter()
+                    .any(|t| t.name.eq_ignore_ascii_case(&e.name) && t.sha256 == e.sha256)
+            })
+            .cloned()
+            .collect();
+        for entry in stale {
+            step += 1;
+            progress(Progress {
+                step,
+                total,
+                message: format!("Removendo {}", entry.name),
+            });
+            j.pending = Some(Pending::Remove { entry: entry.clone() });
+            self.save_journal(&j)?;
+            self.remove_one(&entry)?;
+            if let Some(i) = j.find(&entry.name) {
+                j.entries.remove(i);
+            }
+            j.pending = None;
+            self.save_journal(&j)?;
+        }
+
+        // 2) implantar o que falta
+        fs::create_dir_all(self.backups_dir()).at(self.backups_dir())?;
+        for t in targets {
+            if j.find(&t.name).is_some() {
+                continue; // já está lá, idêntico
+            }
+            step += 1;
+            progress(Progress {
+                step,
+                total,
+                message: format!("Instalando {}", t.name),
+            });
+            let dest = self.game.gamedata.join(&t.name);
+            let (kind, backup) = if dest.exists() {
+                let sha = self.hashes.sha256(&dest)?;
+                let in_baseline = baseline.files.get(&t.name.to_ascii_lowercase());
+                if let Some(b) = in_baseline {
+                    if b.sha256 != sha {
+                        plan.warnings.push(format!(
+                            "{} foi alterado fora do launcher desde a primeira varredura; a versão atual foi guardada no backup",
+                            t.name
+                        ));
+                    }
+                }
+                let bpath = self.backups_dir().join(format!("{sha}.scd"));
+                if !bpath.exists() {
+                    let copied = copy_atomic(&dest, &bpath)?;
+                    if copied != sha {
+                        return Err(Error::Integrity(format!("backup de {} não confere", t.name)));
+                    }
+                }
+                (DeployKind::Replaced, Some(sha))
+            } else {
+                (DeployKind::Added, None)
+            };
+            let entry = Deployed {
+                name: t.name.clone(),
+                sha256: t.sha256.clone(),
+                mod_id: t.mod_id.clone(),
+                mod_version: t.mod_version.clone(),
+                kind,
+                backup,
+            };
+            j.pending = Some(Pending::Add { entry: entry.clone() });
+            self.save_journal(&j)?;
+            let copied = copy_atomic(&t.source, &dest)?;
+            if copied != t.sha256 {
+                // arquivo da biblioteca corrompido: desfaz este item
+                if let (DeployKind::Replaced, Some(b)) = (entry.kind, &entry.backup) {
+                    self.restore_backup(b, &dest)?;
+                } else {
+                    let _ = fs::remove_file(&dest);
+                }
+                j.pending = None;
+                self.save_journal(&j)?;
+                return Err(Error::Integrity(format!(
+                    "{} na biblioteca está corrompido (hash diferente do manifesto) — reinstale o mod {}",
+                    t.name, t.mod_id
+                )));
+            }
+            self.hashes.remember(&dest, &copied);
+            j.entries.push(entry);
+            j.pending = None;
+            self.save_journal(&j)?;
+        }
+
+        j.profile = profile_id.map(str::to_owned);
+        j.deployed_at = Some(chrono::Utc::now().to_rfc3339());
+        self.save_journal(&j)?;
+        self.hashes.save()?;
+        progress(Progress {
+            step: total,
+            total,
+            message: "Pronto".into(),
+        });
+        Ok(plan)
+    }
+
+    /// Volta a pasta ao estado original (remove tudo que o launcher colocou).
+    pub fn purge(&mut self, progress: &mut dyn FnMut(Progress)) -> Result<Plan> {
+        self.apply(&[], None, progress)
+    }
+
+    fn remove_one(&mut self, entry: &Deployed) -> Result<()> {
+        let path = self.game.gamedata.join(&entry.name);
+        if path.exists() {
+            let sha = self.hashes.sha256(&path)?;
+            let is_backup = entry.backup.as_deref() == Some(sha.as_str());
+            if is_backup {
+                return Ok(()); // o original já voltou
+            }
+            if sha != entry.sha256 {
+                // alterado por fora: guarda em quarentena em vez de apagar
+                let q = self.quarantine_dir();
+                fs::create_dir_all(&q).at(&q)?;
+                let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+                let qp = q.join(format!("{stamp}-{}", entry.name));
+                fs::rename(&path, &qp)
+                    .or_else(|_| fs::copy(&path, &qp).map(|_| ()).and_then(|_| fs::remove_file(&path)))
+                    .at(&path)?;
+            } else {
+                fs::remove_file(&path).at(&path)?;
+            }
+        }
+        if let (DeployKind::Replaced, Some(b)) = (entry.kind, &entry.backup) {
+            self.restore_backup(b, &path)?;
+        }
+        Ok(())
+    }
+
+    fn restore_backup(&mut self, sha: &str, dest: &Path) -> Result<()> {
+        let bpath = self.backups_dir().join(format!("{sha}.scd"));
+        if !bpath.exists() {
+            return Err(Error::Integrity(format!(
+                "backup de {} não encontrado — use \"Verificar arquivos\" na Steam para recuperar o original",
+                dest.file_name().unwrap().to_string_lossy()
+            )));
+        }
+        let copied = copy_atomic(&bpath, dest)?;
+        if copied != sha {
+            return Err(Error::Integrity("o backup está corrompido".into()));
+        }
+        self.hashes.remember(dest, &copied);
+        Ok(())
+    }
+
+    /// Estado de cada arquivo da pasta (rápido: usa o cache de hash).
+    pub fn status(&mut self) -> Result<Vec<FileStatus>> {
+        let baseline = self.baseline()?.unwrap_or_default();
+        let j = self.journal()?;
+        let mut out = Vec::new();
+        for path in self.game.archives()? {
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+            let sha = self.hashes.sha256(&path)?;
+            if let Some(e) = j.entries.iter().find(|e| e.name.eq_ignore_ascii_case(&name)) {
+                out.push(FileStatus {
+                    name,
+                    size,
+                    origin: "managed".into(),
+                    mod_id: Some(e.mod_id.clone()),
+                    state: if sha == e.sha256 { "ok" } else { "modified" }.into(),
+                });
+            } else if let Some(b) = baseline.files.get(&name.to_ascii_lowercase()) {
+                out.push(FileStatus {
+                    name,
+                    size,
+                    origin: match b.kind {
+                        BaselineKind::Stock => "stock",
+                        BaselineKind::Unmanaged => "unmanaged",
+                    }
+                    .into(),
+                    mod_id: None,
+                    state: if sha == b.sha256 { "ok" } else { "modified" }.into(),
+                });
+            } else {
+                out.push(FileStatus {
+                    name,
+                    size,
+                    origin: "new".into(),
+                    mod_id: None,
+                    state: "ok".into(),
+                });
+            }
+        }
+        for e in &j.entries {
+            if !self.game.gamedata.join(&e.name).exists() {
+                out.push(FileStatus {
+                    name: e.name.clone(),
+                    size: 0,
+                    origin: "managed".into(),
+                    mod_id: Some(e.mod_id.clone()),
+                    state: "missing".into(),
+                });
+            }
+        }
+        for b in baseline.files.values() {
+            if !self.game.gamedata.join(&b.name).exists() && j.find(&b.name).is_none() {
+                out.push(FileStatus {
+                    name: b.name.clone(),
+                    size: b.size,
+                    origin: match b.kind {
+                        BaselineKind::Stock => "stock",
+                        BaselineKind::Unmanaged => "unmanaged",
+                    }
+                    .into(),
+                    mod_id: None,
+                    state: "missing".into(),
+                });
+            }
+        }
+        self.hashes.save()?;
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::Store;
+    use crate::library::{tests::make_scd, ImportOptions};
+    use crate::profile::{Profile, ProfileMod};
+
+    struct Env {
+        _t: tempfile::TempDir,
+        game: GameInstall,
+        data: PathBuf,
+        lib: Library,
+        cache: HashCache,
+    }
+
+    fn env() -> Env {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("Supreme Commander 2");
+        fs::create_dir_all(root.join("gamedata")).unwrap();
+        make_scd(&root.join("gamedata/lua.scd"), &[("lua/sim/unit.lua", b"-- original")]);
+        make_scd(&root.join("gamedata/maps.scd"), &[("maps/a/a.lua", b"a")]);
+        make_scd(&root.join("gamedata/_manual_map.scd"), &[("maps/b/b.lua", b"b")]);
+        let game = GameInstall::from_dir(&root, Store::Manual).unwrap();
+        let data = t.path().join("data");
+        let lib = Library::open(&data.join("library")).unwrap();
+        let cache = HashCache::load(&data.join("hashcache.json"));
+        Env {
+            _t: t,
+            game,
+            data,
+            lib,
+            cache,
+        }
+    }
+
+    fn profile(ids: &[&str]) -> Profile {
+        Profile {
+            id: "p".into(),
+            name: "P".into(),
+            mods: ids
+                .iter()
+                .map(|i| ProfileMod {
+                    id: i.to_string(),
+                    enabled: true,
+                })
+                .collect(),
+            notes: String::new(),
+        }
+    }
+
+    fn snapshot(dir: &Path) -> BTreeMap<String, String> {
+        fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| {
+                (
+                    e.file_name().to_string_lossy().to_string(),
+                    crate::fsutil::sha256_file(&e.path()).unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn deploy_replace_and_purge_restores_bytes() {
+        let mut e = env();
+        let before = snapshot(&e.game.gamedata);
+        let src = e.data.join("in");
+        fs::create_dir_all(&src).unwrap();
+        // mod que adiciona um arquivo
+        make_scd(&src.join("zz_STORM.scd"), &[("lua/sim/unit.lua", b"-- storm")]);
+        e.lib
+            .import(&src.join("zz_STORM.scd"), &ImportOptions::default())
+            .unwrap();
+        // mod que SUBSTITUI lua.scd
+        let pkg = src.join("pack");
+        fs::create_dir_all(&pkg).unwrap();
+        make_scd(&pkg.join("lua.scd"), &[("lua/sim/unit.lua", b"-- 2013")]);
+        e.lib
+            .import(
+                &pkg,
+                &ImportOptions {
+                    name: Some("SupCom 2013".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let mut d = Deployer {
+            game: &e.game,
+            data_dir: &e.data,
+            hashes: &mut e.cache,
+        };
+        let mut w = vec![];
+        let targets = d.targets(&e.lib, &profile(&["storm", "supcom-2013"]), &mut w).unwrap();
+        assert!(w.is_empty(), "{w:?}");
+        let plan = d.plan(&targets).unwrap();
+        assert_eq!(plan.add, ["zz_STORM.scd"]);
+        assert_eq!(plan.replace, ["lua.scd"]);
+        d.apply(&targets, Some("p"), &mut |_| {}).unwrap();
+
+        let now = snapshot(&e.game.gamedata);
+        assert!(now.contains_key("zz_STORM.scd"));
+        assert_ne!(now["lua.scd"], before["lua.scd"], "lua.scd foi substituído");
+        let st = d.status().unwrap();
+        let lua = st.iter().find(|s| s.name == "lua.scd").unwrap();
+        assert_eq!((lua.origin.as_str(), lua.state.as_str()), ("managed", "ok"));
+        let manual = st.iter().find(|s| s.name == "_manual_map.scd").unwrap();
+        assert_eq!(manual.origin, "unmanaged");
+
+        // reaplicar é idempotente
+        assert!(d.plan(&targets).unwrap().is_noop());
+
+        // purge: volta byte a byte ao original
+        d.purge(&mut |_| {}).unwrap();
+        assert_eq!(snapshot(&e.game.gamedata), before);
+        assert!(d.journal().unwrap().entries.is_empty());
+    }
+
+    #[test]
+    fn recovers_from_interrupted_add() {
+        let mut e = env();
+        let before = snapshot(&e.game.gamedata);
+        let src = e.data.join("in");
+        fs::create_dir_all(&src).unwrap();
+        make_scd(&src.join("lua.scd"), &[("x", b"novo")]);
+        e.lib
+            .import(
+                &src.join("lua.scd"),
+                &ImportOptions {
+                    id: Some("novo-lua".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let mut d = Deployer {
+            game: &e.game,
+            data_dir: &e.data,
+            hashes: &mut e.cache,
+        };
+        d.ensure_baseline(&mut |_| {}).unwrap();
+        let mut w = vec![];
+        let targets = d.targets(&e.lib, &profile(&["novo-lua"]), &mut w).unwrap();
+
+        // simula: intenção gravada + backup feito + arquivo copiado, mas o journal não foi atualizado
+        let dest = e.game.gamedata.join("lua.scd");
+        let orig_sha = crate::fsutil::sha256_file(&dest).unwrap();
+        fs::create_dir_all(e.data.join("backups")).unwrap();
+        fs::copy(&dest, e.data.join(format!("backups/{orig_sha}.scd"))).unwrap();
+        let entry = Deployed {
+            name: "lua.scd".into(),
+            sha256: targets[0].sha256.clone(),
+            mod_id: "novo-lua".into(),
+            mod_version: "1.0.0".into(),
+            kind: DeployKind::Replaced,
+            backup: Some(orig_sha.clone()),
+        };
+        let j = Journal {
+            pending: Some(Pending::Add { entry }),
+            ..Default::default()
+        };
+        write_json(&e.data.join("deploy/journal.json"), &j).unwrap();
+        fs::copy(&targets[0].source, &dest).unwrap();
+
+        let msg = d.recover().unwrap().unwrap();
+        assert!(msg.contains("concluída"), "{msg}");
+        assert_eq!(d.journal().unwrap().entries.len(), 1);
+        d.purge(&mut |_| {}).unwrap();
+        assert_eq!(snapshot(&e.game.gamedata), before);
+    }
+
+    #[test]
+    fn modified_deployed_file_goes_to_quarantine() {
+        let mut e = env();
+        let src = e.data.join("in");
+        fs::create_dir_all(&src).unwrap();
+        make_scd(&src.join("zz_x.scd"), &[("a", b"a")]);
+        e.lib.import(&src.join("zz_x.scd"), &ImportOptions::default()).unwrap();
+        let mut d = Deployer {
+            game: &e.game,
+            data_dir: &e.data,
+            hashes: &mut e.cache,
+        };
+        let mut w = vec![];
+        let t = d.targets(&e.lib, &profile(&["x"]), &mut w).unwrap();
+        d.apply(&t, None, &mut |_| {}).unwrap();
+        // usuário edita o arquivo implantado à mão
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(e.game.gamedata.join("zz_x.scd"), b"editado a mao").unwrap();
+        d.purge(&mut |_| {}).unwrap();
+        assert!(!e.game.gamedata.join("zz_x.scd").exists());
+        let q: Vec<_> = fs::read_dir(e.data.join("quarantine")).unwrap().flatten().collect();
+        assert_eq!(q.len(), 1);
+    }
+
+    #[test]
+    fn duplicate_file_warns_and_last_wins() {
+        let mut e = env();
+        let src = e.data.join("in");
+        for (dir, body) in [("a", b"A" as &[u8]), ("b", b"B")] {
+            fs::create_dir_all(src.join(dir)).unwrap();
+            make_scd(&src.join(dir).join("zz_same.scd"), &[("f", body)]);
+            e.lib
+                .import(
+                    &src.join(dir),
+                    &ImportOptions {
+                        id: Some(format!("mod-{dir}")),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
+        let d = Deployer {
+            game: &e.game,
+            data_dir: &e.data,
+            hashes: &mut e.cache,
+        };
+        let mut w = vec![];
+        let t = d.targets(&e.lib, &profile(&["mod-a", "mod-b"]), &mut w).unwrap();
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].mod_id, "mod-b");
+        assert_eq!(w.len(), 1);
+    }
+
+    #[test]
+    fn adopt_unmanaged_file() {
+        let mut e = env();
+        let manual = e.game.gamedata.join("_manual_map.scd");
+        let mut d = Deployer {
+            game: &e.game,
+            data_dir: &e.data,
+            hashes: &mut e.cache,
+        };
+        d.ensure_baseline(&mut |_| {}).unwrap();
+        let m = e.lib.import(&manual, &ImportOptions::default()).unwrap();
+        d.adopt("_manual_map.scd", &m.id, &m.version).unwrap();
+        // um perfil sem o mod remove o arquivo da pasta (agora gerenciado)
+        d.purge(&mut |_| {}).unwrap();
+        assert!(!manual.exists());
+        let mut w = vec![];
+        let t = d.targets(&e.lib, &profile(&[&m.id]), &mut w).unwrap();
+        d.apply(&t, None, &mut |_| {}).unwrap();
+        assert!(manual.exists());
+    }
+}

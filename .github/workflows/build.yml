@@ -1,0 +1,76 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Núcleo (Rust)
+        run: |
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Ponte do toolkit de mapas (jogo sintético)
+        run: python tools/test_maptk_bridge.py
+      - name: Interface
+        run: |
+          npm ci
+          npm run build
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    env:
+      PYTHON_EMBED: "3.12.10"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Python embutido para o Estúdio de Mapas
+        shell: pwsh
+        run: |
+          $zip = "python-$env:PYTHON_EMBED-embed-amd64.zip"
+          Invoke-WebRequest "https://www.python.org/ftp/python/$env:PYTHON_EMBED/$zip" -OutFile $zip
+          Expand-Archive $zip -DestinationPath resources/python -Force
+          resources/python/python.exe -c "import sys, zlib, zipfile; print(sys.version)"
+      - run: npm ci
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: .
+          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          releaseName: "CommandProject ${{ github.ref_name }}"
+          releaseBody: "Instalador para Windows. Atualizações chegam pela aba Apps do Project Club."
+          releaseDraft: true
+          prerelease: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CommandProject-windows
+          path: src-tauri/target/release/bundle/nsis/*.exe
