@@ -342,6 +342,9 @@ pub struct LaunchResult {
 pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<LaunchResult> {
     let app2 = app.clone();
     let (plan, applied, restore) = with_ws(&state.ws, move |ws| {
+        if let Err(e) = ws.ensure_large_address() {
+            eprintln!("modo 4 GB não reaplicado: {e}");
+        }
         let applied = if ws.settings.apply_before_launch {
             Some(ws.apply_active(&mut |p: Progress| emit_progress(&app2, "apply", p.step, p.total, p.message))?)
         } else {
@@ -1217,6 +1220,122 @@ pub async fn shaders_install_reshade(
     emit_progress(&app, "reshade", 4, 4, "Ativando os shaders");
     with_ws(&state.ws, move |ws| {
         ws.shaders()?.apply(Some(preset.as_deref().unwrap_or("Vivido")))
+    })
+    .await
+}
+
+// ---------------------------------------------------------------- estúdio: texturas HD
+
+#[tauri::command]
+pub async fn enhance_groups(state: State<'_, AppState>) -> R<Vec<cp_core::enhance::GroupSummary>> {
+    with_ws(&state.ws, |ws| cp_core::enhance::groups(&ws.stock_sources()?)).await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnhancePreview {
+    before: String,
+    after: String,
+    info: dds::DdsInfo,
+    width: u32,
+    height: u32,
+    class: cp_core::enhance::TextureClass,
+}
+
+/// Original (ampliado sem filtro) e melhorado, no tamanho final, para comparar.
+#[tauri::command]
+pub async fn enhance_preview(
+    state: State<'_, AppState>,
+    entry: String,
+    mode: cp_core::enhance::Mode,
+    opts: cp_core::enhance::EnhanceOptions,
+) -> R<EnhancePreview> {
+    with_ws(&state.ws, move |ws| {
+        for src in ws.stock_sources()?.iter().rev() {
+            if let Ok(d) = cp_core::scd::Scd::open(src)?.read(&entry) {
+                let key = cp_core::scd::normalize_key(&entry);
+                let (before, after, info, (width, height)) = cp_core::enhance::preview(&key, &d, mode, &opts)?;
+                return Ok(EnhancePreview {
+                    before: data_url("image/png", &before),
+                    after: data_url("image/png", &after),
+                    class: cp_core::enhance::classify(&key, &info),
+                    info,
+                    width,
+                    height,
+                });
+            }
+        }
+        Err(cp_core::Error::Other(format!(
+            "{entry} não encontrado nos arquivos do jogo"
+        )))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn build_enhance(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    opts: cp_core::enhance::EnhanceOptions,
+    enable: bool,
+) -> R<Manifest> {
+    with_ws(&state.ws, move |ws| {
+        let dest = ws.data_dir.join("cache").join("hd").join("zz_cp_texturas_hd.scd");
+        let started = std::time::Instant::now();
+        let res = cp_core::enhance::build(&ws.stock_sources()?, &opts, &dest, &mut |i, n, name| {
+            if i % 4 == 0 || i == n {
+                let secs = started.elapsed().as_secs_f64();
+                let left = if i > 8 { (secs / i as f64 * (n - i) as f64) as u64 } else { 0 };
+                let eta = if left > 0 { format!(" (faltam ~{}:{:02})", left / 60, left % 60) } else { String::new() };
+                emit_progress(&app, "hd", i, n, format!("{name}{eta}"));
+            }
+        })?;
+        let mb = |b: u64| b as f64 / 1_048_576.0;
+        let import = ImportOptions {
+            id: Some("texturas-hd".into()),
+            name: Some(opts.name.clone()),
+            category: Some(Category::Textures),
+            description: Some(format!(
+                "{} texturas ampliadas ({}x, até {} px) e {} com nitidez melhorada, geradas no Estúdio a partir das originais. {:.0} MB → {:.0} MB.{}",
+                res.upscaled,
+                opts.scale,
+                opts.max_size,
+                res.sharpened,
+                mb(res.bytes_before),
+                mb(res.bytes_after),
+                if res.failed.is_empty() { String::new() } else { format!(" {} não puderam ser lidas.", res.failed.len()) }
+            )),
+            multiplayer: Some(cp_core::manifest::MpPolicy::Local),
+            replace: true,
+            ..Default::default()
+        };
+        let m = ws.import_mod(&res.archive, &import, enable)?;
+        let _ = std::fs::remove_file(&res.archive);
+        Ok(m)
+    })
+    .await
+}
+
+// ---------------------------------------------------------------- modo 4 GB
+
+#[tauri::command]
+pub async fn laa_status(state: State<'_, AppState>) -> R<Option<cp_core::laa::LaaStatus>> {
+    with_ws(&state.ws, |ws| match ws.laa() {
+        Ok(l) => l.status().map(Some),
+        Err(_) => Ok(None),
+    })
+    .await
+}
+
+/// Liga/desliga o modo 4 GB e guarda a preferência (para reaplicar depois de atualizações).
+#[tauri::command]
+pub async fn laa_set(state: State<'_, AppState>, enabled: bool) -> R<cp_core::laa::LaaStatus> {
+    with_ws(&state.ws, move |ws| {
+        let l = ws.laa()?;
+        let st = if enabled { l.enable()? } else { l.disable()? };
+        ws.settings.keep_large_address = enabled;
+        ws.save_settings()?;
+        Ok(st)
     })
     .await
 }

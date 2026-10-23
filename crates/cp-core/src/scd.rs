@@ -97,6 +97,27 @@ impl Scd {
         Ok(buf)
     }
 
+    /// Lê a entrada de índice `idx` (a ordem é a de [`Scd::entries`]).
+    pub fn read_at(&mut self, idx: usize) -> Result<Vec<u8>> {
+        let mut f = self.zip.by_index(idx).map_err(|e| Error::archive(&self.path, e))?;
+        if f.size() > MAX_ENTRY_BYTES {
+            return Err(Error::archive(&self.path, "entrada grande demais"));
+        }
+        let mut buf = Vec::with_capacity(f.size() as usize);
+        f.read_to_end(&mut buf).map_err(|e| Error::archive(&self.path, e))?;
+        Ok(buf)
+    }
+
+    /// Lê só os primeiros `n` bytes de uma entrada (ex.: cabeçalho de DDS), sem descompactar o resto.
+    pub fn read_prefix_at(&mut self, idx: usize, n: usize) -> Result<Vec<u8>> {
+        let f = self.zip.by_index(idx).map_err(|e| Error::archive(&self.path, e))?;
+        let mut buf = Vec::with_capacity(n);
+        f.take(n as u64)
+            .read_to_end(&mut buf)
+            .map_err(|e| Error::archive(&self.path, e))?;
+        Ok(buf)
+    }
+
     /// Extrai entradas cujo caminho normalizado começa com `prefix` (vazio = tudo)
     /// para `dest`, recusando caminhos que tentem escapar da pasta.
     pub fn extract(&mut self, prefix: &str, dest: &Path) -> Result<usize> {

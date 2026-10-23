@@ -5,12 +5,14 @@ import type { Project } from "../../lib/types";
 import Explorer from "./Explorer";
 import Maps from "./Maps";
 import Projects from "./Projects";
+import TexturesHd from "./TexturesHd";
 import UiSkin from "./UiSkin";
 
-type Tab = "projects" | "explorer" | "skin" | "maps";
+type Tab = "projects" | "explorer" | "hd" | "skin" | "maps";
 const TABS: { id: Tab; label: string; icon: string; hint: string }[] = [
   { id: "projects", label: "Meus projetos", icon: "folder_special", hint: "Lua, texturas e modelos do seu mod" },
   { id: "explorer", label: "Arquivos do jogo", icon: "folder_zip", hint: "Navegue e copie o que quer mudar" },
+  { id: "hd", label: "Texturas HD", icon: "hd", hint: "Mais resolução e nitidez em lote" },
   { id: "skin", label: "Skin de interface", icon: "palette", hint: "Recolore a HUD inteira" },
   { id: "maps", label: "Mapas", icon: "map", hint: "SC2 Map Toolkit" },
 ];
@@ -48,6 +50,7 @@ export default function Studio() {
           <div className="row"><Icon name={t.icon} size={28} style={{ color: "var(--primary)" }} /><h1 className="page-title">{t.label}</h1></div>
           {tab === "projects" && <Projects projects={projects} current={current} setCurrent={setCurrent} reload={reload} openExplorer={() => setTab("explorer")} />}
           {tab === "explorer" && <Explorer projects={projects} target={current} setTarget={setCurrent} />}
+          {tab === "hd" && <TexturesHd />}
           {tab === "skin" && <UiSkin />}
           {tab === "maps" && <Maps />}
         </div>

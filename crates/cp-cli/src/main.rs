@@ -37,6 +37,8 @@ USO: cp <comando> [args]
                               shaders (ReShade): estado, ativa natural/vivido/cinematico,
                               desliga, restaura os presets ou remove tudo
   reshade                     baixa e instala o ReShade oficial no jogo (Windows)
+  4gb [on|off]                modo 4 GB: deixa o jogo (32 bits) usar até 4 GB de memória
+  hd [grupos|gerar] [--rapido] lista os grupos de texturas ou gera o mod \"Texturas HD\"
 
 Pasta de dados: $CP_DATA ou o padrão do sistema.";
 
@@ -260,6 +262,75 @@ async fn run(args: &[String]) -> cp_core::Result<()> {
                         })?;
                     sh.apply(Some(id))?
                 }
+            };
+            print_json(&st);
+        }
+        "hd" => {
+            let sources = ws.stock_sources()?;
+            if args.get(1).map(String::as_str) != Some("gerar") {
+                for g in cp_core::enhance::groups(&sources)? {
+                    println!(
+                        "{:28} {:5} texturas {:8.1} MB  {:?}",
+                        g.group,
+                        g.textures,
+                        g.bytes as f64 / 1_048_576.0,
+                        g.suggested
+                    );
+                }
+                return Ok(());
+            }
+            let opts = cp_core::enhance::EnhanceOptions {
+                quality: if args.iter().any(|a| a == "--rapido") {
+                    cp_core::dds::Quality::Fast
+                } else {
+                    cp_core::dds::Quality::Normal
+                },
+                ..Default::default()
+            };
+            let dest = ws.data_dir.join("cache").join("hd").join("zz_cp_texturas_hd.scd");
+            let r = cp_core::enhance::build(&sources, &opts, &dest, &mut |i, n, name| {
+                if i % 16 == 0 || i == n {
+                    eprintln!("  [{i}/{n}] {name}");
+                }
+            })?;
+            let m = ws.import_mod(
+                &r.archive,
+                &ImportOptions {
+                    id: Some("texturas-hd".into()),
+                    name: Some(opts.name.clone()),
+                    category: Some(cp_core::manifest::Category::Textures),
+                    multiplayer: Some(cp_core::manifest::MpPolicy::Local),
+                    replace: true,
+                    ..Default::default()
+                },
+                true,
+            )?;
+            let _ = std::fs::remove_file(&r.archive);
+            println!(
+                "{}: {} ampliadas, {} com nitidez, {} sem mudança, {} com erro",
+                m.name,
+                r.upscaled,
+                r.sharpened,
+                r.unchanged,
+                r.failed.len()
+            );
+        }
+        "4gb" => {
+            let l = ws.laa()?;
+            let st = match args.get(1).map(String::as_str) {
+                Some("on") => {
+                    let st = l.enable()?;
+                    ws.settings.keep_large_address = true;
+                    ws.save_settings()?;
+                    st
+                }
+                Some("off") => {
+                    let st = l.disable()?;
+                    ws.settings.keep_large_address = false;
+                    ws.save_settings()?;
+                    st
+                }
+                _ => l.status()?,
             };
             print_json(&st);
         }

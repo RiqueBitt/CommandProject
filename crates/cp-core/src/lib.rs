@@ -5,12 +5,14 @@
 pub mod conflicts;
 pub mod dds;
 pub mod deploy;
+pub mod enhance;
 pub mod error;
 pub mod fsutil;
 pub mod game;
 pub mod hashcache;
 pub mod hub;
 pub mod hubbuild;
+pub mod laa;
 pub mod library;
 pub mod lua;
 pub mod manifest;

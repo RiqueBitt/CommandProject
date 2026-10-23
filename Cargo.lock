@@ -268,7 +268,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cp-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "cp-core",
  "serde",
@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "cp-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -286,6 +286,7 @@ dependencies = [
  "futures-util",
  "hex",
  "image",
+ "rayon",
  "reqwest",
  "semver",
  "serde",
@@ -303,7 +304,7 @@ dependencies = [
 
 [[package]]
 name = "cp-server"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "chrono",

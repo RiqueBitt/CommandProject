@@ -2,24 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { api, confirmDialog, openUrl } from "../lib/api";
 import { useStore } from "../lib/store";
 import type { ShaderStatus } from "../lib/types";
-import { Icon, Menu, MenuItem, Notice, TaskProgress } from "./ui";
+import { Compare, Icon, Menu, MenuItem, Notice, TaskProgress } from "./ui";
 
 const PREVIEW: Record<string, string> = { Natural: "natural", Vivido: "vivido", Cinematico: "cinematico" };
-
-/** Comparador antes/depois: arraste a divisória. */
-function Compare({ after, label }: { after: string; label: string }) {
-  const [pos, setPos] = useState(50);
-  return (
-    <div className="compare" style={{ ["--pos" as string]: `${pos}%` }}>
-      <img src="shaders/original.jpg" alt="Cena de teste sem shaders" draggable={false} />
-      <img className="after" src={`shaders/${after}.jpg`} alt={`Cena de teste com o preset ${label}`} draggable={false} />
-      <span className="divider" aria-hidden="true"><Icon name="code" /></span>
-      <span className="chip dark tag-l">Original</span>
-      <span className="chip dark tag-r">{label}</span>
-      <input type="range" min={0} max={100} value={pos} onChange={(e) => setPos(Number(e.target.value))} aria-label="Comparar antes e depois" />
-    </div>
-  );
-}
 
 export default function ShadersCard() {
   const { run } = useStore.getState();
@@ -55,7 +40,7 @@ export default function ShadersCard() {
   return (
     <section className="card shaders-card" aria-labelledby="shaders-title">
       <div className="shaders-media">
-        <Compare after={PREVIEW[pick] ?? "vivido"} label={chosen?.name ?? "Vívido"} />
+        <Compare before="shaders/original.jpg" after={`shaders/${PREVIEW[pick] ?? "vivido"}.jpg`} beforeLabel="Original" afterLabel={chosen?.name ?? "Vívido"} />
         <p className="faint small">Cena de teste renderizada com estes mesmos shaders, fora do jogo.</p>
       </div>
       <div className="shaders-body">

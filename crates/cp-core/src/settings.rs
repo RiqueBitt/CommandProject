@@ -33,6 +33,8 @@ pub struct Settings {
     pub nickname: String,
     /// Avisar quando sair uma versão nova do launcher (GitHub Releases).
     pub check_app_updates: bool,
+    /// Manter o "modo 4 GB" (Large Address Aware): reaplica antes de jogar se a Steam restaurar o .exe.
+    pub keep_large_address: bool,
 }
 
 impl Default for Settings {
@@ -50,6 +52,7 @@ impl Default for Settings {
             server_url: None,
             nickname: String::new(),
             check_app_updates: true,
+            keep_large_address: false,
         }
     }
 }

@@ -58,6 +58,21 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
 - O launcher instala o ReShade oficial com um clique (assinatura conferida) e troca o preset; é só
   visual e não dessincroniza o multiplayer. Detalhes em [resources/shaders](resources/shaders/README.md).
 
+**Texturas HD (mais resolução e nitidez)**
+- No Estúdio, gera um mod a partir das texturas **originais do seu jogo**: tira os blocos da compressão
+  DXT, amplia 2x ou 4x (Lanczos com anti-halo + retroprojeção, que recupera bordas sem inventar
+  detalhes) e aplica nitidez adaptativa. Recomprime no mesmo formato, com mipmaps.
+- Trata cada tipo de textura do jeito certo: mapas de normal são renormalizados, máscaras não ganham
+  nitidez, tabelas de cor/fontes/cubemaps não mudam, e a interface fica em "só nitidez" (o jogo
+  desenha muitas imagens dela no tamanho da própria textura).
+- Calcula antes quanto de memória de vídeo as texturas vão ocupar e ajusta sozinho para caber.
+
+**Modo 4 GB de memória**
+- O SC2 é um programa de 32 bits (2 GB de RAM). O launcher liga a flag *Large Address Aware* no
+  executável, que passa a usar até 4 GB num Windows 64 bits. Guarda o original, desfaz com um clique
+  e reaplica sozinho se a Steam restaurar o arquivo. (Transformar o jogo em 64 bits de verdade
+  exigiria recompilar o motor, cujo código não é público.)
+
 **Atualizações do app**: avisa quando sai uma versão nova nas Releases do GitHub (dá para desligar).
 
 | | |
@@ -65,6 +80,7 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
 | ![Hub](docs/screenshots/hub.png) | ![Multiplayer](docs/screenshots/multiplayer.png) |
 | ![Pintor de texturas](docs/screenshots/pintor.png) | ![Mapas](docs/screenshots/mapas.png) |
 | ![Shaders](docs/screenshots/shaders.png) | ![Presets: original, Natural, Vívido, Cinemático](docs/screenshots/shaders-presets.jpg) |
+| ![Texturas HD](docs/screenshots/texturas-hd.png) | ![Comparação de ampliação](docs/screenshots/texturas-hd-comparacao.jpg) |
 
 ## Segurança dos arquivos do jogo
 
@@ -147,6 +163,8 @@ cargo run -p cp-cli -- help
 cp status | cp import zz_STORM.scd | cp apply | cp purge | cp conflicts | cp fingerprint
 cp link https://exemplo.com/zz_mod.scd     # instala de um link direto
 cp hub-build hub/ index.json               # gera o índice de uma pasta de hub
+cp hd gerar                                # gera o mod Texturas HD
+cp 4gb on                                  # liga o modo 4 GB no executável
 ```
 
 A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandproject`), ou `CP_DATA`.

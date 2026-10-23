@@ -205,3 +205,18 @@ export function CopyButton({ text, label = "Copiar" }: { text: string; label?: s
     }}><Icon name={done ? "check" : "content_copy"} /> {done ? "Copiado" : label}</button>
   );
 }
+
+/** Comparador antes/depois: arraste a divisória. */
+export function Compare({ before, after, beforeLabel, afterLabel, pixelated, ratio = "16 / 9" }: { before: string; after: string; beforeLabel: string; afterLabel: string; pixelated?: boolean; ratio?: string }) {
+  const [pos, setPos] = useState(50);
+  return (
+    <div className={`compare ${pixelated ? "pixelated" : ""}`} style={{ ["--pos" as string]: `${pos}%`, aspectRatio: ratio }}>
+      <img src={before} alt={beforeLabel} draggable={false} />
+      <img className="after" src={after} alt={afterLabel} draggable={false} />
+      <span className="divider" aria-hidden="true"><Icon name="code" /></span>
+      <span className="chip dark tag-l">{beforeLabel}</span>
+      <span className="chip dark tag-r">{afterLabel}</span>
+      <input type="range" min={0} max={100} value={pos} onChange={(e) => setPos(Number(e.target.value))} aria-label="Comparar antes e depois" />
+    </div>
+  );
+}

@@ -3,7 +3,7 @@ import { Field, Icon, Notice, Switch } from "../components/ui";
 import { api, openUrl, pickFile } from "../lib/api";
 import { community } from "../lib/community";
 import { fmtBytes, useStore } from "../lib/store";
-import type { FileStatus, MaptkStatus, Settings } from "../lib/types";
+import type { FileStatus, LaaStatus, MaptkStatus, Settings } from "../lib/types";
 import { RELEASES_URL } from "../lib/update";
 
 const ORIGIN: Record<FileStatus["origin"], string> = {
@@ -92,6 +92,7 @@ export default function SettingsPage() {
                 <div className="txt"><b>Aplicar o perfil antes de jogar</b><span>O botão Jogar instala e remove os mods do perfil ativo antes de abrir o jogo.</span></div>
                 <Switch checked={s.applyBeforeLaunch} onChange={(v) => setS({ ...s, applyBeforeLaunch: v })} label="Aplicar antes de jogar" />
               </div>
+              <MemoryMode onChange={(v) => setS({ ...s, keepLargeAddress: v })} />
               <div className="setting-row">
                 <div className="txt"><b>Voltar ao original quando o jogo fechar</b><span>Útil se você também joga sem o launcher ou usa “Verificar integridade” da Steam.</span></div>
                 <Switch checked={s.restoreOnExit} onChange={(v) => setS({ ...s, restoreOnExit: v })} label="Restaurar ao fechar" />
@@ -205,5 +206,35 @@ export default function SettingsPage() {
         </div>
       </div>
     </>
+  );
+}
+
+/** "Modo 4 GB": liga a flag Large Address Aware no executável (age na hora, com backup). */
+function MemoryMode({ onChange }: { onChange: (v: boolean) => void }) {
+  const { run } = useStore.getState();
+  const busy = useStore((s) => s.busy.laa);
+  const [st, setSt] = useState<LaaStatus | null | undefined>(undefined);
+  useEffect(() => { api.laaStatus().then(setSt).catch(() => setSt(null)); }, []);
+  if (!st) return null;
+  return (
+    <div className="setting-row" id="modo-4gb">
+      <div className="txt">
+        <b>Modo 4 GB de memória</b>
+        <span>
+          O SC2 é um programa de 32 bits e, sem isso, só pode usar 2 GB de RAM. Ligado, o mesmo executável usa até 4 GB num Windows 64 bits:
+          menos travamentos com Texturas HD, mapas grandes e partidas longas. O original fica guardado e volta com um clique.
+        </span>
+        <div className="chips" style={{ marginTop: 6 }}>
+          {st.is64bit ? <span className="chip ok">O executável já é 64 bits</span> : st.enabled ? <span className="chip ok"><Icon name="memory" /> Até 4 GB</span> : <span className="chip">Até 2 GB</span>}
+          {st.enabled && !st.patchedByUs && <span className="chip info">Já vinha ligado</span>}
+          {st.revertedByUpdate && <span className="chip warn">A Steam restaurou o executável: será reaplicado ao jogar</span>}
+          {st.steamStub && <span className="chip warn">Executável com proteção da Steam: se o jogo não abrir, desligue</span>}
+        </div>
+      </div>
+      <Switch checked={st.enabled} disabled={busy || st.is64bit || (st.enabled && !st.patchedByUs)} onChange={async (v) => {
+        const r = await run("laa", () => api.laaSet(v), v ? "Modo 4 GB ligado." : "Executável original restaurado.");
+        if (r) { setSt(r); onChange(v); }
+      }} label="Modo 4 GB de memória" />
+    </div>
   );
 }

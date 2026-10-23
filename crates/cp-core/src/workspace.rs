@@ -516,6 +516,30 @@ impl Workspace {
         })
     }
 
+    /// "Modo 4 GB" do executável do jogo.
+    pub fn laa(&self) -> Result<crate::laa::Laa> {
+        let exe = self
+            .game()?
+            .exe
+            .clone()
+            .ok_or_else(|| Error::Other("executável do jogo não encontrado".into()))?;
+        Ok(crate::laa::Laa::new(exe, &self.data_dir))
+    }
+
+    /// Antes de jogar: se o usuário quer o modo 4 GB e ele sumiu (atualização da Steam), reaplica.
+    pub fn ensure_large_address(&self) -> Result<bool> {
+        if !self.settings.keep_large_address {
+            return Ok(false);
+        }
+        let laa = self.laa()?;
+        let st = laa.status()?;
+        if st.enabled || st.is_64bit {
+            return Ok(false);
+        }
+        laa.enable()?;
+        Ok(true)
+    }
+
     pub fn shaders(&self) -> Result<crate::shaders::Shaders> {
         let pack = self
             .resources_dir

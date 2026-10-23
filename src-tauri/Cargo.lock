@@ -550,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "commandproject"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "cp-core",
@@ -632,7 +632,7 @@ dependencies = [
 
 [[package]]
 name = "cp-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -640,6 +640,7 @@ dependencies = [
  "futures-util",
  "hex",
  "image",
+ "rayon",
  "reqwest",
  "semver",
  "serde",

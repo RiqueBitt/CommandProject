@@ -149,6 +149,11 @@ export const api = {
   uiSkinPreview: (entry: string, adjust: T.ColorAdjust) => call<T.TextureView>("ui_skin_preview", { entry, adjust }),
   buildUiSkin: (opts: T.UiSkinOptions, enable = true) => call<T.Manifest>("build_ui_skin", { opts, enable }),
 
+  enhanceGroups: () => call<T.EnhanceGroup[]>("enhance_groups"),
+  enhancePreview: (entry: string, mode: T.EnhanceMode, opts: T.EnhanceOptions) => call<T.EnhancePreview>("enhance_preview", { entry, mode, opts }),
+  buildEnhance: (opts: T.EnhanceOptions, enable = true) => call<T.Manifest>("build_enhance", { opts, enable }),
+  laaStatus: () => call<T.LaaStatus | null>("laa_status"),
+  laaSet: (enabled: boolean) => call<T.LaaStatus>("laa_set", { enabled }),
   shadersStatus: () => call<T.ShaderStatus | null>("shaders_status"),
   shadersApply: (preset: string | null) => call<T.ShaderStatus>("shaders_apply", { preset }),
   shadersReset: () => call<T.ShaderStatus>("shaders_reset"),

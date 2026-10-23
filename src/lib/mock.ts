@@ -59,7 +59,7 @@ let profiles: T.ProfileSet = {
 let settings: T.Settings = {
   gamePath: null, launchMode: "steam", launchArgs: [], applyBeforeLaunch: true, restoreOnExit: false,
   hubUrls: ["https://hub.exemplo.com/index.json"], pythonPath: null, checkModUpdates: true, onboarded: true,
-  serverUrl: "http://localhost:8787", nickname: "Rique", checkAppUpdates: true,
+  serverUrl: "http://localhost:8787", nickname: "Rique", checkAppUpdates: true, keepLargeAddress: false,
 };
 
 const game: T.GameInstall = {
@@ -135,6 +135,10 @@ const projectFiles: Record<string, T.ProjectFile[]> = {
   ],
 };
 
+const laa = { enabled: false };
+function laaStatus(): T.LaaStatus {
+  return { exe: "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Supreme Commander 2\\bin\\SupremeCommander2.exe", is64bit: false, enabled: laa.enabled, patchedByUs: laa.enabled, revertedByUpdate: false, steamStub: false };
+}
 const shaderState = { reshade: false, pack: false, preset: null as string | null };
 function shaderStatus(): T.ShaderStatus {
   return {
@@ -350,6 +354,27 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       const o = a.opts as T.UiSkinOptions;
       return r(manifest("skin-" + o.name.toLowerCase(), "Skin de interface: " + o.name, "1.0.0", "ui", ["zz_cp_skin.scd"], { multiplayer: "local" }));
     }
+    case "enhance_groups": return r([
+      { group: "/units/", textures: 1840, bytes: 412_000_000, suggested: "upscale", buckets: [{ width: 512, height: 512, format: "dxt1", mipmaps: true, skip: false, count: 600 }, { width: 512, height: 512, format: "dxt5", mipmaps: true, skip: false, count: 600 }, { width: 256, height: 256, format: "dxt5", mipmaps: true, skip: false, count: 640 }], sample: ["units/uel0101/uel0101_albedo.dds", "units/uel0101/uel0101_normalsts.dds", "units/ual0201/ual0201_albedo.dds"] },
+      { group: "/env/", textures: 960, bytes: 286_000_000, suggested: "upscale", buckets: [{ width: 1024, height: 1024, format: "dxt1", mipmaps: true, skip: false, count: 400 }, { width: 512, height: 512, format: "dxt5", mipmaps: true, skip: false, count: 560 }], sample: ["env/evergreen/layers/grass01_albedo.dds", "env/desert/layers/sand02_albedo.dds"] },
+      { group: "/textures/ui/", textures: 1873, bytes: 96_000_000, suggested: "sharpen", buckets: [{ width: 128, height: 128, format: "dxt5", mipmaps: false, skip: false, count: 1873 }], sample: ["textures/ui/common/game/economy-panel/bg.dds"] },
+      { group: "/projectiles/", textures: 210, bytes: 18_000_000, suggested: "upscale", buckets: [{ width: 128, height: 128, format: "dxt5", mipmaps: true, skip: false, count: 210 }], sample: ["projectiles/laser01/laser01_albedo.dds"] },
+      { group: "/effects/", textures: 430, bytes: 41_000_000, suggested: "upscale", buckets: [{ width: 256, height: 256, format: "dxt5", mipmaps: true, skip: false, count: 430 }], sample: ["effects/textures/explosion01.dds"] },
+      { group: "/textures/environment/", textures: 64, bytes: 12_000_000, suggested: "upscale", buckets: [{ width: 256, height: 1, format: "bgra8", mipmaps: false, skip: true, count: 64 }], sample: ["textures/environment/ramp_water.dds"] },
+    ]);
+    case "enhance_preview": {
+      const o = a.opts as T.EnhanceOptions;
+      const entry = String(a.entry);
+      const cls = /normal/.test(entry) ? "normal" : /ramp/.test(entry) ? "skip" : "color";
+      const size = a.mode === "upscale" && cls !== "skip" ? Math.min(512 * o.scale, o.maxSize) : 512;
+      return r({ before: "hd/antes.jpg", after: cls === "skip" ? "hd/antes.jpg" : "hd/depois.jpg", info: { width: 512, height: 512, mipCount: 10, format: "dxt1", isCubemap: false }, width: size, height: size, class: cls });
+    }
+    case "build_enhance": {
+      for (let i = 0; i <= 40; i += 4) { mockEvents.emit("cp://progress", { task: "hd", step: i, total: 40, message: `units/uel${String(100 + i).padStart(4, "0")}/albedo.dds (faltam ~0:${String(40 - i).padStart(2, "0")})` }); await sleep(150); }
+      return r({ ...mods[0], id: "texturas-hd", name: (a.opts as T.EnhanceOptions).name, category: "textures" });
+    }
+    case "laa_status": return r(laaStatus());
+    case "laa_set": laa.enabled = Boolean(a.enabled); return r(laaStatus());
     case "shaders_status": return r(shaderStatus());
     case "shaders_apply": {
       if (!shaderState.reshade) throw "o ReShade não está instalado";
