@@ -33,6 +33,10 @@ USO: cp <comando> [args]
   launch                      mostra como o jogo seria iniciado
   hub-build <PASTA> [SAÍDA]   gera o index.json de uma pasta de hub (hash e tamanho automáticos)
   link <URL>                  instala um mod de um link direto (.scd/.zip)
+  shaders [PRESET|off|reset|remove]
+                              shaders (ReShade): estado, ativa natural/vivido/cinematico,
+                              desliga, restaura os presets ou remove tudo
+  reshade                     baixa e instala o ReShade oficial no jogo (Windows)
 
 Pasta de dados: $CP_DATA ou o padrão do sistema.";
 
@@ -238,6 +242,36 @@ async fn run(args: &[String]) -> cp_core::Result<()> {
                 true,
             )?;
             println!("instalado: {} ({}) sha256 {}", m.name, m.id, m.files[0].sha256);
+        }
+        "shaders" => {
+            let sh = ws.shaders()?;
+            let st = match args.get(1).map(String::as_str) {
+                None | Some("status") => sh.status()?,
+                Some("off") => sh.apply(None)?,
+                Some("reset") => sh.reset_presets()?,
+                Some("remove") => sh.remove(false)?,
+                Some(p) => {
+                    let id = cp_core::shaders::PRESETS
+                        .iter()
+                        .find(|(id, name, _)| id.eq_ignore_ascii_case(p) || name.eq_ignore_ascii_case(p))
+                        .map(|(id, ..)| *id)
+                        .ok_or_else(|| {
+                            cp_core::Error::Other(format!("preset desconhecido: {p} (natural, vivido, cinematico)"))
+                        })?;
+                    sh.apply(Some(id))?
+                }
+            };
+            print_json(&st);
+        }
+        "reshade" => {
+            let exe = ws
+                .game()?
+                .exe
+                .clone()
+                .ok_or_else(|| cp_core::Error::Other("executável do jogo não encontrado".into()))?;
+            let cache = ws.data_dir.join("cache").join("reshade");
+            let r = cp_core::shaders::install_reshade(&exe, &cache, &mut |m| eprintln!("  {m}")).await?;
+            println!("ReShade {} instalado (assinado por {})", r.version, r.signer);
         }
         "launch" => print_json(&ws.launch_plan()?),
         other => {

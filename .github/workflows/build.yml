@@ -34,6 +34,12 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings > clippy.log 2>&1 || report clippy.log '^(error|warning)' clippy
           cargo test --workspace > test.log 2>&1 || report test.log 'panicked|FAILED|^error|failures:' testes
           grep "test result" test.log
+      - name: Shaders (compilador do ReShade, HLSL SM3 + GLSL)
+        run: tools/shaders/check.sh target/shaders
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shaders-hlsl
+          path: target/shaders/*.hlsl
       - name: Ponte do toolkit de mapas (jogo sintético)
         run: python tools/test_maptk_bridge.py
       - name: Interface
@@ -41,8 +47,21 @@ jobs:
           npm ci
           npm run build
 
-  windows:
+  shaders-dx9:
     needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: shaders-hlsl
+          path: shaders-hlsl
+      - name: Compila cada passe para DirectX 9 (fxc.exe da Microsoft)
+        shell: pwsh
+        run: tools/shaders/check_dx9.ps1 shaders-hlsl
+
+  windows:
+    needs: [test, shaders-dx9]
     runs-on: windows-latest
     env:
       PYTHON_EMBED: "3.12.10"

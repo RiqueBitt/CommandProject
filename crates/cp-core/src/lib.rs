@@ -19,6 +19,7 @@ pub mod profile;
 pub mod scd;
 pub mod scm;
 pub mod settings;
+pub mod shaders;
 pub mod studio;
 pub mod sync;
 pub mod vdf;

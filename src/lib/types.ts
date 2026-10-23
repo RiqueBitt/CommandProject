@@ -165,3 +165,10 @@ export const CATEGORY_LABEL: Record<Category, string> = {
   library: "Biblioteca",
   other: "Outros",
 };
+
+export interface ShaderPreset { id: string; name: string; description: string; customized: boolean }
+export interface ShaderStatus {
+  binDir: string; reshade: boolean; reshadeVersion?: string | null; foreignDll: boolean;
+  packInstalled: boolean; packVersion?: string | null; updateAvailable: boolean;
+  preset?: string | null; presets: ShaderPreset[]; toggleKey: string; menuKey: string;
+}

@@ -1158,3 +1158,65 @@ pub async fn open_path(app: AppHandle, path: String, reveal: Option<bool>) -> R<
         app.opener().open_path(&path, None::<&str>).map_err(err)
     }
 }
+
+// ---------------------------------------------------------------- shaders (ReShade)
+
+/// `None` quando a pasta do jogo ainda não foi configurada.
+#[tauri::command]
+pub async fn shaders_status(state: State<'_, AppState>) -> R<Option<cp_core::shaders::ShaderStatus>> {
+    with_ws(&state.ws, |ws| match ws.shaders() {
+        Ok(sh) => sh.status().map(Some),
+        Err(_) if ws.game().is_err() => Ok(None),
+        Err(e) => Err(e),
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn shaders_apply(state: State<'_, AppState>, preset: Option<String>) -> R<cp_core::shaders::ShaderStatus> {
+    with_ws(&state.ws, move |ws| ws.shaders()?.apply(preset.as_deref())).await
+}
+
+#[tauri::command]
+pub async fn shaders_reset(state: State<'_, AppState>) -> R<cp_core::shaders::ShaderStatus> {
+    with_ws(&state.ws, |ws| ws.shaders()?.reset_presets()).await
+}
+
+#[tauri::command]
+pub async fn shaders_remove(state: State<'_, AppState>, reshade: bool) -> R<cp_core::shaders::ShaderStatus> {
+    with_ws(&state.ws, move |ws| ws.shaders()?.remove(reshade)).await
+}
+
+/// Baixa o instalador oficial do ReShade, confere a assinatura, instala e ativa `preset`.
+#[tauri::command]
+pub async fn shaders_install_reshade(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    preset: Option<String>,
+) -> R<cp_core::shaders::ShaderStatus> {
+    let (exe, cache) = with_ws(&state.ws, |ws| {
+        if cp_core::game::is_running() {
+            return Err(cp_core::Error::Other("feche o jogo antes de instalar o ReShade".into()));
+        }
+        let exe = ws
+            .game()?
+            .exe
+            .clone()
+            .ok_or_else(|| cp_core::Error::Other("executável do jogo não encontrado".into()))?;
+        Ok((exe, ws.data_dir.join("cache").join("reshade")))
+    })
+    .await?;
+    let app2 = app.clone();
+    let mut step = 0usize;
+    cp_core::shaders::install_reshade(&exe, &cache, &mut move |m| {
+        step += 1;
+        emit_progress(&app2, "reshade", step, 4, m);
+    })
+    .await
+    .map_err(err)?;
+    emit_progress(&app, "reshade", 4, 4, "Ativando os shaders");
+    with_ws(&state.ws, move |ws| {
+        ws.shaders()?.apply(Some(preset.as_deref().unwrap_or("Vivido")))
+    })
+    .await
+}

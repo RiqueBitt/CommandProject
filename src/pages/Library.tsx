@@ -1,3 +1,4 @@
+import ShadersCard from "../components/ShadersCard";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -88,6 +89,8 @@ export default function Library() {
             <button className="btn primary" onClick={() => importFrom(false)}><Icon name="add" /> Importar .scd ou .zip</button>
           </div>
         </div>
+
+        <ShadersCard />
 
         <div className="row wrap" style={{ gap: 12 }}>
           <div className="search-bar" style={{ width: 340 }}>

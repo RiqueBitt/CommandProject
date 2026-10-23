@@ -502,6 +502,30 @@ impl Workspace {
         game::launch_plan(self.game()?, self.settings.launch_mode, &self.settings.launch_args)
     }
 
+    // ---------------------------------------------------------------- shaders (ReShade)
+
+    /// Pasta do executável do jogo (onde o ReShade e os shaders ficam).
+    pub fn game_bin_dir(&self) -> Result<PathBuf> {
+        let g = self.game()?;
+        Ok(match &g.exe {
+            Some(exe) => exe
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| g.root.join("bin")),
+            None => g.root.join("bin"),
+        })
+    }
+
+    pub fn shaders(&self) -> Result<crate::shaders::Shaders> {
+        let pack = self
+            .resources_dir
+            .as_ref()
+            .map(|r| r.join("shaders"))
+            .filter(|p| p.join("CommandProject.fx").is_file())
+            .ok_or_else(|| Error::Other("o pacote de shaders não está instalado junto com o app".into()))?;
+        Ok(crate::shaders::Shaders::new(self.game_bin_dir()?, pack, &self.data_dir))
+    }
+
     // ---------------------------------------------------------------- estúdio de mapas
 
     pub fn map_bridge(&self) -> Result<Bridge> {

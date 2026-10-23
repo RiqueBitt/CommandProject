@@ -135,11 +135,27 @@ const projectFiles: Record<string, T.ProjectFile[]> = {
   ],
 };
 
+const shaderState = { reshade: false, pack: false, preset: null as string | null };
+function shaderStatus(): T.ShaderStatus {
+  return {
+    binDir: "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Supreme Commander 2\\bin",
+    reshade: shaderState.reshade, reshadeVersion: shaderState.reshade ? "6.6.2" : null, foreignDll: false,
+    packInstalled: shaderState.pack, packVersion: shaderState.pack ? "1.0.0" : null, updateAvailable: false,
+    preset: shaderState.pack ? shaderState.preset : null,
+    presets: [
+      { id: "Natural", name: "Natural", description: "Mais nítido e com cores mais vivas, sem mudar o clima do jogo.", customized: false },
+      { id: "Vivido", name: "Vívido", description: "Cores fortes, relevo marcado e brilho nas explosões.", customized: false },
+      { id: "Cinematico", name: "Cinemático", description: "Tons quentes, contraste alto, vinheta e bloom generoso.", customized: false },
+    ],
+    toggleKey: "Scroll Lock", menuKey: "Home",
+  };
+}
+
 export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<R> {
   await sleep(120);
   const r = (v: unknown) => v as R;
   switch (cmd) {
-    case "app_info": return r({ version: "0.1.0", dataDir: "%APPDATA%\\io.github.riquebitt.commandproject", resourcesDir: null, os: "browser" });
+    case "app_info": return r({ version: __APP_VERSION__, dataDir: "%APPDATA%\\io.github.riquebitt.commandproject", resourcesDir: null, os: "browser" });
     case "recover": return r(null);
     case "dashboard": {
       const p = plan();
@@ -333,6 +349,26 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       await progress("skin", Array.from({ length: 8 }, (_, i) => `textures/ui/common/${i}.dds`));
       const o = a.opts as T.UiSkinOptions;
       return r(manifest("skin-" + o.name.toLowerCase(), "Skin de interface: " + o.name, "1.0.0", "ui", ["zz_cp_skin.scd"], { multiplayer: "local" }));
+    }
+    case "shaders_status": return r(shaderStatus());
+    case "shaders_apply": {
+      if (!shaderState.reshade) throw "o ReShade não está instalado";
+      shaderState.pack = true;
+      shaderState.preset = (a.preset as string | null) ?? null;
+      return r(shaderStatus());
+    }
+    case "shaders_reset": return r(shaderStatus());
+    case "shaders_remove": {
+      shaderState.pack = false;
+      shaderState.preset = null;
+      if (a.reshade) shaderState.reshade = false;
+      return r(shaderStatus());
+    }
+    case "shaders_install_reshade": {
+      const steps = ["Procurando a versão mais nova do ReShade", "Baixando o ReShade 6.6.2", "Conferindo a assinatura digital", "Instalando", "Ativando os shaders"];
+      for (let i = 0; i < steps.length; i++) { mockEvents.emit("cp://progress", { task: "reshade", step: i, total: 4, message: steps[i] }); await sleep(350); }
+      Object.assign(shaderState, { reshade: true, pack: true, preset: (a.preset as string | null) ?? "Vivido" });
+      return r(shaderStatus());
     }
     case "maptk_status": return r({ python: { program: "python", prefixArgs: [], version: "3.12.7" }, ready: true });
     case "maptk_run": {

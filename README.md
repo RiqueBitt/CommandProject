@@ -52,12 +52,19 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
   Escolha um terreno, clique para posicionar as bases, desenhe passagens sobre a água e gere o
   mapa. O toolkit verifica se todo ponto é navegável e se as bases se alcançam antes de gerar.
 
+**Shaders (deixa o jogo mais bonito)**
+- Mod de pós-processamento próprio para o ReShade (DirectX 9): anti-serrilhado, nitidez adaptativa,
+  relevo no terreno, bloom nas explosões e correção de cor. Presets **Natural**, **Vívido** e **Cinemático**.
+- O launcher instala o ReShade oficial com um clique (assinatura conferida) e troca o preset; é só
+  visual e não dessincroniza o multiplayer. Detalhes em [resources/shaders](resources/shaders/README.md).
+
 **Atualizações do app**: avisa quando sai uma versão nova nas Releases do GitHub (dá para desligar).
 
 | | |
 |---|---|
 | ![Hub](docs/screenshots/hub.png) | ![Multiplayer](docs/screenshots/multiplayer.png) |
 | ![Pintor de texturas](docs/screenshots/pintor.png) | ![Mapas](docs/screenshots/mapas.png) |
+| ![Shaders](docs/screenshots/shaders.png) | ![Presets: original, Natural, Vívido, Cinemático](docs/screenshots/shaders-presets.jpg) |
 
 ## Segurança dos arquivos do jogo
 
@@ -108,6 +115,7 @@ crates/cp-server   servidor da comunidade: salas, chat (WebSocket) e hub
 src-tauri          app desktop (Tauri 2): comandos + eventos de progresso
 src                interface (React + TypeScript + Vite)
 resources/maptk    SC2 Map Toolkit (MIT, sem alterações) + maptk_bridge.py
+resources/shaders  shaders do ReShade (CommandProject.fx) e presets
 resources/python   Python embutido (baixado no build do Windows)
 docs/HUB_API.md    formato do índice do hub e do mod.json
 ```

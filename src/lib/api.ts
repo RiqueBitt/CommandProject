@@ -149,6 +149,11 @@ export const api = {
   uiSkinPreview: (entry: string, adjust: T.ColorAdjust) => call<T.TextureView>("ui_skin_preview", { entry, adjust }),
   buildUiSkin: (opts: T.UiSkinOptions, enable = true) => call<T.Manifest>("build_ui_skin", { opts, enable }),
 
+  shadersStatus: () => call<T.ShaderStatus | null>("shaders_status"),
+  shadersApply: (preset: string | null) => call<T.ShaderStatus>("shaders_apply", { preset }),
+  shadersReset: () => call<T.ShaderStatus>("shaders_reset"),
+  shadersRemove: (reshade: boolean) => call<T.ShaderStatus>("shaders_remove", { reshade }),
+  shadersInstallReshade: (preset: string | null) => call<T.ShaderStatus>("shaders_install_reshade", { preset }),
   maptkStatus: () => call<T.MaptkStatus>("maptk_status"),
   maptkCatalog: () => call<{ terrains: T.Terrain[] }>("maptk_run", { command: "catalog", input: {} }),
   maptkPreview: (terrain: string, size = 512) => call<T.TerrainPreview>("maptk_run", { command: "preview", input: { terrain, size } }),

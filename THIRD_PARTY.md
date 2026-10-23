@@ -12,6 +12,7 @@
 | texpresso | compressão DXT/BC | MIT |
 | zip, image, reqwest, sha2, sysinfo e demais crates | núcleo em Rust | MIT / Apache-2.0 |
 | axum, tokio, tower-http | servidor da comunidade | MIT |
+| [ReShade](https://reshade.me) — crosire | não vem junto: o launcher baixa o instalador oficial quando você pede; o compilador de efeitos (`tools/fxc.cpp`, commit `7bf9de8`) é usado só nos testes do CI | BSD-3-Clause |
 | Python embutido (python.org, só no instalador do Windows) | executar o toolkit de mapas | PSF License |
 
 Ideias de recursos (sem código copiado): [Definitive Supreme Commander Launcher](https://github.com/ageekhere/Definitive-Supreme-Commander-Launcher)

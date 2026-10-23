@@ -20,7 +20,7 @@ sysinfo = { version = "0.39.6", default-features = false, features = ["system"] 
 tempfile = "3.27.0"
 texpresso = { version = "2.0.2", features = ["rayon"] }
 thiserror = "2.0.21"
-tokio = { version = "1.54.1", features = ["fs", "io-util", "rt-multi-thread", "macros", "net"] }
+tokio = { version = "1.54.1", features = ["fs", "io-util", "rt-multi-thread", "macros", "net", "time"] }
 walkdir = "2.5.0"
 zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 

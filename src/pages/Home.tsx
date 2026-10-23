@@ -3,7 +3,7 @@ import { ConflictsModal, InstallLinkModal } from "../components/dialogs";
 import { Empty, Field, Icon, Menu, MenuItem, Modal, Notice, TaskProgress } from "../components/ui";
 import { api, confirmDialog, openUrl, pickFile } from "../lib/api";
 import { fmtDate, plural, useStore } from "../lib/store";
-import type { ConflictReport, UpdateInfo } from "../lib/types";
+import type { ConflictReport, ShaderStatus, UpdateInfo } from "../lib/types";
 
 export default function Home() {
   const d = useStore((s) => s.dashboard);
@@ -17,6 +17,8 @@ export default function Home() {
   const [conflicts, setConflicts] = useState<ConflictReport | null>(null);
   const [link, setLink] = useState(false);
   const [rename, setRename] = useState(false);
+  const [shaders, setShaders] = useState<ShaderStatus | null>(null);
+  useEffect(() => { api.shadersStatus().then(setShaders).catch(() => setShaders(null)); }, []);
   const menuBtn = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -197,6 +199,7 @@ export default function Home() {
         <span className="tabline">Conteúdo</span>
         <button className="content-line" onClick={() => go("library")}><Icon name="extension" /> {plural(active.length, "mod ativo", "mods ativos")}<Icon name="chevron_right" className="go" /></button>
         <button className="content-line" onClick={() => go("library")}><Icon name="map" /> {plural(count("maps"), "mapa", "mapas")} e {plural(count("ui"), "mod de interface", "mods de interface")}<Icon name="chevron_right" className="go" /></button>
+        <button className="content-line" onClick={() => go("library")}><Icon name="auto_awesome" /> {shaders?.packInstalled && shaders.preset ? `Shaders: ${shaders.presets.find((p) => p.id === shaders.preset)?.name}` : "Shaders: deixar o jogo mais bonito"}<Icon name="chevron_right" className="go" /></button>
         <button className="content-line" onClick={() => go("hub")}><Icon name="download" /> Baixar mais mods<Icon name="chevron_right" className="go" /></button>
         <button className="content-line" onClick={() => setLink(true)}><Icon name="link" /> Instalar de um link<Icon name="chevron_right" className="go" /></button>
       </div>
