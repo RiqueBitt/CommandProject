@@ -1,7 +1,7 @@
 {
   "name": "commandproject",
   "private": true,
-  "version": "0.11.0",
+  "version": "0.12.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test:core": "cargo test --workspace",
-    "test:maps": "python tools/test_maptk_bridge.py"
+    "test:maps": "python tools/test_maptk_bridge.py",
+    "test:worldgen": "node --experimental-strip-types tools/test_worldgen.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",

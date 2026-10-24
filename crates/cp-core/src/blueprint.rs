@@ -388,6 +388,8 @@ pub enum Set {
     Bool(bool),
     /// lista de textos (ex.: Categories)
     Strings(Vec<String>),
+    /// trecho Lua pronto (ex.: uma arma inteira copiada de outra unidade)
+    Raw(String),
 }
 
 pub fn lua_string(s: &str) -> String {
@@ -421,8 +423,38 @@ impl Set {
             Set::Str(s) => lua_string(s),
             Set::Bool(b) => b.to_string(),
             Set::Strings(v) => format!("{{ {} }}", v.iter().map(|s| lua_string(s)).collect::<Vec<_>>().join(", ")),
+            Set::Raw(r) => r.clone(),
         }
     }
+}
+
+/// Texto original de um valor (ex.: `Weapon.2` devolve a tabela inteira da segunda arma).
+pub fn value_text(text: &str, path: &str) -> Result<Option<String>> {
+    let bp = parse(text)?;
+    Ok(bp.entry(path).map(|e| text[e.span.0..e.span.1].to_string()))
+}
+
+/// Acrescenta um item no fim de uma lista (ex.: uma arma nova em `Weapon`). Devolve o texto novo
+/// e a posição (1, 2, …) do item.
+pub fn append_item(text: &str, list: &str, raw: &str) -> Result<(String, usize)> {
+    let bp = parse(text)?;
+    let e = bp.entry(list).ok_or_else(|| Error::Format(format!("blueprint: {list} não existe")))?;
+    let Value::Table { entries, .. } = &e.value else {
+        return Err(Error::Format(format!("blueprint: {list} não é uma lista")));
+    };
+    let pos = entries.iter().filter(|x| x.key.is_none()).count() + 1;
+    let end = e.span.1 - 1;
+    let before = text[..end].trim_end();
+    let comma = if before.ends_with('{') || before.ends_with(',') || before.ends_with(';') { "" } else { "," };
+    let mut out = String::with_capacity(text.len() + raw.len() + 16);
+    out.push_str(before);
+    out.push_str(comma);
+    out.push_str("\n        ");
+    out.push_str(raw.trim());
+    out.push_str(",\n    ");
+    out.push_str(&text[end..]);
+    parse(&out)?;
+    Ok((out, pos))
 }
 
 /// Aplica várias alterações (caminho → valor) no texto e devolve o texto novo.
@@ -483,6 +515,20 @@ pub fn strip_loc(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn copy_and_append_weapon() {
+        let t = "UnitBlueprint {\n    Weapon = {\n        { Label = 'A', Damage = 10, },\n        { Label = 'B', Damage = 20, },\n    },\n}\n";
+        let w2 = value_text(t, "Weapon.2").unwrap().unwrap();
+        assert!(w2.contains("'B'") && w2.starts_with('{'));
+        let t2 = apply(t, &[("Weapon.1".into(), Set::Raw(w2.clone()))]).unwrap();
+        assert_eq!(parse(&t2).unwrap().text("Weapon.1.Label").as_deref(), Some("B"));
+        let (t3, pos) = append_item(t, "Weapon", "{ Label = 'C', Damage = 5 }").unwrap();
+        assert_eq!(pos, 3);
+        let bp = parse(&t3).unwrap();
+        assert_eq!(bp.text("Weapon.3.Label").as_deref(), Some("C"));
+        assert_eq!(bp.number("Weapon.2.Damage"), Some(20.0));
+    }
+
     use super::*;
 
     const SAMPLE: &str = r#"# Tanque leve UEF

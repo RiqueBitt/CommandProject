@@ -1290,7 +1290,7 @@ pub struct MapBuild {
 }
 
 #[tauri::command]
-pub async fn maptk_build(app: AppHandle, state: State<'_, AppState>, spec: serde_json::Value) -> R<MapBuild> {
+pub async fn maptk_build(app: AppHandle, state: State<'_, AppState>, spec: serde_json::Value, creation: Option<String>) -> R<MapBuild> {
     // decorações feitas no editor 3D: os arquivos entram no pacote do mapa depois do toolkit
     let custom = crate::creator_cmds::custom_files_for(&state, &spec).await?;
     let (bridge, gamedata, out_dir) = map_ctx(&state.ws).await?;
@@ -1316,6 +1316,12 @@ pub async fn maptk_build(app: AppHandle, state: State<'_, AppState>, spec: serde
             cp_core::scd::append_files(Path::new(scd), &custom)?;
         }
         let manifest = ws.install_built_map(Path::new(scd), name, sid)?;
+        if let Some(c) = &creation {
+            // o projeto do editor lembra qual mod ele gerou (para exportar o .scd depois)
+            if let Ok(store) = cp_core::creator::Creations::open(&ws.data_dir) {
+                let _ = store.set_built_mod(c, &manifest.id);
+            }
+        }
         Ok(MapBuild { result, manifest })
     })
     .await
@@ -1828,6 +1834,31 @@ pub async fn showcase(state: State<'_, AppState>, unit: Option<String>) -> R<Opt
             mask,
             units: models.keys().cloned().collect(),
         }))
+    })
+    .await
+}
+
+// ---------------------------------------------------------------- exportar arquivos de um mod
+
+/// Copia os arquivos (`.scd`) de um mod da biblioteca para uma pasta escolhida.
+#[tauri::command]
+pub async fn mod_export_files(state: State<'_, AppState>, id: String, dir: String) -> R<Vec<String>> {
+    with_ws(&state.ws, move |ws| {
+        let m = ws
+            .mods()?
+            .into_iter()
+            .find(|m| m.manifest.id == id)
+            .ok_or_else(|| cp_core::Error::ModNotFound(id.clone()))?;
+        let dest = PathBuf::from(&dir);
+        std::fs::create_dir_all(&dest).map_err(|e| cp_core::Error::io(&dest, e))?;
+        let mut out = Vec::new();
+        for f in &m.manifest.files {
+            let src = m.file_path(&f.name);
+            let to = dest.join(&f.name);
+            std::fs::copy(&src, &to).map_err(|e| cp_core::Error::io(&src, e))?;
+            out.push(to.display().to_string());
+        }
+        Ok(out)
     })
     .await
 }

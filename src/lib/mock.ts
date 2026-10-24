@@ -647,6 +647,8 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     }
     // ---------------------------------------------------------- tropas (simulado)
     case "unit_catalog": return r(mockUnits);
+    case "unit_packs": return r([{ slug: "minha_faccao", name: "Minha facção", units: ["cpmart01"] }]);
+    case "unit_refs_check": return r((a.paths as string[]).filter((x) => x.includes("nada")));
     case "unit_animations": return r(["/units/uul0101/uul0101_awalk.sca", "/units/uul0101/uul0101_aidle.sca", "/units/uul0101/uul0101_adeath.sca", "/units/uil0101/uil0101_awalk.sca", "/units/ucl0103/ucl0103_aactivate.sca"]);
     case "unit_details": {
       const u = mockUnits.find((x) => x.id === a.id) ?? mockUnits[0];
@@ -696,6 +698,7 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     case "creation_asset_copy": return r(undefined);
 
     // ---------------------------------------------------------- otimizador (simulado)
+    case "mod_export_files": return r(mods.find((m) => m.id === a.id)?.files.map((f) => `${String(a.dir)}\\${f.name}`) ?? []);
     case "perf_report": return r(perfDb());
     case "perf_process": return r(null);
     case "perf_prefs_set": {
@@ -730,9 +733,9 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
 
 // ------------------------------------------------------------------ tropas e otimizador simulados
 const mockUnits: T.UnitInfo[] = [
-  { id: "uul0101", name: "Rock Head", faction: "UEF", role: "Tanque", description: "Tanque de assalto" },
-  { id: "uil0101", name: "Sharp Shooter", faction: "Illuminate", role: "Tanque", description: "Tanque flutuante" },
-  { id: "ucl0103", name: "Bonesmasher", faction: "Cybran", role: "Artilharia", description: "Artilharia móvel" },
+  { id: "uul0101", name: "Rock Head", faction: "UEF", role: "Tanque", description: "Tanque de assalto", categories: ["UEF", "MOBILE", "LAND", "DIRECTFIRE", "BUILTBYTIER1FACTORY", "BUILTBYLANDTIER1FACTORY"] },
+  { id: "uil0101", name: "Sharp Shooter", faction: "Illuminate", role: "Tanque", description: "Tanque flutuante", categories: ["ILLUMINATE", "MOBILE", "LAND", "HOVER", "BUILTBYTIER1FACTORY"] },
+  { id: "ucl0103", name: "Bonesmasher", faction: "Cybran", role: "Artilharia", description: "Artilharia móvel", categories: ["CYBRAN", "MOBILE", "LAND", "INDIRECTFIRE", "BUILTBYTIER2FACTORY", "BUILTBYLANDTIER2FACTORY"] },
 ];
 
 function mockTank(): T.UnitPreview {

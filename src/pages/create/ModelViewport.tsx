@@ -303,7 +303,8 @@ export default function ModelViewport(props: Props) {
         const hit = ray.intersectObject(points)[0];
         if (hit && hit.index !== undefined) { live.current.onVertexPick(hit.index); return; }
       }
-      const hits = ray.intersectObjects([...objs.values()].filter((o) => o.mesh.visible).map((o) => o.mesh), false);
+      const lockedIds = new Set(live.current.doc.parts.filter((q) => q.locked).map((q) => q.id));
+      const hits = ray.intersectObjects([...objs.values()].filter((o) => o.mesh.visible && !lockedIds.has(o.mesh.userData.partId as string)).map((o) => o.mesh), false);
       live.current.onPick(hits[0] ? (hits[0].object.userData.partId as string) : null, e.shiftKey || e.ctrlKey);
     };
     cv.addEventListener("pointerdown", onDown);

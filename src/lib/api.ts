@@ -160,6 +160,7 @@ export const api = {
   enhancePreview: (entry: string, mode: T.EnhanceMode, opts: T.EnhanceOptions) => call<T.EnhancePreview>("enhance_preview", { entry, mode, opts }),
   buildEnhance: (opts: T.EnhanceOptions, enable = true) => call<T.Manifest>("build_enhance", { opts, enable }),
   memoryStatus: () => call<T.MemoryStatus>("memory_status"),
+  modExportFiles: (id: string, dir: string) => call<string[]>("mod_export_files", { id, dir }),
   perfReport: () => call<T.PerfReport>("perf_report"),
   perfProcess: () => call<T.ProcessStats | null>("perf_process"),
   perfPrefsSet: (changes: [string, T.PrefValue][]) => call<T.PrefsWriteReport>("perf_prefs_set", { changes }),
@@ -210,6 +211,8 @@ export const api = {
   creationExport: (id: string, dest: string) => call<void>("creation_export", { id, dest }),
   creationImport: (path: string) => call<T.CreationMeta>("creation_import", { path }),
   unitCatalog: () => call<T.UnitInfo[]>("unit_catalog"),
+  unitPacks: () => call<T.UnitPack[]>("unit_packs"),
+  unitRefsCheck: (paths: string[]) => call<string[]>("unit_refs_check", { paths }),
   unitDetails: (id: string) => call<T.UnitDetails>("unit_details", { id }),
   unitAnimations: () => call<string[]>("unit_animations"),
   unitPreview: (id: string) => call<T.UnitPreview>("unit_preview", { id }),
@@ -224,7 +227,7 @@ export const api = {
   gameTexture: (path: string, max = 128) => call<string>("game_texture", { path, max }),
   propPreview: (bp: string, lod = 0) => call<T.PropPreview>("prop_preview", { bp, lod }),
   maptkTerrain3d: (terrain: string, size = 256) => call<T.Terrain3D>("maptk_terrain3d", { terrain, size }),
-  maptkBuild: (spec: Record<string, unknown>) => call<{ result: T.MapBuildResult; manifest: T.Manifest }>("maptk_build", { spec }),
+  maptkBuild: (spec: Record<string, unknown>, creation: string | null = null) => call<{ result: T.MapBuildResult; manifest: T.Manifest }>("maptk_build", { spec, creation }),
 
   openPath: (path: string, reveal = false) => call<void>("open_path", { path, reveal }),
 };

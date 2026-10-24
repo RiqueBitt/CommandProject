@@ -28,6 +28,7 @@ pub struct UnitInfo {
     /// terrestre, aérea, naval, estrutura…
     pub role: String,
     pub description: String,
+    pub categories: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -156,6 +157,7 @@ fn index(sources: &[PathBuf]) -> Result<(Index, Vec<UnitInfo>)> {
             faction: faction_of(&bp, &cats),
             role: role_of(&cats),
             description: bp.text("Description").map(|s| blueprint::strip_loc(&s)).unwrap_or_default(),
+            categories: cats,
         });
     }
     cat.sort_by(|a, b| a.faction.cmp(&b.faction).then(a.role.cmp(&b.role)).then(a.name.cmp(&b.name)));
@@ -165,6 +167,35 @@ fn index(sources: &[PathBuf]) -> Result<(Index, Vec<UnitInfo>)> {
 
 pub fn catalog(sources: &[PathBuf]) -> Result<Vec<UnitInfo>> {
     Ok(index(sources)?.1)
+}
+
+/// Caminhos (`/projectiles/...bp`, `.sca`, `.dds`…) que não existem nos arquivos do jogo.
+pub fn missing_files(sources: &[PathBuf], paths: &[String]) -> Result<Vec<String>> {
+    static KEYS: Mutex<Option<(Vec<PathBuf>, std::collections::HashSet<String>)>> = Mutex::new(None);
+    let mut guard = KEYS.lock().unwrap_or_else(|p| p.into_inner());
+    if guard.as_ref().map(|(s, _)| s.as_slice() != sources).unwrap_or(true) {
+        let mut set = std::collections::HashSet::new();
+        for src in sources {
+            let Ok(mut scd) = Scd::open(src) else { continue };
+            for e in scd.entries()? {
+                let k = e.key.to_ascii_lowercase();
+                set.insert(k.replace(".win.", "."));
+                set.insert(k.strip_prefix("/uncompiled").unwrap_or(&k).to_string());
+                set.insert(k);
+            }
+        }
+        *guard = Some((sources.to_vec(), set));
+    }
+    let set = &guard.as_ref().expect("preenchido").1;
+    Ok(paths
+        .iter()
+        .filter(|p| {
+            let k = p.trim().to_ascii_lowercase().replace('\\', "/");
+            let k = if k.starts_with('/') { k } else { format!("/{k}") };
+            !set.contains(&k) && !set.contains(&k.replace(".win.", "."))
+        })
+        .cloned()
+        .collect())
 }
 
 /// Texto do blueprint de uma unidade do jogo.
@@ -298,6 +329,10 @@ pub struct UnitBuild {
     pub tint: (f32, f32, f32),
     /// arquivos a mais (ex.: animações criadas no editor), com o caminho interno
     pub extra_files: Vec<(String, Vec<u8>)>,
+    /// armas copiadas de outras unidades: (posição na tropa, 0 = arma nova; unidade; posição lá)
+    pub weapon_copies: Vec<(usize, String, usize)>,
+    /// ícone (PNG) que substitui os ícones da base
+    pub icon_png: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -365,9 +400,53 @@ pub fn make_blueprint(sources: &[PathBuf], b: &UnitBuild) -> Result<(String, Vec
             changes.push((format!("{field}Rate"), Set::Number(*r)));
         }
     }
-    changes.extend(b.changes.iter().cloned());
     text = blueprint::apply(&text, &changes)?;
+    // 3) armas copiadas de outras unidades (antes das alterações, que podem mexer nelas)
+    for (target, unit, src) in &b.weapon_copies {
+        let unit = unit.to_ascii_lowercase();
+        let other = blueprint_text(sources, &unit)?;
+        let Some(w) = blueprint::value_text(&other, &format!("Weapon.{src}"))? else {
+            warnings.push(format!("a arma {src} de {unit} não existe"));
+            continue;
+        };
+        if *target == 0 {
+            text = match blueprint::append_item(&text, "Weapon", &w) {
+                Ok((t, _)) => t,
+                Err(_) => blueprint::apply(&text, &[("Weapon".into(), Set::Raw(format!("{{\n        {w},\n    }}")))])?,
+            };
+        } else {
+            text = blueprint::apply(&text, &[(format!("Weapon.{target}"), Set::Raw(w))])?;
+        }
+        warnings.push(format!("arma copiada de {unit}: confira no jogo se os pontos de disparo (ossos) dela existem nesta tropa"));
+    }
+    // 4) alterações do editor
+    if !b.changes.is_empty() {
+        text = blueprint::apply(&text, &b.changes)?;
+    }
     Ok((text, warnings))
+}
+
+/// Ícone novo no tamanho e formato do ícone original (imagem centralizada, sem distorcer).
+fn icon_texture(orig: &[u8], png: &[u8]) -> Result<Vec<u8>> {
+    let (info, _) = crate::dds::decode(orig)?;
+    let mut img = crate::dds::from_png(png)?;
+    let (tw, th) = (info.width.max(1), info.height.max(1));
+    while img.width >= tw * 2 && img.height >= th * 2 {
+        img = crate::dds::downsample(&img);
+    }
+    let k = (tw as f32 / img.width as f32).min(th as f32 / img.height as f32);
+    let (w, h) = (((img.width as f32 * k).round() as u32).max(1), ((img.height as f32 * k).round() as u32).max(1));
+    let fit = crate::enhance::upscale_lanczos(&img, w, h);
+    let mut out = crate::dds::Rgba { width: tw, height: th, pixels: vec![0; (tw * th * 4) as usize] };
+    let (ox, oy) = ((tw - w.min(tw)) / 2, (th - h.min(th)) / 2);
+    for y in 0..h.min(th) {
+        for x in 0..w.min(tw) {
+            let s = ((y * w + x) * 4) as usize;
+            let d = (((y + oy) * tw + x + ox) * 4) as usize;
+            out.pixels[d..d + 4].copy_from_slice(&fit.pixels[s..s + 4]);
+        }
+    }
+    crate::dds::encode(&out, info.format, if info.mip_count <= 1 { 1 } else { 0 }, crate::dds::Quality::Normal)
 }
 
 /// Gera o `.scd` da tropa em `dest` e devolve o relatório.
@@ -413,6 +492,12 @@ pub fn build(sources: &[PathBuf], b: &UnitBuild, dest: &Path) -> Result<BuildRep
         let new_name = rename(name, &base, &new);
         let mut data = Scd::open(&sources[*si])?.read_at(*i)?;
         let is_dds = ln.ends_with(".dds") && name.to_ascii_lowercase().starts_with("units/");
+        if let Some(png) = b.icon_png.as_ref().filter(|_| ln.ends_with(".dds") && !name.to_ascii_lowercase().starts_with("units/")) {
+            match icon_texture(&data, png) {
+                Ok(d) => data = d,
+                Err(e) => warnings.push(format!("ícone {new_name} não trocado: {e}")),
+            }
+        }
         if let Some(m) = &b.model {
             if ln.ends_with(".scm") {
                 data = m.scm.clone();
@@ -633,6 +718,19 @@ mod tests {
         }
         let script = String::from_utf8(scd.read("units/cpmart01/cpmart01_script.lua").unwrap()).unwrap();
         assert!(script.contains("import('/units/uul0101/uul0101_script.lua')"));
+        // arma copiada (de outra unidade ou da mesma) entra como arma nova
+        let r2 = build(&src, &UnitBuild {
+            base: "uul0101".into(), new_id: "cpmart02".into(), name: "Martelo 2".into(),
+            weapon_copies: vec![(0, "uul0101".into(), 1)], icon_png: Some(vec![1, 2, 3]),
+            changes: vec![("Weapon.2.Damage".into(), Set::Number(7.0))],
+            ..Default::default()
+        }, &t.path().join("out2.scd")).unwrap();
+        let bp2 = blueprint::parse(&r2.blueprint).unwrap();
+        assert_eq!(bp2.number("Weapon.2.Damage"), Some(7.0));
+        assert!(r2.warnings.iter().any(|w| w.contains("arma copiada")), "{:?}", r2.warnings);
+        assert!(r2.warnings.iter().any(|w| w.contains("ícone")), "ícone inválido vira aviso: {:?}", r2.warnings);
+        assert_eq!(missing_files(&src, &["/units/uul0101/uul0101_awalk.sca".into(), "/projectiles/nada/nada_proj.bp".into()]).unwrap(), vec!["/projectiles/nada/nada_proj.bp".to_string()]);
+        assert!(c[0].categories.iter().any(|x| x == "UEF"));
         assert!(build(&src, &UnitBuild { base: "uul0101".into(), new_id: "uul0101".into(), ..Default::default() }, &dest).is_err());
         assert!(build(&src, &UnitBuild { base: "uul0101".into(), new_id: "X".into(), ..Default::default() }, &dest).is_err());
     }

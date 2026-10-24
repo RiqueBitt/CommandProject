@@ -8,6 +8,7 @@ ping → catalog → preview → build (REMIX e PATCH). Não precisa do jogo ins
     python tools/test_maptk_bridge.py
 """
 
+import base64
 import json
 import os
 import struct
@@ -98,6 +99,15 @@ def minimap():
     return bytes(hdr) + bytes(8 * 256 * 256)
 
 
+def waterdepth():
+    hdr = bytearray(128)
+    hdr[0:4] = b"DDS "
+    struct.pack_into("<I", hdr, 4, 124)
+    struct.pack_into("<II", hdr, 12, 512, 512)
+    hdr[84:88] = b"DXT5"
+    return bytes(hdr) + bytes(16 * 128 * 128)
+
+
 def info():
     p = bytearray(256)
     struct.pack_into("<f", p, 216, 0.0)
@@ -120,7 +130,9 @@ def make_game(root):
         z.writestr(base + ".info.win.bdf", info())
         for k in ("collision2", "decals"):
             z.writestr(f"{base}.{k}.win.bdf", bdf(b"\x00" * 64))
-        z.writestr(f"{base}.terrain.win.bdf", bdf(b"\x00" * 16 + b"/textures/Terrain/MP_901/sc2_mp_901_grass01_d.dds" + b"\x00" * 24))
+        z.writestr(f"{base}.terrain.win.bdf", bdf(b"\x00" * 16 + b"/textures/Terrain/MP_901/sc2_mp_901_grass01_d.dds" + b"\x00" * 24
+                                                  + f"/maps/{TID}/{TID}.waterDepth.dds".encode() + b"\x00" * 8))
+        z.writestr(f"{base}.waterDepth.dds", waterdepth())
         z.writestr(f"{base}.mapobjs.win.bdf", mapobjs())
     with zipfile.ZipFile(os.path.join(gd, "uncompiled_lua.scd"), "w") as z:
         z.writestr("uncompiled/maps/SC2_MP_204/SC2_MP_204_save.lua", save_lua())
@@ -224,6 +236,33 @@ def main():
         assert abs(got[2][1] - 20.0) < 1.5, "decoração apoiada no chão"
         assert b"sc2_mp_002_snow01_d" in zlib.decompress(tb[tb.find(b"\x78\x9c"):]), "textura trocada"
         print("decorações + textura ok:", res4["propsAdded"], "novas,", res4["propsRemoved"], "removida, 1 textura")
+
+        # camada de relevo do gerador (morro de +40 no centro) + máscara de água refeita
+        import array
+        n = 64
+        d = array.array("h", [0] * ((n + 1) ** 2))
+        for j in range(n + 1):
+            for i in range(n + 1):
+                r = ((i - 32) ** 2 + (j - 32) ** 2) ** 0.5
+                if r < 8:
+                    d[j * (n + 1) + i] = int(40 * 32 * (1 - r / 8))
+        spec5 = dict(spec, scenario_id="SC2_CPGERA", name="[2] Gerado", minimap="natural", water_rewrite=True,
+                     height_delta=dict(size=n, scale=1 / 32, data=base64.b64encode(d.tobytes()).decode()))
+        res5, log5 = run("build", {"spec": spec5}, gd, out)
+        assert any("relevo do gerador aplicado" in l for l in log5), log5
+        with zipfile.ZipFile(res5["scd"]) as z:
+            names5 = z.namelist()
+            hf = z.read("maps/SC2_CPGERA/SC2_CPGERA.hfield.win.bdf")
+            tb5 = z.read("maps/SC2_CPGERA/SC2_CPGERA.terrain.win.bdf")
+        assert "maps/SC2_CPGERA/SC2_CPGERA.waterDepth.win.dds" in names5, names5
+        assert "maps/SC2_CPGERA/SC2_CPGERA.costs.win.bdf" in names5, "relevo novo refaz a navegação"
+        sys.path.insert(0, os.path.join(ROOT, "resources", "maptk"))
+        import sc2maps
+        H5, w5 = sc2maps.hfield_heights(hf)
+        assert abs(H5[512 * w5 + 512] / 128 - 60.0) < 1.5, H5[512 * w5 + 512] / 128
+        assert abs(H5[100 * w5 + 100] / 128 - 20.0) < 0.1
+        assert b"/maps/SC2_CPGERA/SC2_CPGERA.waterDepth.dds" in sc2maps.read_bdf_payload(tb5), "máscara de água apontando para o mapa novo"
+        print("gerador ok: relevo +40 no centro, máscara de água e minimapa natural")
 
         bad = dict(spec, scenario_id="meu mapa")
         env = dict(os.environ, SC2_GAMEDATA=gd, SC2_MAP_OUT=out)

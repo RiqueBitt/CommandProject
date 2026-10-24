@@ -44,6 +44,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::mod_export_files,
             perf_cmds::perf_report,
             perf_cmds::perf_process,
             perf_cmds::perf_prefs_set,
@@ -55,6 +56,8 @@ pub fn run() {
             perf_cmds::perf_dumps_delete,
             perf_cmds::perf_set_priority,
             creator_cmds::creations_list,
+            creator_cmds::unit_packs,
+            creator_cmds::unit_refs_check,
             creator_cmds::unit_catalog,
             creator_cmds::unit_details,
             creator_cmds::unit_animations,

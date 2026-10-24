@@ -120,12 +120,13 @@ export function Panel({ title, icon, actions, children, grow, collapsible = true
 
 export interface TreeNode { id: string; label: string; icon: string; color?: string; detail?: string; children?: TreeNode[]; hidden?: boolean; locked?: boolean }
 
-export function Tree({ nodes, selected, onSelect, onContext, onToggleHidden, filter }: {
+export function Tree({ nodes, selected, onSelect, onContext, onToggleHidden, onToggleLocked, filter }: {
   nodes: TreeNode[];
   selected: Set<string>;
   onSelect: (id: string, mode: "set" | "toggle" | "range") => void;
   onContext?: (id: string, x: number, y: number) => void;
   onToggleHidden?: (id: string) => void;
+  onToggleLocked?: (id: string) => void;
   filter?: string;
 }) {
   const [closed, setClosed] = useState<Set<string>>(new Set());
@@ -150,8 +151,13 @@ export function Tree({ nodes, selected, onSelect, onContext, onToggleHidden, fil
           <Icon name={n.icon} size={16} style={n.color ? { color: n.color } : undefined} />
           <span className="tl">{n.label}</span>
           {n.detail && <span className="td">{n.detail}</span>}
-          {onToggleHidden && depth > 0 && (
-            <button className="tv" aria-label={n.hidden ? "Mostrar" : "Esconder"} onClick={(e) => { e.stopPropagation(); onToggleHidden(n.id); }}>
+          {onToggleLocked && depth > 0 && n.locked !== undefined && (
+            <button className={`tv ${n.locked ? "on" : ""}`} aria-label={n.locked ? "Destravar" : "Travar"} title={n.locked ? "Destravar" : "Travar (não seleciona nem move)"} onClick={(e) => { e.stopPropagation(); onToggleLocked(n.id); }}>
+              <Icon name={n.locked ? "lock" : "lock_open"} size={14} />
+            </button>
+          )}
+          {onToggleHidden && depth > 0 && n.hidden !== undefined && (
+            <button className={`tv ${n.hidden ? "on" : ""}`} aria-label={n.hidden ? "Mostrar" : "Esconder"} onClick={(e) => { e.stopPropagation(); onToggleHidden(n.id); }}>
               <Icon name={n.hidden ? "visibility_off" : "visibility"} size={14} />
             </button>
           )}
@@ -211,8 +217,8 @@ export function PropertyGrid({ sections, empty }: { sections: { title: string; p
         <div key={s.title} className="pgrid-section">
           <div className="pgrid-title">{s.title}</div>
           {s.props.map((p, i) => (
-            <div key={p.label + i} className="pgrid-row" title={"hint" in p ? p.hint : undefined}>
-              <span className="pl">{p.label}</span>
+            <div key={p.label + i} className={`pgrid-row ${!p.label && (p.kind === "custom" || p.kind === "info") ? "wide" : ""}`} title={"hint" in p ? p.hint : undefined}>
+              {(p.label || (p.kind !== "custom" && p.kind !== "info")) && <span className="pl">{p.label}</span>}
               <span className="pv">
                 {p.kind === "number" && <span className="row" style={{ gap: 4 }}><NumInput {...p} />{p.unit && <small className="faint">{p.unit}</small>}</span>}
                 {p.kind === "slider" && (

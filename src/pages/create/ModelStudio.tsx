@@ -232,9 +232,9 @@ export default function ModelStudio({ id }: { id: string }) {
 
   // ------------------------------------------------------------ explorador
   const nodes = useMemo<TreeNode[]>(() => {
-    const partNode = (q: ModelPart): TreeNode => ({ id: q.id, label: q.name, icon: PART_ICON[q.type], color: q.material.color, hidden: q.hidden, detail: q.material.team ? "time" : undefined });
+    const partNode = (q: ModelPart): TreeNode => ({ id: q.id, label: q.name, icon: PART_ICON[q.type], color: q.material.color, hidden: !!q.hidden, locked: !!q.locked, detail: q.material.team ? "time" : undefined });
     const groupNode = (g: ModelGroup): TreeNode => ({
-      id: `g:${g.id}`, label: g.name, icon: "folder_special", color: "#f2b33d", hidden: g.hidden, detail: `osso ${boneName(g.name)}`,
+      id: `g:${g.id}`, label: g.name, icon: "folder_special", color: "#f2b33d", hidden: !!g.hidden, detail: `osso ${boneName(g.name)}`,
       children: [...doc.groups.filter((x) => x.parent === g.id).map(groupNode), ...doc.parts.filter((q) => q.group === g.id).map(partNode)],
     });
     return [{
@@ -456,6 +456,7 @@ export default function ModelStudio({ id }: { id: string }) {
             <div className="tree-filter"><input placeholder="Filtrar peças…" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filtrar peças" /></div>
             <Tree nodes={nodes} selected={new Set(sel)} filter={filter} onSelect={onTreeSelect}
               onToggleHidden={(nid) => nid.startsWith("g:") ? update((d) => ({ ...d, groups: d.groups.map((g) => (`g:${g.id}` === nid ? { ...g, hidden: !g.hidden } : g)) })) : patchParts([nid], (q) => ({ ...q, hidden: !q.hidden }))}
+              onToggleLocked={(nid) => { if (!nid.startsWith("g:")) patchParts([nid], (q) => ({ ...q, locked: !q.locked })); }}
               onContext={(nid, x, y) => { if (nid === "root") return; if (!sel.includes(nid)) setSel([nid]); setCtx({ x, y }); }} />
           </Panel>
           <Panel title="Propriedades" icon="tune" grow id="model-props"><PropertyGrid sections={sections} /></Panel>

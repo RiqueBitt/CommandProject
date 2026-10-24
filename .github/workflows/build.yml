@@ -48,6 +48,8 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: Gerador de mundos (determinístico, simétrico, bases alcançáveis)
+        run: node --experimental-strip-types tools/test_worldgen.ts
 
   shaders-dx9:
     needs: test

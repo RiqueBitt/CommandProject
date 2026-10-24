@@ -9,14 +9,15 @@ import { Empty, Icon, Modal, Notice } from "../../components/ui";
 import { api } from "../../lib/api";
 import { errorText, useStore } from "../../lib/store";
 import { useTabs } from "../../lib/tabs";
-import type { AnimKey, BpLeaf, CreationMeta, ScaAnimation, UnitBuildReq, UnitBuildResult, UnitDetails, UnitInfo } from "../../lib/types";
+import type { AnimKey, BpLeaf, CreationMeta, ScaAnimation, UnitBuildReq, UnitBuildResult, UnitDetails, UnitInfo, UnitPack } from "../../lib/types";
 import { useProject } from "../../lib/useProject";
+import { ANIM_TEMPLATES, animFromKeys, sampleKey } from "./animKeys";
 import { migrateUnit, newUnitDoc, type UnitDoc } from "./docs";
 import UnitViewport, { viewFromBaked, viewFromPreview, type ViewModel } from "./UnitViewport";
 
-type Section = "general" | "look" | `attr:${string}` | `weapon:${number}` | "anims" | `anim:${string}` | "cats" | "advanced" | "bp" | "check";
+type Section = "general" | "look" | "balance" | `attr:${string}` | `weapon:${number}` | "weapons" | "anims" | `anim:${string}` | "cats" | "advanced" | "bp" | "check";
 
-const ATTRS: { id: string; label: string; icon: string; fields: [string, string, string?][] }[] = [
+const ATTRS: { id: string; label: string; icon: string; fields: [string, string][] }[] = [
   { id: "defense", label: "Defesa", icon: "shield", fields: [["Defense.MaxHealth", "Vida máxima"], ["Defense.Health", "Vida inicial"], ["Defense.RegenRate", "Regeneração por segundo"], ["Defense.ArmorType", "Tipo de blindagem"], ["Defense.Shield.ShieldMaxHealth", "Escudo (vida)"], ["Defense.Shield.ShieldRegenRate", "Regeneração do escudo"], ["Defense.Shield.ShieldSize", "Tamanho do escudo"]] },
   { id: "economy", label: "Custo e construção", icon: "payments", fields: [["Economy.BuildCostMass", "Custo em massa"], ["Economy.BuildCostEnergy", "Custo em energia"], ["Economy.BuildTime", "Tempo de construção"], ["Economy.BuildRate", "Velocidade de construção"], ["Economy.MaintenanceConsumptionPerSecondEnergy", "Consumo de energia/s"], ["Economy.ProductionPerSecondMass", "Produz massa/s"], ["Economy.ProductionPerSecondEnergy", "Produz energia/s"]] },
   { id: "physics", label: "Movimento", icon: "speed", fields: [["Physics.MotionType", "Tipo de movimento"], ["Physics.MaxSpeed", "Velocidade máxima"], ["Physics.MaxSpeedReverse", "Velocidade de ré"], ["Physics.MaxAcceleration", "Aceleração"], ["Physics.MaxBrake", "Frenagem"], ["Physics.TurnRate", "Giro (graus/s)"], ["Air.MaxAirspeed", "Velocidade no ar"], ["Air.TurnSpeed", "Giro no ar"], ["Physics.Elevation", "Altura de voo/flutuação"]] },
@@ -30,8 +31,42 @@ const WEAPON_FIELDS: [string, string][] = [
 ];
 const MOTION: Record<string, string> = { RULEUMT_Land: "Terrestre", RULEUMT_Air: "Aérea", RULEUMT_Water: "Naval", RULEUMT_Amphibious: "Anfíbia", RULEUMT_Hover: "Flutuante (hover)", RULEUMT_SurfacingSub: "Submarino", RULEUMT_None: "Parada" };
 const TEAM = ["#2f6fd6", "#c8352b", "#d9a227", "#3fa34d", "#8e44ad", "#e67e22", "#eceff1"];
+const PAINT = ["#2b2f33", "#6b7178", "#c9cdd2", "#8a6a3c", "#4d6b3a", "#7a2f2a", "#2c4f7a", "#d9a227"];
 const ANIM_LABEL: Record<string, string> = { AnimationWalk: "Andar", AnimationIdle: "Parado", AnimationDeath: "Morte", AnimationActivate: "Ativar", AnimationOpen: "Abrir", AnimationBuild: "Construir", AnimationTakeOff: "Decolar", AnimationLand: "Pousar", AnimationTransform: "Transformar", AnimationUpgrade: "Melhorar", AnimationFire: "Disparar", AnimationReload: "Recarregar" };
 const animLabel = (field: string) => { const k = field.split(".").pop() ?? field; return ANIM_LABEL[k] ?? k.replace(/^Animation/, ""); };
+
+/** modelos de função: multiplicadores sobre os valores da base ("Weapon.*" = todas as armas) */
+const ROLE_PRESETS: { id: string; label: string; icon: string; desc: string; mul: Record<string, number>; air?: boolean }[] = [
+  { id: "heavy", label: "Tanque pesado", icon: "shield", desc: "Muita vida, lento e caro.", mul: { "Defense.MaxHealth": 1.8, "Defense.Health": 1.8, "Physics.MaxSpeed": 0.75, "Economy.BuildCostMass": 1.6, "Economy.BuildCostEnergy": 1.6, "Economy.BuildTime": 1.5, "Weapon.*.Damage": 1.3 } },
+  { id: "artillery", label: "Artilharia", icon: "track_changes", desc: "Alcance longo, tiro forte e lento, frágil.", mul: { "Weapon.*.MaxRadius": 1.6, "Weapon.*.Damage": 1.5, "Weapon.*.RateOfFire": 0.6, "Defense.MaxHealth": 0.7, "Defense.Health": 0.7, "Physics.MaxSpeed": 0.85 } },
+  { id: "scout", label: "Batedor", icon: "visibility", desc: "Rápido, enxerga longe, barato e fraco.", mul: { "Physics.MaxSpeed": 1.6, "Defense.MaxHealth": 0.6, "Defense.Health": 0.6, "Intel.VisionRadius": 1.5, "Economy.BuildCostMass": 0.6, "Economy.BuildCostEnergy": 0.6, "Economy.BuildTime": 0.6, "Weapon.*.Damage": 0.6 } },
+  { id: "swarm", label: "Barata em massa", icon: "groups", desc: "Metade do custo e do tempo, menos vida.", mul: { "Economy.BuildCostMass": 0.5, "Economy.BuildCostEnergy": 0.5, "Economy.BuildTime": 0.5, "Defense.MaxHealth": 0.55, "Defense.Health": 0.55, "Weapon.*.Damage": 0.6 } },
+  { id: "sniper", label: "Atirador de longe", icon: "gps_fixed", desc: "Dano alto e alcance maior, atira devagar.", mul: { "Weapon.*.MaxRadius": 1.4, "Weapon.*.Damage": 1.8, "Weapon.*.RateOfFire": 0.5, "Physics.MaxSpeed": 0.9 } },
+  { id: "fast-air", label: "Aérea rápida", icon: "flight", desc: "Mais veloz no ar, um pouco mais frágil.", air: true, mul: { "Air.MaxAirspeed": 1.4, "Physics.MaxSpeed": 1.4, "Defense.MaxHealth": 0.8, "Defense.Health": 0.8 } },
+  { id: "elite", label: "Elite", icon: "military_tech", desc: "Tudo +40%, custa bem mais.", mul: { "Defense.MaxHealth": 1.4, "Defense.Health": 1.4, "Weapon.*.Damage": 1.4, "Economy.BuildCostMass": 1.6, "Economy.BuildCostEnergy": 1.6, "Economy.BuildTime": 1.4 } },
+];
+
+interface Stats { hp: number; mass: number; energy: number; time: number; speed: number; vision: number; dps: number; range: number; hpPerMass: number; dpsPerMass: number; eff: number }
+function statsOf(get: (p: string) => number | null, weapons: { index: number; dummy: boolean }[]): Stats {
+  const n = (p: string) => get(p) ?? 0;
+  let dps = 0, range = 0;
+  for (const w of weapons) {
+    if (w.dummy) continue;
+    const salvo = Math.max(1, get(`Weapon.${w.index}.MuzzleSalvoSize`) ?? 1);
+    dps += n(`Weapon.${w.index}.Damage`) * n(`Weapon.${w.index}.RateOfFire`) * salvo;
+    range = Math.max(range, n(`Weapon.${w.index}.MaxRadius`));
+  }
+  const hp = n("Defense.MaxHealth"), mass = n("Economy.BuildCostMass"), energy = n("Economy.BuildCostEnergy");
+  const cost = mass + energy / 10;
+  return {
+    hp, mass, energy, time: n("Economy.BuildTime"), speed: get("Physics.MaxSpeed") ?? n("Air.MaxAirspeed"), vision: n("Intel.VisionRadius"), dps, range,
+    hpPerMass: mass ? hp / mass : 0, dpsPerMass: mass ? dps / mass : 0, eff: cost ? Math.sqrt(Math.max(0, hp) * Math.max(0, dps)) / cost : 0,
+  };
+}
+const fmt = (v: number) => (Math.abs(v) >= 100 ? Math.round(v).toLocaleString("pt-BR") : (Math.round(v * 100) / 100).toLocaleString("pt-BR"));
+const isPath = (t: string) => /^\/[\w/.-]+\.(bp|sca|scm|dds|lua)$/i.test(t.trim());
+
+interface AnimDraft { index: number | null; name: string; field: string; duration: number; keys: AnimKey[] }
 
 export default function UnitStudio({ id }: { id: string }) {
   const p = useProject<UnitDoc>(id, migrateUnit, newUnitDoc());
@@ -41,9 +76,11 @@ export default function UnitStudio({ id }: { id: string }) {
   const [ribbon, setRibbon] = useState("home");
   const [section, setSection] = useState<Section>("general");
   const [details, setDetails] = useState<UnitDetails | null | undefined>(undefined);
+  const [others, setOthers] = useState<Record<string, UnitDetails>>({});
   const [catalog, setCatalog] = useState<UnitInfo[] | null>(null);
   const [view, setView] = useState<ViewModel | null>(null);
   const [models, setModels] = useState<CreationMeta[] | null>(null);
+  const [packs, setPacks] = useState<UnitPack[]>([]);
   const [anim, setAnim] = useState<ScaAnimation | null>(null);
   const [animField, setAnimField] = useState<string | null>(null);
   const [playing, setPlaying] = useState(true);
@@ -51,20 +88,31 @@ export default function UnitStudio({ id }: { id: string }) {
   const [teamColor, setTeamColor] = useState(TEAM[0]);
   const [allAnims, setAllAnims] = useState<string[] | null>(null);
   const [animPick, setAnimPick] = useState<string | null>(null);
-  const [animator, setAnimator] = useState(false);
+  const [draft, setDraft] = useState<AnimDraft | null>(null);
   const [bpText, setBpText] = useState<string | null>(null);
   const [result, setResult] = useState<UnitBuildResult | null>(null);
   const [albedoUrl, setAlbedoUrl] = useState<string | null>(null);
+  const [iconUrl, setIconUrl] = useState<string | null>(null);
   const [newCat, setNewCat] = useState("");
   const [advFilter, setAdvFilter] = useState("");
+  const [weaponPick, setWeaponPick] = useState<number | null>(null); // posição alvo (0 = nova)
+  const [compareWith, setCompareWith] = useState<string>("");
+  const [paint, setPaint] = useState({ on: false, color: PAINT[0], size: 6, opacity: 0.8 });
+  const [missing, setMissing] = useState<string[]>([]);
+  const [newPack, setNewPack] = useState("");
+  const [scrub, setScrub] = useState(0);
   const snapshot = useRef<(() => string | null) | null>(null);
+  const iconShot = useRef<(() => string | null) | null>(null);
   const imageInput = useRef<HTMLInputElement>(null);
+  const iconInput = useRef<HTMLInputElement>(null);
   const busy = useStore((s) => s.busy[`unit:${id}`]);
+  const animBusy = useStore((s) => s.busy[`anim:${id}`]);
 
   // ------------------------------------------------------------ dados
   useEffect(() => {
     void api.unitCatalog().then(setCatalog).catch(() => setCatalog([]));
     void api.creations().then((l) => setModels(l.filter((m) => m.kind === "model"))).catch(() => setModels([]));
+    void api.unitPacks().then(setPacks).catch(() => setPacks([]));
   }, []);
   useEffect(() => {
     if (p.status !== "ready" || !doc.base) return;
@@ -72,7 +120,11 @@ export default function UnitStudio({ id }: { id: string }) {
     void api.unitDetails(doc.base).then(setDetails).catch((e) => { setDetails(null); toast("error", errorText(e)); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.base, p.status]);
-  // prévia: modelo do jogo ou o modelo próprio
+  // unidades de onde vieram armas copiadas (e a de comparação)
+  const wantOthers = useMemo(() => [...new Set([...(doc.weaponCopies ?? []).map((c) => c[1]), compareWith].filter(Boolean))], [doc.weaponCopies, compareWith]);
+  useEffect(() => {
+    for (const u of wantOthers) if (!others[u]) void api.unitDetails(u).then((d) => setOthers((o) => ({ ...o, [u]: d }))).catch(() => {});
+  }, [wantOthers, others]);
   const modelSrc = doc.appearance.model;
   useEffect(() => {
     if (p.status !== "ready" || !doc.base) return;
@@ -89,17 +141,45 @@ export default function UnitStudio({ id }: { id: string }) {
     if (!doc.appearance.albedoAsset) { setAlbedoUrl(null); return; }
     void api.creationAsset(id, doc.appearance.albedoAsset).then(setAlbedoUrl).catch(() => setAlbedoUrl(null));
   }, [id, doc.appearance.albedoAsset]);
+  useEffect(() => {
+    if (!doc.appearance.iconAsset) { setIconUrl(null); return; }
+    void api.creationAsset(id, doc.appearance.iconAsset).then(setIconUrl).catch(() => setIconUrl(null));
+  }, [id, doc.appearance.iconAsset]);
 
-  const leaves = useMemo(() => new Map((details?.leaves ?? []).map((l) => [l.path, l])), [details]);
-  const value = (path: string): number | string | boolean | null => {
-    if (path in doc.overrides) return doc.overrides[path];
-    const l = leaves.get(path);
-    return l ? (l.kind === "number" ? l.number : l.kind === "bool" ? l.flag : l.text) : null;
-  };
+  // ------------------------------------------------------------ armas (da base + copiadas)
+  const copies = useMemo(() => doc.weaponCopies ?? [], [doc.weaponCopies]);
+  const weapons = useMemo(() => {
+    const base = (details?.weapons ?? []).map((w) => ({ ...w, from: null as string | null }));
+    for (const [t, u, s] of copies) {
+      const ow = others[u]?.weapons.find((w) => w.index === s);
+      const label = ow?.label ?? `Arma ${s} de ${u}`;
+      if (t > 0) { const i = base.findIndex((w) => w.index === t); if (i >= 0) base[i] = { index: t, label, dummy: ow?.dummy ?? false, from: u }; }
+      else base.push({ index: base.length + 1, label, dummy: ow?.dummy ?? false, from: u });
+    }
+    return base;
+  }, [details, copies, others]);
+  const leaves = useMemo(() => {
+    const m = new Map((details?.leaves ?? []).map((l) => [l.path, l]));
+    let appended = details?.weapons.length ?? 0;
+    for (const [t, u, s] of copies) {
+      const od = others[u];
+      const target = t > 0 ? t : ++appended;
+      if (t > 0) for (const k of [...m.keys()]) if (k.startsWith(`Weapon.${t}.`)) m.delete(k);
+      if (!od) continue;
+      for (const l of od.leaves) if (l.path.startsWith(`Weapon.${s}.`)) {
+        const path = `Weapon.${target}.${l.path.slice(`Weapon.${s}.`.length)}`;
+        m.set(path, { ...l, path });
+      }
+    }
+    return m;
+  }, [details, copies, others]);
+  const baseLeaves = useMemo(() => new Map((details?.leaves ?? []).map((l) => [l.path, l])), [details]);
+  const leafValue = (l: BpLeaf | undefined) => (l ? (l.kind === "number" ? l.number : l.kind === "bool" ? l.flag : l.text) : null);
+  const value = (path: string): number | string | boolean | null => (path in doc.overrides ? doc.overrides[path] : leafValue(leaves.get(path)));
+  const num = (path: string) => { const v = value(path); return typeof v === "number" ? v : null; };
   const changed = (path: string) => path in doc.overrides;
   const setValue = (path: string, v: number | string | boolean) => p.commit((d) => {
-    const base = leaves.get(path);
-    const orig = base ? (base.kind === "number" ? base.number : base.kind === "bool" ? base.flag : base.text) : undefined;
+    const orig = leafValue(leaves.get(path)) ?? undefined;
     const overrides = { ...d.overrides };
     if (orig === v) delete overrides[path]; else overrides[path] = v;
     return { ...d, overrides };
@@ -111,6 +191,7 @@ export default function UnitStudio({ id }: { id: string }) {
     const rm = new Set(doc.categoriesRemove.map((c) => c.toUpperCase()));
     return [...base.filter((c) => !rm.has(c.toUpperCase())), ...doc.categoriesAdd.filter((c) => !base.some((b) => b.toUpperCase() === c.toUpperCase()))];
   }, [details, doc.categoriesAdd, doc.categoriesRemove]);
+  const allCats = useMemo(() => [...new Set((catalog ?? []).flatMap((u) => u.categories ?? []))].sort(), [catalog]);
 
   // animações: as do blueprint, com as trocas do projeto
   const animFields = useMemo(() => {
@@ -122,11 +203,17 @@ export default function UnitStudio({ id }: { id: string }) {
   const playAnim = async (field: string, file: string) => {
     setAnimField(field);
     if (file.startsWith("asset:")) {
-      toast("info", "A prévia de animações criadas aqui aparece depois de gerar a tropa (o arquivo já está no projeto).");
+      const c = (doc.customAnims ?? []).find((x) => `asset:${x.asset}` === file);
+      if (c && view) { setAnim(animFromKeys(view, c.keys, c.duration)); setPlaying(true); }
+      else toast("info", "Esta animação foi criada antes do editor guardar os quadros: gere a tropa para vê-la no jogo.");
       return;
     }
     try { setAnim(await api.animRead(file)); setPlaying(true); } catch (e) { setAnim(null); toast("error", `Não deu para ler a animação: ${errorText(e)}`); }
   };
+
+  // prévia ao vivo da animação em edição
+  const draftAnim = useMemo(() => (draft && view ? animFromKeys(view, draft.keys, draft.duration) : null), [draft, view]);
+  const shownAnim = draft ? draftAnim : anim;
 
   // ------------------------------------------------------------ gerar
   const request = (): UnitBuildReq => ({
@@ -138,7 +225,23 @@ export default function UnitStudio({ id }: { id: string }) {
     modelCreation: modelSrc.source === "creation" ? modelSrc.creation : null,
     albedoAsset: doc.appearance.albedoAsset,
     tint: [doc.appearance.tint.hue, doc.appearance.tint.sat, doc.appearance.tint.bright],
+    weaponCopies: copies, iconAsset: doc.appearance.iconAsset ?? null, boneMap: doc.appearance.boneMap ?? {}, pack: doc.pack ?? null,
   });
+
+  // arquivos citados (projéteis, animações…) que não existem no jogo
+  useEffect(() => {
+    if (!details || !doc.base) return;
+    const baseDir = `/units/${doc.base}/`;
+    const paths = new Set<string>();
+    for (const [path, l] of leaves) {
+      const v = path in doc.overrides ? doc.overrides[path] : l.text;
+      if (typeof v === "string" && isPath(v) && !v.toLowerCase().startsWith(baseDir)) paths.add(v);
+    }
+    for (const [k, v] of Object.entries(doc.overrides)) if (typeof v === "string" && isPath(v) && !leaves.has(k)) paths.add(v);
+    for (const a of Object.values(doc.animations)) if (!a.file.startsWith("asset:")) paths.add(a.file);
+    const t = window.setTimeout(() => { void api.unitRefsCheck([...paths]).then(setMissing).catch(() => setMissing([])); }, 400);
+    return () => window.clearTimeout(t);
+  }, [details, leaves, doc.overrides, doc.animations, doc.base]);
 
   const problems = useMemo(() => {
     const out: { level: "err" | "warn"; text: string; section: Section }[] = [];
@@ -146,38 +249,72 @@ export default function UnitStudio({ id }: { id: string }) {
     if (!/^[a-z][a-z0-9_]{3,15}$/.test(doc.newId)) out.push({ level: "err", text: "O id precisa ter 4 a 16 letras minúsculas, números ou _, começando por letra.", section: "general" });
     if (catalog?.some((u) => u.id === doc.newId)) out.push({ level: "err", text: `Já existe a unidade ${doc.newId} no jogo: troque o id.`, section: "general" });
     if (!doc.name.trim()) out.push({ level: "err", text: "Dê um nome para a tropa.", section: "general" });
-    const num = (pth: string) => { const v = value(pth); return typeof v === "number" ? v : null; };
     for (const [pth, label] of [["Defense.MaxHealth", "Vida máxima"], ["Economy.BuildTime", "Tempo de construção"]] as const) {
       const v = num(pth);
       if (v !== null && v <= 0) out.push({ level: "err", text: `${label} precisa ser maior que zero.`, section: "attr:defense" });
     }
-    for (const w of details?.weapons ?? []) {
+    for (const w of weapons) {
       const r = num(`Weapon.${w.index}.MaxRadius`), f = num(`Weapon.${w.index}.RateOfFire`), dmg = num(`Weapon.${w.index}.Damage`);
       if (r !== null && r <= 0 && !w.dummy) out.push({ level: "err", text: `${w.label}: alcance precisa ser maior que zero.`, section: `weapon:${w.index}` });
       if (f !== null && f <= 0 && !w.dummy) out.push({ level: "err", text: `${w.label}: cadência precisa ser maior que zero.`, section: `weapon:${w.index}` });
       if (dmg !== null && dmg < 0) out.push({ level: "err", text: `${w.label}: dano não pode ser negativo.`, section: `weapon:${w.index}` });
       if (dmg !== null && dmg > 100000) out.push({ level: "warn", text: `${w.label}: dano muito alto (${dmg}).`, section: `weapon:${w.index}` });
+      if (w.from) out.push({ level: "warn", text: `${w.label} veio de ${w.from}: confira no jogo se os pontos de disparo existem nesta tropa.`, section: `weapon:${w.index}` });
     }
     const speedV = num("Physics.MaxSpeed");
     if (speedV !== null && speedV > 60) out.push({ level: "warn", text: `Velocidade ${speedV} é muito alta para o jogo.`, section: "attr:physics" });
-    if (modelSrc.source === "creation") {
-      out.push({ level: "warn", text: "Modelo próprio: as armas e efeitos usam ossos pelo nome. Confira em Aparência se o modelo tem todos.", section: "look" });
+    if (modelSrc.source === "creation" && view && details) {
+      const have = new Set(view.bones.map((b) => b.name.toLowerCase()));
+      const map = doc.appearance.boneMap ?? {};
+      const miss = details.bones.filter((b) => !have.has(b.toLowerCase()) && !map[b]);
+      if (miss.length) out.push({ level: "warn", text: `O modelo próprio não tem ${miss.length} osso(s) que as armas usam (${miss.slice(0, 4).join(", ")}${miss.length > 4 ? "…" : ""}). Ligue no assistente de ossos.`, section: "look" });
     }
+    for (const m of missing) out.push({ level: "err", text: `Arquivo citado não existe no jogo: ${m}`, section: "advanced" });
     if (!categories.length) out.push({ level: "err", text: "A tropa ficou sem categorias.", section: "cats" });
+    if (!categories.some((c) => c.toUpperCase().startsWith("BUILTBY"))) out.push({ level: "warn", text: "Nenhuma categoria BUILTBY…: talvez nenhuma fábrica consiga construir a tropa.", section: "cats" });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, details, catalog, categories]);
+  }, [doc, details, catalog, categories, weapons, missing, view]);
 
   const save = async () => p.save({ thumb: snapshot.current?.() ?? null });
   const build = async (play: boolean) => {
     const errs = problems.filter((x) => x.level === "err");
     if (errs.length) { setSection("check"); toast("error", errs[0].text); return; }
     await save();
-    const r = await run(`unit:${id}`, () => api.unitBuild(id, request()), (x) => `Tropa "${x.manifest.name}" gerada e ligada no perfil.`);
+    const r = await run(`unit:${id}`, () => api.unitBuild(id, request()), (x) => `Tropa "${doc.name}" gerada${doc.pack ? ` no pacote "${doc.pack}"` : ""} (${x.manifest.name}).`);
     if (!r) return;
     setResult(r);
     await refreshMods();
+    void api.unitPacks().then(setPacks).catch(() => {});
     if (play) await run("launch", () => api.launchGame(), "Abrindo o jogo…");
+  };
+
+  const applyPreset = (preset: (typeof ROLE_PRESETS)[number] | null) => p.commit((d) => {
+    const overrides = { ...d.overrides };
+    const paths = (k: string) => (k.startsWith("Weapon.*.") ? weapons.filter((w) => !w.dummy).map((w) => `Weapon.${w.index}.${k.slice(9)}`) : [k]);
+    // tira os valores de qualquer modelo anterior
+    for (const pr of ROLE_PRESETS) for (const k of Object.keys(pr.mul)) for (const pth of paths(k)) delete overrides[pth];
+    if (preset) for (const [k, m] of Object.entries(preset.mul)) for (const pth of paths(k)) {
+      const b = leafValue(leaves.get(pth));
+      if (typeof b !== "number" || b === 0) continue;
+      const v = b * m;
+      overrides[pth] = Math.abs(v) >= 10 ? Math.round(v) : Math.round(v * 100) / 100;
+    }
+    return { ...d, overrides };
+  });
+
+  const savePaint = async (png: string) => {
+    try {
+      const name = await api.creationAssetPut(id, "pintura.png", png);
+      p.commit((d) => ({ ...d, appearance: { ...d.appearance, albedoAsset: name } }));
+    } catch (e) { toast("error", errorText(e)); }
+  };
+  const makeIcon = async () => {
+    const url = iconShot.current?.();
+    if (!url) { toast("error", "Não deu para fotografar a vista 3D."); return; }
+    const name = await api.creationAssetPut(id, "icone.png", url);
+    p.commit((d) => ({ ...d, appearance: { ...d.appearance, iconAsset: name } }));
+    toast("ok", "Ícone criado a partir da vista 3D. Ele substitui o ícone da base no jogo.");
   };
 
   useHotkeys(active, { "ctrl+s": () => void save(), "ctrl+z": p.undo, "ctrl+y": p.redo, "ctrl+shift+z": p.redo });
@@ -186,10 +323,11 @@ export default function UnitStudio({ id }: { id: string }) {
   const nodes = useMemo<TreeNode[]>(() => [{
     id: "root", label: doc.name || "Tropa", icon: "smart_toy", color: "#f2b33d", detail: doc.newId,
     children: [
-      { id: "general", label: "Geral", icon: "badge" },
+      { id: "general", label: "Geral", icon: "badge", detail: doc.pack ? `pacote ${doc.pack}` : undefined },
       { id: "look", label: "Aparência", icon: "palette", detail: modelSrc.source === "creation" ? "modelo próprio" : undefined },
+      { id: "balance", label: "Equilíbrio", icon: "balance" },
       { id: "grp:attr", label: "Atributos", icon: "tune", children: ATTRS.map((a) => ({ id: `attr:${a.id}`, label: a.label, icon: a.icon, detail: String(a.fields.filter(([f]) => changed(f)).length || "") })) },
-      { id: "grp:weapons", label: "Armas", icon: "gps_fixed", children: (details?.weapons ?? []).map((w) => ({ id: `weapon:${w.index}`, label: String(value(`Weapon.${w.index}.Label`) ?? w.label), icon: w.dummy ? "block" : "gps_fixed", detail: w.dummy ? "efeito" : undefined })) },
+      { id: "weapons", label: "Armas", icon: "gps_fixed", detail: String(weapons.length), children: weapons.map((w) => ({ id: `weapon:${w.index}`, label: String(value(`Weapon.${w.index}.Label`) ?? w.label), icon: w.dummy ? "block" : w.from ? "content_copy" : "gps_fixed", detail: w.from ? `de ${w.from}` : w.dummy ? "efeito" : undefined })) },
       { id: "anims", label: "Animações", icon: "animation", children: animFields.map(([f, file]) => ({ id: `anim:${f}`, label: animLabel(f), icon: "play_circle", detail: file.startsWith("asset:") ? "criada aqui" : doc.animations[f] ? "trocada" : undefined })) },
       { id: "cats", label: "Comportamento", icon: "category", detail: `${categories.length}` },
       { id: "advanced", label: "Todos os campos", icon: "list" },
@@ -198,7 +336,7 @@ export default function UnitStudio({ id }: { id: string }) {
     ],
   }],
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [doc, details, animFields, categories, problems]);
+  [doc, details, animFields, categories, problems, weapons]);
 
   // ------------------------------------------------------------ propriedades
   const fieldProp = (path: string, label: string): Prop | null => {
@@ -211,7 +349,47 @@ export default function UnitStudio({ id }: { id: string }) {
     }
     if (typeof v === "number") return { kind: "number", label: label + mark, value: v, step: Math.abs(v) < 10 ? 0.1 : 1, onChange: (x) => setValue(path, x), hint: changed(path) ? `Original: ${l?.number ?? "—"}` : undefined };
     if (typeof v === "boolean") return { kind: "toggle", label: label + mark, value: v, onChange: (x) => setValue(path, x) };
-    return { kind: "text", label: label + mark, value: String(v ?? ""), onChange: (x) => setValue(path, x) };
+    return { kind: "text", label: label + mark, value: String(v ?? ""), onChange: (x) => setValue(path, x), hint: missing.includes(String(v)) ? "Este arquivo não existe no jogo." : undefined };
+  };
+
+  const cur = useMemo(() => statsOf(num, weapons),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doc.overrides, leaves, weapons]);
+  const ref = useMemo(() => {
+    if (compareWith && others[compareWith]) {
+      const od = others[compareWith];
+      const m = new Map(od.leaves.map((l) => [l.path, l]));
+      return { name: od.name, s: statsOf((pth) => { const l = m.get(pth); return l?.kind === "number" ? l.number : null; }, od.weapons) };
+    }
+    return { name: details?.name ?? "base", s: statsOf((pth) => { const l = baseLeaves.get(pth); return l?.kind === "number" ? l.number : null; }, details?.weapons ?? []) };
+  }, [compareWith, others, details, baseLeaves]);
+
+  function openDraft(index: number | null) {
+    const bones = view?.bones.map((b) => b.name) ?? [];
+    if (!bones.length) { toast("info", "Espere o modelo carregar para animar."); return; }
+    if (index !== null) {
+      const c = (doc.customAnims ?? [])[index];
+      if (c) { setDraft({ index, name: c.name, field: c.field, duration: c.duration, keys: c.keys.map((k) => ({ ...k })) }); setPlaying(false); setScrub(0); return; }
+    }
+    const b = bones.find((x) => /turret/i.test(x)) ?? bones[1] ?? bones[0];
+    setDraft({ index: null, name: "minha_animacao", field: "Display.AnimationIdle", duration: 2, keys: [{ bone: b, time: 0, pos: [0, 0, 0], rot: [0, 0, 0] }, { bone: b, time: 1, pos: [0, 0, 0], rot: [0, 40, 0] }, { bone: b, time: 2, pos: [0, 0, 0], rot: [0, 0, 0] }] });
+    setPlaying(true);
+    setScrub(0);
+  }
+  const saveDraft = async () => {
+    if (!draft || !doc.base) return;
+    const source = modelSrc.source === "creation" ? { model: modelSrc.creation } : { unit: doc.base };
+    const asset = await run(`anim:${id}`, () => api.animCreate(id, draft.name, source, draft.keys, draft.duration));
+    if (!asset) return;
+    p.commit((d) => {
+      const list = [...(d.customAnims ?? [])];
+      const entry = { name: draft.name, field: draft.field, duration: draft.duration, keys: draft.keys, asset };
+      if (draft.index !== null && list[draft.index]) list[draft.index] = entry; else list.push(entry);
+      return { ...d, customAnims: list, animations: { ...d.animations, [draft.field]: { file: `asset:${asset}`, rate: d.animations[draft.field]?.rate ?? null } } };
+    });
+    toast("ok", `Animação "${draft.name}" salva e usada em ${animLabel(draft.field)}.`);
+    setDraft(null);
+    setSection(`anim:${draft.field}`);
   };
 
   const sections = useMemo(() => {
@@ -229,6 +407,13 @@ export default function UnitStudio({ id }: { id: string }) {
         { kind: "info", label: "Função", value: details?.role ?? "…" },
         { kind: "info", label: "Alterações", value: `${Object.keys(doc.overrides).length} campo(s)` },
       ] });
+      out.push({ title: "Pacote (várias tropas num mod)", props: [
+        { kind: "select", label: "Pacote", value: doc.pack ?? "", onChange: (v) => p.commit((d) => ({ ...d, pack: v || null })),
+          options: [{ value: "", label: "Sem pacote (mod próprio)" }, ...packs.map((x) => ({ value: x.name, label: `${x.name} (${x.units.length} tropa${x.units.length === 1 ? "" : "s"})` })), ...(doc.pack && !packs.some((x) => x.name === doc.pack) ? [{ value: doc.pack, label: `${doc.pack} (novo)` }] : [])] },
+        { kind: "custom", label: "Novo pacote", node: <form className="row" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); const n = newPack.trim(); if (!n) return; p.commit((d) => ({ ...d, pack: n.slice(0, 40) })); setNewPack(""); }}>
+          <input className="pinput" placeholder="ex.: Minha facção" value={newPack} onChange={(e) => setNewPack(e.target.value)} /><button className="btn sm"><Icon name="add" size={15} /></button></form> },
+        { kind: "info", label: "", value: "Tropas do mesmo pacote vão juntas num mod só na biblioteca: liga e desliga tudo de uma vez." },
+      ] });
       out.push({ title: "Anotações", props: [{ kind: "text", label: "Notas", value: doc.notes, multiline: true, onChange: (v) => p.commit((d) => ({ ...d, notes: v })) }] });
     } else if (section === "look") {
       const a = doc.appearance;
@@ -237,19 +422,76 @@ export default function UnitStudio({ id }: { id: string }) {
         { kind: "select", label: "Modelo", value: a.model.source === "creation" ? a.model.creation : "", onChange: (v) => setA((x) => ({ ...x, model: v ? { source: "creation", creation: v, name: models?.find((m) => m.id === v)?.name ?? v } : { source: "base" } })),
           options: [{ value: "", label: "O da unidade base" }, ...(models ?? []).map((m) => ({ value: m.id, label: `Modelo próprio: ${m.name}` }))], hint: "Modelos próprios precisam ser preparados no editor 3D (Exportar → Preparar para o jogo)." },
         { kind: "number", label: "Escala", value: (typeof doc.overrides["Display.UniformScale"] === "number" ? doc.overrides["Display.UniformScale"] as number : (leaves.get("Display.UniformScale")?.number ?? 1)), step: 0.005, min: 0.001, max: 10, onChange: (v) => setValue("Display.UniformScale", v) },
-        ...(a.model.source === "creation" ? [{ kind: "custom", label: "Ossos que a base usa", node: <span className="bone-list">{(details?.bones ?? []).map((b) => <code key={b} className={view?.bones.some((x) => x.name.toLowerCase() === b.toLowerCase()) ? "ok" : "miss"}>{b}</code>)}</span> } as Prop] : []),
       ] });
+      if (a.model.source === "creation" && details) {
+        const mine = view?.bones.map((b) => b.name) ?? [];
+        const map = a.boneMap ?? {};
+        out.push({ title: "Assistente de ossos", props: [
+          { kind: "info", label: "", value: "As armas e efeitos saem de ossos com estes nomes. Escolha qual grupo do seu modelo faz o papel de cada um." },
+          ...details.bones.map((b) => {
+            const auto = mine.find((m) => m.toLowerCase() === b.toLowerCase());
+            return { kind: "select", label: `${auto || map[b] ? "✓" : "✗"} ${b}`, value: map[b] ?? (auto ? "__same" : ""),
+              onChange: (v: string) => setA((x) => { const bm = { ...(x.boneMap ?? {}) }; if (!v || v === "__same") delete bm[b]; else bm[b] = v; return { ...x, boneMap: bm }; }),
+              options: [{ value: "", label: "— nenhum —" }, ...(auto ? [{ value: "__same", label: `${auto} (mesmo nome)` }] : []), ...mine.filter((m) => m !== auto).map((m) => ({ value: m, label: m }))] } as Prop;
+          }),
+        ] });
+      }
       out.push({ title: "Textura", props: [
         { kind: "slider", label: "Matiz", value: a.tint.hue, min: -180, max: 180, unit: "°", onChange: (v) => setA((x) => ({ ...x, tint: { ...x.tint, hue: v } })) },
         { kind: "slider", label: "Saturação", value: a.tint.sat, min: -100, max: 100, unit: "%", onChange: (v) => setA((x) => ({ ...x, tint: { ...x.tint, sat: v } })) },
         { kind: "slider", label: "Brilho", value: a.tint.bright, min: -60, max: 60, unit: "%", onChange: (v) => setA((x) => ({ ...x, tint: { ...x.tint, bright: v } })) },
+        { kind: "custom", label: "Pintar no modelo", node: <button className={`btn sm ${paint.on ? "primary" : ""}`} onClick={() => { setPaint((x) => ({ ...x, on: !x.on })); setRibbon("look"); }}><Icon name="brush" size={15} /> {paint.on ? "Pincel ligado" : "Ligar pincel"}</button> },
         { kind: "custom", label: "Imagem própria", node: <span className="row" style={{ gap: 6 }}>
           <button className="btn sm" onClick={() => imageInput.current?.click()}><Icon name="upload" size={15} /> Importar PNG</button>
-          {a.albedoAsset && <button className="btn sm text" onClick={() => setA((x) => ({ ...x, albedoAsset: null }))}><Icon name="close" size={15} /></button>}
-        </span>, },
-        { kind: "info", label: "Dica", value: "A imagem precisa seguir o mapa UV do modelo do jogo (exporte a textura original no Estúdio → Arquivos do jogo, pinte e importe)." },
+          {a.albedoAsset && <button className="btn sm text" title="Voltar à textura original" onClick={() => setA((x) => ({ ...x, albedoAsset: null }))}><Icon name="undo" size={15} /> Original</button>}
+        </span> },
+      ] });
+      out.push({ title: "Ícone", props: [
+        { kind: "custom", label: "", node: <span className="row" style={{ gap: 10, alignItems: "center" }}>
+          <span className="unit-icon">{iconUrl ? <img src={iconUrl} alt="Ícone" /> : <Icon name="smart_toy" size={26} />}</span>
+          <span className="col" style={{ gap: 6 }}>
+            <button className="btn sm" onClick={() => void makeIcon()}><Icon name="photo_camera" size={15} /> Gerar da vista 3D</button>
+            <span className="row" style={{ gap: 6 }}>
+              <button className="btn sm text" onClick={() => iconInput.current?.click()}><Icon name="upload" size={15} /> PNG</button>
+              {a.iconAsset && <button className="btn sm text" onClick={() => setA((x) => ({ ...x, iconAsset: null }))}><Icon name="close" size={15} /></button>}
+            </span>
+          </span>
+        </span> },
+        { kind: "info", label: "", value: a.iconAsset ? "Substitui o ícone da base (mesmo tamanho e formato)." : "Sem ícone próprio: usa o da base." },
       ] });
       out.push({ title: "Prévia", props: [{ kind: "custom", label: "Cor do time", node: <span className="swatches">{TEAM.map((c) => <button key={c} style={{ background: c, outline: teamColor === c ? "2px solid #fff" : undefined }} aria-label={c} onClick={() => setTeamColor(c)} />)}</span> }] });
+    } else if (section === "balance") {
+      const rows: [string, keyof Stats, boolean][] = [
+        ["Vida", "hp", true], ["Dano por segundo", "dps", true], ["Alcance", "range", true], ["Velocidade", "speed", true], ["Visão", "vision", true],
+        ["Custo em massa", "mass", false], ["Custo em energia", "energy", false], ["Tempo de construção", "time", false],
+        ["Vida por massa", "hpPerMass", true], ["Dano/s por massa", "dpsPerMass", true],
+      ];
+      const ratio = ref.s.eff ? cur.eff / ref.s.eff : 1;
+      out.push({ title: "Comparação", props: [
+        { kind: "select", label: "Comparar com", value: compareWith, onChange: setCompareWith, options: [{ value: "", label: `A base (${details?.name ?? "…"})` }, ...(catalog ?? []).filter((u) => u.id !== doc.base).map((u) => ({ value: u.id, label: `${u.name} (${u.id})` }))] },
+        { kind: "custom", label: "", node: <table className="bal-table">
+          <thead><tr><th /><th>{ref.name}</th><th>Esta tropa</th><th /></tr></thead>
+          <tbody>{rows.map(([label, k, up]) => {
+            const a0 = ref.s[k], b0 = cur[k];
+            const pct = a0 ? Math.round(((b0 - a0) / Math.abs(a0)) * 100) : 0;
+            const good = pct === 0 ? "" : (pct > 0) === up ? "good" : "bad";
+            return <tr key={k}><td>{label}</td><td>{fmt(a0)}</td><td><b>{fmt(b0)}</b></td><td className={good}>{pct ? `${pct > 0 ? "+" : ""}${pct}%` : "="}</td></tr>;
+          })}</tbody>
+        </table> },
+        { kind: "custom", label: "", node: <Notice kind={ratio > 1.6 || ratio < 0.5 ? "warn" : "ok"}>
+          Força pelo custo: <b>{Math.round(ratio * 100)}%</b> da referência. {ratio > 1.6 ? "Pode desequilibrar as partidas: aumente o custo ou reduza vida/dano." : ratio < 0.5 ? "Ficou fraca para o preço." : "Dentro do razoável."}
+        </Notice> },
+        { kind: "info", label: "", value: "Estimativa simples (vida × dano por segundo ÷ custo). Teste no jogo antes de usar em partidas sérias." },
+      ] });
+      out.push({ title: "Modelos de função", props: [
+        { kind: "custom", label: "", node: <div className="role-grid">
+          {ROLE_PRESETS.filter((r) => !r.air || categories.some((c) => c.toUpperCase() === "AIR")).map((r) => (
+            <button key={r.id} className="role-card" onClick={() => applyPreset(r)} title={r.desc}><Icon name={r.icon} size={20} /><b>{r.label}</b><small>{r.desc}</small></button>
+          ))}
+          <button className="role-card" onClick={() => applyPreset(null)}><Icon name="undo" size={20} /><b>Voltar à base</b><small>Tira os valores dos modelos.</small></button>
+        </div> },
+        { kind: "info", label: "", value: "Os modelos ajustam vários atributos a partir dos valores da base (não se somam). Depois ajuste à mão." },
+      ] });
     } else if (section.startsWith("attr:")) {
       const g = ATTRS.find((a) => `attr:${a.id}` === section);
       if (g) {
@@ -258,46 +500,92 @@ export default function UnitStudio({ id }: { id: string }) {
         const changedHere = g.fields.filter(([f]) => changed(f));
         if (changedHere.length) out.push({ title: "Alterados", props: [{ kind: "custom", label: "", node: <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>{changedHere.map(([f, label]) => <button key={f} className="chip" onClick={() => reset(f)} title="Voltar ao valor original">{label} <Icon name="undo" size={14} /></button>)}</span> }] });
       }
+    } else if (section === "weapons") {
+      out.push({ title: "Armas", props: [
+        { kind: "info", label: "Total", value: `${weapons.length} arma(s)` },
+        { kind: "custom", label: "", node: <button className="btn sm" onClick={() => setWeaponPick(0)}><Icon name="add" size={15} /> Adicionar arma de outra unidade</button> },
+        { kind: "info", label: "", value: "Copiar a arma inteira traz junto o projétil, os efeitos e os sons originais dela." },
+      ] });
     } else if (section.startsWith("weapon:")) {
       const i = Number(section.split(":")[1]);
-      const w = details?.weapons.find((x) => x.index === i);
+      const w = weapons.find((x) => x.index === i);
+      const baseCount = details?.weapons.length ?? 0;
+      let appended = 0;
+      const copyIdx = copies.findIndex(([t]) => { if (t > 0) return t === i; appended++; return baseCount + appended === i; });
       const props = WEAPON_FIELDS.map(([f, label]) => fieldProp(`Weapon.${i}.${f}`, label)).filter((x): x is Prop => !!x);
-      out.push({ title: w?.label ?? `Arma ${i}`, props });
+      const dps = (num(`Weapon.${i}.Damage`) ?? 0) * (num(`Weapon.${i}.RateOfFire`) ?? 0) * Math.max(1, num(`Weapon.${i}.MuzzleSalvoSize`) ?? 1);
+      out.push({ title: w?.label ?? `Arma ${i}`, props: [
+        ...(w?.from ? [{ kind: "info", label: "Origem", value: `copiada de ${w.from}` } as Prop] : []),
+        { kind: "info", label: "Dano por segundo", value: fmt(dps) },
+        ...props,
+      ] });
+      out.push({ title: "Trocar", props: [
+        { kind: "custom", label: "", node: <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+          <button className="btn sm" onClick={() => setWeaponPick(i)}><Icon name="swap_horiz" size={15} /> Trocar por arma de outra unidade</button>
+          {copyIdx >= 0 && <button className="btn sm text" onClick={() => p.commit((d) => {
+            const list = [...(d.weaponCopies ?? [])];
+            const [t] = list.splice(copyIdx, 1)[0];
+            // tira as alterações da arma copiada (e reposiciona as armas novas que vinham depois)
+            const overrides: UnitDoc["overrides"] = {};
+            for (const [k, v] of Object.entries(d.overrides)) {
+              const m = /^Weapon\.(\d+)\.(.*)$/.exec(k);
+              if (!m) { overrides[k] = v; continue; }
+              const n = Number(m[1]);
+              if (n === i) continue;
+              overrides[t === 0 && n > i ? `Weapon.${n - 1}.${m[2]}` : k] = v;
+            }
+            return { ...d, weaponCopies: list, overrides };
+          })}><Icon name="undo" size={15} /> {copies[copyIdx]?.[0] === 0 ? "Remover arma" : "Voltar à original"}</button>}
+        </span> },
+      ] });
       const known = new Set(WEAPON_FIELDS.map(([f]) => `Weapon.${i}.${f}`));
-      const extra = (details?.leaves ?? []).filter((l) => l.path.startsWith(`Weapon.${i}.`) && !known.has(l.path) && l.kind !== "text").slice(0, 60);
+      const extra = [...leaves.values()].filter((l) => l.path.startsWith(`Weapon.${i}.`) && !known.has(l.path) && l.kind !== "text").slice(0, 60);
       if (extra.length) out.push({ title: "Mais campos desta arma", props: extra.map((l) => fieldProp(l.path, l.path.slice(`Weapon.${i}.`.length))).filter((x): x is Prop => !!x) });
     } else if (section === "anims" || section.startsWith("anim:")) {
       const field = section.startsWith("anim:") ? section.slice(5) : animField;
       out.push({ title: "Animações", props: [
         { kind: "info", label: "Total", value: `${animFields.length} animações` },
-        { kind: "custom", label: "Criar", node: <button className="btn sm" onClick={() => setAnimator(true)}><Icon name="add" size={15} /> Nova animação</button> },
+        { kind: "custom", label: "Criar", node: <button className="btn sm" onClick={() => openDraft(null)}><Icon name="add" size={15} /> Nova animação</button> },
+        ...((doc.customAnims ?? []).length ? [{ kind: "custom", label: "Feitas aqui", node: <span className="col" style={{ gap: 4 }}>{(doc.customAnims ?? []).map((c, k) => (
+          <button key={k} className="btn sm text" style={{ justifyContent: "flex-start" }} onClick={() => openDraft(k)}><Icon name="edit" size={15} /> {c.name} <small className="faint">({animLabel(c.field)})</small></button>
+        ))}</span> } as Prop] : []),
       ] });
       if (field) {
-        const cur = animFields.find(([f]) => f === field)?.[1] ?? "";
+        const cur2 = animFields.find(([f]) => f === field)?.[1] ?? "";
         const rate = doc.animations[field]?.rate ?? null;
         out.push({ title: animLabel(field), props: [
           { kind: "info", label: "Campo", value: field },
-          { kind: "info", label: "Arquivo", value: cur.startsWith("asset:") ? `${cur.slice(6)} (criada aqui)` : cur.split("/").pop() },
+          { kind: "info", label: "Arquivo", value: cur2.startsWith("asset:") ? `${cur2.slice(6)} (criada aqui)` : cur2.split("/").pop() },
           { kind: "custom", label: "", node: <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-            <button className="btn sm" onClick={() => void playAnim(field, cur)}><Icon name="play_arrow" size={15} /> Ver</button>
+            <button className="btn sm" onClick={() => void playAnim(field, cur2)}><Icon name="play_arrow" size={15} /> Ver</button>
             <button className="btn sm" onClick={() => { setAnimPick(field); if (!allAnims) void api.unitAnimations().then(setAllAnims).catch(() => setAllAnims([])); }}><Icon name="swap_horiz" size={15} /> Trocar</button>
             {doc.animations[field] && <button className="btn sm text" onClick={() => p.commit((d) => { const a = { ...d.animations }; delete a[field]; return { ...d, animations: a }; })}><Icon name="undo" size={15} /> Original</button>}
           </span> },
-          { kind: "number", label: "Velocidade", value: rate ?? 1, step: 0.1, min: 0.05, max: 10, onChange: (v) => p.commit((d) => ({ ...d, animations: { ...d.animations, [field]: { file: d.animations[field]?.file ?? cur, rate: v } } })) },
+          { kind: "number", label: "Velocidade", value: rate ?? 1, step: 0.1, min: 0.05, max: 10, onChange: (v) => p.commit((d) => ({ ...d, animations: { ...d.animations, [field]: { file: d.animations[field]?.file ?? cur2, rate: v } } })) },
         ] });
       }
     } else if (section === "cats") {
+      const builtBy = categories.filter((c) => c.toUpperCase().startsWith("BUILTBY"));
+      const builtOpts = allCats.filter((c) => c.startsWith("BUILTBY") && !builtBy.includes(c));
+      const addCat = (c: string) => p.commit((d) => ({ ...d, categoriesAdd: [...d.categoriesAdd.filter((x) => x !== c), c], categoriesRemove: d.categoriesRemove.filter((x) => x !== c) }));
+      const rmCat = (c: string) => p.commit((d) => ({ ...d, categoriesAdd: d.categoriesAdd.filter((x) => x !== c), categoriesRemove: (details?.categories ?? []).includes(c) ? [...d.categoriesRemove, c] : d.categoriesRemove }));
+      out.push({ title: "Quem constrói (fábricas)", props: [
+        { kind: "custom", label: "", node: <div className="cat-chips">{builtBy.length ? builtBy.map((c) => <button key={c} className="chip" title="Remover" onClick={() => rmCat(c)}>{c} <Icon name="close" size={13} /></button>) : <span className="faint small">nenhuma</span>}</div> },
+        { kind: "select", label: "Adicionar fábrica", value: "", onChange: (v) => v && addCat(v), options: [{ value: "", label: "— escolha —" }, ...builtOpts.map((c) => ({ value: c, label: c }))] },
+        { kind: "info", label: "Pesquisa", value: "A tropa nova segue as regras de construção das categorias acima. Exigir uma pesquisa própria ainda não é possível (experimental)." },
+      ] });
       out.push({ title: "Categorias (comportamento no jogo)", props: [
         { kind: "custom", label: "", node: <div className="cat-chips">{categories.map((c) => (
-          <button key={c} className="chip" title="Remover" onClick={() => p.commit((d) => ({ ...d, categoriesAdd: d.categoriesAdd.filter((x) => x !== c), categoriesRemove: (details?.categories ?? []).includes(c) ? [...d.categoriesRemove, c] : d.categoriesRemove }))}>{c} <Icon name="close" size={13} /></button>
+          <button key={c} className="chip" title="Remover" onClick={() => rmCat(c)}>{c} <Icon name="close" size={13} /></button>
         ))}</div> },
-        { kind: "custom", label: "Adicionar", node: <form className="row" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); const c = newCat.trim().toUpperCase().replace(/[^A-Z0-9_]/g, ""); if (!c) return; p.commit((d) => ({ ...d, categoriesAdd: [...d.categoriesAdd.filter((x) => x !== c), c], categoriesRemove: d.categoriesRemove.filter((x) => x !== c) })); setNewCat(""); }}>
-          <input className="pinput" placeholder="EX.: AMPHIBIOUS" value={newCat} onChange={(e) => setNewCat(e.target.value)} /><button className="btn sm"><Icon name="add" size={15} /></button></form> },
-        { kind: "info", label: "Dica", value: "Categorias decidem quem constrói a tropa (fábrica), alvos das armas e como a IA a usa. Mantenha as de facção e de fábrica da base." },
+        { kind: "custom", label: "Adicionar", node: <form className="row" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); const c = newCat.trim().toUpperCase().replace(/[^A-Z0-9_]/g, ""); if (!c) return; addCat(c); setNewCat(""); }}>
+          <input className="pinput" placeholder="EX.: AMPHIBIOUS" list={`cats-${id}`} value={newCat} onChange={(e) => setNewCat(e.target.value)} /><button className="btn sm"><Icon name="add" size={15} /></button>
+          <datalist id={`cats-${id}`}>{allCats.map((c) => <option key={c} value={c} />)}</datalist></form> },
+        { kind: "info", label: "Dica", value: "Categorias decidem quem constrói a tropa, alvos das armas e como a IA a usa. Mantenha as de facção e de fábrica da base." },
       ] });
     } else if (section === "advanced") {
       const f = advFilter.trim().toLowerCase();
-      const list = (details?.leaves ?? []).filter((l: BpLeaf) => l.kind !== "text" || l.path.endsWith("Label")).filter((l) => !f || l.path.toLowerCase().includes(f)).slice(0, 150);
+      const list = [...leaves.values()].filter((l: BpLeaf) => l.kind !== "text" || l.path.endsWith("Label") || (l.text && isPath(l.text))).filter((l) => !f || l.path.toLowerCase().includes(f)).slice(0, 150);
       out.push({ title: "Todos os campos do blueprint", props: [
         { kind: "custom", label: "Filtrar", node: <input className="pinput" placeholder="ex.: Weapon.1, Speed, Radius" value={advFilter} onChange={(e) => setAdvFilter(e.target.value)} /> },
         ...list.map((l) => fieldProp(l.path, l.path)).filter((x): x is Prop => !!x),
@@ -312,7 +600,7 @@ export default function UnitStudio({ id }: { id: string }) {
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section, doc, details, leaves, catalog, models, animFields, animField, allAnims, categories, problems, newCat, advFilter, view, teamColor]);
+  }, [section, doc, details, leaves, catalog, models, animFields, animField, allAnims, categories, problems, newCat, advFilter, view, teamColor, weapons, cur, ref, compareWith, packs, newPack, iconUrl, paint.on, missing, allCats]);
 
   if (p.status === "loading") return <div className="studio-root"><div className="bar indeterminate" style={{ margin: 30 }}><i /></div></div>;
   if (p.status === "error") return <div className="studio-root"><Empty icon="error" title="Não deu para abrir o projeto">{p.error}</Empty></div>;
@@ -320,15 +608,15 @@ export default function UnitStudio({ id }: { id: string }) {
   return (
     <div className="studio-root">
       <div className="studio-top">
-        <Ribbon active={ribbon} onTab={setRibbon} tabs={[{ id: "home", label: "Início" }, { id: "look", label: "Aparência" }, { id: "test", label: "Testar e gerar" }]}>
+        <Ribbon active={ribbon} onTab={setRibbon} tabs={[{ id: "home", label: "Início" }, { id: "look", label: "Aparência" }, { id: "anim", label: "Animação" }, { id: "test", label: "Testar e gerar" }]}>
           {ribbon === "home" && <>
             <RibbonGroup label="Editar">
               <RibbonButton icon="badge" label="Geral" active={section === "general"} onClick={() => setSection("general")} />
+              <RibbonButton icon="balance" label="Equilíbrio" active={section === "balance"} onClick={() => setSection("balance")} color="#ffd166" />
               <RibbonButton icon="shield" label="Defesa" active={section === "attr:defense"} onClick={() => setSection("attr:defense")} />
               <RibbonButton icon="payments" label="Custo" active={section === "attr:economy"} onClick={() => setSection("attr:economy")} />
               <RibbonButton icon="speed" label="Movimento" active={section === "attr:physics"} onClick={() => setSection("attr:physics")} />
-              <RibbonButton icon="gps_fixed" label="Armas" active={section.startsWith("weapon:")} onClick={() => setSection(details?.weapons[0] ? `weapon:${details.weapons[0].index}` : "general")} />
-              <RibbonButton icon="animation" label="Animações" active={section === "anims" || section.startsWith("anim:")} onClick={() => setSection("anims")} />
+              <RibbonButton icon="gps_fixed" label="Armas" active={section.startsWith("weapon")} onClick={() => setSection(weapons[0] ? `weapon:${weapons[0].index}` : "weapons")} />
               <RibbonButton icon="category" label="Comportamento" active={section === "cats"} onClick={() => setSection("cats")} />
             </RibbonGroup>
             <RibbonGroup label="Gerar">
@@ -344,20 +632,43 @@ export default function UnitStudio({ id }: { id: string }) {
                 if (m) { useTabs.getState().open(m); toast("info", "Modele, prepare para o jogo e escolha o modelo em Aparência."); }
               }} />
               <RibbonButton icon="upload" label="Textura PNG" onClick={() => imageInput.current?.click()} />
+              <RibbonButton icon="photo_camera" label="Gerar ícone" onClick={() => void makeIcon()} />
+            </RibbonGroup>
+            <RibbonGroup label="Pintar no modelo">
+              <RibbonButton icon="brush" label={paint.on ? "Pincel ligado" : "Pincel"} active={paint.on} onClick={() => setPaint((x) => ({ ...x, on: !x.on }))} hint="Pinte direto no modelo 3D. Cada pincelada vira a textura da tropa." />
+              <div className="ribbon-stack" style={{ width: 200 }}>
+                <span className="swatches big">{PAINT.map((c) => <button key={c} style={{ background: c, outline: paint.color === c ? "2px solid #fff" : undefined }} aria-label={c} onClick={() => setPaint((x) => ({ ...x, color: c, on: true }))} />)}
+                  <input type="color" value={paint.color} onChange={(e) => setPaint((x) => ({ ...x, color: e.target.value, on: true }))} aria-label="Outra cor" /></span>
+              </div>
+              <div className="ribbon-stack" style={{ width: 170 }}>
+                <label className="range" style={{ gridTemplateColumns: "54px 1fr 30px" }}><span>Tamanho</span><input type="range" min={1} max={30} value={paint.size} onChange={(e) => setPaint((x) => ({ ...x, size: Number(e.target.value) }))} /><output>{paint.size}</output></label>
+                <label className="range" style={{ gridTemplateColumns: "54px 1fr 30px" }}><span>Força</span><input type="range" min={0.1} max={1} step={0.05} value={paint.opacity} onChange={(e) => setPaint((x) => ({ ...x, opacity: Number(e.target.value) }))} /><output>{Math.round(paint.opacity * 100)}</output></label>
+              </div>
+              <RibbonButton icon="undo" label="Textura original" onClick={() => p.commit((d) => ({ ...d, appearance: { ...d.appearance, albedoAsset: null } }))} disabled={!doc.appearance.albedoAsset} />
             </RibbonGroup>
             <RibbonGroup label="Cor do time (prévia)">
               <span className="swatches big">{TEAM.map((c) => <button key={c} style={{ background: c, outline: teamColor === c ? "2px solid #fff" : undefined }} aria-label={c} onClick={() => setTeamColor(c)} />)}</span>
             </RibbonGroup>
           </>}
-          {ribbon === "test" && <>
+          {ribbon === "anim" && <>
+            <RibbonGroup label="Animações">
+              <RibbonButton icon="animation" label="Lista" active={section === "anims"} onClick={() => setSection("anims")} />
+              <RibbonButton icon="add" label="Nova animação" onClick={() => openDraft(null)} color="#a3e635" />
+            </RibbonGroup>
             <RibbonGroup label="Prévia">
-              <RibbonButton icon={playing ? "pause" : "play_arrow"} label={playing ? "Pausar" : "Tocar"} onClick={() => setPlaying((v) => !v)} disabled={!anim} />
+              <RibbonButton icon={playing ? "pause" : "play_arrow"} label={playing ? "Pausar" : "Tocar"} onClick={() => setPlaying((v) => !v)} disabled={!shownAnim} />
               <div className="ribbon-stack" style={{ width: 170 }}>
                 <label className="range" style={{ gridTemplateColumns: "70px 1fr 34px" }}><span>Velocidade</span><input type="range" min={0.1} max={3} step={0.1} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} /><output>{speed}×</output></label>
               </div>
             </RibbonGroup>
-            <RibbonGroup label="Gerar">
+          </>}
+          {ribbon === "test" && <>
+            <RibbonGroup label="Conferir">
+              <RibbonButton icon="balance" label="Equilíbrio" onClick={() => setSection("balance")} />
+              <RibbonButton icon="fact_check" label="Validar" onClick={() => setSection("check")} />
               <RibbonButton icon="description" label="Ver blueprint" onClick={async () => { try { setBpText(await api.unitBlueprintPreview(request())); } catch (e) { toast("error", errorText(e)); } }} />
+            </RibbonGroup>
+            <RibbonGroup label="Gerar">
               <RibbonButton icon="rocket_launch" label={busy ? "Gerando…" : "Gerar tropa"} onClick={() => void build(false)} disabled={busy || !doc.base} color="#a3e635" />
               <RibbonButton icon="play_circle" label="Gerar e jogar" onClick={() => void build(true)} disabled={busy || !doc.base} color="#a3e635" />
             </RibbonGroup>
@@ -374,17 +685,27 @@ export default function UnitStudio({ id }: { id: string }) {
           }} />
         </Panel>}
         center={
-          <div className="viewport">
-            {!doc.base ? <div style={{ display: "grid", placeItems: "center", height: "100%" }}><Empty icon="smart_toy" title="Escolha a unidade base">Em Geral → Base.</Empty></div> : (
-              <UnitViewport model={view} tint={doc.appearance.tint} albedoOverride={albedoUrl} teamColor={teamColor} anim={anim} playing={playing} speed={speed} snapshotRef={snapshot} />
-            )}
-            <div className="viewport-overlay">
-              <span className="vp-chip"><Icon name="smart_toy" size={15} /> {doc.name} <small className="faint">({doc.newId || "sem id"})</small></span>
-              {details && <span className="vp-chip"><span className={`fac fac-${details.faction.toLowerCase()}`}>{details.faction.slice(0, 1)}</span> baseada em {details.name}</span>}
-              {anim && animField && <span className="vp-chip"><Icon name="animation" size={15} /> {animLabel(animField)} <button aria-label="Parar" onClick={() => { setAnim(null); setAnimField(null); }}><Icon name="stop" size={15} /></button></span>}
+          <div className="unit-center">
+            <div className="viewport">
+              {!doc.base ? <div style={{ display: "grid", placeItems: "center", height: "100%" }}><Empty icon="smart_toy" title="Escolha a unidade base">Em Geral → Base.</Empty></div> : (
+                <UnitViewport model={view} tint={doc.appearance.tint} albedoOverride={albedoUrl} teamColor={teamColor} anim={shownAnim} playing={playing} speed={speed}
+                  snapshotRef={snapshot} iconRef={iconShot} paint={paint} onPainted={(png) => void savePaint(png)} seek={draft && !playing ? scrub : null}
+                  onTime={(t) => { if (draft && draftAnim) setScrub(t % Math.max(0.05, draftAnim.duration)); }} />
+              )}
+              <div className="viewport-overlay">
+                <span className="vp-chip"><Icon name="smart_toy" size={15} /> {doc.name} <small className="faint">({doc.newId || "sem id"})</small></span>
+                {details && <span className="vp-chip"><span className={`fac fac-${details.faction.toLowerCase()}`}>{details.faction.slice(0, 1)}</span> baseada em {details.name}</span>}
+                {paint.on && <span className="vp-chip" style={{ color: "var(--warn)" }}><Icon name="brush" size={15} /> Pintando: arraste sobre o modelo · botão direito gira</span>}
+                {anim && animField && !draft && <span className="vp-chip"><Icon name="animation" size={15} /> {animLabel(animField)} <button aria-label="Parar" onClick={() => { setAnim(null); setAnimField(null); }}><Icon name="stop" size={15} /></button></span>}
+              </div>
+              {details === undefined && doc.base && <div className="vp-hint">Lendo a unidade do jogo…</div>}
+              {view === null && details && <div className="vp-hint">{modelSrc.source === "creation" ? "Prepare o modelo próprio para o jogo para vê-lo aqui." : "Sem prévia 3D para esta unidade."}</div>}
             </div>
-            {details === undefined && doc.base && <div className="vp-hint">Lendo a unidade do jogo…</div>}
-            {view === null && details && <div className="vp-hint">{modelSrc.source === "creation" ? "Prepare o modelo próprio para o jogo para vê-lo aqui." : "Sem prévia 3D para esta unidade."}</div>}
+            {draft && view && (
+              <AnimTimeline draft={draft} setDraft={setDraft} bones={view.bones.map((b) => b.name)} fields={animFields.map(([f]) => f)}
+                time={scrub} setTime={(t) => { setPlaying(false); setScrub(t); }} playing={playing} setPlaying={setPlaying}
+                busy={!!animBusy} onSave={() => void saveDraft()} onClose={() => { setDraft(null); setPlaying(true); }} />
+            )}
           </div>
         }
         right={<Panel title="Propriedades" icon="tune" grow collapsible={false} id="unit-props">
@@ -392,7 +713,7 @@ export default function UnitStudio({ id }: { id: string }) {
         </Panel>}
       />
       <StatusBar>
-        <span><b>{Object.keys(doc.overrides).length}</b> campos alterados · <b>{Object.keys(doc.animations).length}</b> animações trocadas · <b>{categories.length}</b> categorias</span>
+        <span><b>{Object.keys(doc.overrides).length}</b> campos alterados · <b>{weapons.length}</b> armas · <b>{Object.keys(doc.animations).length}</b> animações trocadas · <b>{categories.length}</b> categorias</span>
         <span className="grow" />
         <span style={{ color: "var(--warn)" }}>Experimental: confirme no jogo se a tropa aparece na fábrica.</span>
       </StatusBar>
@@ -401,10 +722,16 @@ export default function UnitStudio({ id }: { id: string }) {
         const f = e.target.files?.[0];
         e.target.value = "";
         if (!f) return;
-        const data = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(f); });
-        const name = await api.creationAssetPut(id, f.name, data);
+        const name = await api.creationAssetPut(id, f.name, await readFile(f));
         p.commit((d) => ({ ...d, appearance: { ...d.appearance, albedoAsset: name } }));
         setSection("look");
+      }} />
+      <input ref={iconInput} type="file" accept="image/png" hidden onChange={async (e) => {
+        const f = e.target.files?.[0];
+        e.target.value = "";
+        if (!f) return;
+        const name = await api.creationAssetPut(id, `icone-${f.name}`, await readFile(f));
+        p.commit((d) => ({ ...d, appearance: { ...d.appearance, iconAsset: name } }));
       }} />
 
       {animPick && (
@@ -414,15 +741,21 @@ export default function UnitStudio({ id }: { id: string }) {
           setAnimPick(null);
         }} onPreview={(file) => void playAnim(animPick, file)} />
       )}
-      {animator && doc.base && (
-        <Animator creation={id} source={modelSrc.source === "creation" ? { model: modelSrc.creation } : { unit: doc.base }} bones={view?.bones.map((b) => b.name) ?? []}
-          fields={animFields.map(([f]) => f)} onClose={() => setAnimator(false)}
-          onSaved={(asset, field) => {
-            p.commit((d) => ({ ...d, animations: { ...d.animations, [field]: { file: `asset:${asset}`, rate: null } } }));
-            setAnimator(false);
-            setSection(`anim:${field}`);
-            toast("ok", `Animação "${asset}" criada e usada em ${animLabel(field)}.`);
-          }} />
+      {weaponPick !== null && (
+        <WeaponPicker catalog={catalog ?? []} exclude={doc.base ?? ""} target={weaponPick} onClose={() => setWeaponPick(null)} onPick={(unit, src, d) => {
+          setOthers((o) => ({ ...o, [unit]: d }));
+          const target = weaponPick;
+          p.commit((doc0) => {
+            const list = [...(doc0.weaponCopies ?? [])].filter((c) => target === 0 || c[0] !== target);
+            list.push([target, unit, src]);
+            const overrides = target > 0 ? Object.fromEntries(Object.entries(doc0.overrides).filter(([k]) => !k.startsWith(`Weapon.${target}.`))) : doc0.overrides;
+            return { ...doc0, weaponCopies: list, overrides };
+          });
+          const idx = target > 0 ? target : weapons.length + 1;
+          setWeaponPick(null);
+          setSection(`weapon:${idx}`);
+          toast("ok", `Arma de ${d.name} ${target > 0 ? "no lugar da original" : "adicionada"}.`);
+        }} />
       )}
       {bpText !== null && (
         <Modal title="Blueprint da tropa" icon="description" onClose={() => setBpText(null)} wide>
@@ -444,6 +777,8 @@ export default function UnitStudio({ id }: { id: string }) {
     </div>
   );
 }
+
+const readFile = (f: File) => new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(f); });
 
 function AnimPicker({ all, base, onClose, onPick, onPreview }: { all: string[] | null; base: string; onClose: () => void; onPick: (f: string) => void; onPreview: (f: string) => void }) {
   const [q, setQ] = useState(base);
@@ -471,57 +806,135 @@ function AnimPicker({ all, base, onClose, onPick, onPreview }: { all: string[] |
   );
 }
 
-/** Animação nova por quadros-chave: escolha o osso, o instante e a rotação/posição. */
-function Animator({ creation, source, bones, fields, onClose, onSaved }: {
-  creation: string; source: { unit?: string; model?: string }; bones: string[]; fields: string[];
-  onClose: () => void; onSaved: (asset: string, field: string) => void;
-}) {
-  const [name, setName] = useState("minha_animacao");
-  const [duration, setDuration] = useState(1.5);
-  const [field, setField] = useState(fields[0] ?? "Display.AnimationIdle");
-  const [keys, setKeys] = useState<AnimKey[]>(() => {
-    const b = bones.find((x) => /turret/i.test(x)) ?? bones[1] ?? bones[0] ?? "Root";
-    return [{ bone: b, time: 0, pos: [0, 0, 0], rot: [0, 0, 0] }, { bone: b, time: 0.75, pos: [0, 0, 0], rot: [0, 45, 0] }, { bone: b, time: 1.5, pos: [0, 0, 0], rot: [0, 0, 0] }];
-  });
-  const [busy, setBusy] = useState(false);
-  const toast = useStore((s) => s.toast);
-  const setKey = (i: number, k: Partial<AnimKey>) => setKeys((ks) => ks.map((x, j) => (j === i ? { ...x, ...k } : x)));
-  const num = (v: string) => Number(v.replace(",", ".")) || 0;
+/** Galeria de armas: escolhe a unidade, vê as armas dela (dano, cadência, alcance, projétil) e copia. */
+function WeaponPicker({ catalog, exclude, target, onClose, onPick }: { catalog: UnitInfo[]; exclude: string; target: number; onClose: () => void; onPick: (unit: string, src: number, d: UnitDetails) => void }) {
+  const [q, setQ] = useState("");
+  const [unit, setUnit] = useState<string | null>(null);
+  const [d, setD] = useState<UnitDetails | null | undefined>(undefined);
+  useEffect(() => {
+    if (!unit) return;
+    setD(undefined);
+    void api.unitDetails(unit).then(setD).catch(() => setD(null));
+  }, [unit]);
+  const list = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return catalog.filter((u) => u.id !== exclude && (!t || `${u.name} ${u.id} ${u.faction} ${u.role}`.toLowerCase().includes(t))).slice(0, 200);
+  }, [catalog, q, exclude]);
+  const leaf = (path: string) => { const l = d?.leaves.find((x) => x.path === path); return l ? (l.kind === "number" ? l.number : l.text) : null; };
   return (
-    <Modal title="Nova animação" icon="animation" onClose={onClose} wide>
-      <div className="col" style={{ gap: 12 }}>
-        <p className="muted small">Cada linha é um quadro-chave: no instante indicado o osso fica com essa rotação (graus) e deslocamento. Entre um quadro e outro o movimento é suave. Ossos sem quadros ficam parados.</p>
-        <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
-          <label className="field" style={{ flex: 1, minWidth: 180 }}><span className="label">Nome</span><input className="input" value={name} onChange={(e) => setName(e.target.value.replace(/[^\w-]/g, "_"))} /></label>
-          <label className="field" style={{ width: 140 }}><span className="label">Duração (s)</span><input className="input" type="number" step={0.1} min={0.1} max={60} value={duration} onChange={(e) => setDuration(Number(e.target.value) || 1)} /></label>
-          <label className="field" style={{ flex: 1, minWidth: 200 }}><span className="label">Usar como</span>
-            <select className="select" value={field} onChange={(e) => setField(e.target.value)}>
-              {[...new Set([...fields, "Display.AnimationIdle", "Display.AnimationWalk", "Display.AnimationDeath", "Display.AnimationActivate"])].map((f) => <option key={f} value={f}>{animLabel(f)} ({f.split(".").pop()})</option>)}
-            </select></label>
+    <Modal title={target ? `Trocar a arma ${target}` : "Adicionar arma"} icon="gps_fixed" onClose={onClose} wide>
+      <div className="wpick">
+        <div className="col" style={{ gap: 8, minHeight: 0 }}>
+          <div className="search-bar"><Icon name="search" /><input className="input dense" autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar unidade: artilharia, cybran, ucl0103…" /></div>
+          <div className="anim-list">{list.map((u) => (
+            <button key={u.id} className="pick row-pick" aria-pressed={unit === u.id} onClick={() => setUnit(u.id)}>
+              <span className={`fac fac-${u.faction.toLowerCase()}`}>{u.faction.slice(0, 1)}</span>
+              <span className="grow"><b>{u.name}</b> <small className="faint">{u.id}</small></span>
+              <small className="faint">{u.role}</small>
+            </button>
+          ))}</div>
         </div>
-        <div className="key-table">
-          <div className="key-head"><span>Osso</span><span>Tempo (s)</span><span>Girar X/Y/Z (°)</span><span>Mover X/Y/Z</span><span /></div>
-          {keys.map((k, i) => (
-            <div key={i} className="key-row">
-              <select className="pinput" value={k.bone} onChange={(e) => setKey(i, { bone: e.target.value })}>{(bones.length ? bones : ["Root"]).map((b) => <option key={b}>{b}</option>)}</select>
-              <input className="pinput" value={k.time} onChange={(e) => setKey(i, { time: Math.max(0, Math.min(duration, num(e.target.value))) })} />
-              <span className="vec3">{[0, 1, 2].map((a) => <input key={a} className="pinput" value={k.rot[a]} onChange={(e) => { const r = [...k.rot] as [number, number, number]; r[a] = num(e.target.value); setKey(i, { rot: r }); }} />)}</span>
-              <span className="vec3">{[0, 1, 2].map((a) => <input key={a} className="pinput" value={k.pos[a]} onChange={(e) => { const r = [...k.pos] as [number, number, number]; r[a] = num(e.target.value); setKey(i, { pos: r }); }} />)}</span>
-              <button className="btn icon-btn sm" aria-label="Remover quadro" onClick={() => setKeys((ks) => ks.filter((_, j) => j !== i))}><Icon name="close" size={16} /></button>
-            </div>
-          ))}
-          <button className="btn sm" onClick={() => setKeys((ks) => [...ks, { ...(ks[ks.length - 1] ?? { bone: bones[0] ?? "Root", pos: [0, 0, 0], rot: [0, 0, 0] }), time: Math.min(duration, (ks[ks.length - 1]?.time ?? 0) + 0.5) }])}><Icon name="add" size={16} /> Quadro-chave</button>
+        <div className="col" style={{ gap: 8, minHeight: 0, overflow: "auto" }}>
+          {!unit ? <p className="faint small">Escolha uma unidade para ver as armas dela.</p> : d === undefined ? <div className="bar indeterminate"><i /></div> : !d ? <p className="faint small">Não deu para ler essa unidade.</p> : d.weapons.length === 0 ? <p className="faint small">{d.name} não tem armas.</p> : d.weapons.map((w) => {
+            const dmg = Number(leaf(`Weapon.${w.index}.Damage`) ?? 0), rof = Number(leaf(`Weapon.${w.index}.RateOfFire`) ?? 0);
+            const proj = String(leaf(`Weapon.${w.index}.ProjectileId`) ?? "").split("/").filter(Boolean).slice(-2, -1)[0];
+            return (
+              <div key={w.index} className="wcard">
+                <div className="row" style={{ gap: 8 }}><Icon name={w.dummy ? "block" : "gps_fixed"} size={18} /><b className="grow">{w.label}</b>{w.dummy && <span className="chip">efeito</span>}</div>
+                <div className="wstats">
+                  <span><small>Dano</small><b>{fmt(dmg)}</b></span><span><small>Tiros/s</small><b>{fmt(rof)}</b></span>
+                  <span><small>Dano/s</small><b>{fmt(dmg * rof)}</b></span><span><small>Alcance</small><b>{fmt(Number(leaf(`Weapon.${w.index}.MaxRadius`) ?? 0))}</b></span>
+                </div>
+                {proj && <small className="faint mono">projétil: {proj}</small>}
+                <button className="btn sm primary" onClick={() => onPick(d.id, w.index, d)}><Icon name="content_copy" size={15} /> {target ? "Usar no lugar" : "Adicionar"}</button>
+              </div>
+            );
+          })}
         </div>
-        <footer>
-          <button className="btn text" onClick={onClose}>Cancelar</button>
-          <button className="btn primary" disabled={busy || !keys.length || !name.trim()} onClick={async () => {
-            setBusy(true);
-            try { const asset = await api.animCreate(creation, name, source, keys, duration); onSaved(asset, field); }
-            catch (e) { toast("error", errorText(e)); }
-            finally { setBusy(false); }
-          }}><Icon name="save" size={17} /> {busy ? "Criando…" : "Criar animação"}</button>
-        </footer>
       </div>
     </Modal>
+  );
+}
+
+/** Linha do tempo: ossos à esquerda, quadros-chave (losangos) no tempo, edição do quadro escolhido. */
+function AnimTimeline({ draft, setDraft, bones, fields, time, setTime, playing, setPlaying, busy, onSave, onClose }: {
+  draft: AnimDraft; setDraft: (d: AnimDraft) => void; bones: string[]; fields: string[]; time: number; setTime: (t: number) => void;
+  playing: boolean; setPlaying: (v: boolean) => void; busy: boolean; onSave: () => void; onClose: () => void;
+}) {
+  const [selBone, setSelBone] = useState(draft.keys[0]?.bone ?? bones[0]);
+  const [selKey, setSelKey] = useState<number | null>(0);
+  const track = useRef<HTMLDivElement>(null);
+  const boneList = useRef<HTMLDivElement>(null);
+  const dragK = useRef<number | null>(null);
+  const dur = Math.max(0.05, draft.duration);
+  const keys = draft.keys;
+  const set = (patch: Partial<AnimDraft>) => setDraft({ ...draft, ...patch });
+  const setKey = (i: number, k: Partial<AnimKey>) => set({ keys: keys.map((x, j) => (j === i ? { ...x, ...k } : x)) });
+  const used = new Set(keys.map((k) => k.bone));
+  const rows = [...bones.filter((b) => used.has(b)), ...bones.filter((b) => !used.has(b))];
+  const tAt = (clientX: number) => { const r = track.current!.getBoundingClientRect(); return Math.max(0, Math.min(dur, Math.round(((clientX - r.left) / r.width) * dur * 100) / 100)); };
+  const addKey = () => {
+    const s = sampleKey(keys, selBone, time);
+    const k: AnimKey = { bone: selBone, time: Math.round(time * 100) / 100, ...s };
+    const list = [...keys.filter((x) => !(x.bone === selBone && Math.abs(x.time - k.time) < 0.01)), k];
+    set({ keys: list });
+    setSelKey(list.length - 1);
+  };
+  const sk = selKey !== null ? keys[selKey] : null;
+  return (
+    <div className="timeline">
+      <div className="tl-head">
+        <Icon name="animation" size={18} />
+        <input className="pinput" style={{ width: 160 }} value={draft.name} onChange={(e) => set({ name: e.target.value.replace(/[^\w-]/g, "_").slice(0, 40) })} aria-label="Nome" />
+        <select className="pinput" value={draft.field} onChange={(e) => set({ field: e.target.value })} aria-label="Usar como">
+          {[...new Set([...fields, "Display.AnimationIdle", "Display.AnimationWalk", "Display.AnimationDeath", "Display.AnimationActivate", "Display.AnimationFire", "Display.AnimationBuild"])].map((f) => <option key={f} value={f}>Usar como: {animLabel(f)}</option>)}
+        </select>
+        <label className="row small" style={{ gap: 4 }}>Duração <input className="pinput" style={{ width: 60 }} type="number" step={0.1} min={0.1} max={60} value={draft.duration} onChange={(e) => { const v = Math.max(0.1, Number(e.target.value) || 1); set({ duration: v, keys: keys.map((k) => ({ ...k, time: Math.min(k.time, v) })) }); }} />s</label>
+        <select className="pinput" value="" onChange={(e) => { const t = ANIM_TEMPLATES.find((x) => x.id === e.target.value); if (t) { set({ keys: t.make(selBone, bones), duration: t.duration, field: t.field }); setSelKey(0); } }} aria-label="Modelo">
+          <option value="">Começar de um modelo…</option>
+          {ANIM_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.label} (osso {selBone})</option>)}
+        </select>
+        <span className="grow" />
+        <button className="btn sm icon-btn" onClick={() => setPlaying(!playing)} aria-label={playing ? "Pausar" : "Tocar"}><Icon name={playing ? "pause" : "play_arrow"} size={18} /></button>
+        <span className="mono small">{time.toFixed(2)}s</span>
+        <button className="btn sm" onClick={addKey}><Icon name="add" size={15} /> Quadro em {selBone}</button>
+        <button className="btn sm primary" disabled={busy || !keys.length || !draft.name.trim()} onClick={onSave}><Icon name="save" size={15} /> {busy ? "Salvando…" : "Salvar animação"}</button>
+        <button className="btn sm icon-btn" onClick={onClose} aria-label="Fechar"><Icon name="close" size={18} /></button>
+      </div>
+      <div className="tl-body">
+        <div className="tl-bones" ref={boneList} onScroll={(e) => { if (track.current) track.current.scrollTop = e.currentTarget.scrollTop; }}>
+          {rows.map((b) => <button key={b} className={`tl-bone ${b === selBone ? "on" : ""} ${used.has(b) ? "used" : ""}`} onClick={() => setSelBone(b)}>{b}</button>)}
+        </div>
+        <div className="tl-tracks" ref={track} onScroll={(e) => { if (boneList.current) boneList.current.scrollTop = e.currentTarget.scrollTop; }}
+          onPointerDown={(e) => { if ((e.target as HTMLElement).dataset.key) return; setTime(tAt(e.clientX)); }}
+          onPointerMove={(e) => { if (dragK.current !== null && e.buttons & 1) setKey(dragK.current, { time: tAt(e.clientX) }); }}
+          onPointerUp={() => { dragK.current = null; }}>
+          <div className="tl-ruler">{Array.from({ length: 11 }, (_, i) => <span key={i} style={{ left: `${i * 10}%` }}>{((dur * i) / 10).toFixed(dur < 2 ? 2 : 1)}</span>)}</div>
+          {rows.map((b) => (
+            <div key={b} className={`tl-row ${b === selBone ? "on" : ""}`}>
+              {keys.map((k, i) => k.bone === b && (
+                <button key={i} data-key="1" className={`tl-key ${selKey === i ? "on" : ""}`} style={{ left: `${(k.time / dur) * 100}%` }} title={`${k.time.toFixed(2)}s`}
+                  onPointerDown={(e) => { e.stopPropagation(); track.current?.setPointerCapture(e.pointerId); dragK.current = i; setSelKey(i); setSelBone(b); setTime(k.time); }} />
+              ))}
+            </div>
+          ))}
+          <div className="tl-head-line" style={{ left: `${(time / dur) * 100}%` }} />
+        </div>
+        <div className="tl-key-edit">
+          {sk ? <>
+            <b className="small">{sk.bone} · {sk.time.toFixed(2)}s</b>
+            {(["X", "Y", "Z"] as const).map((ax, a) => (
+              <label key={`r${ax}`} className="range" style={{ gridTemplateColumns: "56px 1fr 44px" }}><span>Girar {ax}</span>
+                <input type="range" min={-180} max={180} value={sk.rot[a]} onChange={(e) => { const r = [...sk.rot] as [number, number, number]; r[a] = Number(e.target.value); setKey(selKey!, { rot: r }); }} /><output>{sk.rot[a]}°</output></label>
+            ))}
+            {(["X", "Y", "Z"] as const).map((ax, a) => (
+              <label key={`p${ax}`} className="range" style={{ gridTemplateColumns: "56px 1fr 44px" }}><span>Mover {ax}</span>
+                <input type="range" min={-1} max={1} step={0.01} value={sk.pos[a]} onChange={(e) => { const r = [...sk.pos] as [number, number, number]; r[a] = Number(e.target.value); setKey(selKey!, { pos: r }); }} /><output>{sk.pos[a]}</output></label>
+            ))}
+            <button className="btn sm text" onClick={() => { set({ keys: keys.filter((_, j) => j !== selKey) }); setSelKey(null); }}><Icon name="delete" size={15} /> Apagar quadro</button>
+          </> : <p className="faint small">Escolha um losango na linha do tempo, ou clique em "Quadro" para criar um no instante atual. Arraste os losangos para mudar o tempo.</p>}
+        </div>
+      </div>
+    </div>
   );
 }

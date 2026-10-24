@@ -1,6 +1,7 @@
 // Formato dos documentos de cada tipo de projeto (salvos como JSON pelo núcleo) e os modelos
 // iniciais. Sem three.js aqui: a biblioteca de projetos usa isto sem carregar os editores.
 import { EMPTY_EDITS, type Edits } from "../studio/mapEdit";
+import type { Feature, Symmetry, WorldGen } from "./worldgen";
 
 // ------------------------------------------------------------------ mapa
 
@@ -16,24 +17,39 @@ export interface MapDoc {
   waterMargin: number;
   smooth: boolean;
   rugged: boolean;
-  minimap: "donor" | "desert" | "snow" | "dark";
+  minimap: "donor" | "natural" | "desert" | "snow" | "dark";
   strip: "moving" | "all" | "none";
   edits: Edits;
   /** modelos 3D próprios (projetos de modelo) usados como decoração: bp → projeto */
   models: { creation: string; name: string; bp: string }[];
   notes: string;
+  /** gerador de mundo (relevo base); null = relevo do terreno do jogo */
+  world: WorldGen | null;
+  /** formas do terreno (montanhas, lagos, rios…), geradas ou colocadas à mão */
+  features: Feature[];
+  /** camada do pincel de escultura (int16 base64, 1/32 unidade) na resolução sculptSize */
+  sculpt: string | null;
+  sculptSize: number;
+  /** simetria ao colocar objetos à mão */
+  symmetry: Symmetry;
+  /** grupos/objetos escondidos e travados no explorador */
+  layers: { hidden: string[]; locked: string[] };
 }
 
 export const newMapDoc = (over: Partial<MapDoc> = {}): MapDoc => ({
   schema: 1, terrain: null, lobbyName: "Meu mapa", teams: "2", economy: { baseMass: 4, sites: 8, perSite: 3 }, norush: 70,
   patch: false, maxSlope: 6, waterMargin: 4, smooth: false, rugged: false, minimap: "donor", strip: "moving",
-  edits: EMPTY_EDITS, models: [], notes: "", ...over,
+  edits: EMPTY_EDITS, models: [], notes: "", world: null, features: [], sculpt: null, sculptSize: 0, symmetry: "none",
+  layers: { hidden: [], locked: [] }, ...over,
 });
 
 export function migrateMap(raw: unknown): MapDoc {
   const d = (raw ?? {}) as Partial<MapDoc>;
   const base = newMapDoc();
-  return { ...base, ...d, economy: { ...base.economy, ...(d.economy ?? {}) }, edits: { ...EMPTY_EDITS, ...(d.edits ?? {}) }, models: d.models ?? [], schema: 1 };
+  return {
+    ...base, ...d, economy: { ...base.economy, ...(d.economy ?? {}) }, edits: { ...EMPTY_EDITS, ...(d.edits ?? {}) }, models: d.models ?? [],
+    features: d.features ?? [], layers: { hidden: d.layers?.hidden ?? [], locked: d.layers?.locked ?? [] }, schema: 1,
+  };
 }
 
 // ------------------------------------------------------------------ modelo 3D
@@ -197,9 +213,19 @@ export interface UnitDoc {
     tint: { hue: number; sat: number; bright: number };
     /** textura pintada/importada (arquivo do projeto) que substitui a do jogo */
     albedoAsset: string | null;
+    /** ícone (arquivo do projeto) que substitui o da base */
+    iconAsset?: string | null;
+    /** assistente de ossos: osso da base → grupo do modelo próprio */
+    boneMap?: Record<string, string>;
   };
   /** animações: campo do blueprint (ex.: "AnimationWalk") → arquivo .sca do jogo ou do projeto */
   animations: Record<string, { file: string; rate?: number | null }>;
+  /** animações feitas aqui (quadros-chave), para reabrir e editar */
+  customAnims?: { name: string; field: string; duration: number; keys: { bone: string; time: number; pos: [number, number, number]; rot: [number, number, number] }[]; asset?: string | null }[];
+  /** armas copiadas de outras unidades: [posição na tropa (0 = nova), unidade, posição lá] */
+  weaponCopies?: [number, string, number][];
+  /** pacote de tropas (várias tropas num mod só) */
+  pack?: string | null;
   notes: string;
 }
 

@@ -22,6 +22,64 @@ entre eles sem perder nada (as abas ficam montadas em segundo plano).
 
 Layout: caixa de recursos à esquerda, vista 3D no centro, explorador e propriedades à direita.
 
+### Gerar mundo (por semente)
+
+**Gerar mundo** (tecla `G`, faixa Início ou Terreno) abre o gerador:
+
+- **Estilos prontos**: vales verdes, montanhas, terra dos lagos, arquipélago, deserto, terra
+  arrasada, gelo e campo aberto. Cada estilo só preenche os controles; tudo pode ser ajustado.
+- **Semente**: o mesmo número gera sempre o mesmo mundo (o dado sorteia outra).
+- **Jogadores e simetria**: 2 a 8 bases. As simetrias são espelho (esquerda/direita, cima/baixo,
+  diagonal), giro de 180° ou giro de 90°. Relevo, formas e decorações saem iguais para todos os lados.
+- **Relevo**: quanto do terreno base é substituído, altura da terra, ondulação e largura das ondas.
+- **Montanhas** (com picos irregulares), cordilheiras, colinas e planaltos.
+- **Água**: lagos, rios com curvas e ilhas.
+- **Cavidades**: crateras, cânions e campos de dunas.
+- **Vida e estruturas**: florestas em manchas naturais, pedras (mais nas encostas), ruínas e postos
+  em áreas planas, destroços espalhados.
+- **Acabamento**: bordas (montanhas, borda rochosa ou mar), economia e cores do minimapa.
+
+A prévia ao vivo mostra o mapa de cima, as bases, as linhas de rios e cordilheiras, o total de
+formas e decorações e a % caminhável. O gerador:
+
+- deixa a área de cada base plana;
+- confere se todas as bases se alcançam a pé e, se alguma ficar isolada, abre passagens.
+
+**Depois de gerar, tudo é editável**:
+
+- montanhas, lagos, rios etc. ficam em **Formas do terreno** no explorador: arraste para mover,
+  mude raio, altura, irregularidade, ou **Variar** a forma;
+- apague ou duplique;
+- decorações geradas ficam marcadas como "gerada";
+- gerar de novo troca só o que o gerador fez: o que você criou ou mexeu fica.
+
+### Esculpir
+
+- **Pincel** (faixa Terreno): subir (`R`), descer (`F`), suavizar (`S`), nivelar e irregular, com
+  raio e força. O que foi pintado fica numa camada própria ("Pincel de escultura" no explorador),
+  que dá para esconder para comparar ou apagar.
+- **Formas** (faixa Formas): montanha, colina, cordilheira (arrastar), planalto, dunas, ilha, lago,
+  rio (arrastar), cânion (arrastar), cratera e passagem. Cada uma vira um objeto editável.
+- **Relevo simples**: morro, vale, platô, área plana, rampa e vau sobre a água.
+- **Simetria ao colocar**: com uma simetria ligada, bases, massa, decorações, formas, relevo e
+  pinceladas são repetidos nos outros lados do mapa.
+
+### Organizar, analisar e exportar
+
+- **Esconder e travar** no explorador (olho e cadeado), por grupo ou por objeto. Uma forma
+  escondida fica desligada, para comparar o mapa com e sem ela. Objetos travados não são
+  selecionados nem movidos.
+- **Exibir → Análise**: território de cada base pelo caminho a pé, fronteira entre os times,
+  caminhos mais curtos, gargalos e distância até o inimigo. Mostra se o mapa está equilibrado.
+- **Exibir → Cores do relevo**: água, areia, grama, rocha e neve pela altura e inclinação.
+  É só a prévia: no jogo o chão usa as texturas do terreno base (troque em **Chão**).
+- **Prévia do lobby**: como o mapa aparece na lista do jogo. O minimapa "cores do relevo" é gerado
+  a partir do relevo novo.
+- **Jogo → Exportar .scd**: depois de **Gerar mapa**, salva o `.scd` numa pasta (para compartilhar
+  ou instalar à mão).
+
+### Mais ferramentas
+
 - **Terreno base**: um dos terrenos do jogo (relevo, água e texturas vêm dele).
 - **Inserir**: bases (2 a 8), massa extra, relevo (morro, vale, planalto), cortes, passagens.
 - **Objetos**: decorações do jogo com o **modelo e a textura reais** (lidos da sua instalação),
@@ -66,7 +124,29 @@ pode ser ligada, desligada ou apagada como qualquer mod.
 - **Comportamento**: categorias (quem constrói, alvos, IA).
 - **Todos os campos**: qualquer valor numérico do blueprint.
 - **Blueprint (texto)**: o arquivo final; só os valores alterados mudam, comentários e ordem ficam.
-- **Validação** antes de gerar; **Gerar tropa** ou **Gerar e jogar**.
+- **Equilíbrio**: compara vida, dano por segundo, alcance, velocidade e custo com a base (ou outra
+  unidade). Mostra a força pelo custo e avisa se a tropa pode desequilibrar as partidas.
+- **Modelos de função**: tanque pesado, artilharia, batedor, barata em massa, atirador de longe,
+  aérea rápida e elite. Ajustam vários atributos de uma vez, sempre a partir da base.
+- **Copiar arma de outra unidade**: galeria com dano, cadência, alcance e projétil de cada arma do
+  jogo. Troca uma arma ou adiciona uma nova, levando projétil, efeitos e sons originais.
+- **Pintar no modelo**: pincel direto na vista 3D (cor, tamanho, força). Cada pincelada vira a
+  textura da tropa.
+- **Ícone**: gerado da vista 3D (fundo transparente) ou PNG próprio. Substitui o ícone da base no
+  mesmo tamanho e formato.
+- **Assistente de ossos**: com um modelo próprio, liga cada osso que as armas usam a um grupo do
+  seu modelo.
+- **Linha do tempo de animação**:
+  - ossos à esquerda e quadros-chave (losangos) arrastáveis no tempo;
+  - giro e deslocamento do quadro escolhido;
+  - modelos prontos: torre vigiando, recuo do tiro, balanço ao andar, abrir, tombar, construir;
+  - prévia ao vivo na vista 3D, igual ao arquivo gerado.
+
+  As animações feitas aqui podem ser reabertas e editadas.
+- **Quem constrói**: fábricas (categorias BUILTBY…) com a lista de todas as categorias do jogo.
+- **Pacotes**: várias tropas num mod só (`pacote-<nome>`).
+- **Validação**, inclusive de arquivos citados que não existem no jogo (projéteis, animações…).
+- **Gerar tropa** ou **Gerar e jogar**.
 
 ## O que é experimental
 
@@ -81,6 +161,11 @@ O launcher nunca supõe que o jogo aceita um formato não testado. Hoje:
 | **Tropas novas** | experimental: blueprint em texto em `/units/<id>/`, script herdado da base. Confirme se a unidade aparece na fábrica da facção da base |
 | **Animações criadas por quadros-chave** | experimental: `.sca` gerado a partir dos ossos da base/modelo |
 | Modelo próprio numa tropa | experimental: armas e efeitos dependem dos nomes dos ossos |
+| **Lagos e rios novos em terrenos com água** | experimental: a máscara de água é refeita e o id do mapa fica com o tamanho do id do terreno (exigência do formato) |
+| Lagos e rios em terrenos sem água | viram vales e leitos secos (o jogo não desenha água num terreno feito sem ela) |
+| Relevo gerado (montanhas, formas, pincel) | mesma técnica do relevo esculpido, que já funciona no jogo; as texturas do chão continuam as do terreno base |
+| Armas copiadas e ícone gerado | experimental: confira os pontos de disparo e o ícone no jogo |
+| Pacotes de tropas | experimental (mesmo caminho das tropas sozinhas) |
 
 Se algo experimental não funcionar, desligue o mod na biblioteca e abra uma issue com o que
 aconteceu (e o relatório de travamento da tela Desempenho, se houver).
@@ -100,6 +185,8 @@ Código:
 
 - Rust (`crates/cp-core/src/`):
   - `creator.rs`: projetos, versões, recuperação, assets, `.cpproj`;
+  - `resources/maptk/maptk_bridge.py`: camada de relevo (`height_delta`), máscara de água e
+    minimapa natural;
   - `blueprint.rs`: leitor/editor de blueprints;
   - `anim.rs`: SCA;
   - `modelgen.rs`: modelo do editor para SCM e DDS;
@@ -108,6 +195,8 @@ Código:
 - Tauri: `src-tauri/src/creator_cmds.rs`, `src-tauri/src/perf_cmds.rs`.
 - Interface:
   - `src/pages/create/` (Create, MapStudio, ModelStudio, UnitStudio e as vistas 3D);
+  - `src/pages/create/worldgen.ts` (gerador: ruído, simetria, formas, decorações, pincel) e
+    `mapAnalysis.ts` (equilíbrio do mapa); `animKeys.ts` (animação por quadros-chave);
   - `src/components/studio/kit.tsx` (faixa de ferramentas, painéis, árvore, propriedades);
   - `src/lib/useProject.ts`, `src/lib/tabs.ts`.
 
@@ -119,6 +208,9 @@ Testes (`npm run test:core`) cobrem:
 - geração de modelos e de tropas;
 - o Otimizador: opções com backup, perfis, minidumps e versão do executável;
 - implantação e TOC: instalar mods e voltar ao original.
+- gerador de mundos (`npm run test:worldgen`): mesma semente gera o mesmo mapa, a simetria é exata
+  e todas as bases se alcançam;
+- ponte do toolkit (`npm run test:maps`): camada de relevo, máscara de água e minimapa natural.
 
 Alguns testes também rodam com arquivos reais do jogo quando as variáveis `CP_REAL_BP` e
 `CP_REAL_SCA` apontam para eles.

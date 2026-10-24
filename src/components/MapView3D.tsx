@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { naturalColor } from "../pages/create/worldgen";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { heightAt, type DecorKind, type Pt, type Rect } from "../pages/studio/mapEdit";
 import { propModel, propModelNow } from "./propModels";
@@ -33,6 +34,10 @@ interface Props {
   snapshotRef?: { current: (() => string | null) | null };
   /** câmera livre: o botão esquerdo gira em vez de editar */
   orbit: boolean;
+  /** sem textura: cores naturais do relevo (água, areia, grama, rocha, neve) neste bioma */
+  palette?: "temperate" | "desert" | "snow" | "volcanic" | null;
+  /** linhas no chão (rios, cordilheiras, passagens): pontos e cor */
+  lines?: { pts: Pt[]; color: string }[];
   onPointer: (type: "down" | "move" | "up", p: Pt | null) => void;
 }
 
@@ -187,9 +192,17 @@ export default function MapView3D(props: Props) {
       let lo = Infinity, hi = -Infinity;
       for (let k = 0; k < heights.length; k++) { lo = Math.min(lo, heights[k]); hi = Math.max(hi, heights[k]); }
       const c = new THREE.Color();
+      const pal = live.current.palette;
+      const st = grid / size;
       for (let k = 0; k < w * w; k++) {
         pos[k * 3 + 1] = heights[k] * e;
-        colorFor(heights[k], waterLevel, lo, hi, c);
+        if (pal) {
+          const i = k % w, j = (k - i) / w;
+          const dx = (heights[Math.min(k + 1, j * w + size)] - heights[Math.max(k - 1, j * w)]) / (2 * st);
+          const dz = (heights[Math.min(k + w, w * w - 1)] - heights[Math.max(k - w, 0)]) / (2 * st);
+          const [r, g, b] = naturalColor(heights[k], Math.hypot(dx, dz), waterLevel, waterLevel > 0.5, lo, hi, pal, 1);
+          c.setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace);
+        } else colorFor(heights[k], waterLevel, lo, hi, c);
         col.set([c.r, c.g, c.b], k * 3);
       }
       geo.attributes.position.needsUpdate = true;
@@ -288,6 +301,22 @@ export default function MapView3D(props: Props) {
         c.rotation.x = -Math.PI / 2;
         c.position.set(seed[0], y + 3, seed[1]);
         markers.add(c);
+      }
+      for (const ln of live.current.lines ?? []) {
+        const pts: THREE.Vector3[] = [];
+        for (let k = 0; k < ln.pts.length - 1; k++) {
+          const [ax, az] = ln.pts[k], [bx, bz] = ln.pts[k + 1];
+          const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 6));
+          for (let t = 0; t <= n; t++) {
+            const x = ax + ((bx - ax) * t) / n, z = az + ((bz - az) * t) / n;
+            pts.push(new THREE.Vector3(x, Math.max(hAt(x, z), live.current.waterLevel * exag()) + 2.5, z));
+          }
+        }
+        if (pts.length < 2) continue;
+        const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineDashedMaterial({ color: ln.color, dashSize: 10, gapSize: 6, depthTest: false, transparent: true }));
+        l.computeLineDistances();
+        l.renderOrder = 4;
+        markers.add(l);
       }
     };
 
@@ -558,9 +587,9 @@ export default function MapView3D(props: Props) {
     };
   }, [props.size, props.grid]);
 
-  useEffect(() => { api.current?.setHeights(); }, [props.heights, props.waterLevel, props.exaggeration]);
+  useEffect(() => { api.current?.setHeights(); }, [props.heights, props.waterLevel, props.exaggeration, props.palette]);
   useEffect(() => { api.current?.setTexture(props.texture); }, [props.texture]);
-  useEffect(() => { api.current?.setMarkers(); }, [props.spawns, props.mass, props.autoMass, props.bridges, props.seed]);
+  useEffect(() => { api.current?.setMarkers(); }, [props.spawns, props.mass, props.autoMass, props.bridges, props.seed, props.lines]);
   useEffect(() => { api.current?.setDecor(); }, [props.decor, props.cuts]);
   useEffect(() => { api.current?.setHighlights(); }, [props.highlights]);
   useEffect(() => { api.current?.setOrbit(props.orbit); }, [props.orbit]);

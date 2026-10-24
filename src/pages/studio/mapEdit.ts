@@ -14,7 +14,7 @@ export type ReliefKind = "hill" | "valley" | "plateau" | "flatten" | "ramp";
 export interface Relief { kind: ReliefKind; op: SculptOp }
 
 /** Decoração colocada pelo jogador. */
-export interface PlacedProp { bp: string; x: number; z: number; yaw: number; scale: number }
+export interface PlacedProp { bp: string; x: number; z: number; yaw: number; scale: number; gen?: boolean }
 
 /** Camada de textura do chão (de qualquer mapa do jogo). */
 export interface GroundLayer { map: string; name: string; d: string; n?: string | null; s?: string | null; slotD: number; slotN: number; slotS: number }

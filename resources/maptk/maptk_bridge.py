@@ -306,7 +306,7 @@ def _clean_spec(spec):
     if len(spec["extra_mass"]) > 200:
         raise ValueError("no máximo 200 pontos de massa manuais")
     # relevo esculpido muda onde as unidades andam: a navegação precisa ser refeita (modo PATCH)
-    edits_terrain = bool(spec.get("sculpt") or spec.get("flatten") or spec.get("rugged_edges"))
+    edits_terrain = bool(spec.get("sculpt") or spec.get("flatten") or spec.get("rugged_edges") or spec.get("height_delta"))
     if edits_terrain and not spec.get("patch"):
         first = next(iter(spec["anchors"].values()))
         spec["patch"] = dict(max_slope=6.0, water_margin=4.0, seed=first, causeways=[])
@@ -335,6 +335,29 @@ def _clean_spec(spec):
         spec["ship_terrain"] = True
     if spec.get("playable_area"):
         spec["playable_area"] = tuple(int(v) for v in spec["playable_area"])
+    # camada de relevo do gerador/pincel: grade (size+1)² de deltas int16 (× scale = unidades do mundo)
+    hd = spec.get("height_delta")
+    if hd:
+        import base64
+        size = int(hd["size"])
+        scale = float(hd.get("scale", 1 / 32))
+        data = base64.b64decode(hd["data"])
+        if not 16 <= size <= 1024 or len(data) != (size + 1) ** 2 * 2 or not 0 < scale <= 1:
+            raise ValueError("camada de relevo inválida")
+        spec["height_delta"] = dict(size=size, scale=scale, data=data)
+        if not spec.get("patch"):
+            first = next(iter(spec["anchors"].values()))
+            spec["patch"] = dict(max_slope=6.0, water_margin=4.0, seed=first, causeways=[])
+    else:
+        spec.pop("height_delta", None)
+    # água nova (lagos/rios): reescreve a máscara de água; o caminho dela dentro do terreno só
+    # pode ser trocado por um id do MESMO tamanho do terreno base
+    if spec.get("water_rewrite"):
+        if len(spec["scenario_id"]) != len(str(spec["terrain"])):
+            spec["water_rewrite"] = False
+            spec.setdefault("_notes", []).append("o id do mapa precisa ter o mesmo tamanho do id do terreno para a água nova aparecer")
+    if spec.get("minimap") not in (None, "donor", "desert", "snow", "dark", "natural"):
+        raise ValueError("minimapa inválido")
     return spec
 
 
@@ -347,6 +370,10 @@ def _hooks(sm, spec, state):
     def init(self, *a, **k):
         orig_init(self, *a, **k)
         state["t"] = self
+        hd = spec.get("height_delta")
+        if hd and self.id == spec["terrain"]:
+            self.set_hfield(_apply_delta(sm, self.raw["hfield.win.bdf"], hd))
+            emit("progress", message=f"relevo do gerador aplicado ({hd['size'] + 1}² amostras)")
 
     def set_hfield(self, new):
         old = self.raw["hfield.win.bdf"]
@@ -360,6 +387,12 @@ def _hooks(sm, spec, state):
         except Exception as e:  # noqa: BLE001 — terrenos de escaramuça desenham direto do heightfield
             emit("progress", message=f"malha visual não ajustada ({e}); o relevo usa o heightfield")
         orig_set(self, new)
+        if spec.get("water_rewrite") and self.raw.get("waterDepth.dds"):
+            # a máscara de água acompanha o relevo novo (lagos e rios novos, terra nova)
+            wd = sm.write_waterdepth_dds_mips(self, sm._water_level(self))
+            self.raw["waterDepth.dds"] = wd
+            self._wd = wd[128:]
+            state["water_mask"] = True
 
     def make_save(blob, n_armies, area=(40, 40, 984, 984)):
         t = state.get("t")
@@ -391,15 +424,114 @@ def _hooks(sm, spec, state):
             emit("progress", message=f"decorações: {na} novas, {nr} removidas")
             if k.get("strip_props") == "all":
                 k["strip_props"] = "moving"  # "remover todos" apagaria as novas também
-        return orig_pack(out, terrain, *a, **k)
+        water = False
+        if state.get("water_mask") and terrain.raw.get("terrain.win.bdf"):
+            try:
+                terrain.raw["terrain.win.bdf"] = sm.retarget_waterdepth_path(terrain.raw["terrain.win.bdf"], terrain.id, a[0])
+                water = True
+                emit("progress", message="máscara de água refeita para os lagos e rios novos")
+            except Exception as e:  # noqa: BLE001 — sem a troca, a água segue a do terreno base
+                state["warnings"].append(f"a água nova pode não aparecer no jogo ({e})")
+        res = orig_pack(out, terrain, *a, **k)
+        if water:
+            # o jogo procura a máscara com e sem ".win"
+            with zipfile.ZipFile(out, "a", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(f"maps/{a[0]}/{a[0]}.waterDepth.win.dds", terrain.raw["waterDepth.dds"])
+        return res
 
     sm.Terrain.__init__, sm.Terrain.set_hfield, sm.make_save = init, set_hfield, make_save
     sm.package_patched = package_patched
+    # minimapa "natural" (cores do relevo com sombra): entra no lugar da paleta "dark" do toolkit
+    orig_dark = getattr(sm, "dark_palette", None)
+    if spec.get("minimap") == "natural":
+        sm.dark_palette = _natural_palette
+        spec["minimap"] = "dark"
 
     def restore():
         sm.Terrain.__init__, sm.Terrain.set_hfield, sm.make_save = orig_init, orig_set, orig_save
         sm.package_patched = orig_pack
+        if orig_dark is not None:
+            sm.dark_palette = orig_dark
     return restore
+
+
+def _apply_delta(sm, hfield_bytes, hd):
+    """Soma a camada de relevo (grade menor, interpolada) ao heightfield inteiro."""
+    import array
+    import struct
+    pl = bytearray(sm.read_bdf_payload(hfield_bytes))
+    _, w, h, _, off = struct.unpack_from("<5I", pl, 0)
+    n, sc = hd["size"], hd["scale"] * 128.0
+    D = array.array("h")
+    D.frombytes(hd["data"])
+    H = array.array("H")
+    H.frombytes(bytes(pl[off:off + w * h * 2]))
+    if sys.byteorder != "little":
+        D.byteswap()
+        H.byteswap()
+    k = n / max(1, w - 1)
+    cols = []
+    for x in range(w):
+        fx = x * k
+        i = min(n - 1, int(fx))
+        cols.append((i, fx - i))
+    n1 = n + 1
+    for z in range(h):
+        fz = z * k
+        j = min(n - 1, int(fz))
+        v = fz - j
+        r0, r1 = j * n1, (j + 1) * n1
+        base = z * w
+        for x, (i, u) in enumerate(cols):
+            a0 = D[r0 + i] + (D[r0 + i + 1] - D[r0 + i]) * u
+            a1 = D[r1 + i] + (D[r1 + i + 1] - D[r1 + i]) * u
+            d = a0 + (a1 - a0) * v
+            if d:
+                y = H[base + x] + int(round(d * sc))
+                H[base + x] = 0 if y < 0 else 65535 if y > 65535 else y
+    if sys.byteorder != "little":
+        H.byteswap()
+    pl[off:off + w * h * 2] = H.tobytes()
+    return sm.rebuild_bdf(hfield_bytes, bytes(pl))
+
+
+def _natural_palette(terrain):
+    """Minimapa com as cores do relevo (água, areia, grama, terra, rocha e neve) e sombra."""
+    wl = 0.0
+    try:
+        import sc2maps
+        wl = sc2maps._water_level(terrain)
+    except Exception:  # noqa: BLE001
+        pass
+    ys = terrain.H
+    lo, hi = min(ys) / 128.0, max(ys) / 128.0
+    span = max(1.0, hi - max(lo, wl))
+    g = terrain.grid
+
+    def pal(x, z):
+        y = terrain.y(x, z)
+        if wl > 0 and y < wl:
+            d = min(1.0, (wl - y) / 20.0)
+            return (int(70 - 40 * d), int(120 - 50 * d), int(160 - 30 * d))
+        x1, z1 = min(g, x + 3), min(g, z + 3)
+        sl = (terrain.y(x1, z) - y) * 0.8 + (terrain.y(x, z1) - y) * 0.6
+        t = (y - max(lo, wl)) / span
+        if wl > 0 and y < wl + 2.5:
+            c = (196, 182, 130)
+        elif t > 0.82:
+            c = (226, 230, 234)
+        elif t > 0.6:
+            c = (124, 116, 104)
+        elif t > 0.35:
+            c = (112, 128, 74)
+        else:
+            c = (88, 132, 64)
+        steep = abs(sl) > 6
+        if steep:
+            c = (118, 110, 100)
+        k = max(0.55, min(1.35, 1.0 - sl * 0.05))
+        return tuple(max(0, min(255, int(v * k))) for v in c)
+    return pal
 
 
 def _buildable_near(t, x, z, r=10):
@@ -418,7 +550,7 @@ def cmd_build(inp):
     import make_map
     make_map.WS = OUT
     sm = _toolkit()
-    state = {"warnings": []}
+    state = {"warnings": list(spec.pop("_notes", []))}
     restore = _hooks(sm, spec, state)
     old = sys.stdout
     sys.stdout = LineCapture()

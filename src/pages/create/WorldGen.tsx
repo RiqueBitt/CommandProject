@@ -1,0 +1,236 @@
+// Janela do gerador de mundos: escolha um estilo, ajuste montanhas, água, florestas e estruturas,
+// veja a prévia ao vivo e gere. Tudo o que sai daqui continua editável no editor.
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Icon, Modal, Notice } from "../../components/ui";
+import type { Terrain } from "../../lib/types";
+import type { Pt } from "../studio/mapEdit";
+import {
+  BIOME_LABEL, FEATURE_COLOR, generateWorld, LINE_FEATURES, newWorld, reliefImage, SYMMETRY_LABEL, symmetriesFor, walkMask, WORLD_PRESETS,
+  type Grid, type PropCatalog, type WorldGen, type WorldResult,
+} from "./worldgen";
+
+interface Props {
+  grid: Grid;
+  donor: Float32Array;
+  water: number;
+  hasWater: boolean;
+  terrains: Terrain[] | null;
+  terrain: string | null;
+  initial: WorldGen | null;
+  catalog: PropCatalog;
+  onTerrain: (id: string) => void;
+  onClose: () => void;
+  onApply: (wg: WorldGen, res: WorldResult) => void;
+}
+
+/** Reduz a grade de alturas (prévia rápida). */
+function downsample(g: Grid, H: Float32Array, to: number): [Grid, Float32Array] {
+  if (g.size <= to) return [g, H];
+  const w = g.size + 1, n = to + 1, out = new Float32Array(n * n), k = g.size / to;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) out[j * n + i] = H[Math.round(j * k) * w + Math.round(i * k)];
+  return [{ size: to, grid: g.grid }, out];
+}
+
+const SLIDERS: { group: string; icon: string; items: { key: keyof WorldGen; label: string; min: number; max: number; step?: number; fmt?: (v: number) => string; water?: boolean }[] }[] = [
+  { group: "Relevo", icon: "terrain", items: [
+    { key: "blend", label: "Relevo novo", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: "elevation", label: "Altura da terra", min: 4, max: 60 },
+    { key: "hilliness", label: "Ondulação", min: 0, max: 30 },
+    { key: "scale", label: "Largura das ondas", min: 100, max: 500, step: 10 },
+  ] },
+  { group: "Montanhas", icon: "landscape", items: [
+    { key: "mountains", label: "Montanhas", min: 0, max: 10 },
+    { key: "mountainHeight", label: "Altura das montanhas", min: 20, max: 140, step: 5 },
+    { key: "ridges", label: "Cordilheiras", min: 0, max: 6 },
+    { key: "hills", label: "Colinas", min: 0, max: 14 },
+    { key: "plateaus", label: "Planaltos", min: 0, max: 6 },
+  ] },
+  { group: "Água", icon: "water", items: [
+    { key: "lakes", label: "Lagos", min: 0, max: 10 },
+    { key: "rivers", label: "Rios", min: 0, max: 4 },
+    { key: "islands", label: "Ilhas", min: 0, max: 8, water: true },
+  ] },
+  { group: "Cavidades", icon: "vertical_align_bottom", items: [
+    { key: "craters", label: "Crateras", min: 0, max: 10 },
+    { key: "canyons", label: "Cânions", min: 0, max: 4 },
+    { key: "dunes", label: "Campos de dunas", min: 0, max: 8 },
+  ] },
+  { group: "Vida e estruturas", icon: "forest", items: [
+    { key: "forests", label: "Florestas", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: "rocks", label: "Pedras", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: "structures", label: "Estruturas e ruínas", min: 0, max: 12 },
+    { key: "wrecks", label: "Destroços", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
+  ] },
+];
+
+export default function WorldGenModal(props: Props) {
+  const { grid, donor, water, hasWater, catalog } = props;
+  const [wg, setWg] = useState<WorldGen>(() => props.initial ?? newWorld());
+  const [img, setImg] = useState<string | null>(null);
+  const [res, setRes] = useState<WorldResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const timer = useRef<number | null>(null);
+  const [small, smallDonor] = useMemo(() => downsample(grid, donor, 128), [grid, donor]);
+  const set = <K extends keyof WorldGen>(k: K, v: WorldGen[K]) => setWg((w) => ({ ...w, [k]: v }));
+
+  // prévia: gera numa grade menor alguns instantes depois da última mudança
+  useEffect(() => {
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      const r = generateWorld(small, smallDonor, water, hasWater, wg, catalog);
+      setRes(r);
+      setImg(reliefImage(small, r.heights, water, hasWater, wg.biome, 384));
+    }, 120);
+    return () => { if (timer.current) window.clearTimeout(timer.current); };
+  }, [wg, small, smallDonor, water, hasWater, catalog]);
+
+  const walkPct = useMemo(() => {
+    if (!res) return 0;
+    const m = walkMask(small, res.heights, water, hasWater);
+    let n = 0;
+    for (const v of m) n += v;
+    return Math.round((n / m.length) * 100);
+  }, [res, small, water, hasWater]);
+
+  const syms = symmetriesFor(wg.players);
+  const terrainName = props.terrains?.find((t) => t.id === props.terrain)?.name ?? props.terrain ?? "—";
+  const G = grid.grid;
+  const svgPt = (p: Pt) => [(p[0] / G) * 100, (p[1] / G) * 100];
+
+  const apply = () => {
+    setBusy(true);
+    // a geração final usa a resolução do editor (a mesma semente dá o mesmo mapa)
+    window.setTimeout(() => {
+      const r = generateWorld(grid, donor, water, hasWater, wg, catalog);
+      props.onApply(wg, r);
+      setBusy(false);
+    }, 20);
+  };
+
+  return (
+    <Modal title="Gerar mundo" icon="auto_awesome" onClose={props.onClose} wide>
+      <div className="wg">
+        <div className="wg-left">
+          <div className="wg-presets">
+            {WORLD_PRESETS.map((p) => (
+              <button key={p.id} className={`wg-preset ${wg.preset === p.id ? "on" : ""}`} onClick={() => setWg((w) => ({ ...w, ...p.over, preset: p.id }))} title={p.desc}>
+                <Icon name={p.icon} size={22} />
+                <b>{p.label}</b>
+                <small>{p.desc}</small>
+              </button>
+            ))}
+          </div>
+
+          <div className="wg-row">
+            <label className="field"><span className="label">Terreno base</span>
+              <select className="select" value={props.terrain ?? ""} onChange={(e) => props.onTerrain(e.target.value)}>
+                {(props.terrains ?? []).map((t) => <option key={t.id} value={t.id}>{t.name ?? t.id}{t.waterY ? " · com água" : ""}</option>)}
+              </select>
+            </label>
+            <label className="field"><span className="label">Semente</span>
+              <span className="row" style={{ gap: 6 }}>
+                <input className="input" type="number" value={wg.seed} onChange={(e) => set("seed", Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                <button className="btn icon-btn" title="Semente aleatória" aria-label="Semente aleatória" onClick={() => set("seed", Math.floor(Math.random() * 999999))}><Icon name="casino" /></button>
+              </span>
+            </label>
+          </div>
+          <div className="wg-row">
+            <label className="field"><span className="label">Jogadores</span>
+              <select className="select" value={wg.players} onChange={(e) => {
+                const n = Number(e.target.value);
+                setWg((w) => ({ ...w, players: n, symmetry: symmetriesFor(n).includes(w.symmetry) ? w.symmetry : symmetriesFor(n)[symmetriesFor(n).length > 1 ? 1 : 0] }));
+              }}>
+                {[2, 3, 4, 5, 6, 8].map((n) => <option key={n} value={n}>{n} jogadores</option>)}
+              </select>
+            </label>
+            <label className="field"><span className="label">Simetria</span>
+              <select className="select" value={wg.symmetry} onChange={(e) => set("symmetry", e.target.value as WorldGen["symmetry"])}>
+                {syms.map((s) => <option key={s} value={s}>{SYMMETRY_LABEL[s]}</option>)}
+              </select>
+            </label>
+          </div>
+
+          {SLIDERS.map((g) => (
+            <section key={g.group} className="wg-group">
+              <h4><Icon name={g.icon} size={17} /> {g.group}</h4>
+              {g.items.map((it) => {
+                const v = wg[it.key] as number;
+                const off = it.water && !hasWater;
+                return (
+                  <label key={it.key} className={`range ${off ? "off" : ""}`} title={off ? "Precisa de um terreno com água" : undefined}>
+                    <span>{it.label}</span>
+                    <input type="range" min={it.min} max={it.max} step={it.step ?? 1} value={v} disabled={off} onChange={(e) => set(it.key, Number(e.target.value) as never)} />
+                    <output>{it.fmt ? it.fmt(v) : v}</output>
+                  </label>
+                );
+              })}
+              {g.group === "Água" && !hasWater && <p className="faint small">{terrainName} não tem água: lagos e rios viram vales e leitos secos.</p>}
+            </section>
+          ))}
+          <section className="wg-group">
+            <h4><Icon name="tune" size={17} /> Acabamento</h4>
+            <div className="wg-row">
+              <label className="field"><span className="label">Bordas do mapa</span>
+                <select className="select" value={wg.edge} onChange={(e) => set("edge", e.target.value as WorldGen["edge"])}>
+                  <option value="none">Abertas</option>
+                  <option value="mountains">Cercadas por montanhas</option>
+                  <option value="rugged">Borda rochosa (intransponível)</option>
+                  <option value="water" disabled={!hasWater}>Mar em volta{hasWater ? "" : " (precisa de água)"}</option>
+                </select>
+              </label>
+              <label className="field"><span className="label">Economia</span>
+                <select className="select" value={wg.economy} onChange={(e) => set("economy", e.target.value as WorldGen["economy"])}>
+                  <option value="poor">Pouca massa</option>
+                  <option value="normal">Normal</option>
+                  <option value="rich">Muita massa</option>
+                </select>
+              </label>
+              <label className="field"><span className="label">Cores (prévia e minimapa)</span>
+                <select className="select" value={wg.biome} onChange={(e) => set("biome", e.target.value as WorldGen["biome"])}>
+                  {Object.entries(BIOME_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
+              </label>
+            </div>
+            <label className="check"><input type="checkbox" checked={wg.clearDonor} onChange={(e) => set("clearDonor", e.target.checked)} /> Tirar as decorações originais do terreno (recomendado com relevo novo)</label>
+          </section>
+        </div>
+
+        <div className="wg-right">
+          <div className="wg-preview">
+            {img ? <img src={img} alt="Prévia do mundo" draggable={false} /> : <div className="bar indeterminate"><i /></div>}
+            {res && (
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+                {res.features.filter((f) => LINE_FEATURES.includes(f.kind) && f.kind !== "pass").map((f) => (
+                  <polyline key={f.id} points={f.pts.map((p) => svgPt(p).join(",")).join(" ")} fill="none" stroke={FEATURE_COLOR[f.kind]} strokeOpacity={0.35} strokeWidth={0.5} />
+                ))}
+                {res.features.filter((f) => f.kind === "pass").map((f) => (
+                  <polyline key={f.id} points={f.pts.map((p) => svgPt(p).join(",")).join(" ")} fill="none" stroke="#f2b33d" strokeWidth={0.6} strokeDasharray="1.4 1" />
+                ))}
+                {res.spawns.map((p, i) => {
+                  const [x, y] = svgPt(p);
+                  const team = wg.players % 2 === 0 && wg.symmetry !== "none" ? (i < res.spawns.length / 2 ? 0 : 1) : i;
+                  return <g key={i}><circle cx={x} cy={y} r={2.6} fill={["#5aa9e6", "#e5534b", "#7bd88f", "#c78bff", "#f2b33d", "#ff8fab", "#9be7ff", "#eee"][team % 8]} stroke="#0d1b26" strokeWidth={0.6} /><text x={x} y={y + 1.1} fontSize={3} textAnchor="middle" fontWeight={700} fill="#0d1b26">{i + 1}</text></g>;
+                })}
+              </svg>
+            )}
+          </div>
+          {res && (
+            <div className="wg-stats">
+              <span><b>{res.features.filter((f) => f.kind !== "pad").length}</b> formas</span>
+              <span><b>{res.props.length}</b> decorações</span>
+              <span><b>{walkPct}%</b> caminhável</span>
+              <span><b>{wg.players}</b> bases</span>
+            </div>
+          )}
+          {res?.notes.map((n, i) => <Notice key={i} kind="info">{n}</Notice>)}
+          <p className="faint small">Depois de gerar, tudo vira objetos editáveis: mova montanhas e lagos, mude raio e altura, apague, pinte o relevo com o pincel e espalhe mais decorações. A mesma semente sempre gera o mesmo mundo.</p>
+          <p className="faint small">No jogo o chão usa as texturas do terreno base ({terrainName}); troque as camadas em <b>Chão</b>. As cores acima são da prévia e do minimapa.</p>
+          <footer>
+            <button className="btn text" onClick={props.onClose}>Cancelar</button>
+            <button className="btn primary" disabled={busy || !res} onClick={apply}><Icon name="auto_awesome" size={18} /> {busy ? "Gerando…" : "Gerar mundo"}</button>
+          </footer>
+        </div>
+      </div>
+    </Modal>
+  );
+}

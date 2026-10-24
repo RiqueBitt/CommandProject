@@ -43,6 +43,14 @@ interface Props {
   speed: number;
   onTime?: (t: number) => void;
   snapshotRef?: { current: (() => string | null) | null };
+  /** foto quadrada com fundo transparente (ícone da tropa) */
+  iconRef?: { current: (() => string | null) | null };
+  /** pincel para pintar direto no modelo (na textura de cor) */
+  paint?: { on: boolean; color: string; size: number; opacity: number } | null;
+  /** fim de uma pincelada: a textura pintada (PNG) */
+  onPainted?: (png: string) => void;
+  /** com a animação parada: mostra este instante */
+  seek?: number | null;
 }
 
 const q4 = (r: [number, number, number, number]) => new THREE.Quaternion(r[1], r[2], r[3], r[0]);
@@ -55,7 +63,7 @@ export default function UnitViewport(props: Props) {
 
   useEffect(() => {
     const el = host.current!;
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: false });
     renderer.setPixelRatio(Math.min(1.75, window.devicePixelRatio));
     renderer.setSize(el.clientWidth, el.clientHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -92,6 +100,18 @@ export default function UnitViewport(props: Props) {
     let baseImg: HTMLImageElement | null = null;
     let teamImg: HTMLImageElement | null = null;
     const canvas = document.createElement("canvas");
+    // textura "crua" (sem ajuste de cor), onde o pincel pinta
+    const paintCanvas = document.createElement("canvas");
+    let painted = false;
+    const resetPaint = () => {
+      const src = baseImg;
+      paintCanvas.width = src?.width ?? 1024;
+      paintCanvas.height = src?.height ?? 1024;
+      const g = paintCanvas.getContext("2d")!;
+      if (src) g.drawImage(src, 0, 0);
+      else { g.fillStyle = "#9aa7b4"; g.fillRect(0, 0, paintCanvas.width, paintCanvas.height); }
+      painted = !!src;
+    };
     let tex: THREE.CanvasTexture | null = null;
     let time = 0;
     let absolute = false; // a animação guarda posições do modelo (e não em relação ao pai)
@@ -105,18 +125,18 @@ export default function UnitViewport(props: Props) {
     });
 
     // textura = cor do jogo com o ajuste (filtro CSS do canvas) + cor do time onde o _Team marca
-    const setLook = () => {
+    const setLook = (quick = false) => {
       if (!mesh) return;
       const mat = mesh.material as THREE.MeshStandardMaterial;
-      if (!baseImg) { mat.map = null; mat.color.set(0x9aa7b4); mat.needsUpdate = true; return; }
+      if (!baseImg && !painted) { mat.map = null; mat.color.set(0x9aa7b4); mat.needsUpdate = true; return; }
       const { tint, teamColor } = live.current;
-      canvas.width = baseImg.width;
-      canvas.height = baseImg.height;
+      canvas.width = paintCanvas.width;
+      canvas.height = paintCanvas.height;
       const g = canvas.getContext("2d")!;
       g.filter = `hue-rotate(${tint.hue}deg) saturate(${100 + tint.sat}%) brightness(${100 + tint.bright}%)`;
-      g.drawImage(baseImg, 0, 0);
+      g.drawImage(paintCanvas, 0, 0);
       g.filter = "none";
-      if (teamImg) {
+      if (teamImg && !quick) {
         // tinge onde o alfa do _Team indica
         const t = document.createElement("canvas");
         t.width = canvas.width; t.height = canvas.height;
@@ -185,6 +205,7 @@ export default function UnitViewport(props: Props) {
       orbit.target.set(0, 0.45, 0);
       orbit.update();
       [baseImg, teamImg] = await Promise.all([load(live.current.albedoOverride ?? m.albedo), load(m.team)]);
+      resetPaint();
       setLook();
       setAnim();
     };
@@ -235,6 +256,61 @@ export default function UnitViewport(props: Props) {
       });
     };
 
+    // ---- pincel: pinta na textura onde o raio acerta o modelo
+    const ray = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    let painting = false;
+    let lastDab = 0;
+    const dab = (e: PointerEvent) => {
+      const pt = live.current.paint;
+      if (!mesh || !pt) return;
+      const r = renderer.domElement.getBoundingClientRect();
+      ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      ray.setFromCamera(ndc, camera);
+      const hit = ray.intersectObject(mesh, false)[0];
+      if (!hit?.uv) return;
+      const W = paintCanvas.width, H = paintCanvas.height;
+      const x = ((hit.uv.x % 1) + 1) % 1 * W, y = ((hit.uv.y % 1) + 1) % 1 * H;
+      const rad = Math.max(1, (pt.size / 100) * W * 0.25);
+      const g = paintCanvas.getContext("2d")!;
+      const grad = g.createRadialGradient(x, y, 0, x, y, rad);
+      const c = new THREE.Color(pt.color);
+      const rgb = `${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)}`;
+      grad.addColorStop(0, `rgba(${rgb},${pt.opacity})`);
+      grad.addColorStop(0.7, `rgba(${rgb},${pt.opacity * 0.6})`);
+      grad.addColorStop(1, `rgba(${rgb},0)`);
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(x, y, rad, 0, Math.PI * 2);
+      g.fill();
+      painted = true;
+      setLook(true);
+    };
+    const onDown = (e: PointerEvent) => {
+      if (!live.current.paint?.on || e.button !== 0) return;
+      painting = true;
+      orbit.enabled = false;
+      renderer.domElement.setPointerCapture(e.pointerId);
+      dab(e);
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!painting) return;
+      const now = performance.now();
+      if (now - lastDab < 24) return;
+      lastDab = now;
+      dab(e);
+    };
+    const onUp = () => {
+      if (!painting) return;
+      painting = false;
+      orbit.enabled = true;
+      setLook();
+      live.current.onPainted?.(paintCanvas.toDataURL("image/png"));
+    };
+    renderer.domElement.addEventListener("pointerdown", onDown);
+    renderer.domElement.addEventListener("pointermove", onMove);
+    renderer.domElement.addEventListener("pointerup", onUp);
+
     let raf = 0;
     let last = performance.now();
     let lastReport = 0;
@@ -247,6 +323,9 @@ export default function UnitViewport(props: Props) {
         time += dt * live.current.speed;
         applyFrame(time);
         if (now - lastReport > 100) { live.current.onTime?.(time); lastReport = now; }
+      } else if (live.current.anim && typeof live.current.seek === "number") {
+        time = live.current.seek;
+        applyFrame(time);
       }
       orbit.update();
       renderer.render(scene, camera);
@@ -272,12 +351,43 @@ export default function UnitViewport(props: Props) {
         } catch { return null; }
       };
     }
-    api.current = { setModel: () => void setModel(), setLook: () => void (async () => { if (live.current.albedoOverride !== undefined && mesh) { baseImg = await load(live.current.albedoOverride ?? live.current.model?.albedo ?? null); } setLook(); })(), setAnim };
+    if (live.current.iconRef) {
+      live.current.iconRef.current = () => {
+        try {
+          const size = new THREE.Vector2();
+          renderer.getSize(size);
+          const bg = scene.background, cam = camera.position.clone(), tgt = orbit.target.clone(), aspect = camera.aspect;
+          floor.visible = ring.visible = false;
+          scene.background = null;
+          renderer.setClearColor(0x000000, 0);
+          renderer.setSize(256, 256, false);
+          camera.aspect = 1;
+          camera.position.set(1.9, 1.35, 2.1);
+          camera.lookAt(0, 0.4, 0);
+          camera.updateProjectionMatrix();
+          renderer.render(scene, camera);
+          const url = renderer.domElement.toDataURL("image/png");
+          floor.visible = ring.visible = true;
+          scene.background = bg;
+          renderer.setSize(size.x, size.y, false);
+          camera.aspect = aspect;
+          camera.position.copy(cam);
+          orbit.target.copy(tgt);
+          camera.updateProjectionMatrix();
+          orbit.update();
+          return url;
+        } catch { return null; }
+      };
+    }
+    api.current = { setModel: () => void setModel(), setLook: () => void (async () => { if (live.current.albedoOverride !== undefined && mesh) { baseImg = await load(live.current.albedoOverride ?? live.current.model?.albedo ?? null); resetPaint(); } setLook(); })(), setAnim };
     void setModel();
     return () => {
       api.current = null;
       cancelAnimationFrame(raf);
       ro.disconnect();
+      renderer.domElement.removeEventListener("pointerdown", onDown);
+      renderer.domElement.removeEventListener("pointermove", onMove);
+      renderer.domElement.removeEventListener("pointerup", onUp);
       orbit.dispose();
       if (mesh) { mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose(); }
       tex?.dispose();
@@ -290,5 +400,5 @@ export default function UnitViewport(props: Props) {
   useEffect(() => { api.current?.setLook(); }, [props.tint, props.teamColor, props.albedoOverride]);
   useEffect(() => { api.current?.setAnim(); }, [props.anim]);
 
-  return <div ref={host} className="viewport unit-viewport" />;
+  return <div ref={host} className={`viewport unit-viewport ${props.paint?.on ? "painting" : ""}`} />;
 }

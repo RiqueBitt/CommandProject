@@ -249,6 +249,18 @@ pub struct UnitBuildReq {
     albedo_asset: Option<String>,
     #[serde(default)]
     tint: (f32, f32, f32),
+    /// armas copiadas: (posição na tropa, 0 = nova; unidade; posição lá)
+    #[serde(default)]
+    weapon_copies: Vec<(usize, String, usize)>,
+    /// ícone (PNG) do projeto
+    #[serde(default)]
+    icon_asset: Option<String>,
+    /// osso da base → grupo/osso do modelo próprio
+    #[serde(default)]
+    bone_map: std::collections::BTreeMap<String, String>,
+    /// pacote: várias tropas no mesmo mod
+    #[serde(default)]
+    pack: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -258,10 +270,69 @@ pub struct UnitBuildResult {
     manifest: cp_core::manifest::Manifest,
 }
 
-fn baked_files(c: &Creations, creation: &str) -> cp_core::Result<ModelFiles> {
+fn baked_files(c: &Creations, creation: &str, bone_map: &std::collections::BTreeMap<String, String>) -> cp_core::Result<ModelFiles> {
     let raw = c.derived_get(creation, "baked.json").map_err(|_| cp_core::Error::Other("o modelo ainda não foi preparado: abra o projeto do modelo e use \"Preparar para o jogo\"".into()))?;
-    let baked: BakedModel = serde_json::from_slice(&raw).map_err(|e| cp_core::Error::Other(format!("modelo preparado inválido: {e}")))?;
+    let mut baked: BakedModel = serde_json::from_slice(&raw).map_err(|e| cp_core::Error::Other(format!("modelo preparado inválido: {e}")))?;
+    // assistente de ossos: o grupo do modelo recebe o nome do osso que a base usa
+    for b in &mut baked.bones {
+        if let Some((base, _)) = bone_map.iter().find(|(_, m)| m.eq_ignore_ascii_case(&b.name)) {
+            b.name = base.clone();
+        }
+    }
     cp_core::modelgen::build(&baked)
+}
+
+fn slug(s: &str) -> String {
+    let t: String = s.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    let t = t.trim_matches('_').to_string();
+    if t.is_empty() { "pacote".into() } else { t.chars().take(32).collect() }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnitPack {
+    slug: String,
+    name: String,
+    #[serde(default)]
+    units: Vec<String>,
+}
+
+fn packs_dir(data: &std::path::Path) -> PathBuf {
+    data.join("unit-packs")
+}
+
+fn list_packs(data: &std::path::Path) -> Vec<UnitPack> {
+    let mut out: Vec<UnitPack> = std::fs::read_dir(packs_dir(data))
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let meta: UnitPack = serde_json::from_slice(&std::fs::read(e.path().join("pack.json")).ok()?).ok()?;
+                    let mut units: Vec<String> = std::fs::read_dir(e.path()).ok()?.filter_map(|f| f.ok()).filter_map(|f| {
+                        let n = f.file_name().to_string_lossy().into_owned();
+                        n.strip_suffix(".scd").map(str::to_owned)
+                    }).collect();
+                    units.sort();
+                    Some(UnitPack { units, ..meta })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// Pacotes de tropas (várias tropas num mod só).
+#[tauri::command]
+pub async fn unit_packs(state: State<'_, AppState>) -> R<Vec<UnitPack>> {
+    let data: PathBuf = with_ws(&state.ws, |ws| Ok(ws.data_dir.clone())).await?;
+    Ok(list_packs(&data))
+}
+
+/// Caminhos de arquivos citados pela tropa que não existem no jogo.
+#[tauri::command]
+pub async fn unit_refs_check(state: State<'_, AppState>, paths: Vec<String>) -> R<Vec<String>> {
+    let srcs = sources(&state.ws).await?;
+    off_lock(move || cp_core::units::missing_files(&srcs, &paths)).await
 }
 
 /// Gera a tropa (mod) e coloca na biblioteca, ligada no perfil ativo.
@@ -269,9 +340,9 @@ fn baked_files(c: &Creations, creation: &str) -> cp_core::Result<ModelFiles> {
 pub async fn unit_build(state: State<'_, AppState>, creation: String, req: UnitBuildReq) -> R<UnitBuildResult> {
     let srcs = sources(&state.ws).await?;
     let c = store(&state).await?;
-    let dir: PathBuf = with_ws(&state.ws, |ws| Ok(ws.data_dir.join("cache").join("tmp"))).await?;
+    let (dir, data): (PathBuf, PathBuf) = with_ws(&state.ws, |ws| Ok((ws.data_dir.join("cache").join("tmp"), ws.data_dir.clone()))).await?;
     let creation_id = creation.clone();
-    let (scd, report, new_id, name) = off_lock(move || {
+    let (scd, report, new_id, name, pack) = off_lock(move || {
         use cp_core::blueprint::Set;
         let changes = req
             .overrides
@@ -287,7 +358,11 @@ pub async fn unit_build(state: State<'_, AppState>, creation: String, req: UnitB
             })
             .collect();
         let model = match &req.model_creation {
-            Some(m) => Some(baked_files(&c, m)?),
+            Some(m) => Some(baked_files(&c, m, &req.bone_map)?),
+            None => None,
+        };
+        let icon_png = match &req.icon_asset {
+            Some(a) => Some(c.asset_get(&creation_id, a)?),
             None => None,
         };
         let albedo_png = match &req.albedo_asset {
@@ -326,14 +401,62 @@ pub async fn unit_build(state: State<'_, AppState>, creation: String, req: UnitB
                 albedo_png,
                 tint: req.tint,
                 extra_files,
+                weapon_copies: req.weapon_copies,
+                icon_png,
             },
             &dest,
         )?;
-        Ok((dest, report, new_id, req.name))
+        // pacote: guarda esta tropa na pasta do pacote e junta todas num .scd só
+        let pack = match req.pack.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+            Some(p) => {
+                let sl = slug(p);
+                let pdir = packs_dir(&data).join(&sl);
+                std::fs::create_dir_all(&pdir).map_err(|e| cp_core::Error::io(&pdir, e))?;
+                cp_core::fsutil::write_json(&pdir.join("pack.json"), &UnitPack { slug: sl.clone(), name: p.to_string(), units: vec![] })?;
+                std::fs::copy(&dest, pdir.join(format!("{new_id}.scd"))).map_err(|e| cp_core::Error::io(&dest, e))?;
+                let merged = dir.join(format!("_cp_pacote_{sl}.scd"));
+                let mut out = cp_core::scd::ScdBuilder::create(&merged)?;
+                let mut seen = std::collections::HashSet::new();
+                let mut files: Vec<PathBuf> = std::fs::read_dir(&pdir).map_err(|e| cp_core::Error::io(&pdir, e))?
+                    .filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "scd")).collect();
+                files.sort();
+                for f in files {
+                    let mut scd = cp_core::scd::Scd::open(&f)?;
+                    for (i, e) in scd.entries()?.into_iter().enumerate() {
+                        if e.is_dir || !seen.insert(e.key.clone()) {
+                            continue;
+                        }
+                        let bytes = scd.read_at(i)?;
+                        out.add_bytes(&e.name.replace('\\', "/"), &bytes)?;
+                    }
+                }
+                out.finish()?;
+                let _ = std::fs::remove_file(&dest);
+                Some((sl, p.to_string(), merged))
+            }
+            None => None,
+        };
+        Ok((dest, report, new_id, req.name, pack))
     })
     .await?;
     let c2 = store(&state).await?;
     let manifest = with_ws(&state.ws, move |ws| {
+        if let Some((sl, pname, merged)) = pack {
+            // a tropa sai do mod próprio (se tinha) e passa a viver no pacote
+            if ws.mods()?.iter().any(|m| m.manifest.id == format!("tropa-{new_id}")) {
+                ws.remove_mod(&format!("tropa-{new_id}"))?;
+            }
+            let opts = cp_core::library::ImportOptions {
+                id: Some(format!("pacote-{sl}")),
+                name: Some(format!("Pacote: {pname}")),
+                category: Some(cp_core::manifest::Category::Gameplay),
+                description: Some(format!("Pacote de tropas \"{pname}\" criado no editor de tropas do CommandProject. Experimental.")),
+                replace: true,
+                move_source: true,
+                ..Default::default()
+            };
+            return ws.import_mod(&merged, &opts, true);
+        }
         let opts = cp_core::library::ImportOptions {
             id: Some(format!("tropa-{new_id}")),
             name: Some(name.clone()),
@@ -397,7 +520,7 @@ pub(crate) fn map_custom_files(c: &Creations, srcs: &[PathBuf], spec: &Value) ->
         let creation = m.get("creation").and_then(|v| v.as_str()).unwrap_or_default();
         let slug = m.get("slug").and_then(|v| v.as_str()).unwrap_or_default();
         let name = m.get("name").and_then(|v| v.as_str()).unwrap_or(slug);
-        let files = baked_files(c, creation)?;
+        let files = baked_files(c, creation, &Default::default())?;
         out.extend(cp_core::units::prop_files(srcs, slug, name, &files)?);
     }
     Ok(out)
@@ -475,6 +598,7 @@ pub async fn unit_blueprint_preview(state: State<'_, AppState>, req: UnitBuildRe
                 categories: req.categories,
                 scale: req.scale,
                 animations,
+                weapon_copies: req.weapon_copies,
                 ..Default::default()
             },
         )?;

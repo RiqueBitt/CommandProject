@@ -227,7 +227,7 @@ export interface CreationVersion { file: string; savedAt: string; size: number }
 export interface CreationAsset { name: string; size: number }
 
 // ---------------------------------------------------------------- tropas e modelos
-export interface UnitInfo { id: string; name: string; faction: string; role: string; description: string }
+export interface UnitInfo { id: string; name: string; faction: string; role: string; description: string; categories?: string[] }
 export interface BpLeaf { path: string; kind: "number" | "text" | "bool"; number: number | null; text: string | null; flag: boolean | null }
 export interface UnitDetails {
   id: string; name: string; description: string; faction: string; role: string; text: string;
@@ -244,7 +244,9 @@ export interface UnitBuildReq {
   base: string; newId: string; name: string; description: string;
   overrides: Record<string, number | string | boolean>; categories: string[] | null; scale: number | null;
   animations: [string, string, number | null][]; modelCreation: string | null; albedoAsset: string | null; tint: [number, number, number];
+  weaponCopies?: [number, string, number][]; iconAsset?: string | null; boneMap?: Record<string, string>; pack?: string | null;
 }
+export interface UnitPack { slug: string; name: string; units: string[] }
 export interface UnitBuildResult { report: { files: number; warnings: string[]; blueprint: string }; manifest: Manifest }
 export interface BakedModel {
   positions: number[]; normals: number[]; uvs: number[]; indices: number[]; boneIndex: number[];

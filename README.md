@@ -101,13 +101,24 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
 **Criar em abas: mapas, tropas e modelos 3D** ([guia](docs/criacao.md))
 - Cada projeto abre numa **aba própria** (várias ao mesmo tempo), com salvamento automático,
   recuperação após fechar sem salvar, **versões**, desfazer/refazer e exportação `.cpproj`.
-- **Editor de mapas** no estilo de um editor de jogo: vista 3D, explorador, propriedades,
-  decorações com o modelo e a textura reais do jogo, modelos próprios, texturas do chão, relevo,
-  bases e massa; *Gerar e jogar*.
+- **Gerador de mundos por semente**: montanhas, cordilheiras, lagos, rios, ilhas, cânions,
+  crateras, dunas, florestas, ruínas e destroços, com simetria para 2 a 8 jogadores e passagens
+  automáticas entre as bases. Depois de gerar, tudo continua editável.
+- **Editor de mapas** no estilo de um editor de jogo:
+  - vista 3D, explorador (esconder e travar), propriedades;
+  - pincel de escultura, formas do terreno, simetria;
+  - análise de equilíbrio (território, caminhos e gargalos) e prévia do lobby;
+  - decorações com o modelo e a textura reais do jogo, modelos próprios, texturas do chão;
+  - *Gerar e jogar* e exportar o `.scd`.
 - **Editor de modelos 3D**: formas, importação OBJ/GLB, edição de vértices, grupos que viram ossos,
   materiais com imagem, cor do time e brilho; exporta `.scm` + `.dds` para o jogo, OBJ e GLB.
-- **Criador de tropas** (experimental): parte de uma unidade do jogo e edita aparência, atributos,
-  armas, animações (trocar ou criar por quadros-chave) e comportamento; gera um mod instalável.
+- **Criador de tropas** (experimental): parte de uma unidade do jogo.
+  - Edita aparência (pintar direto no modelo, ícone gerado do 3D, assistente de ossos), atributos
+    e armas (copiar de outras unidades).
+  - Animações: trocar, ou criar numa linha do tempo com prévia ao vivo.
+  - Comportamento e fábricas.
+  - Comparação de equilíbrio e modelos de função (tanque pesado, artilharia, batedor…).
+  - Gera um mod instalável ou um pacote com várias tropas.
 
 **Otimizador incluso** ([detalhes](docs/otimizador.md))
 - Monitor de memória/CPU do jogo, prioridade do processo, perfis das opções gráficas do jogo com
@@ -133,6 +144,8 @@ clique (baixa com retomada, confere o SHA-256 publicado pelo GitHub, instala e r
 | ![Texturas HD](docs/screenshots/texturas-hd.png) | ![Comparação de ampliação](docs/screenshots/texturas-hd-comparacao.jpg) |
 | ![Editor de mapas](docs/screenshots/editor-mapa.png) | ![Editor de modelos 3D](docs/screenshots/modelo-3d.png) |
 | ![Criador de tropas](docs/screenshots/tropa.png) | ![Desempenho](docs/screenshots/desempenho.png) |
+| ![Gerador de mundos](docs/screenshots/gerador.png) | ![Mundo gerado](docs/screenshots/mundo-gerado.png) |
+| ![Análise do mapa](docs/screenshots/analise-mapa.png) | ![Linha do tempo de animação](docs/screenshots/tropa-animacao.png) |
 
 ## Segurança dos arquivos do jogo
 
