@@ -82,12 +82,13 @@ def props(data):
     return out
 
 
-def edit(data, add=(), remove=(), height=None):
+def edit(data, add=(), remove=(), height=None, clear=False):
     """Adiciona e remove decorações.
 
     add    = [(blueprint, x, z, yaw_graus, escala)] — y vem de `height(x, z)`
     remove = [(x, z, raio)] — props dentro do círculo são afundados (y = -100, como o toolkit
              faz: o jogo não os mostra e nada mais no arquivo muda de lugar)
+    clear  = True afunda TODAS as decorações originais (as novas entram depois)
     Devolve (bytes novos, n_adicionados, n_removidos)."""
     head, fixups, pl = read_mfdb(data)
     ver, count, off = struct.unpack_from("<3I", pl, 0)
@@ -95,7 +96,7 @@ def edit(data, add=(), remove=(), height=None):
     for k in range(count):
         o = off + k * REC
         x, y, z = struct.unpack_from("<3f", pl, o + 16)
-        if y > -50 and any((x - cx) ** 2 + (z - cz) ** 2 <= r * r for cx, cz, r in remove):
+        if y > -50 and (clear or any((x - cx) ** 2 + (z - cz) ** 2 <= r * r for cx, cz, r in remove)):
             struct.pack_into("<f", pl, o + 20, -100.0)
             removed += 1
     add = list(add)

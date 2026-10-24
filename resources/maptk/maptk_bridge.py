@@ -356,6 +356,37 @@ def _clean_spec(spec):
         if len(spec["scenario_id"]) != len(str(spec["terrain"])):
             spec["water_rewrite"] = False
             spec.setdefault("_notes", []).append("o id do mapa precisa ter o mesmo tamanho do id do terreno para a água nova aparecer")
+    # base lisa (mapa em branco): o heightfield inteiro vira um plano nessa altura antes das camadas
+    if spec.get("flat_base") is not None:
+        fb = float(spec["flat_base"])
+        if not 0 <= fb <= 500:
+            raise ValueError("altura da base lisa inválida")
+        spec["flat_base"] = fb
+    else:
+        spec.pop("flat_base", None)
+    # visual limpo: chão inteiro com o mesmo conjunto de texturas, luz refeita para o relevo novo e
+    # nenhuma decoração do terreno original (nada do mapa base aparece por cima do mapa novo)
+    clean = spec.get("clean")
+    if clean:
+        grounds = clean.get("ground") or []
+        if isinstance(grounds, dict):
+            grounds = [grounds]
+        ok = []
+        for g in grounds[:12]:
+            for k in ("d", "n", "s"):
+                v = g.get(k)
+                if v and not re.match(r"^/textures/terrain/[\w/.-]+\.dds$", v, re.I):
+                    raise ValueError(f"textura inválida: {v}")
+            if g.get("d"):
+                ok.append({k: g.get(k) for k in ("d", "n", "s") if g.get(k)})
+        ground = ok or None
+        spec["clean"] = dict(ground=ground, relight=bool(clean.get("relight", True)),
+                             clear_props=bool(clean.get("clear_props", True)))
+    else:
+        spec.pop("clean", None)
+    if (spec.get("clean") or spec.get("flat_base") is not None) and not spec.get("patch"):
+        first = next(iter(spec["anchors"].values()))
+        spec["patch"] = dict(max_slope=6.0, water_margin=4.0, seed=first, causeways=[])
     if spec.get("minimap") not in (None, "donor", "desert", "snow", "dark", "natural"):
         raise ValueError("minimapa inválido")
     return spec
@@ -370,10 +401,30 @@ def _hooks(sm, spec, state):
     def init(self, *a, **k):
         orig_init(self, *a, **k)
         state["t"] = self
-        hd = spec.get("height_delta")
-        if hd and self.id == spec["terrain"]:
-            self.set_hfield(_apply_delta(sm, self.raw["hfield.win.bdf"], hd))
-            emit("progress", message=f"relevo do gerador aplicado ({hd['size'] + 1}² amostras)")
+        if self.id != spec["terrain"]:
+            return
+        clean = spec.get("clean")
+        if clean and clean["relight"]:
+            # direção do sol que explica a luz original: a luz nova combina com o céu do mapa
+            try:
+                import cp_lighting
+                tb = self.raw["terrain.win.bdf"]
+                lit = {n.replace("\\", "/").split("/")[-1]: b for n, b in self.lighting.items()}
+                state["sun"] = cp_lighting.fit_sun(tb, sm.read_bdf_payload(tb), lit, self.y, self.grid)
+            except Exception as e:  # noqa: BLE001 — sem o ajuste, usa a direção padrão
+                emit("progress", message=f"luz: direção do sol padrão ({e})")
+        hf = self.raw["hfield.win.bdf"]
+        fb, hd = spec.get("flat_base"), spec.get("height_delta")
+        if fb is not None:
+            hf = _flat(sm, hf, fb)
+        if hd:
+            hf = _apply_delta(sm, hf, hd)
+        if fb is not None or hd:
+            self.set_hfield(hf)
+            if fb is not None:
+                emit("progress", message=f"base lisa na altura {fb:g}")
+            if hd:
+                emit("progress", message=f"relevo do gerador aplicado ({hd['size'] + 1}² amostras)")
 
     def set_hfield(self, new):
         old = self.raw["hfield.win.bdf"]
@@ -412,18 +463,22 @@ def _hooks(sm, spec, state):
     def package_patched(out, terrain, *a, **k):
         # (a troca de texturas do chão, spec["reskin"], o próprio make_map já aplica antes)
         # decorações novas/removidas: entram antes do strip_props do toolkit
-        if (spec.get("props_add") or spec.get("props_remove")) and terrain.raw.get("mapobjs.win.bdf"):
+        clean = spec.get("clean") or {}
+        clear = clean.get("clear_props", False)
+        if (spec.get("props_add") or spec.get("props_remove") or clear) and terrain.raw.get("mapobjs.win.bdf"):
             import cp_mapobjs
             grid = terrain.grid
             def height(x, z):
                 return terrain.y(min(grid, max(0, x)), min(grid, max(0, z)))
             data, na, nr = cp_mapobjs.edit(terrain.raw["mapobjs.win.bdf"], spec.get("props_add") or [],
-                                           spec.get("props_remove") or [], height)
+                                           spec.get("props_remove") or [], height, clear=clear)
             terrain.raw["mapobjs.win.bdf"] = data
             state["props"] = (na, nr)
             emit("progress", message=f"decorações: {na} novas, {nr} removidas")
             if k.get("strip_props") == "all":
                 k["strip_props"] = "moving"  # "remover todos" apagaria as novas também
+        if clean and terrain.raw.get("terrain.win.bdf"):
+            _clean_visual(sm, spec, state, terrain, a[0])
         water = False
         if state.get("water_mask") and terrain.raw.get("terrain.win.bdf"):
             try:
@@ -453,6 +508,77 @@ def _hooks(sm, spec, state):
         if orig_dark is not None:
             sm.dark_palette = orig_dark
     return restore
+
+
+def _flat(sm, hfield_bytes, y):
+    """heightfield inteiro numa altura só (base lisa)"""
+    import struct
+    pl = bytearray(sm.read_bdf_payload(hfield_bytes))
+    _, w, h, _, off = struct.unpack_from("<5I", pl, 0)
+    v = max(0, min(65535, int(round(y * 128))))
+    pl[off:off + w * h * 2] = struct.pack("<H", v) * (w * h)
+    return sm.rebuild_bdf(hfield_bytes, bytes(pl))
+
+
+def _existing_textures(sm, grounds):
+    """Só conjuntos cuja difusa existe no jogo (normal/especular ausentes ficam de fora): um
+    caminho que o jogo não acha viraria chão sem textura."""
+    names = set()
+    for scd in ("textures.scd", "z_dlc1.scd"):
+        path = os.path.join(sm.GAMEDATA, scd)
+        if os.path.isfile(path):
+            try:
+                with zipfile.ZipFile(path) as zf:
+                    names.update(n.replace("\\", "/").lower() for n in zf.namelist())
+            except (OSError, zipfile.BadZipFile):
+                pass
+    if not names:
+        return grounds  # sem como conferir (pasta do jogo diferente): segue como veio
+
+    def has(p):
+        k = p.lstrip("/").lower()
+        return k.replace(".dds", ".win.dds") in names or k in names
+    out = []
+    for g in grounds:
+        if g.get("d") and has(g["d"]):
+            out.append({k: v for k, v in g.items() if v and has(v)})
+    return out
+
+
+def _clean_visual(sm, spec, state, terrain, new_id):
+    """Chão com um conjunto só de texturas e luz refeita para o relevo novo (cp_lighting)."""
+    import cp_lighting
+    clean = spec["clean"]
+    tb = terrain.raw["terrain.win.bdf"]
+    pl = sm.read_bdf_payload(tb)
+    grounds = _existing_textures(sm, clean.get("ground") or [])
+    if clean.get("ground") and not grounds:
+        state["warnings"].append("as texturas de chão escolhidas não foram achadas no jogo: o chão ficou como era")
+    if grounds:
+        pl, n, skipped = cp_lighting.reskin_all(pl, grounds)
+        emit("progress", message=f"chão: {n} texturas trocadas pelo conjunto escolhido")
+        if skipped:
+            state["warnings"].append(f"{skipped} textura(s) do chão não couberam no espaço do terreno base e ficaram como eram")
+    if clean.get("relight"):
+        old_dir = cp_lighting.mask_dir(pl, terrain.id)
+        new_dir = f"/maps/{new_id}/lighting/"
+        lit = {n.replace("\\", "/").split("/")[-1]: (n, b) for n, b in terrain.lighting.items()}
+        if old_dir:
+            try:
+                pl, out, n = cp_lighting.relight(tb, pl, {k: v[1] for k, v in lit.items()}, terrain.y, terrain.grid,
+                                                 old_dir, new_dir, sun=state.get("sun") or cp_lighting.SUN,
+                                                 log=lambda m: emit("progress", message=m))
+                for f, b in out.items():
+                    terrain.lighting[lit[f][0]] = b
+                if n:
+                    emit("progress", message=f"luz do chão refeita para o relevo novo ({n} máscara(s))")
+                else:
+                    state["warnings"].append("a luz do chão não pôde ser refeita (sombras do terreno base podem aparecer)")
+            except Exception as e:  # noqa: BLE001 — sem a luz nova, o mapa continua válido
+                state["warnings"].append(f"a luz do chão não pôde ser refeita ({e})")
+        else:
+            state["warnings"].append("terreno sem máscaras de luz conhecidas: a luz original foi mantida")
+    terrain.raw["terrain.win.bdf"] = sm.rebuild_bdf(tb, pl)
 
 
 def _apply_delta(sm, hfield_bytes, hd):

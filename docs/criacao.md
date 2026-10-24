@@ -22,6 +22,29 @@ entre eles sem perder nada (as abas ficam montadas em segundo plano).
 
 Layout: caixa de recursos à esquerda, vista 3D no centro, explorador e propriedades à direita.
 
+### Começar em branco
+
+Um mapa novo já abre pronto para editar, sem escolher terreno: um **chão liso de grama** do tamanho
+escolhido (**512 × 512** ou **1024 × 1024**). Dá para esculpir, gerar um mundo por cima, decorar e
+trocar a textura do chão à vontade. Por baixo vai um terreno do jogo só como suporte (sem água e com
+a malha do chão acompanhando o relevo: `SC2_MP_004` no 512, `SC2_MP_007` no 1024) — nada dele
+aparece. Em **Propriedades → Começar de** dá para trocar para um mapa do jogo (ou voltar ao branco);
+mapas de 2048 só a partir de um mapa do jogo.
+
+### Visual limpo (nada do mapa original por cima)
+
+Num mapa feito a partir de um mapa do jogo, o chão do jogo tem o "desenho" do mapa original: as
+camadas de areia, rocha e cidade e as sombras pré-calculadas de morros e prédios ficam nos lugares de
+antes. Com um relevo novo por cima, isso aparecia como manchas e sombras fora do lugar. O **visual
+limpo** (ligado no mapa em branco e ao gerar um mundo; em Propriedades → Chão e visual) resolve:
+
+- **todas** as camadas do chão recebem uma textura só, do bioma (grama, areia, neve ou terra
+  escura) — escolha em **Chão** na caixa de recursos; a prévia mostra exatamente essa textura;
+- a **luz do chão é refeita** para o relevo novo (as máscaras `lighting/maskNN_{0,1,2}` vão junto no
+  mapa, com a cor original do céu do mapa e as sombras do relevo novo; a paisagem em volta do mapa
+  mantém a luz original);
+- **todas** as decorações do terreno original saem (as suas e as do gerador ficam).
+
 ### Gerar mundo (por semente)
 
 **Gerar mundo** (tecla `G`, faixa Início ou Terreno) abre o gerador:
@@ -89,8 +112,8 @@ problema (bases e relevo não mudam; Ctrl+Z desfaz).
   selecionados nem movidos.
 - **Exibir → Análise**: território de cada base pelo caminho a pé, fronteira entre os times,
   caminhos mais curtos, gargalos e distância até o inimigo. Mostra se o mapa está equilibrado.
-- **Exibir → Cores do relevo**: água, areia, grama, rocha e neve pela altura e inclinação.
-  É só a prévia: no jogo o chão usa as texturas do terreno base (troque em **Chão**).
+- **Exibir → Chão do jogo** (visual limpo): a textura escolhida com a luz e as sombras do relevo,
+  como fica no jogo. Sem o visual limpo, **Cores do relevo** usa as texturas do terreno base.
 - **Prévia do lobby**: como o mapa aparece na lista do jogo. O minimapa "cores do relevo" é gerado
   a partir do relevo novo.
 - **Jogo → Exportar .scd**: depois de **Gerar mapa**, salva o `.scd` numa pasta (para compartilhar
@@ -98,11 +121,12 @@ problema (bases e relevo não mudam; Ctrl+Z desfaz).
 
 ### Mais ferramentas
 
-- **Terreno base**: um dos terrenos do jogo (relevo, água e texturas vêm dele).
+- **Começar de**: mapa em branco (512 ou 1024) ou um dos terrenos do jogo (relevo, água e texturas vêm dele).
 - **Inserir**: bases (2 a 8), massa extra, relevo (morro, vale, planalto), cortes, passagens.
 - **Objetos**: decorações do jogo com o **modelo e a textura reais** (lidos da sua instalação),
   modelos próprios feitos no editor 3D (experimental), retirada de decorações do terreno.
-- **Chão**: troca de camadas de textura por camadas de qualquer mapa do jogo.
+- **Chão**: com o visual limpo, a textura do chão inteiro (por bioma ou qualquer uma que caiba);
+  sem ele, troca de camadas uma a uma por camadas de qualquer mapa do jogo.
 - Selecionar e arrastar, seleção múltipla (`Shift`), duplicar (`Ctrl+D`), excluir (`Del`),
   visão 2D, grade.
 - **Gerar mapa** / **Gerar e jogar**: monta o mapa com o SC2 Map Toolkit, confere se todas as bases
@@ -220,7 +244,8 @@ O launcher nunca supõe que o jogo aceita um formato não testado. Hoje:
 | Modelo próprio numa tropa | experimental: armas e efeitos dependem dos nomes dos ossos |
 | **Lagos e rios novos em terrenos com água** | experimental: a máscara de água é refeita e o id do mapa fica com o tamanho do id do terreno (exigência do formato) |
 | Lagos e rios em terrenos sem água | viram vales e leitos secos (o jogo não desenha água num terreno feito sem ela) |
-| Relevo gerado (montanhas, formas, pincel) | mesma técnica do relevo esculpido, que já funciona no jogo; as texturas do chão continuam as do terreno base |
+| Relevo gerado (montanhas, formas, pincel) | mesma técnica do relevo esculpido, que já funciona no jogo |
+| **Visual limpo / mapa em branco** | troca de textura: mesma técnica testada no jogo; **luz refeita**: experimental (máscaras de luz novas no formato das originais, apontadas pelo terreno do mapa) |
 | Armas copiadas e ícone gerado | experimental: confira os pontos de disparo e o ícone no jogo |
 | Pacotes de tropas | experimental (mesmo caminho das tropas sozinhas) |
 
@@ -267,7 +292,8 @@ Testes (`npm run test:core`) cobrem:
 - implantação e TOC: instalar mods e voltar ao original.
 - gerador de mundos (`npm run test:worldgen`): mesma semente gera o mesmo mapa, a simetria é exata
   e todas as bases se alcançam;
-- ponte do toolkit (`npm run test:maps`): camada de relevo, máscara de água e minimapa natural.
+- ponte do toolkit (`npm run test:maps`): camada de relevo, máscara de água, minimapa natural, base lisa,
+  decorações originais retiradas e luz refeita numa malha de teste (`cp_lighting.py`).
 
 Alguns testes também rodam com arquivos reais do jogo quando as variáveis `CP_REAL_BP` e
 `CP_REAL_SCA` apontam para eles.

@@ -158,7 +158,8 @@ function lineDist(pts: Pt[], x: number, z: number): [number, number] {
     const px = ax + vx * t, pz = az + vz * t;
     const d = Math.hypot(x - px, z - pz);
     const len = Math.sqrt(len2);
-    if (d < best) { best = d; along = acc + t * len; }
+    // empate (ponto à mesma distância de dois trechos): fica o primeiro, sem depender do arredondamento
+    if (d < best - 1e-9) { best = d; along = acc + t * len; }
     acc += len;
   }
   return [best, along];
@@ -348,9 +349,9 @@ export interface WorldGen {
 export interface Strategic { kind: "center" | "safe" | "contested" | "choke"; pos: Pt; label: string }
 
 export const WORLD_PRESETS: { id: string; label: string; icon: string; desc: string; over: Partial<WorldGen> }[] = [
-  { id: "valleys", label: "Vales verdes", icon: "forest", desc: "Morros suaves, rios e muita floresta.", over: { blend: 0.85, hilliness: 9, scale: 260, mountains: 2, mountainHeight: 55, ridges: 1, hills: 6, plateaus: 1, craters: 0, canyons: 0, lakes: 2, rivers: 1, dunes: 0, islands: 0, edge: "mountains", forests: 0.75, rocks: 0.35, structures: 2, wrecks: 0.2, biome: "temperate" } },
+  { id: "valleys", label: "Vales verdes", icon: "forest", desc: "Morros suaves, rios e muita floresta.", over: { blend: 1, hilliness: 9, scale: 260, mountains: 2, mountainHeight: 55, ridges: 1, hills: 6, plateaus: 1, craters: 0, canyons: 0, lakes: 2, rivers: 1, dunes: 0, islands: 0, edge: "mountains", forests: 0.75, rocks: 0.35, structures: 2, wrecks: 0.2, biome: "temperate" } },
   { id: "highlands", label: "Montanhas", icon: "landscape", desc: "Cordilheiras altas, passagens e planaltos.", over: { blend: 1, hilliness: 14, scale: 220, mountains: 5, mountainHeight: 85, ridges: 3, hills: 4, plateaus: 3, craters: 0, canyons: 1, lakes: 1, rivers: 0, dunes: 0, islands: 0, edge: "mountains", forests: 0.45, rocks: 0.75, structures: 2, wrecks: 0.25, biome: "temperate" } },
-  { id: "lakes", label: "Terra dos lagos", icon: "water", desc: "Muitos lagos e rios entre as bases.", over: { blend: 0.9, hilliness: 7, scale: 240, mountains: 1, mountainHeight: 45, ridges: 0, hills: 5, plateaus: 0, craters: 0, canyons: 0, lakes: 6, rivers: 2, dunes: 0, islands: 1, edge: "none", forests: 0.6, rocks: 0.3, structures: 2, wrecks: 0.15, biome: "temperate" } },
+  { id: "lakes", label: "Terra dos lagos", icon: "water", desc: "Muitos lagos e rios entre as bases.", over: { blend: 1, hilliness: 7, scale: 240, mountains: 1, mountainHeight: 45, ridges: 0, hills: 5, plateaus: 0, craters: 0, canyons: 0, lakes: 6, rivers: 2, dunes: 0, islands: 1, edge: "none", forests: 0.6, rocks: 0.3, structures: 2, wrecks: 0.15, biome: "temperate" } },
   { id: "archipelago", label: "Arquipélago", icon: "beach_access", desc: "Ilhas ligadas por passagens rasas.", over: { blend: 1, hilliness: 6, scale: 200, mountains: 2, mountainHeight: 40, ridges: 0, hills: 3, plateaus: 0, craters: 0, canyons: 0, lakes: 3, rivers: 2, dunes: 0, islands: 4, edge: "water", forests: 0.5, rocks: 0.3, structures: 1, wrecks: 0.2, biome: "temperate" } },
   { id: "desert", label: "Deserto", icon: "wb_sunny", desc: "Dunas, cânions e ruínas.", over: { blend: 1, hilliness: 5, scale: 300, mountains: 1, mountainHeight: 45, ridges: 1, hills: 2, plateaus: 3, craters: 1, canyons: 2, lakes: 0, rivers: 0, dunes: 4, islands: 0, edge: "rugged", forests: 0.05, rocks: 0.55, structures: 4, wrecks: 0.6, biome: "desert" } },
   { id: "wasteland", label: "Terra arrasada", icon: "local_fire_department", desc: "Crateras, destroços e bases em ruínas.", over: { blend: 1, hilliness: 8, scale: 180, mountains: 1, mountainHeight: 40, ridges: 1, hills: 3, plateaus: 1, craters: 6, canyons: 1, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "rugged", forests: 0.1, rocks: 0.6, structures: 5, wrecks: 1, biome: "volcanic" } },
@@ -360,7 +361,7 @@ export const WORLD_PRESETS: { id: string; label: string; icon: string; desc: str
 
 export const newWorld = (over: Partial<WorldGen> = {}): WorldGen => ({
   seed: Math.floor(Math.random() * 999999), preset: "valleys", players: 2, symmetry: "rot2",
-  blend: 0.85, elevation: 22, hilliness: 9, scale: 260, mountains: 2, mountainHeight: 55, ridges: 1, hills: 6, plateaus: 1, craters: 0,
+  blend: 1, elevation: 22, hilliness: 9, scale: 260, mountains: 2, mountainHeight: 55, ridges: 1, hills: 6, plateaus: 1, craters: 0,
   canyons: 0, lakes: 2, rivers: 1, dunes: 0, islands: 0, edge: "mountains", forests: 0.75, rocks: 0.35, structures: 2, wrecks: 0.2,
   clearDonor: true, economy: "normal", biome: "temperate", resources: "generated", expansions: 2, center: true, obstacles: 0, ...over,
 });
@@ -411,7 +412,7 @@ export function baseHeights(g: Grid, donor: Float32Array, water: number, hasWate
 
 // ------------------------------------------------------------------ geração
 
-export interface PropCatalog { trees: string[]; rocks: string[]; buildings: string[]; wrecks: string[]; other: string[] }
+export interface PropCatalog { trees: string[]; rocks: string[]; buildings: string[]; wrecks: string[]; other: string[]; meta?: Record<string, PropMeta> }
 
 export interface WorldResult {
   features: Feature[];
@@ -431,7 +432,33 @@ const fid = () => `f${Date.now().toString(36)}${(idSeq++).toString(36)}`;
 export function composeWorld(g: Grid, donor: Float32Array, water: number, hasWater: boolean, wg: WorldGen | null, features: Feature[], base?: Float32Array | null) {
   const H = base ? base.slice() : wg ? baseHeights(g, donor, water, hasWater, wg) : donor.slice();
   if (features.length) applyFeatures(g, H, features, water, hasWater);
+  // mundo gerado: erosão leve tira as agulhas e paredões de um ponto só (encostas naturais)
+  if (wg) erode(g, H, 10, 1.6);
   for (let k = 0; k < H.length; k++) H[k] = Math.max(0, Math.min(511, H[k]));
+  return H;
+}
+
+/**
+ * Erosão térmica: onde a diferença para um vizinho passa da inclinação `talus` (altura por unidade
+ * do mundo), parte do material desce. Atualização simultânea e vizinhança simétrica: o resultado
+ * continua simétrico e a massa total se conserva.
+ */
+export function erode(g: Grid, H: Float32Array, iters: number, talus: number) {
+  const s = g.size, w = s + 1, step = g.grid / s;
+  const T = talus * step;
+  const d = new Float32Array(H.length);
+  for (let it = 0; it < iters; it++) {
+    d.fill(0);
+    let moved = 0;
+    for (let j = 0; j <= s; j++) for (let i = 0; i <= s; i++) {
+      const k = j * w + i, y = H[k];
+      // só os vizinhos da direita e de baixo: cada par é tratado uma vez, nos dois sentidos
+      if (i < s) { const e = y - H[k + 1], a = Math.abs(e) - T; if (a > 0) { const m = 0.2 * a * Math.sign(e); d[k] -= m; d[k + 1] += m; moved++; } }
+      if (j < s) { const e = y - H[k + w], a = Math.abs(e) - T; if (a > 0) { const m = 0.2 * a * Math.sign(e); d[k] -= m; d[k + w] += m; moved++; } }
+    }
+    if (!moved) break;
+    for (let k = 0; k < H.length; k++) H[k] += d[k];
+  }
   return H;
 }
 
@@ -633,7 +660,9 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
     const from = reach.reduce((a, b) => (Math.hypot(b[0] - spawns[lost][0], b[1] - spawns[lost][1]) < Math.hypot(a[0] - spawns[lost][0], a[1] - spawns[lost][1]) ? b : a), reach[0] ?? spawns[0]);
     for (const o of ops) {
       const a = o.pt(from), b = o.pt(spawns[lost]);
-      if (features.some((f) => f.kind === "pass" && Math.hypot(f.pts[0][0] - a[0], f.pts[0][1] - a[1]) < 5 && Math.hypot(f.pts[1][0] - b[0], f.pts[1][1] - b[1]) < 5)) continue;
+      const same = (p: Pt, q: Pt) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 5;
+      // a mesma passagem (em qualquer sentido) só uma vez
+      if (features.some((f) => f.kind === "pass" && ((same(f.pts[0], a) && same(f.pts[1], b)) || (same(f.pts[0], b) && same(f.pts[1], a))))) continue;
       features.push({ id: fid(), kind: "pass", pts: [a, b], r: 34, h: 0, rough: 0.2, seed: 7, gen: true });
     }
     H = composeWorld(g, donor, water, hasWater, wg, features, base);
@@ -730,13 +759,37 @@ function meander(a: Pt, b: Pt, n: number, amp: number, r: () => number): Pt[] {
 
 // ------------------------------------------------------------------ decorações
 
+type Biome = WorldGen["biome"];
+/** Tamanho e ambiente de cada decoração (do catálogo do jogo). */
+export interface PropMeta { bp: string; r: number; h: number; group: boolean; biomes: Biome[]; local: boolean }
+
+/** Ambientes onde uma decoração combina, pelo nome (gelo, lava, deserto…). */
+function biomesOf(bp: string): Biome[] {
+  const n = bp.toLowerCase();
+  if (/winter|_ice|ice_|iceberg|snow|frozen/.test(n)) return ["snow"];
+  if (/lava|burnt|dead|volcan|charred|scorch/.test(n)) return ["volcanic"];
+  if (/desert|palm|acacia|cactus|dune|rock_red|sand/.test(n)) return ["desert"];
+  return ["temperate"];
+}
+
 /** Florestas, pedras, estruturas e destroços (na região fundamental, repetidos pela simetria). */
 function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, wg: WorldGen, cat: PropCatalog, spawns: Pt[], features: Feature[], r: () => number,
   ops: ReturnType<typeof symmetryOps>, mass: Pt[] = []): PlacedProp[] {
   const G = g.grid, s = g.size, w = s + 1, step = G / s;
   const out: PlacedProp[] = [];
-  const taken = new Set<string>();
   const MAX = 4800;
+  // ocupação do chão (células de 2 unidades): nada fica em cima de nada
+  const occ = new Set<number>();
+  const cell = (x: number, z: number) => Math.round(z / 2) * 4096 + Math.round(x / 2);
+  const free = (x: number, z: number, rad: number) => {
+    const k = Math.max(0, Math.ceil(rad / 2));
+    for (let dz = -k; dz <= k; dz++) for (let dx = -k; dx <= k; dx++) if (occ.has(cell(x + dx * 2, z + dz * 2))) return false;
+    return true;
+  };
+  const mark = (x: number, z: number, rad: number) => {
+    const k = Math.max(0, Math.round(rad / 2));
+    for (let dz = -k; dz <= k; dz++) for (let dx = -k; dx <= k; dx++) if (dx * dx + dz * dz <= k * k + 1) occ.add(cell(x + dx * 2, z + dz * 2));
+  };
   const hAt = (x: number, z: number) => {
     const i = Math.max(0, Math.min(s, Math.round(x / step))), j = Math.max(0, Math.min(s, Math.round(z / step)));
     return H[j * w + i];
@@ -755,87 +808,140 @@ function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, 
       default: return true;
     }
   };
-  const emit = (bp: string, x: number, z: number, yaw: number, scale: number) => {
-    for (const o of ops) {
-      if (out.length >= MAX) return;
-      const [px, pz] = o.pt([x, z]);
-      // nada em cima da massa nem fora do mapa
-      if (px < 4 || pz < 4 || px > G - 4 || pz > G - 4 || mass.some((m) => Math.hypot(m[0] - px, m[1] - pz) < 14)) continue;
-      // uma decoração por lugar (sem sobreposição)
-      const key = `${Math.round(px / 1.5)},${Math.round(pz / 1.5)}`;
-      if (taken.has(key)) continue;
-      taken.add(key);
-      out.push({ bp, x: Math.round(px * 10) / 10, z: Math.round(pz * 10) / 10, yaw: mapYaw(yaw, o.m), scale: Math.round(scale * 100) / 100, gen: true });
+  const meta = (bp: string): PropMeta => cat.meta?.[bp.toLowerCase()] ?? { bp, r: 1.5, h: 2, group: false, biomes: biomesOf(bp), local: false };
+  /** coloca a decoração e as cópias da simetria; devolve false se não coube */
+  const emit = (bp: string, x: number, z: number, yaw: number, scale: number, check = true): boolean => {
+    const rad = meta(bp).r * scale;
+    const spots = ops.map((o) => o.pt([x, z]));
+    if (out.length + spots.length > MAX) return false;
+    for (const [px, pz] of spots) {
+      if (px < 4 || pz < 4 || px > G - 4 || pz > G - 4) return false;
+      if (mass.some((m) => Math.hypot(m[0] - px, m[1] - pz) < 12 + rad)) return false;
+      if (check && !free(px, pz, rad * 0.75)) return false;
     }
+    ops.forEach((o, k) => {
+      const [px, pz] = spots[k];
+      mark(px, pz, rad * 0.75);
+      out.push({ bp, x: Math.round(px * 10) / 10, z: Math.round(pz * 10) / 10, yaw: mapYaw(yaw, o.m), scale: Math.round(scale * 100) / 100, gen: true });
+    });
+    return true;
   };
-  const pick = (list: string[]) => list[Math.floor(r() * list.length)];
+  // só o que combina com o ambiente; o que já existe no terreno base tem preferência
+  const choose = (list: string[]) => {
+    const fit = list.filter((bp) => meta(bp).biomes.includes(wg.biome));
+    const base = fit.length ? fit : list.filter((bp) => meta(bp).biomes.includes("temperate"));
+    const pool = base.length ? base : list;
+    const local = pool.filter((bp) => meta(bp).local);
+    return { pool, local };
+  };
+  const pick = (c: { pool: string[]; local: string[] }) => { const src = c.local.length && r() < 0.7 ? c.local : c.pool; return src[Math.floor(r() * src.length)]; };
   const forest = simplex(wg.seed + 977), rockN = simplex(wg.seed + 1931);
+  const budget = (share: number) => Math.floor((MAX * share) / ops.length);
 
-  // florestas: manchas de ruído, árvores com espaçamento irregular
-  if (cat.trees.length && wg.forests > 0) {
-    const spacing = lerp(22, 9, wg.forests);
-    const thr = lerp(0.45, -0.15, wg.forests);
-    const kinds = [pick(cat.trees), pick(cat.trees), pick(cat.trees)];
-    for (let z = spacing / 2; z < G; z += spacing) for (let x = spacing / 2; x < G; x += spacing) {
-      const jx = x + (r() - 0.5) * spacing * 0.9, jz = z + (r() - 0.5) * spacing * 0.9;
-      if (!inRegion(jx, jz) || jx < 8 || jz < 8 || jx > G - 8 || jz > G - 8) continue;
-      const f = fbm(forest, jx / 160, jz / 160, 4);
-      if (f < thr) continue;
-      if (wet(jx, jz) || slope(jx, jz) > 1.1 || nearSpawn(jx, jz, 95) || onLine(jx, jz)) continue;
-      const k = kinds[Math.floor(Math.abs(forest(jx / 40, jz / 40)) * kinds.length) % kinds.length];
-      emit(k, jx, jz, r() * 360, lerp(0.8, 1.25, r()));
+  // estruturas primeiro (precisam de espaço plano)
+  const nSites = Math.max(0, Math.round(wg.structures / ops.length));
+  const buildings = choose(cat.buildings), wrecks = choose(cat.wrecks), others = choose(cat.other.length ? cat.other : cat.rocks);
+  for (let k = 0, tries = 0; k < nSites && tries < 400; tries++) {
+    const x = 90 + r() * (G - 180), z = 90 + r() * (G - 180);
+    if (!inRegion(x, z) || wet(x, z) || slope(x, z) > 0.45 || nearSpawn(x, z, 160) || onLine(x, z)) continue;
+    const center = buildings.pool.length ? pick(buildings) : wrecks.pool.length ? pick(wrecks) : null;
+    if (!center) break;
+    const cr = meta(center).r;
+    if (!emit(center, x, z, Math.round(r() * 4) * 90, lerp(0.9, 1.1, r()))) continue;
+    k++;
+    const ring = 5 + Math.floor(r() * 6);
+    for (let q = 0; q < ring; q++) {
+      const list = r() < 0.45 && buildings.pool.length ? buildings : wrecks.pool.length && r() < 0.7 ? wrecks : others;
+      if (!list.pool.length) continue;
+      const bp = pick(list);
+      const a = (q / ring) * Math.PI * 2 + r() * 0.4, d = cr + meta(bp).r + lerp(3, 12, r());
+      const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
+      if (wet(px, pz) || slope(px, pz) > 0.7) continue;
+      emit(bp, px, pz, Math.round(r() * 4) * 90 + (r() - 0.5) * 20, lerp(0.85, 1.15, r()));
     }
   }
-  // pedras: mais nas encostas e nas montanhas
-  if (cat.rocks.length && wg.rocks > 0) {
-    const spacing = lerp(60, 22, wg.rocks);
-    for (let z = spacing / 2; z < G; z += spacing) for (let x = spacing / 2; x < G; x += spacing) {
+
+  // florestas: manchas de ruído; o miolo usa bosques inteiros (modelos de grupo) e a borda árvores soltas
+  const trees = choose(cat.trees.filter((bp) => { const m = meta(bp); return m.h > 0.4 && m.r < 30 && !/kelp/i.test(bp); }));
+  const groups = { pool: trees.pool.filter((bp) => meta(bp).group), local: trees.local.filter((bp) => meta(bp).group) };
+  const singles = { pool: trees.pool.filter((bp) => !meta(bp).group), local: trees.local.filter((bp) => !meta(bp).group) };
+  if (trees.pool.length && wg.forests > 0) {
+    const thr = lerp(0.45, -0.15, wg.forests);
+    const inForest = (x: number, z: number) => {
+      if (!inRegion(x, z) || x < 8 || z < 8 || x > G - 8 || z > G - 8) return -1;
+      const f = fbm(forest, x / 160, z / 160, 4);
+      if (f < thr || wet(x, z) || slope(x, z) > 1.0 || nearSpawn(x, z, 95) || onLine(x, z)) return -1;
+      return f - thr;
+    };
+    // área de floresta (amostrada) para caber no orçamento de decorações
+    let area = 0;
+    for (let z = 4; z < G; z += 8) for (let x = 4; x < G; x += 8) if (inForest(x, z) >= 0) area += 64;
+    const maxN = budget(0.62);
+    const single = singles.pool.length ? singles.pool.reduce((a, bp) => a + meta(bp).r, 0) / singles.pool.length : 2;
+    let spacing = Math.max(single * 2.6, lerp(10, 4.5, wg.forests));
+    const groupChance = groups.pool.length ? Math.min(0.85, Math.max(0.15, area / (spacing * spacing) / maxN - 0.6)) : 0;
+    if (area / (spacing * spacing) * (1 - groupChance * 0.8) > maxN) spacing = Math.sqrt(area / maxN);
+    let placed = 0;
+    for (let z = spacing / 2; z < G && placed < maxN; z += spacing) for (let x = spacing / 2; x < G && placed < maxN; x += spacing) {
+      const jx = x + (r() - 0.5) * spacing * 0.9, jz = z + (r() - 0.5) * spacing * 0.9;
+      const depth = inForest(jx, jz);
+      if (depth < 0) continue;
+      const deep = depth > 0.12;
+      const useGroup = deep && groups.pool.length > 0 && r() < groupChance;
+      const bp = useGroup ? pick(groups) : singles.pool.length ? pick(singles) : pick(groups);
+      if (emit(bp, jx, jz, r() * 360, lerp(0.8, 1.25, r()))) placed++;
+    }
+  }
+
+  // pedras: grupos de 2 a 5 bem juntos, mais nas encostas e nas montanhas
+  const rocks = choose(cat.rocks);
+  if (rocks.pool.length && wg.rocks > 0) {
+    const spacing = lerp(70, 26, wg.rocks);
+    const maxN = budget(0.22);
+    let placed = 0;
+    for (let z = spacing / 2; z < G && placed < maxN; z += spacing) for (let x = spacing / 2; x < G && placed < maxN; x += spacing) {
       const jx = x + (r() - 0.5) * spacing, jz = z + (r() - 0.5) * spacing;
       if (!inRegion(jx, jz) || jx < 8 || jz < 8 || jx > G - 8 || jz > G - 8) continue;
       const sl = slope(jx, jz);
       const chance = 0.18 + Math.min(0.6, sl * 0.5) + 0.2 * rockN(jx / 90, jz / 90);
       if (r() > chance * wg.rocks * 1.4 || wet(jx, jz) || nearSpawn(jx, jz, 85) || onLine(jx, jz)) continue;
-      const cluster = 1 + Math.floor(r() * 3);
-      const kind = pick(cat.rocks);
-      for (let c = 0; c < cluster; c++) emit(kind, jx + (r() - 0.5) * 14, jz + (r() - 0.5) * 14, r() * 360, lerp(0.7, 1.5, r()));
+      const kind = pick(rocks), rr = meta(kind).r;
+      const cluster = 2 + Math.floor(r() * 4);
+      for (let c = 0; c < cluster; c++) {
+        const a = r() * Math.PI * 2, d = c === 0 ? 0 : rr * lerp(1.2, 2.6, r());
+        if (emit(kind, jx + Math.cos(a) * d, jz + Math.sin(a) * d, r() * 360, lerp(0.7, 1.5, r()))) placed++;
+      }
     }
   }
-  // estruturas: ruínas e postos em áreas planas
-  const nSites = Math.max(0, Math.round(wg.structures / ops.length));
-  for (let k = 0, tries = 0; k < nSites && tries < 400; tries++) {
-    const x = 90 + r() * (G - 180), z = 90 + r() * (G - 180);
-    if (!inRegion(x, z) || wet(x, z) || slope(x, z) > 0.5 || nearSpawn(x, z, 160) || onLine(x, z)) continue;
-    k++;
-    const style = r();
-    const ring = 6 + Math.floor(r() * 6);
-    const center = cat.buildings.length ? pick(cat.buildings) : pick(cat.wrecks.length ? cat.wrecks : cat.rocks.length ? cat.rocks : cat.other);
-    if (center) emit(center, x, z, Math.round(r() * 4) * 90, lerp(0.9, 1.2, r()));
-    for (let q = 0; q < ring; q++) {
-      const a = (q / ring) * Math.PI * 2 + r() * 0.4, d = lerp(16, 34, r());
-      const list = style < 0.4 && cat.buildings.length ? cat.buildings : cat.wrecks.length && style < 0.75 ? cat.wrecks : cat.other.length ? cat.other : cat.rocks;
-      if (!list.length) break;
-      emit(pick(list), x + Math.cos(a) * d, z + Math.sin(a) * d, Math.round(r() * 4) * 90 + (r() - 0.5) * 20, lerp(0.8, 1.15, r()));
-    }
-  }
+
   // destroços espalhados (restos de batalha)
-  if (cat.wrecks.length && wg.wrecks > 0) {
-    const n = Math.round(wg.wrecks * 30 / ops.length);
+  if (wrecks.pool.length && wg.wrecks > 0) {
+    const n = Math.min(budget(0.1), Math.round((wg.wrecks * 30) / ops.length));
     for (let k = 0, tries = 0; k < n && tries < 600; tries++) {
       const x = 40 + r() * (G - 80), z = 40 + r() * (G - 80);
       if (!inRegion(x, z) || wet(x, z) || nearSpawn(x, z, 120) || slope(x, z) > 0.8) continue;
-      k++;
-      emit(pick(cat.wrecks), x, z, r() * 360, lerp(0.85, 1.15, r()));
+      if (emit(pick(wrecks), x, z, r() * 360, lerp(0.85, 1.15, r()))) k++;
     }
   }
   return out;
 }
 
-/** Separa as decorações do jogo por tipo para o gerador. */
-export function propCatalog(props: { bp: string; category?: string }[]): PropCatalog {
-  const c: PropCatalog = { trees: [], rocks: [], buildings: [], wrecks: [], other: [] };
+/**
+ * Separa as decorações do jogo por tipo para o gerador. `size` vem do catálogo (modelo × escala do
+ * jogo); `local` = decorações que o terreno base já usa (combinam com o chão dele).
+ */
+export function propCatalog(props: { bp: string; category?: string; size?: [number, number, number] | null }[], local: string[] = []): PropCatalog {
+  const c: PropCatalog = { trees: [], rocks: [], buildings: [], wrecks: [], other: [], meta: {} };
+  const here = new Set(local.map((x) => x.toLowerCase()));
   for (const p of props) {
     const k = p.bp.toLowerCase().split("/")[2] ?? "";
     const n = p.bp.toLowerCase();
+    // modelos sem tamanho conhecido ou minúsculos/enormes demais ficam de fora do gerador
+    const sz = p.size ?? null;
+    const r = sz ? Math.max(sz[0], sz[2]) / 2 : 1.5;
+    const h = sz ? sz[1] : 2;
+    if (sz && (r < 0.15 || r > 60)) continue;
+    c.meta![n] = { bp: p.bp, r, h, group: /group|canopy/.test(n) || r > 6, biomes: biomesOf(n), local: here.has(n) };
     if (k.startsWith("tree") && !n.includes("dead") && !n.includes("burnt") && !n.includes("fall")) c.trees.push(p.bp);
     else if (k.startsWith("rock")) c.rocks.push(p.bp);
     else if (k.startsWith("wreck") || k.startsWith("debris") || k.startsWith("defaultwreck")) c.wrecks.push(p.bp);

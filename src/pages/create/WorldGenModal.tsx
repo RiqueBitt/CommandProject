@@ -2,6 +2,7 @@
 // veja a prévia ao vivo e gere. Tudo o que sai daqui continua editável no editor.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon, Modal, Notice } from "../../components/ui";
+import { BLANK_BASES, BLANK_LABEL, blankSizeOf, type BlankSize } from "../studio/mapEdit";
 import type { Terrain } from "../../lib/types";
 import type { Pt } from "../studio/mapEdit";
 import {
@@ -16,6 +17,8 @@ interface Props {
   hasWater: boolean;
   terrains: Terrain[] | null;
   terrain: string | null;
+  /** base em branco (chão liso; o terreno do jogo é só o suporte) */
+  blank: boolean;
   initial: WorldGen | null;
   catalog: PropCatalog;
   onTerrain: (id: string) => void;
@@ -140,8 +143,13 @@ export default function WorldGenModal(props: Props) {
 
           <div className="wg-row">
             <label className="field"><span className="label">Terreno base</span>
-              <select className="select" value={props.terrain ?? ""} onChange={(e) => props.onTerrain(e.target.value)}>
-                {(props.terrains ?? []).map((t) => <option key={t.id} value={t.id}>{t.name ?? t.id}{t.waterY ? " · com água" : ""}</option>)}
+              <select className="select" value={props.blank ? `blank:${blankSizeOf(props.terrain) ?? 1024}` : props.terrain ?? ""} onChange={(e) => props.onTerrain(e.target.value)}>
+                <optgroup label="Em branco (grama lisa)">
+                  {(Object.keys(BLANK_BASES) as unknown as BlankSize[]).map((k) => <option key={k} value={`blank:${k}`}>{BLANK_LABEL[k]}</option>)}
+                </optgroup>
+                <optgroup label="Mapas do jogo">
+                  {(props.terrains ?? []).filter((t) => t.kind === "skirmish").map((t) => <option key={t.id} value={t.id}>{t.name ?? t.id}{t.waterY ? " · com água" : ""}</option>)}
+                </optgroup>
               </select>
             </label>
             <label className="field"><span className="label">Semente</span>
@@ -208,14 +216,14 @@ export default function WorldGenModal(props: Props) {
                   <option value="rich">Muita massa</option>
                 </select>
               </label>
-              <label className="field"><span className="label">Cores (prévia e minimapa)</span>
+              <label className="field"><span className="label">Bioma (chão, prévia e minimapa)</span>
                 <select className="select" value={wg.biome} onChange={(e) => set("biome", e.target.value as WorldGen["biome"])}>
                   {Object.entries(BIOME_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                 </select>
               </label>
             </div>
             <label className="check"><input type="checkbox" checked={wg.center !== false} disabled={wg.symmetry === "none"} onChange={(e) => set("center", e.target.checked)} /> Centro disputado (área plana com massa no meio)</label>
-            <label className="check"><input type="checkbox" checked={wg.clearDonor} onChange={(e) => set("clearDonor", e.target.checked)} /> Tirar as decorações originais do terreno (recomendado com relevo novo)</label>
+            <label className="check" title="O chão inteiro ganha as texturas do bioma, a luz e as sombras são refeitas para o relevo novo e as decorações do mapa original saem. Sem isso, o desenho do mapa original aparece por baixo do mundo novo."><input type="checkbox" checked={wg.clearDonor} onChange={(e) => set("clearDonor", e.target.checked)} /> Visual limpo: nada do mapa original por cima (texturas, sombras e decorações) — recomendado</label>
           </section>
         </div>
 
@@ -256,6 +264,7 @@ export default function WorldGenModal(props: Props) {
           {gallery.length > 0 && <div className="wg-gallery">{gallery.map((g) => (
             <button key={g.seed} className={wg.seed === g.seed ? "on" : ""} onClick={() => set("seed", g.seed)} title={`Semente ${g.seed}`}><img src={g.img} alt={`Semente ${g.seed}`} /><small>{g.seed}</small></button>
           ))}</div>}
+          {!hasWater && (wg.lakes > 0 || wg.rivers > 0 || wg.islands > 0 || wg.edge === "water") && <Notice kind="info">Este terreno não tem água: lagos e rios viram vales secos. Para água de verdade, use um mapa do jogo com água como base.</Notice>}
           {res?.notes.map((n, i) => <Notice key={i} kind="info">{n}</Notice>)}
           <p className="faint small">Depois de gerar, tudo vira objetos editáveis: mova montanhas e lagos, mude raio e altura, apague, pinte o relevo com o pincel e espalhe mais decorações. A mesma semente sempre gera o mesmo mundo.</p>
           <p className="faint small">No jogo o chão usa as texturas do terreno base ({terrainName}); troque as camadas em <b>Chão</b>. As cores acima são da prévia e do minimapa.</p>

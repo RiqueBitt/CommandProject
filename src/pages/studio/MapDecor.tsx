@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Icon, Modal } from "../../components/ui";
 import { api } from "../../lib/api";
 import type { PropInfo, PropPreview } from "../../lib/types";
-import { layerFits, type GroundLayer } from "./mapEdit";
+import { groundCandidates, layerFits, type GroundBiome, type GroundLayer } from "./mapEdit";
 
 const ModelViewer = lazy(() => import("../../components/ModelViewer"));
 
@@ -167,5 +167,70 @@ function LayerChooser({ target, all, onPick, onClose }: { target: GroundLayer; a
         </div>
       </div>
     </Modal>
+  );
+}
+
+const BIOMES: { id: GroundBiome; label: string; icon: string }[] = [
+  { id: "temperate", label: "Grama", icon: "grass" }, { id: "desert", label: "Areia", icon: "wb_sunny" },
+  { id: "snow", label: "Neve", icon: "ac_unit" }, { id: "volcanic", label: "Terra escura", icon: "local_fire_department" },
+];
+/** nomes que não são chão natural (metal, piso de cidade, paredes…) */
+const NOT_GROUND = /metal|floor|wall|trim|window|teleporter|greeble|road|plate|tile|concrete|pipe|panel|decal|clouds|water|foam|wave|black|white|engine/;
+
+/** Chão do visual limpo: uma textura para o mapa inteiro (a mesma no editor e no jogo). */
+export function CleanGround({ all, minSlot, biome, chosen, onBiome, onPick }: {
+  all: GroundLayer[] | null;
+  /** menor espaço de texto entre as camadas do terreno base: o caminho novo precisa ser menor */
+  minSlot: number;
+  biome: GroundBiome;
+  chosen: string | null;
+  onBiome: (b: GroundBiome) => void;
+  onPick: (d: string | null) => void;
+}) {
+  const [q, setQ] = useState("");
+  const fits = (l: GroundLayer) => !minSlot || l.d.length < minSlot;
+  const current = useMemo(() => groundCandidates(all ?? [], biome, chosen).find(fits) ?? null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [all, biome, chosen, minSlot]);
+  const options = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    const seen = new Set<string>();
+    return (all ?? []).filter((l) => {
+      const k = l.d.toLowerCase();
+      if (seen.has(k) || !fits(l) || NOT_GROUND.test(k)) return false;
+      seen.add(k);
+      return !t || l.name.toLowerCase().includes(t) || l.map.toLowerCase().includes(t);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [all, q, minSlot]);
+  return (
+    <div className="col" style={{ gap: 10 }}>
+      <div className="ground-layer">
+        <TextureThumb path={current?.d} size={52} />
+        <div className="grow">
+          <b>{current ? nice(current.name) : "—"}</b>
+          <span className="faint small" style={{ textTransform: "none" }}>{current ? `${current.map.replace(/^SC2_/, "")} · em todo o chão` : "nenhuma textura cabe neste terreno"}</span>
+        </div>
+        {chosen && <button className="btn icon-btn sm" title="Voltar à automática do bioma" aria-label="Textura automática" onClick={() => onPick(null)}><Icon name="undo" size={18} /></button>}
+      </div>
+      <div className="chips" style={{ padding: 0 }}>
+        {BIOMES.map((b) => (
+          <button key={b.id} className="chip" aria-pressed={biome === b.id} onClick={() => onBiome(b.id)}>
+            <Icon name={b.icon} size={15} /> {b.label}
+          </button>
+        ))}
+      </div>
+      <div className="search-bar"><Icon name="search" /><input className="input dense" placeholder="Buscar: grass, sand, snow, MP_007…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar textura do chão" /></div>
+      <div className="layer-grid compact">
+        {all === null ? <div className="bar indeterminate"><i /></div> : options.slice(0, 120).map((l) => (
+          <button key={l.d} className="layer-tile" aria-pressed={current?.d === l.d} onClick={() => onPick(l.d)} title={l.d}>
+            <TextureThumb path={l.d} size={72} />
+            <b>{nice(l.name)}</b>
+            <span className="faint small">{l.map.replace(/^SC2_/, "")}</span>
+          </button>
+        ))}
+      </div>
+      <p className="faint small">A luz e as sombras do chão são refeitas para o relevo novo ao gerar o mapa.</p>
+    </div>
   );
 }

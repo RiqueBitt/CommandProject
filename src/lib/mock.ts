@@ -176,9 +176,28 @@ function proj(id: string): MockProj {
   return p;
 }
 
+// Modo de depuração: dados reais do jogo exportados para /fixture (localStorage.cpFixture = "1").
+// Só para conferir o editor no navegador com modelos, texturas e relevo de verdade.
+const fxCache = new Map<string, Promise<unknown>>();
+const fxGet = (f: string) => { let p = fxCache.get(f); if (!p) { p = fetch(`/fixture/${f}`).then((x) => x.json()); fxCache.set(f, p); } return p as Promise<Record<string, unknown>>; };
+async function fixture(cmd: string, a: Record<string, unknown>): Promise<unknown> {
+  try { if (localStorage.getItem("cpFixture") !== "1") return undefined; } catch { return undefined; }
+  if (cmd === "maptk_terrain3d") return fxGet("terrain3d.json");
+  if (cmd === "map_assets") return fxGet("assets.json");
+  if (cmd === "game_texture") { const t = await fxGet("textures.json"); return t[String(a.path)] ?? undefined; }
+  if (cmd === "prop_preview") { const t = await fxGet("props.json"); const v = t[String(a.bp).toLowerCase()]; if (!v) throw new Error("o modelo dessa decoração não foi encontrado"); return v; }
+  if (cmd === "creation_load" && a.id === "fixture-map") return { meta: fxMeta, doc: await fxGet("doc.json"), recoveryAt: null };
+  if (cmd === "creations_list") return [fxMeta, ...Object.values(creationsDb).map((p) => p.meta)];
+  if (cmd === "creation_save" || cmd === "creation_autosave" || cmd === "creation_set_thumb") return a.id === "fixture-map" ? (cmd === "creation_save" ? fxMeta : null) : undefined;
+  return undefined;
+}
+const fxMeta: T.CreationMeta = { id: "fixture-map", kind: "map", name: "Mapa real (depuração)", description: "", createdAt: "2026-10-24T00:00:00Z", updatedAt: "2026-10-24T00:00:00Z", favorite: false, tags: [], hasThumb: false };
+
 export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<R> {
   await sleep(120);
   const r = (v: unknown) => v as R;
+  const fx = await fixture(cmd, a);
+  if (fx !== undefined) return r(fx);
   switch (cmd) {
     case "creations_list": return r(Object.values(creationsDb).map((p) => p.meta).sort((x, y) => y.updatedAt.localeCompare(x.updatedAt)));
     case "creation_create": {
@@ -536,6 +555,7 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       const c = a.command;
       if (c === "catalog") return r({ terrains: [
         { id: "SC2_MP_002", archive: "maps.scd", kind: "skirmish", name: "Open Palms", biome: "grass", waterY: 15, openness: 1, navmesh: "full", players: 6 },
+        { id: "SC2_MP_203", archive: "maps.scd", kind: "skirmish", name: "MP 203", biome: "sand", waterY: 34, openness: 0.8, navmesh: "full", players: 4 },
         { id: "SC2_MP_007", archive: "maps.scd", kind: "skirmish", name: "4 FFA Land", biome: "grass", openness: 0.67, navmesh: "full", players: 4 },
         { id: "SC2_MP_302", archive: "maps.scd", kind: "skirmish", name: "Treallach Island", biome: "island", waterY: 56, openness: 0.82, navmesh: "full", players: 4 },
         { id: "SC2_CA_I01", archive: "maps.scd", kind: "campaign", name: "Illuminate Desert", biome: "sand", waterY: 34, openness: 0.28, navmesh: "pocket", players: 6, notes: "two shores split by a river; patch + causeway needed" },

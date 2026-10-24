@@ -692,6 +692,11 @@ button.mod-line { cursor: pointer; }
 .layer-tile:hover { border-color: var(--primary); transform: translateY(-1px); }
 .layer-tile .tex-thumb { width: 96px; height: 96px; }
 .layer-tile b { text-transform: capitalize; font-size: 13px; }
+.layer-tile[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 35%, transparent); }
+.layer-grid.compact { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; max-height: none; overflow: visible; }
+.layer-grid.compact .tex-thumb { width: 72px; height: 72px; }
+.layer-grid.compact .layer-tile b { font-size: 12px; text-align: center; }
+.blank-sizes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 @media (max-width: 900px) { .decor-picker { grid-template-columns: 1fr; } }
 .decor-preview > div:first-child > .row.small { display: none; }
 .ground-layer .faint { text-transform: capitalize; }

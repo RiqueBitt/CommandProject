@@ -17,7 +17,7 @@ for (const [sym, players] of [["rot2", 2], ["mirror-x", 4], ["rot4", 4], ["diag"
     // simetria exata do relevo
     const ops = symmetryOps(sym, 1024);
     let maxd = 0;
-    for (const o of ops.slice(1)) for (let j = 0; j <= 128; j += 4) for (let i = 0; i <= 128; i += 4) {
+    for (const o of ops.slice(1)) for (let j = 0; j <= 128; j += 1) for (let i = 0; i <= 128; i += 1) {
       const [x, z] = o.pt([i * 8, j * 8]);
       const k2 = Math.round(z / 8) * 129 + Math.round(x / 8);
       maxd = Math.max(maxd, Math.abs(a.heights[j * 129 + i] - a.heights[k2]));
@@ -26,6 +26,14 @@ for (const [sym, players] of [["rot2", 2], ["mirror-x", 4], ["rot4", 4], ["diag"
     const m = walkMask(g, a.heights, water, water > 0);
     const d0 = walkDistances(g, m, a.spawns[0]);
     check(a.spawns.every((s) => distAt(g, d0, s) >= 0), `bases alcançáveis ${sym} água=${water}`);
+    // sem agulhas: nenhuma célula muito acima de todas as vizinhas
+    let spikes = 0;
+    for (let j = 1; j < 128; j++) for (let i = 1; i < 128; i++) {
+      const k = j * 129 + i, y = a.heights[k];
+      const lo = Math.max(a.heights[k - 1], a.heights[k + 1], a.heights[k - 129], a.heights[k + 129]);
+      if (y - lo > 8 * 2.2) spikes++;
+    }
+    check(spikes === 0, `agulhas no relevo ${sym}: ${spikes}`);
     // massa: simétrica, alcançável, sem decorações em cima
     check(a.mass.length >= players, `massa gerada em ${sym}: ${a.mass.length}`);
     if (sym !== "none") {

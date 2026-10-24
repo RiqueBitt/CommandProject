@@ -8,6 +8,7 @@ import { load, useStore } from "../../lib/store";
 import { KIND_META, useTabs } from "../../lib/tabs";
 import type { CreationKind, CreationMeta, Terrain, UnitInfo } from "../../lib/types";
 import { MODEL_TEMPLATES, newMapDoc, newUnitDoc, suggestUnitId } from "./docs";
+import { BLANK_BASES, BLANK_LABEL, type BlankSize } from "../studio/mapEdit";
 
 const DESC: Record<CreationKind, string> = {
   map: "Terreno 3D do jogo, relevo, água, bases, massa, decorações, texturas do chão e modelos próprios.",
@@ -186,6 +187,8 @@ export function NewProject({ kind, onClose, onCreated }: { kind: CreationKind; o
   const [template, setTemplate] = useState("empty");
   const [terrains, setTerrains] = useState<Terrain[] | null>(null);
   const [terrain, setTerrain] = useState<string | null>(null);
+  // mapa novo começa em branco (chão liso de grama); um mapa do jogo como base é opcional
+  const [start, setStart] = useState<"blank512" | "blank1024" | "game">("blank1024");
   const [units, setUnits] = useState<UnitInfo[] | null>(null);
   const [base, setBase] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -198,8 +201,7 @@ export function NewProject({ kind, onClose, onCreated }: { kind: CreationKind; o
         if (!s.ready) { setTerrains([]); return; }
         const list = (await load(() => api.maptkCatalog()))?.terrains ?? [];
         setTerrains(list);
-        // já vem um terreno escolhido: o mapa abre pronto para editar
-        setTerrain((t) => t ?? list[0]?.id ?? null);
+        setTerrain((t) => t ?? list.find((x) => x.kind === "skirmish")?.id ?? list[0]?.id ?? null);
       });
     }
     if (kind === "unit") void load(() => api.unitCatalog()).then((u) => setUnits(u ?? []));
@@ -212,7 +214,11 @@ export function NewProject({ kind, onClose, onCreated }: { kind: CreationKind; o
 
   const create = async () => {
     const m = await run("create", async () => {
-      if (kind === "map") return api.creationCreate("map", name, newMapDoc({ terrain, lobbyName: name }));
+      if (kind === "map") {
+        if (start === "game") return api.creationCreate("map", name, newMapDoc({ terrain, lobbyName: name }));
+        const size: BlankSize = start === "blank512" ? 512 : 1024;
+        return api.creationCreate("map", name, newMapDoc({ terrain: BLANK_BASES[size], lobbyName: name, base: "blank", clean: true, minimap: "natural", patch: true }));
+      }
       if (kind === "model") return api.creationCreate("model", name, (MODEL_TEMPLATES.find((t) => t.id === template) ?? MODEL_TEMPLATES[0]).make());
       const taken = new Set((units ?? []).map((u) => u.id));
       const u = units?.find((x) => x.id === base);
@@ -227,6 +233,24 @@ export function NewProject({ kind, onClose, onCreated }: { kind: CreationKind; o
         <Field label="Nome do projeto"><input className="input" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} /></Field>
 
         {kind === "map" && (
+          <Field label="Começar de" hint="Em branco: chão liso de grama do tamanho escolhido, pronto para esculpir, texturizar e decorar. Dá para trocar depois.">
+            <div className="blank-sizes">
+              {(Object.keys(BLANK_BASES) as unknown as BlankSize[]).map((k) => (
+                <button key={k} type="button" className="pick" aria-pressed={start === `blank${k}`} onClick={() => setStart(`blank${k}` as typeof start)}>
+                  <Icon name="grass" size={22} />
+                  <b>Em branco</b>
+                  <small className="faint">{BLANK_LABEL[k]}</small>
+                </button>
+              ))}
+              <button type="button" className="pick" aria-pressed={start === "game"} onClick={() => setStart("game")}>
+                <Icon name="terrain" size={22} />
+                <b>Mapa do jogo</b>
+                <small className="faint">relevo, água e texturas de um mapa existente</small>
+              </button>
+            </div>
+          </Field>
+        )}
+        {kind === "map" && start === "game" && (
           <Field label="Terreno base" hint="O relevo, a água e as texturas vêm desse terreno do jogo. Dá para trocar depois.">
             {terrains === null ? <div className="bar indeterminate"><i /></div> : terrains.length === 0 ? (
               <p className="faint small">Não achei os terrenos (o Estúdio de Mapas precisa do Python e do jogo). Dá para criar o projeto e escolher depois.</p>

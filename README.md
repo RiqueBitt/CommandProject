@@ -124,7 +124,12 @@ disponível em Sistema → Visual.
 - **Validação do mapa** com correção automática: bases na água/declive/isoladas, massa inacessível,
   em declive ou sobreposta, decorações em cima de bases e massa, distâncias e massa desiguais.
 - **Editor de mapas** no estilo de um editor de jogo:
-  - vista 3D, explorador (esconder e travar), propriedades;
+  - abre direto num **mapa em branco** (chão liso de grama, 512 ou 1024), sem escolher terreno;
+  - **visual limpo**: num mapa feito sobre um mapa do jogo, o chão inteiro ganha a textura do bioma,
+    a luz e as sombras são refeitas para o relevo novo e as decorações originais saem — nada do
+    mapa original aparece por cima;
+  - vista 3D com as texturas e o tamanho reais das decorações e do chão, explorador (esconder e
+    travar), propriedades;
   - pincel de escultura, formas do terreno, simetria;
   - análise de equilíbrio (território, caminhos e gargalos) e prévia do lobby;
   - decorações com o modelo e a textura reais do jogo, modelos próprios, texturas do chão;
@@ -283,7 +288,11 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
 - **HUD**: a edição é por textura e por Lua (layout em código); ainda não há editor visual de arrastar.
 - **Texturas do chão dos mapas**: o jogo mistura as camadas com máscaras pré-calculadas junto da
   iluminação, então a troca vale para a camada inteira (não dá para pintar pixel a pixel). O nome
-  do arquivo novo precisa caber no espaço do original; o editor só mostra as que cabem.
+  do arquivo novo precisa caber no espaço do original; o editor só mostra as que cabem. No visual
+  limpo o chão inteiro usa uma textura só (as máscaras de mistura do mapa original não acompanham
+  o relevo novo, então não dá para pôr rocha só nas encostas no jogo).
+- **Luz refeita** (visual limpo): experimental — as máscaras de luz novas seguem o formato das
+  originais e a cor do céu do mapa, mas ainda falta a confirmação no jogo.
 - **Decorações** são visuais: não bloqueiam a passagem das unidades.
 - **Tropas novas, animações criadas e modelos próprios no jogo** são experimentais: veja a tabela
   em [docs/criacao.md](docs/criacao.md#o-que-é-experimental).

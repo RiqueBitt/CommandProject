@@ -1,5 +1,6 @@
 // Edição do mapa no cliente: as mesmas operações que o toolkit aplica ao heightfield
 // (sc2maps.reshape_hfield), refeitas sobre o relevo amostrado para a prévia 2D/3D.
+import type { LayerSet } from "../../lib/types";
 
 export type Pt = [number, number];
 export type Rect = [number, number, number, number]; // x0, x1, z0, z1 (formato das passagens)
@@ -182,3 +183,42 @@ export function reliefShape(op: SculptOp): { c: Pt; r: number; rect?: Rect } {
 }
 
 export const round1 = (v: number) => Math.round(v * 10) / 10;
+
+// ------------------------------------------------------------------ base em branco e chão limpo
+
+export type GroundBiome = "temperate" | "desert" | "snow" | "volcanic";
+export type BlankSize = 512 | 1024;
+/** Terrenos do jogo usados por baixo de um mapa em branco: sem água, com a malha do chão
+ *  acompanhando o relevo (≥ 98% dos vértices), então tudo pode virar um plano liso. */
+export const BLANK_BASES: Record<BlankSize, string> = { 512: "SC2_MP_004", 1024: "SC2_MP_007" };
+/** Altura do plano do mapa em branco (dá espaço para cavar vales e subir montanhas). */
+export const BLANK_Y = 60;
+export const BLANK_LABEL: Record<BlankSize, string> = { 512: "Pequeno (512 × 512)", 1024: "Padrão (1024 × 1024)" };
+export function blankSizeOf(terrain: string | null): BlankSize | null {
+  const hit = (Object.keys(BLANK_BASES) as unknown as BlankSize[]).find((k) => BLANK_BASES[k] === terrain);
+  return hit ? (Number(hit) as BlankSize) : null;
+}
+
+/** Preferência de textura por bioma (o primeiro nome que existir e couber ganha). */
+const GROUND_PREF: Record<GroundBiome, RegExp[]> = {
+  temperate: [/mp_007_grass01/, /mp_002_grass01/, /mp_003_grass01/, /u105_grass01/, /u06_grass/, /grass/, /moss|lawn|field/],
+  desert: [/i01_sand_001a/, /u05_sand01/, /u105_sand0/, /mp_203_sand01/, /sand/, /dune|desert/],
+  snow: [/mp_002_snow01/, /mp_004_snow01/, /mp_006_snow0/, /mp_103_snow/, /snow|ice|frost/],
+  volcanic: [/mp_303_ground/, /lavarock/, /dirt_00/, /u05_dirt01/, /ash|lava|burnt|scorch|dirt|mud/],
+};
+
+/** Conjuntos de textura para o chão inteiro do bioma, do preferido ao último (a ponte usa o
+ *  primeiro que cabe em todos os lugares do terreno base). `chosen` (difusa) vem na frente. */
+export function groundCandidates(layers: LayerSet[], biome: GroundBiome, chosen: string | null = null) {
+  const seen = new Set<string>();
+  const uniq = layers.filter((l) => { const k = l.d.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+  const out: LayerSet[] = [];
+  const push = (l: LayerSet | undefined) => { if (l && !out.includes(l)) out.push(l); };
+  if (chosen) push(uniq.find((l) => l.d.toLowerCase() === chosen.toLowerCase()));
+  for (const re of GROUND_PREF[biome]) {
+    // dentro do mesmo padrão, os caminhos mais curtos cabem em mais lugares
+    for (const l of uniq.filter((x) => re.test(x.d.toLowerCase())).sort((a, b) => a.d.length - b.d.length)) push(l);
+  }
+  return out.slice(0, 10);
+}
+export const groundSpec = (c: LayerSet[]) => c.map((l) => ({ d: l.d, ...(l.n ? { n: l.n } : {}), ...(l.s ? { s: l.s } : {}) }));

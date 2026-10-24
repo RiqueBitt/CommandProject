@@ -1,6 +1,6 @@
 // Formato dos documentos de cada tipo de projeto (salvos como JSON pelo núcleo) e os modelos
 // iniciais. Sem three.js aqui: a biblioteca de projetos usa isto sem carregar os editores.
-import { EMPTY_EDITS, type Edits } from "../studio/mapEdit";
+import { EMPTY_EDITS, type Edits, type GroundBiome } from "../studio/mapEdit";
 import type { Feature, Symmetry, WorldGen } from "./worldgen";
 import type { TexGenDoc } from "./texgen";
 
@@ -35,13 +35,23 @@ export interface MapDoc {
   symmetry: Symmetry;
   /** grupos/objetos escondidos e travados no explorador */
   layers: { hidden: string[]; locked: string[] };
+  /** de onde vem o chão: "blank" = plano liso do tamanho escolhido (o terreno do jogo por baixo
+   *  é só o suporte e não aparece); "game" = relevo, água e texturas de um mapa do jogo */
+  base: "blank" | "game";
+  /** visual limpo: chão inteiro com as texturas do bioma, luz refeita para o relevo novo e sem as
+   *  decorações originais — nada do mapa base aparece por cima do mapa novo */
+  clean: boolean;
+  /** bioma do chão limpo (com o gerador de mundo, segue o bioma dele) */
+  groundBiome: GroundBiome;
+  /** textura do chão limpo escolhida à mão (difusa); null = a melhor do bioma */
+  groundTex: string | null;
 }
 
 export const newMapDoc = (over: Partial<MapDoc> = {}): MapDoc => ({
   schema: 1, terrain: null, lobbyName: "Meu mapa", teams: "2", economy: { baseMass: 4, sites: 8, perSite: 3 }, norush: 70,
   patch: false, maxSlope: 6, waterMargin: 4, smooth: false, rugged: false, minimap: "donor", strip: "moving",
   edits: EMPTY_EDITS, models: [], notes: "", world: null, features: [], sculpt: null, sculptSize: 0, symmetry: "none",
-  layers: { hidden: [], locked: [] }, ...over,
+  layers: { hidden: [], locked: [] }, base: "game", clean: false, groundBiome: "temperate", groundTex: null, ...over,
 });
 
 export function migrateMap(raw: unknown): MapDoc {
@@ -50,6 +60,8 @@ export function migrateMap(raw: unknown): MapDoc {
   return {
     ...base, ...d, economy: { ...base.economy, ...(d.economy ?? {}) }, edits: { ...EMPTY_EDITS, ...(d.edits ?? {}) }, models: d.models ?? [],
     features: d.features ?? [], layers: { hidden: d.layers?.hidden ?? [], locked: d.layers?.locked ?? [] }, schema: 1,
+    // projetos antigos: mundo gerado sobre um mapa do jogo já ganha o visual limpo
+    base: d.base ?? "game", clean: d.clean ?? !!d.world, groundBiome: d.groundBiome ?? d.world?.biome ?? "temperate", groundTex: d.groundTex ?? null,
   };
 }
 

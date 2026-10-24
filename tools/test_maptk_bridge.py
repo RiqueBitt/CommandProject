@@ -264,11 +264,83 @@ def main():
         assert b"/maps/SC2_CPGERA/SC2_CPGERA.waterDepth.dds" in sc2maps.read_bdf_payload(tb5), "máscara de água apontando para o mapa novo"
         print("gerador ok: relevo +40 no centro, máscara de água e minimapa natural")
 
+        # base lisa + visual limpo: tudo plano na altura pedida, decorações originais fora
+        spec6 = dict(spec, scenario_id="SC2_CPLISO", name="[2] Liso", flat_base=33,
+                     clean=dict(ground=[dict(d="/textures/Terrain/MP_007/sc2_mp_007_grass01_d.dds")], relight=True, clear_props=True))
+        res6, log6 = run("build", {"spec": spec6}, gd, out)
+        assert any("base lisa" in l for l in log6), log6
+        assert res6["propsRemoved"] == 1, res6
+        with zipfile.ZipFile(res6["scd"]) as z:
+            H6, w6 = sc2maps.hfield_heights(z.read("maps/SC2_CPLISO/SC2_CPLISO.hfield.win.bdf"))
+        assert abs(H6[700 * w6 + 512] / 128 - 33) < 0.01 and abs(H6[3 * w6 + 3] / 128 - 33) < 0.01
+        print("base lisa ok: heightfield plano e decorações originais retiradas")
+        test_lighting()
+
         bad = dict(spec, scenario_id="meu mapa")
         env = dict(os.environ, SC2_GAMEDATA=gd, SC2_MAP_OUT=out)
         p = subprocess.run([sys.executable, BRIDGE, "build"], input=json.dumps({"spec": bad}).encode(), capture_output=True, env=env)
         assert p.returncode == 1 and b"SC2_MEUMAPA" in p.stdout, p.stdout
     print("maptk_bridge: todos os testes passaram")
+
+
+def test_lighting():
+    """cp_lighting com uma malha mínima: 1 material (2 camadas + máscara de luz) e 2 triângulos."""
+    sys.path.insert(0, os.path.join(ROOT, "resources", "maptk"))
+    import cp_lighting as cl
+    import sc2maps
+    strs = [b"Ground01-Sand01", b"/textures/Terrain/MP_901/sc2_mp_901_ground01_d.dds", b"/textures/Terrain/MP_901/sc2_mp_901_sand01_d.dds",
+            b"/textures/engine/black_d.dds", b"/maps/SC2_MP_901/lighting/mask02.dds"]
+    strtab = 20 + 108
+    sp = strtab + 84
+    ptr = []
+    blob_s = b""
+    for t in strs:
+        ptr.append(sp + len(blob_s))
+        blob_s += t + b"\x00" * (4 - len(t) % 4 + 4)
+    N = 0xFFFFFFFF
+    mat = struct.pack("<21I", ptr[0], N, N, 0, N, N, 0, 0, ptr[1], ptr[2], N, N, N, N, ptr[3], N, N, N, ptr[4], N, N)
+    head = struct.pack("<5I", 6, 1, 20, 1, strtab) + struct.pack("<27I", *([0] * 27))
+    body = head + mat + blob_s
+    fix = len(body)
+    hill = lambda x, z: 20 + max(0.0, 60 - ((x - 512) ** 2 + (z - 512) ** 2) ** 0.5 * 0.3)
+    n = 17  # malha 17×17 já com o relevo novo (como fica depois de resample_mesh_heights)
+    verts = b""
+    for j in range(n):
+        for i in range(n):
+            x, z = i * 1024 / (n - 1), j * 1024 / (n - 1)
+            verts += struct.pack("<3f", x, hill(x, z), z) + struct.pack("<10H", 0, 0, round(i * 32767 / (n - 1)), round(j * 32767 / (n - 1)), 0, 0, 0, 0, 0, 0)
+    tri = []
+    for j in range(n - 1):
+        for i in range(n - 1):
+            a = j * n + i
+            tri += [a, a + 1, a + n, a + 1, a + n + 1, a + n]
+    idx = struct.pack(f"<{len(tri)}I", *tri)
+    pl = body + struct.pack("<5I", 3, n * n, 20, len(tri), 20 + n * n * 32) + verts + idx + b"\x00" * 64
+    comp = zlib.compress(pl, 6)
+    data = b"MFDB" + struct.pack("<6I", 7, 2, 0, len(comp), len(pl), 1) + struct.pack("<I", fix) + comp
+    # máscara DXT5 64×64 com 1 mip: alfa = 0x55 em todo bloco, cor qualquer
+    w = 64
+    dds = bytearray(128)
+    dds[:4] = b"DDS "
+    struct.pack_into("<2I", dds, 12, w, w)
+    struct.pack_into("<I", dds, 28, 1)
+    dds[84:88] = b"DXT5"
+    blocks = (w // 4) ** 2
+    dds += (b"\x55" * 8 + struct.pack("<2HI", 0xFFFF, 0x0000, 0)) * blocks
+    lit = {f"mask02_{k}.win.dds": bytes(dds) for k in range(3)}
+    p0 = sc2maps.read_bdf_payload(data)
+    p1, n, sk = cl.reskin_all(p0, [dict(d="/textures/Terrain/MP_007/sc2_mp_007_grass01_d.dds"), dict(d="/textures/Terrain/CA_U06/U06_grass_d.dds")])
+    assert n == 2 and sk == 0 and p1.count(b"/textures/Terrain/MP_007/sc2_mp_007_grass01_d.dds") == 2, (n, sk)
+    assert b"/textures/engine/black_d.dds" in p1
+    p2, out, k = cl.relight(data, p1, lit, hill, 1024, "/maps/SC2_MP_901/lighting/", "/maps/SC2_CPLUZ/lighting/")
+    assert k == 1 and sorted(out) == sorted(lit), (k, list(out))
+    assert b"/maps/SC2_CPLUZ/lighting/mask02.dds" in p2 and b"/maps/SC2_MP_901/lighting/" not in p2
+    m0 = out["mask02_0.win.dds"]
+    assert len(m0) == len(dds) and m0[:128] == bytes(dds[:128])
+    assert all(m0[128 + i * 16:128 + i * 16 + 8] == b"\x55" * 8 for i in range(blocks)), "a mistura (alfa) não muda"
+    cols = {struct.unpack_from("<H", m0, 128 + i * 16 + 8)[0] for i in range(blocks)}
+    assert len(cols) > 3, "a luz nova acompanha o relevo"
+    print(f"luz refeita ok: {len(cols)} tons, caminho da máscara apontando para o mapa novo")
 
 
 if __name__ == "__main__":

@@ -38,10 +38,15 @@ interface Props {
   palette?: "temperate" | "desert" | "snow" | "volcanic" | null;
   /** linhas no chão (rios, cordilheiras, passagens): pontos e cor */
   lines?: { pts: Pt[]; color: string }[];
+  /** texturas reais do chão (do terreno base) misturadas pela altura e inclinação, com a paleta */
+  ground?: GroundTextures | null;
   onPointer: (type: "down" | "move" | "up", p: Pt | null) => void;
 }
 
 const SKY = 0x0b1118;
+
+/** Texturas do chão para as cores do relevo: praia, chão, rocha (encostas) e topo. */
+export interface GroundTextures { sand: string; grass: string; rock: string; snow: string; /** uma textura só no chão inteiro, sem tinta da paleta */ uniform?: boolean }
 
 /** Editor 3D: relevo do terreno com a textura do jogo, água, marcadores e pincel. */
 export default function MapView3D(props: Props) {
@@ -57,6 +62,7 @@ export default function MapView3D(props: Props) {
     setOrbit: (on: boolean) => void;
     setExaggeration: () => void;
     redrawBrush: () => void;
+    setGround: () => void;
   } | null>(null);
 
   // cena: criada uma vez por terreno
@@ -70,6 +76,9 @@ export default function MapView3D(props: Props) {
     renderer.setSize(el.clientWidth, el.clientHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    // sombras do sol: montanhas, árvores e prédios
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     el.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
@@ -82,6 +91,7 @@ export default function MapView3D(props: Props) {
     const pos = new Float32Array(w * w * 3);
     const uv = new Float32Array(w * w * 2);
     const col = new Float32Array(w * w * 3);
+    const splat = new Float32Array(w * w * 4);
     for (let j = 0; j < w; j++) for (let i = 0; i < w; i++) {
       const k = j * w + i;
       pos[k * 3] = i * step;
@@ -100,9 +110,42 @@ export default function MapView3D(props: Props) {
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.setAttribute("splat", new THREE.BufferAttribute(splat, 4));
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0, vertexColors: true });
+    // chão com texturas: 4 camadas misturadas por vértice (praia, chão, rocha, topo), em dois
+    // tamanhos para não parecer azulejo
+    const groundU = {
+      tSand: { value: null as THREE.Texture | null }, tGrass: { value: null as THREE.Texture | null },
+      tRock: { value: null as THREE.Texture | null }, tSnow: { value: null as THREE.Texture | null },
+      uGround: { value: 0 }, uTile: { value: 1 / 22 },
+    };
+    mat.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, groundU);
+      sh.vertexShader = sh.vertexShader
+        .replace("#include <common>", "#include <common>\nattribute vec4 splat;\nvarying vec4 vSplat;\nvarying vec2 vGround;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvSplat = splat;\nvGround = position.xz;");
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <common>", `#include <common>
+uniform sampler2D tSand; uniform sampler2D tGrass; uniform sampler2D tRock; uniform sampler2D tSnow;
+uniform float uGround; uniform float uTile;
+varying vec4 vSplat; varying vec2 vGround;
+vec3 layerAt(vec2 p) {
+  vec4 w = vSplat / max(0.0001, dot(vSplat, vec4(1.0)));
+  return texture2D(tSand, p).rgb * w.x + texture2D(tGrass, p).rgb * w.y + texture2D(tRock, p).rgb * w.z + texture2D(tSnow, p).rgb * w.w;
+}`)
+        .replace("#include <map_fragment>", `#include <map_fragment>
+if (uGround > 0.5) {
+  vec2 p = vGround * uTile;
+  vec2 q = mat2(0.8, -0.6, 0.6, 0.8) * vGround * uTile * 0.23 + 0.37;
+  vec3 c = mix(layerAt(p), layerAt(q), 0.35);
+  diffuseColor.rgb *= c * 0.62;
+}`);
+    };
+    mat.customProgramCacheKey = () => "cp-ground";
     const ground = new THREE.Mesh(geo, mat);
+    ground.receiveShadow = true;
+    ground.castShadow = true;
     scene.add(ground);
 
     // saia nas bordas para o relevo não parecer uma folha solta
@@ -139,6 +182,13 @@ export default function MapView3D(props: Props) {
     const sun = new THREE.DirectionalLight(0xfff1dc, 2.3);
     sun.position.set(grid * 0.15, grid * 0.9, grid * -0.35);
     sun.target.position.set(grid / 2, 0, grid / 2);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -grid * 0.8; sun.shadow.camera.right = grid * 0.8;
+    sun.shadow.camera.top = grid * 0.8; sun.shadow.camera.bottom = -grid * 0.8;
+    sun.shadow.camera.near = 1; sun.shadow.camera.far = grid * 3;
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 1.2;
     scene.add(sun, sun.target);
 
     // marcadores e pincel
@@ -180,6 +230,31 @@ export default function MapView3D(props: Props) {
       });
     };
 
+    // texturas do chão (só nas cores do relevo, sem a textura do jogo por cima)
+    const groundTex: THREE.Texture[] = [];
+    let groundKey = "";
+    const setGround = () => {
+      const g = live.current.ground;
+      const key = g ? `${g.uniform ? "u" : ""}${g.sand.length}:${g.grass.slice(-40)}:${g.rock.slice(-40)}:${g.snow.slice(-40)}` : "";
+      if (key === groundKey) return;
+      groundKey = key;
+      groundTex.splice(0).forEach((t) => t.dispose());
+      groundU.uGround.value = 0;
+      if (!g) { invalidate(); return; }
+      const urls = [g.sand, g.grass, g.rock, g.snow];
+      let done = 0;
+      const slots = [groundU.tSand, groundU.tGrass, groundU.tRock, groundU.tSnow];
+      urls.forEach((u, k) => loader.load(u, (t) => {
+        if (groundKey !== key) { t.dispose(); return; }
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        groundTex.push(t);
+        slots[k].value = t;
+        if (++done === urls.length) { groundU.uGround.value = 1; setHeights(); invalidate(); }
+      }));
+    };
+
     const colorFor = (y: number, wl: number, lo: number, hi: number, out: THREE.Color) => {
       if (y < wl - 0.5) return out.setRGB(0.36, 0.42, 0.38);
       const t = Math.max(0, Math.min(1, (y - lo) / Math.max(1, hi - lo)));
@@ -194,17 +269,33 @@ export default function MapView3D(props: Props) {
       const c = new THREE.Color();
       const pal = live.current.palette;
       const st = grid / size;
+      const textured = !!pal && groundU.uGround.value > 0.5;
+      const wet = waterLevel > 0.5;
+      const base = Math.max(lo, wet ? waterLevel : lo);
       for (let k = 0; k < w * w; k++) {
         pos[k * 3 + 1] = heights[k] * e;
         if (pal) {
           const i = k % w, j = (k - i) / w;
           const dx = (heights[Math.min(k + 1, j * w + size)] - heights[Math.max(k - 1, j * w)]) / (2 * st);
           const dz = (heights[Math.min(k + w, w * w - 1)] - heights[Math.max(k - w, 0)]) / (2 * st);
-          const [r, g, b] = naturalColor(heights[k], Math.hypot(dx, dz), waterLevel, waterLevel > 0.5, lo, hi, pal, 1);
+          const sl = Math.hypot(dx, dz), y = heights[k];
+          const [r, g, b] = naturalColor(y, sl, waterLevel, wet, lo, hi, pal, 1);
           c.setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace);
+          // pesos das camadas: praia perto da água, rocha nas encostas, topo nas partes altas
+          const t = Math.max(0, Math.min(1, (y - base) / Math.max(1, hi - base)));
+          const sm = (a: number, b2: number, x: number) => { const q = Math.max(0, Math.min(1, (x - a) / (b2 - a))); return q * q * (3 - 2 * q); };
+          const rock = sm(0.45, 1.05, sl);
+          const snow = (pal === "snow" ? 0.55 + 0.45 * sm(0.4, 0.8, t) : sm(0.7, 0.9, t)) * (1 - rock * 0.6);
+          const sand = (wet ? sm(waterLevel + 4.5, waterLevel + 1, y) : 0) * (1 - rock);
+          const grass = Math.max(0, 1 - rock - snow - sand);
+          splat.set([sand, grass, rock, snow], k * 4);
+          // com textura, a paleta só tinge de leve (a cor vem da textura do jogo)
+          // (chão de uma textura só, o "visual limpo": sem tinta — fica como no jogo)
+          if (textured) { if (live.current.ground?.uniform) c.setRGB(1, 1, 1); else c.setRGB(0.8 + c.r * 0.3, 0.8 + c.g * 0.3, 0.8 + c.b * 0.3); }
         } else colorFor(heights[k], waterLevel, lo, hi, c);
         col.set([c.r, c.g, c.b], k * 3);
       }
+      geo.attributes.splat.needsUpdate = true;
       geo.attributes.position.needsUpdate = true;
       geo.attributes.color.needsUpdate = true;
       geo.computeVertexNormals();
@@ -287,7 +378,7 @@ export default function MapView3D(props: Props) {
         o.scale.y = 1.5;
         markers.add(o);
       };
-      mass.forEach((p) => gem(p, 0x7bd88f, 11));
+      mass.forEach((p) => gem(p, 0x7bd88f, 6));
       (autoMass ?? []).forEach((p) => gem(p, 0x3f8f5a, 4.5));
       bridges.forEach(([x0, x1, z0, z1]) => {
         const y = Math.max(hAt(x0, z0), hAt(x1, z1), hAt((x0 + x1) / 2, (z0 + z1) / 2), live.current.waterLevel * exag());
@@ -324,11 +415,12 @@ export default function MapView3D(props: Props) {
     const decorGroup = new THREE.Group();
     scene.add(decorGroup);
     const KIND_GEO: Record<DecorKind, () => THREE.BufferGeometry> = {
-      tree: () => new THREE.ConeGeometry(2.6, 10, 7).translate(0, 5, 0),
-      rock: () => new THREE.DodecahedronGeometry(2.4, 0).scale(1, 0.6, 1).translate(0, 0.8, 0),
-      building: () => new THREE.BoxGeometry(7, 6, 7).translate(0, 3, 0),
-      wreck: () => new THREE.BoxGeometry(5, 1.6, 3).translate(0, 0.8, 0),
-      other: () => new THREE.OctahedronGeometry(1.8).translate(0, 1.8, 0),
+      // enquanto o modelo do jogo carrega (ou se não houver): formas do tamanho típico no jogo
+      tree: () => new THREE.ConeGeometry(0.9, 2.8, 7).translate(0, 1.4, 0),
+      rock: () => new THREE.DodecahedronGeometry(0.8, 0).scale(1, 0.6, 1).translate(0, 0.3, 0),
+      building: () => new THREE.BoxGeometry(6, 5, 6).translate(0, 2.5, 0),
+      wreck: () => new THREE.BoxGeometry(2.5, 0.8, 1.6).translate(0, 0.4, 0),
+      other: () => new THREE.OctahedronGeometry(0.7).translate(0, 0.7, 0),
     };
     const KIND_COLOR: Record<DecorKind, number> = { tree: 0x3f7d3a, rock: 0x8a8378, building: 0xb39b78, wreck: 0x6b4a3a, other: 0x9aa7b4 };
     const cutRing = new THREE.Group();
@@ -387,6 +479,8 @@ export default function MapView3D(props: Props) {
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
         mesh.computeBoundingSphere();
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
         decorGroup.add(mesh);
       }
       for (const [x, z, r] of cuts) {
@@ -556,9 +650,11 @@ export default function MapView3D(props: Props) {
     const dirtying = <A extends unknown[]>(f: (...a: A) => void) => (...a: A) => { f(...a); invalidate(); };
     api.current = {
       setHeights: dirtying(setHeights), setTexture: dirtying(setTexture), setMarkers: dirtying(setMarkers), setDecor: dirtying(setDecor), setHighlights: dirtying(setHighlights),
-      setOrbit: dirtying(setOrbit), setExaggeration: dirtying(setHeights), redrawBrush: dirtying(redrawBrush),
+      setOrbit: dirtying(setOrbit), setExaggeration: dirtying(setHeights), redrawBrush: dirtying(redrawBrush), setGround: dirtying(setGround),
     };
+    setGround();
     setHeights();
+    try { if (localStorage.getItem("cpFixture") === "1") (window as unknown as { __map3d: unknown }).__map3d = { mat, groundU, splat, col, renderer, scene, live }; } catch { /* sem depuração */ }
     setTexture(live.current.texture);
 
     return () => {
@@ -575,6 +671,7 @@ export default function MapView3D(props: Props) {
       for (const o of [...hiGroup.children]) { const m = o as THREE.Line; m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
       clearTimeout(decorQueued);
       texture?.dispose();
+      groundTex.forEach((t) => t.dispose());
       scene.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.Line) {
           o.geometry.dispose();
@@ -589,6 +686,7 @@ export default function MapView3D(props: Props) {
 
   useEffect(() => { api.current?.setHeights(); }, [props.heights, props.waterLevel, props.exaggeration, props.palette]);
   useEffect(() => { api.current?.setTexture(props.texture); }, [props.texture]);
+  useEffect(() => { api.current?.setGround(); }, [props.ground]);
   useEffect(() => { api.current?.setMarkers(); }, [props.spawns, props.mass, props.autoMass, props.bridges, props.seed, props.lines]);
   useEffect(() => { api.current?.setDecor(); }, [props.decor, props.cuts]);
   useEffect(() => { api.current?.setHighlights(); }, [props.highlights]);

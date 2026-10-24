@@ -214,7 +214,7 @@ export interface SystemMemory { totalMb: number; availableMb: number }
 export interface MemoryStatus { system: SystemMemory; limitMb: number; recommendedMb: number; choices: number[]; laa: LaaStatus | null }
 export interface AppUpdate { version: string; notes: string; url: string; assetName?: string | null; assetUrl?: string | null; size: number; sha256?: string | null }
 
-export interface PropInfo { bp: string; name: string; category: string }
+export interface PropInfo { bp: string; name: string; category: string; size?: [number, number, number] | null }
 export interface LayerSet { map: string; name: string; d: string; n?: string | null; s?: string | null; slotD: number; slotN: number; slotS: number }
 export interface MapAssets { props: PropInfo[]; layers: LayerSet[] }
 export interface PropPreview { mesh: MeshView; texture?: string | null }
