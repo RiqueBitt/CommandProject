@@ -98,6 +98,22 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
   desenha muitas imagens dela no tamanho da própria textura).
 - Calcula antes quanto de memória de vídeo as texturas vão ocupar e ajusta sozinho para caber.
 
+**Criar em abas: mapas, tropas e modelos 3D** ([guia](docs/criacao.md))
+- Cada projeto abre numa **aba própria** (várias ao mesmo tempo), com salvamento automático,
+  recuperação após fechar sem salvar, **versões**, desfazer/refazer e exportação `.cpproj`.
+- **Editor de mapas** no estilo de um editor de jogo: vista 3D, explorador, propriedades,
+  decorações com o modelo e a textura reais do jogo, modelos próprios, texturas do chão, relevo,
+  bases e massa; *Gerar e jogar*.
+- **Editor de modelos 3D**: formas, importação OBJ/GLB, edição de vértices, grupos que viram ossos,
+  materiais com imagem, cor do time e brilho; exporta `.scm` + `.dds` para o jogo, OBJ e GLB.
+- **Criador de tropas** (experimental): parte de uma unidade do jogo e edita aparência, atributos,
+  armas, animações (trocar ou criar por quadros-chave) e comportamento; gera um mod instalável.
+
+**Otimizador incluso** ([detalhes](docs/otimizador.md))
+- Monitor de memória/CPU do jogo, prioridade do processo, perfis das opções gráficas do jogo com
+  backup, análise dos relatórios de travamento (módulo culpado e dica), conflitos de mods e versão
+  do jogo. Opcional, reversível e sem promessa de FPS: você mede antes e depois.
+
 **Memória do jogo (2 a 4 GB)**
 - O SC2 é um programa de 32 bits: sozinho usa até 2 GB, e o máximo possível para ele é 4 GB.
   Em Configurações você escolhe o teto (2, 2,5, 3, 3,5 ou 4 GB). Acima de 2 GB o launcher liga a flag
@@ -115,6 +131,8 @@ clique (baixa com retomada, confere o SHA-256 publicado pelo GitHub, instala e r
 | ![Pintor de texturas](docs/screenshots/pintor.png) | ![Mapas](docs/screenshots/mapas.png) |
 | ![Shaders](docs/screenshots/shaders.png) | ![Presets: original, Natural, Vívido, Cinemático](docs/screenshots/shaders-presets.jpg) |
 | ![Texturas HD](docs/screenshots/texturas-hd.png) | ![Comparação de ampliação](docs/screenshots/texturas-hd-comparacao.jpg) |
+| ![Editor de mapas](docs/screenshots/editor-mapa.png) | ![Editor de modelos 3D](docs/screenshots/modelo-3d.png) |
+| ![Criador de tropas](docs/screenshots/tropa.png) | ![Desempenho](docs/screenshots/desempenho.png) |
 
 ## Segurança dos arquivos do jogo
 
@@ -168,6 +186,8 @@ resources/maptk    SC2 Map Toolkit (MIT, sem alterações) + maptk_bridge.py
 resources/shaders  shaders do ReShade (CommandProject.fx) e presets
 resources/python   Python embutido (baixado no build do Windows)
 docs/HUB_API.md    formato do índice do hub e do mod.json
+docs/criacao.md    editores de mapa, modelo 3D e tropa (uso, formatos, desenvolvimento)
+docs/otimizador.md o que o Otimizador muda e como desfazer
 ```
 
 A interface roda também no navegador com um backend simulado (`src/lib/mock.ts`), útil para
@@ -207,7 +227,7 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
 
 - **Ordem de montagem**: o launcher assume que o jogo monta os `.scd` em ordem alfabética e o último
   vence (é o que os mods da comunidade usam com os prefixos `_` e `zz_`). Teste numa partida.
-- **Modelos `.scm`**: leitura/escrita do formato da família Supreme Commander (versão 5). O rigging
+- **Modelos `.scm`**: leitura das versões 5 a 7 e escrita da 7. O rigging
   automático copia o osso do vértice original mais próximo, sem misturar pesos; malhas muito
   diferentes do original podem deformar nas animações.
 - **Lua compilado**: só dá para editar como texto quando o jogo traz a versão em `uncompiled_lua.scd`.
@@ -216,6 +236,8 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
   iluminação, então a troca vale para a camada inteira (não dá para pintar pixel a pixel). O nome
   do arquivo novo precisa caber no espaço do original; o editor só mostra as que cabem.
 - **Decorações** são visuais: não bloqueiam a passagem das unidades.
+- **Tropas novas, animações criadas e modelos próprios no jogo** são experimentais: veja a tabela
+  em [docs/criacao.md](docs/criacao.md#o-que-é-experimental).
 - **Partidas**: o jogo em si continua nos lobbies da Steam; o launcher organiza as salas, o chat e os
   mods, mas não substitui o netcode do SC2.
 

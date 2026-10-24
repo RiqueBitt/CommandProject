@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, onProgress } from "./api";
 import type * as T from "./types";
 
-export type Page = "me" | "home" | "library" | "hub" | "multiplayer" | "studio" | "settings";
+export type Page = "me" | "home" | "library" | "hub" | "multiplayer" | "studio" | "create" | "performance" | "settings";
 
 export type AppUpdate = T.AppUpdate;
 
@@ -61,7 +61,11 @@ export const useStore = create<State>((set, get) => ({
   setStudioTab: (studioTab) => set({ studioTab }),
   settingsSection: null,
   openSettings: (section) => { set({ settingsSection: section }); get().go("settings"); },
-  go: (page) => set((s) => (s.page === page ? {} : { page, history: [...s.history.slice(-30), s.page] })),
+  go: (page) => {
+    // ir para uma tela do launcher sai da aba de projeto (o projeto continua aberto na aba)
+    void import("./tabs").then(({ useTabs }) => { if (useTabs.getState().active) useTabs.getState().activate(null); });
+    set((s) => (s.page === page ? {} : { page, history: [...s.history.slice(-30), s.page] }));
+  },
   back: () => set((s) => (s.history.length ? { page: s.history[s.history.length - 1], history: s.history.slice(0, -1) } : {})),
   setPalette: (palette) => set({ palette }),
   refresh: async () => {

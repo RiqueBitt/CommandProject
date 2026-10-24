@@ -245,8 +245,10 @@ pub fn write(m: &Model) -> Result<Vec<u8>> {
         (off, len)
     };
 
+    // mesma versão do modelo de origem (o SC2 usa 7, com o mesmo layout de 68 bytes por vértice)
+    let version = if (5..=7).contains(&m.version) { m.version } else { 7 };
     let header = [
-        5u32,
+        version,
         bone_off as u32,
         m.weighted_bones,
         vert_off as u32,
@@ -285,7 +287,12 @@ pub struct MeshView {
 pub struct BoneView {
     pub name: String,
     pub parent: i32,
+    /// posição em relação ao pai
     pub position: [f32; 3],
+    /// rotação em relação ao pai (w, x, y, z)
+    pub rotation: [f32; 4],
+    /// posição de repouso no modelo (da matriz inversa de repouso)
+    pub world: [f32; 3],
 }
 
 pub fn view(m: &Model) -> MeshView {
@@ -315,10 +322,11 @@ pub fn view(m: &Model) -> MeshView {
         bones: m
             .bones
             .iter()
-            .map(|b| BoneView {
-                name: b.name.clone(),
-                parent: b.parent,
-                position: b.position,
+            .map(|b| {
+                let inv = &b.rest_inverse;
+                let t = [inv[12], inv[13], inv[14]];
+                let world = [0, 1, 2].map(|j| -(0..3).map(|k| t[k] * inv[j * 4 + k]).sum::<f32>());
+                BoneView { name: b.name.clone(), parent: b.parent, position: b.position, rotation: b.rotation, world }
             })
             .collect(),
         bbox_min: min,

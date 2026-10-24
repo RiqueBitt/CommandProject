@@ -2,6 +2,8 @@
 //! que a interface chama, os eventos de progresso e a integração com o sistema.
 
 mod commands;
+mod creator_cmds;
+mod perf_cmds;
 
 use cp_core::hub::HubIndex;
 use cp_core::workspace::{default_data_dir, Workspace};
@@ -42,6 +44,47 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            perf_cmds::perf_report,
+            perf_cmds::perf_process,
+            perf_cmds::perf_prefs_set,
+            perf_cmds::perf_backup_restore,
+            perf_cmds::perf_backup_now,
+            perf_cmds::perf_profile_save,
+            perf_cmds::perf_profile_apply,
+            perf_cmds::perf_profile_delete,
+            perf_cmds::perf_dumps_delete,
+            perf_cmds::perf_set_priority,
+            creator_cmds::creations_list,
+            creator_cmds::unit_catalog,
+            creator_cmds::unit_details,
+            creator_cmds::unit_animations,
+            creator_cmds::unit_preview,
+            creator_cmds::anim_read,
+            creator_cmds::unit_build,
+            creator_cmds::unit_blueprint_preview,
+            creator_cmds::anim_create,
+            creator_cmds::model_prepare,
+            creator_cmds::model_baked,
+            creator_cmds::model_export_game,
+            creator_cmds::creation_create,
+            creator_cmds::creation_load,
+            creator_cmds::creation_save,
+            creator_cmds::creation_autosave,
+            creator_cmds::creation_recovery,
+            creator_cmds::creation_discard_recovery,
+            creator_cmds::creation_versions,
+            creator_cmds::creation_restore,
+            creator_cmds::creation_update,
+            creator_cmds::creation_set_thumb,
+            creator_cmds::creation_thumb,
+            creator_cmds::creation_duplicate,
+            creator_cmds::creation_delete,
+            creator_cmds::creation_asset_put,
+            creator_cmds::creation_asset,
+            creator_cmds::creation_asset_copy,
+            creator_cmds::creation_assets,
+            creator_cmds::creation_export,
+            creator_cmds::creation_import,
             commands::app_info,
             commands::recover,
             commands::dashboard,

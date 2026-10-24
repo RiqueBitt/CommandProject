@@ -51,6 +51,21 @@ function build(mesh: { positions: number[]; normals: number[]; uvs: number[]; in
   return { geo, mat };
 }
 
+// decorações feitas no editor 3D (projetos de modelo): bp → projeto
+const custom = new Map<string, string>();
+export function registerCustomProp(bp: string, creation: string) {
+  const key = bp.toLowerCase();
+  if (custom.get(key) !== creation) {
+    custom.set(key, creation);
+    for (const lod of [1, 2]) { cache.delete(`${key}#${lod}`); ready.delete(`${key}#${lod}`); }
+  }
+}
+
+function fromBaked(b: { positions: number[]; normals: number[]; uvs: number[]; indices: number[]; albedoPng: string }): PropModel | null {
+  const tex = b.albedoPng.startsWith("data:") ? b.albedoPng : `data:image/png;base64,${b.albedoPng}`;
+  return build({ positions: b.positions, normals: b.normals, uvs: b.uvs, indices: b.indices }, tex);
+}
+
 /** Modelo pronto (ou `undefined` se ainda não carregou; `null` = sem modelo). */
 export const propModelNow = (bp: string, lod = 1) => ready.get(`${bp.toLowerCase()}#${lod}`);
 
@@ -59,8 +74,10 @@ export function propModel(bp: string, lod = 1): Promise<PropModel | null> {
   const key = `${bp.toLowerCase()}#${lod}`;
   let p = cache.get(key);
   if (!p) {
-    p = limited(() => api.propPreview(bp, lod))
-      .then((r) => build(r.mesh, r.texture))
+    const creation = custom.get(bp.toLowerCase());
+    p = (creation
+      ? api.modelBaked(creation).then((b) => (b ? fromBaked(b) : null))
+      : limited(() => api.propPreview(bp, lod)).then((r) => build(r.mesh, r.texture)))
       .catch(() => null)
       .then((m) => {
         ready.set(key, m);

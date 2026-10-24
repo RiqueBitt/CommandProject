@@ -2,7 +2,10 @@
 //!
 //! Este crate não depende de interface gráfica: é usado pelo app Tauri e pela CLI `cp`.
 
+pub mod anim;
+pub mod blueprint;
 pub mod conflicts;
+pub mod creator;
 pub mod dds;
 pub mod deploy;
 pub mod enhance;
@@ -19,7 +22,9 @@ pub mod manifest;
 pub mod mapassets;
 pub mod maptk;
 pub mod memory;
+pub mod perf;
 pub mod menu_theme;
+pub mod modelgen;
 pub mod net;
 pub mod profile;
 pub mod scd;
@@ -29,6 +34,7 @@ pub mod shaders;
 pub mod studio;
 pub mod sync;
 pub mod toc;
+pub mod units;
 pub mod update;
 pub mod ttf;
 pub mod vdf;

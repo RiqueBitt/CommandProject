@@ -3,6 +3,7 @@ import { CommandPalette, Rail, SystemBar } from "./components/Shell";
 import { Toasts } from "./components/ui";
 import { api, onEvent } from "./lib/api";
 import { errorText, useStore } from "./lib/store";
+import { useTabs } from "./lib/tabs";
 import Home from "./pages/Home";
 import Hub from "./pages/Hub";
 import Library from "./pages/Library";
@@ -12,10 +13,15 @@ import SettingsPage from "./pages/Settings";
 
 // o Estúdio carrega three.js e o editor de código: só baixa quando abrir
 const Studio = lazy(() => import("./pages/studio/Studio"));
+const Create = lazy(() => import("./pages/create/Create"));
+const ProjectHost = lazy(() => import("./pages/create/ProjectHost"));
+const Performance = lazy(() => import("./pages/Performance"));
 
 export default function App() {
   const page = useStore((s) => s.page);
   const refresh = useStore((s) => s.refresh);
+  const activeTab = useTabs((s) => s.active);
+  const hasTabs = useTabs((s) => s.tabs.length > 0);
   const toast = useStore((s) => s.toast);
 
   useEffect(() => {
@@ -57,14 +63,21 @@ export default function App() {
         toast("error", "O jogo fechou com erro. Veja na tela inicial o que pode ter causado.");
       }),
       onEvent<number>("cp://memory-limited", (mb) => toast("ok", `Memória do jogo limitada a ${(mb / 1024).toLocaleString("pt-BR")} GB.`)),
+      onEvent<string>("cp://priority-set", (p) => toast("ok", `Prioridade do jogo: ${p === "high" ? "alta" : "acima do normal"}.`)),
+      onEvent<string>("cp://priority-failed", (e) => toast("error", `Não deu para mudar a prioridade do jogo: ${e}`)),
       onEvent<string>("cp://memory-limit-failed", (e) => toast("error", `Não deu para aplicar o limite de memória: ${e}. O jogo está usando até 4 GB.`)),
     ];
     return () => offs.forEach((p) => p.then((off) => off()));
   }, [refresh, toast]);
 
   return (
-    <div className="app">
+    <div className={`app ${activeTab ? "in-project" : ""}`}>
       <SystemBar />
+      {hasTabs && (
+        <div className="project-area" hidden={!activeTab}>
+          <Suspense fallback={<div className="page muted">Abrindo…</div>}><ProjectHost /></Suspense>
+        </div>
+      )}
       <Rail />
       <main className="main">
         {page === "me" && <Me />}
@@ -75,6 +88,16 @@ export default function App() {
         {page === "studio" && (
           <Suspense fallback={<div className="page muted">Carregando o Estúdio…</div>}>
             <Studio />
+          </Suspense>
+        )}
+        {page === "create" && (
+          <Suspense fallback={<div className="page muted">Carregando…</div>}>
+            <Create />
+          </Suspense>
+        )}
+        {page === "performance" && (
+          <Suspense fallback={<div className="page muted">Carregando…</div>}>
+            <Performance />
           </Suspense>
         )}
         {page === "settings" && <SettingsPage />}

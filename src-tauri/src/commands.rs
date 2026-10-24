@@ -22,9 +22,9 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_opener::OpenerExt;
 
-type R<T> = Result<T, String>;
+pub(crate) type R<T> = Result<T, String>;
 
-fn err<E: ToString>(e: E) -> String {
+pub(crate) fn err<E: ToString>(e: E) -> String {
     e.to_string()
 }
 
@@ -37,7 +37,7 @@ struct ProgressEvent {
     message: String,
 }
 
-fn emit_progress(app: &AppHandle, task: &str, step: usize, total: usize, message: impl Into<String>) {
+pub(crate) fn emit_progress(app: &AppHandle, task: &str, step: usize, total: usize, message: impl Into<String>) {
     let _ = app.emit(
         "cp://progress",
         ProgressEvent {
@@ -50,7 +50,7 @@ fn emit_progress(app: &AppHandle, task: &str, step: usize, total: usize, message
 }
 
 /// Roda `f` com o workspace travado, fora da thread principal.
-async fn with_ws<T, F>(ws: &Arc<Mutex<Workspace>>, f: F) -> R<T>
+pub(crate) async fn with_ws<T, F>(ws: &Arc<Mutex<Workspace>>, f: F) -> R<T>
 where
     T: Send + 'static,
     F: FnOnce(&mut Workspace) -> cp_core::Result<T> + Send + 'static,
@@ -66,7 +66,7 @@ where
 
 /// Roda `f` fora da thread principal e SEM travar o workspace: para trabalho pesado que só lê
 /// arquivos do jogo (gerar texturas, prévias, mapas). Os outros botões continuam respondendo.
-async fn off_lock<T, F>(f: F) -> R<T>
+pub(crate) async fn off_lock<T, F>(f: F) -> R<T>
 where
     T: Send + 'static,
     F: FnOnce() -> cp_core::Result<T> + Send + 'static,
@@ -75,7 +75,7 @@ where
 }
 
 /// Arquivos originais do jogo (na ordem de montagem), lidos com o workspace travado só por um instante.
-async fn sources(ws: &Arc<Mutex<Workspace>>) -> R<Vec<PathBuf>> {
+pub(crate) async fn sources(ws: &Arc<Mutex<Workspace>>) -> R<Vec<PathBuf>> {
     with_ws(ws, |ws| ws.stock_sources()).await
 }
 
@@ -91,7 +91,7 @@ fn crash_dumps(bin: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn data_url(mime: &str, bytes: &[u8]) -> String {
+pub(crate) fn data_url(mime: &str, bytes: &[u8]) -> String {
     format!(
         "data:{mime};base64,{}",
         base64::engine::general_purpose::STANDARD.encode(bytes)
@@ -164,6 +164,7 @@ pub async fn save_settings(state: State<'_, AppState>, settings: Settings) -> R<
         // configurações nunca sobrescreve com um valor antigo
         settings.keep_large_address = ws.settings.keep_large_address;
         settings.memory_limit_mb = ws.settings.memory_limit_mb;
+        settings.game_priority = ws.settings.game_priority.clone();
         ws.settings = settings;
         ws.save_settings()?;
         ws.refresh_game();
@@ -387,7 +388,7 @@ pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<Launch
     })
     .await
     .ok();
-    let (plan, applied, restore, memory_mb) = with_ws(&state.ws, move |ws| {
+    let (plan, applied, restore, memory_mb, priority) = with_ws(&state.ws, move |ws| {
         if let Err(e) = ws.ensure_large_address() {
             eprintln!("modo 4 GB não reaplicado: {e}");
         }
@@ -400,7 +401,7 @@ pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<Launch
         } else {
             None
         };
-        Ok((ws.launch_plan()?, applied, ws.settings.restore_on_exit, ws.settings.memory_mb()))
+        Ok((ws.launch_plan()?, applied, ws.settings.restore_on_exit, ws.settings.memory_mb(), ws.settings.game_priority.clone()))
     })
     .await?;
     match &plan {
@@ -430,6 +431,28 @@ pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<Launch
                         let _ = app6.emit("cp://game-crashed", serde_json::json!({ "dump": new, "mods": mods }));
                     }
                     return;
+                }
+            }
+        });
+    }
+    if priority != "normal" {
+        // prioridade escolhida no Otimizador: aplicada quando o processo aparecer
+        let app7 = app.clone();
+        tauri::async_runtime::spawn(async move {
+            for _ in 0..120 {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                let level = priority.clone();
+                match tauri::async_runtime::spawn_blocking(move || cp_core::perf::set_game_priority(&level)).await {
+                    Ok(Ok(_)) => {
+                        let _ = app7.emit("cp://priority-set", &priority);
+                        return;
+                    }
+                    Ok(Err(cp_core::Error::Other(m))) if m.contains("não está aberto") => continue,
+                    Ok(Err(e)) => {
+                        let _ = app7.emit("cp://priority-failed", e.to_string());
+                        return;
+                    }
+                    Err(_) => return,
                 }
             }
         });
@@ -1268,6 +1291,8 @@ pub struct MapBuild {
 
 #[tauri::command]
 pub async fn maptk_build(app: AppHandle, state: State<'_, AppState>, spec: serde_json::Value) -> R<MapBuild> {
+    // decorações feitas no editor 3D: os arquivos entram no pacote do mapa depois do toolkit
+    let custom = crate::creator_cmds::custom_files_for(&state, &spec).await?;
     let (bridge, gamedata, out_dir) = map_ctx(&state.ws).await?;
     let result = off_lock(move || {
         let mut n = 0;
@@ -1287,6 +1312,9 @@ pub async fn maptk_build(app: AppHandle, state: State<'_, AppState>, spec: serde
             .ok_or_else(|| cp_core::Error::Other("o toolkit não informou o arquivo gerado".into()))?;
         let name = result.get("name").and_then(|s| s.as_str()).unwrap_or("Mapa");
         let sid = result.get("scenarioId").and_then(|s| s.as_str()).unwrap_or("SC2_MAPA");
+        if !custom.is_empty() {
+            cp_core::scd::append_files(Path::new(scd), &custom)?;
+        }
         let manifest = ws.install_built_map(Path::new(scd), name, sid)?;
         Ok(MapBuild { result, manifest })
     })

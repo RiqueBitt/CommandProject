@@ -74,6 +74,7 @@ export interface Settings {
   keepLargeAddress: boolean;
   memoryLimitMb?: number | null;
   showcaseTeamColor?: string | null;
+  gamePriority?: string;
   showcaseUnit?: string | null;
   showcase: boolean;
 }
@@ -131,7 +132,7 @@ export interface ColorAdjust {
 
 export interface MeshView {
   positions: number[]; normals: number[]; uvs: number[]; indices: number[];
-  bones: { name: string; parent: number; position: [number, number, number] }[];
+  bones: { name: string; parent: number; position: [number, number, number]; rotation?: [number, number, number, number]; world?: [number, number, number] }[];
   bboxMin: [number, number, number]; bboxMax: [number, number, number];
   version: number; triangles: number; info: string;
 }
@@ -213,3 +214,57 @@ export interface PropInfo { bp: string; name: string; category: string }
 export interface LayerSet { map: string; name: string; d: string; n?: string | null; s?: string | null; slotD: number; slotN: number; slotS: number }
 export interface MapAssets { props: PropInfo[]; layers: LayerSet[] }
 export interface PropPreview { mesh: MeshView; texture?: string | null }
+
+// ---------------------------------------------------------------- projetos de criação
+export type CreationKind = "map" | "unit" | "model";
+export interface CreationMeta {
+  id: string; kind: CreationKind; name: string; description: string;
+  createdAt: string; updatedAt: string; favorite: boolean; tags: string[];
+  builtMod?: string | null; hasThumb: boolean;
+}
+export interface CreationLoaded<D = unknown> { meta: CreationMeta; doc: D; recoveryAt: string | null }
+export interface CreationVersion { file: string; savedAt: string; size: number }
+export interface CreationAsset { name: string; size: number }
+
+// ---------------------------------------------------------------- tropas e modelos
+export interface UnitInfo { id: string; name: string; faction: string; role: string; description: string }
+export interface BpLeaf { path: string; kind: "number" | "text" | "bool"; number: number | null; text: string | null; flag: boolean | null }
+export interface UnitDetails {
+  id: string; name: string; description: string; faction: string; role: string; text: string;
+  leaves: BpLeaf[]; categories: string[]; weapons: { index: number; label: string; dummy: boolean }[];
+  animations: [string, string][]; bones: string[]; files: [string, number][]; mesh: string | null; albedo: string | null;
+}
+export interface UnitPreview { mesh: MeshView; boneIndex: number[]; albedo: string | null; team: string | null }
+export interface ScaAnimation {
+  version: number; duration: number; bones: string[]; parents: number[];
+  deltaPosition: [number, number, number]; deltaRotation: [number, number, number, number];
+  frames: { time: number; flags: number; positions: [number, number, number][]; rotations: [number, number, number, number][] }[];
+}
+export interface UnitBuildReq {
+  base: string; newId: string; name: string; description: string;
+  overrides: Record<string, number | string | boolean>; categories: string[] | null; scale: number | null;
+  animations: [string, string, number | null][]; modelCreation: string | null; albedoAsset: string | null; tint: [number, number, number];
+}
+export interface UnitBuildResult { report: { files: number; warnings: string[]; blueprint: string }; manifest: Manifest }
+export interface BakedModel {
+  positions: number[]; normals: number[]; uvs: number[]; indices: number[]; boneIndex: number[];
+  bones: { name: string; parent: number; pos: [number, number, number]; rot: [number, number, number, number] }[];
+  albedoPng: string; teamPng: string | null; glowPng: string | null;
+}
+export interface AnimKey { bone: string; time: number; pos: [number, number, number]; rot: [number, number, number] }
+
+// ------------------------------------------------------------------ Otimizador (Desempenho)
+export type PrefValue = boolean | number | string;
+export interface PrefOption { path: string; value: PrefValue }
+export interface PrefsInfo { path: string; exists: boolean; options: PrefOption[]; error: string | null }
+export interface PrefsBackup { name: string; size: number; modified: string | null }
+export interface PrefProfile { id: string; name: string; description: string; createdAt: string; values: [string, PrefValue][] }
+export interface DumpInfo { code: number; codeName: string; address: number; module: string | null; moduleOffset: number | null; modules: number; hint: string }
+export interface CrashDump { name: string; size: number; modified: string | null; info: DumpInfo | null; error: string | null }
+export interface PerfReport {
+  prefs: PrefsInfo | null; backups: PrefsBackup[]; profiles: PrefProfile[]; dumps: CrashDump[];
+  version: string | null; latest: boolean | null; knownLatest: string; exe: string | null;
+  priority: string; priorities: string[]; modsEnabled: number;
+}
+export interface ProcessStats { pid: number; memoryMb: number; virtualMb: number; cpuPercent: number; runSeconds: number }
+export interface PrefsWriteReport { backup: string | null; changed: number; skipped: string[] }

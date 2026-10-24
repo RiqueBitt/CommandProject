@@ -27,6 +27,10 @@ interface Props {
   decor?: DecorPoint[];
   /** áreas onde as decorações do terreno serão retiradas */
   cuts?: [number, number, number][];
+  /** objetos selecionados: círculos amarelos [x, z, raio] */
+  highlights?: [number, number, number][];
+  /** recebe uma função que tira uma foto da vista (miniatura do projeto) */
+  snapshotRef?: { current: (() => string | null) | null };
   /** câmera livre: o botão esquerdo gira em vez de editar */
   orbit: boolean;
   onPointer: (type: "down" | "move" | "up", p: Pt | null) => void;
@@ -44,6 +48,7 @@ export default function MapView3D(props: Props) {
     setTexture: (url: string | null) => void;
     setMarkers: () => void;
     setDecor: () => void;
+    setHighlights: () => void;
     setOrbit: (on: boolean) => void;
     setExaggeration: () => void;
     redrawBrush: () => void;
@@ -205,6 +210,7 @@ export default function MapView3D(props: Props) {
       water.visible = waterLevel > lo + 0.5;
       setMarkers();
       setDecor();
+      setHighlights();
       redrawBrush();
     };
 
@@ -298,6 +304,9 @@ export default function MapView3D(props: Props) {
     const KIND_COLOR: Record<DecorKind, number> = { tree: 0x3f7d3a, rock: 0x8a8378, building: 0xb39b78, wreck: 0x6b4a3a, other: 0x9aa7b4 };
     const cutRing = new THREE.Group();
     scene.add(cutRing);
+    const hiGroup = new THREE.Group();
+    hiGroup.renderOrder = 7;
+    scene.add(hiGroup);
     const clearDecor = () => {
       for (const g of [decorGroup, cutRing]) for (const o of [...g.children]) {
         g.remove(o);
@@ -359,6 +368,25 @@ export default function MapView3D(props: Props) {
         }
         const l = new THREE.LineLoop(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(pts, 3)), new THREE.LineBasicMaterial({ color: 0xe5534b, transparent: true, opacity: 0.8 }));
         cutRing.add(l);
+      }
+    };
+
+    const setHighlights = () => {
+      for (const o of [...hiGroup.children]) {
+        hiGroup.remove(o);
+        const m = o as THREE.Line;
+        m.geometry.dispose();
+        (m.material as THREE.Material).dispose();
+      }
+      for (const [x, z, r] of live.current.highlights ?? []) {
+        const pts = new Float32Array(48 * 3);
+        for (let i = 0; i < 48; i++) {
+          const a = (i / 48) * Math.PI * 2, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+          pts.set([px, hAt(Math.max(0, Math.min(grid, px)), Math.max(0, Math.min(grid, pz))) + 2, pz], i * 3);
+        }
+        const l = new THREE.LineLoop(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(pts, 3)), new THREE.LineBasicMaterial({ color: 0xffd166, depthTest: false, transparent: true }));
+        l.renderOrder = 8;
+        hiGroup.add(l);
       }
     };
 
@@ -481,10 +509,24 @@ export default function MapView3D(props: Props) {
     });
     ro.observe(el);
 
+    if (live.current.snapshotRef) {
+      live.current.snapshotRef.current = () => {
+        try {
+          renderer.render(scene, camera);
+          const src = renderer.domElement;
+          const c = document.createElement("canvas");
+          c.width = 480; c.height = 300;
+          const g = c.getContext("2d")!;
+          const k = Math.max(480 / src.width, 300 / src.height);
+          g.drawImage(src, (480 - src.width * k) / 2, (300 - src.height * k) / 2, src.width * k, src.height * k);
+          return c.toDataURL("image/png");
+        } catch { return null; }
+      };
+    }
     // toda mudança na cena pede um quadro novo
     const dirtying = <A extends unknown[]>(f: (...a: A) => void) => (...a: A) => { f(...a); invalidate(); };
     api.current = {
-      setHeights: dirtying(setHeights), setTexture: dirtying(setTexture), setMarkers: dirtying(setMarkers), setDecor: dirtying(setDecor),
+      setHeights: dirtying(setHeights), setTexture: dirtying(setTexture), setMarkers: dirtying(setMarkers), setDecor: dirtying(setDecor), setHighlights: dirtying(setHighlights),
       setOrbit: dirtying(setOrbit), setExaggeration: dirtying(setHeights), redrawBrush: dirtying(redrawBrush),
     };
     setHeights();
@@ -501,6 +543,7 @@ export default function MapView3D(props: Props) {
       cv.removeEventListener("pointerleave", onLeave);
       clearGroup();
       clearDecor();
+      for (const o of [...hiGroup.children]) { const m = o as THREE.Line; m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
       clearTimeout(decorQueued);
       texture?.dispose();
       scene.traverse((o) => {
@@ -519,6 +562,7 @@ export default function MapView3D(props: Props) {
   useEffect(() => { api.current?.setTexture(props.texture); }, [props.texture]);
   useEffect(() => { api.current?.setMarkers(); }, [props.spawns, props.mass, props.autoMass, props.bridges, props.seed]);
   useEffect(() => { api.current?.setDecor(); }, [props.decor, props.cuts]);
+  useEffect(() => { api.current?.setHighlights(); }, [props.highlights]);
   useEffect(() => { api.current?.setOrbit(props.orbit); }, [props.orbit]);
   useEffect(() => { api.current?.redrawBrush(); }, [props.brush, props.drag]);
 

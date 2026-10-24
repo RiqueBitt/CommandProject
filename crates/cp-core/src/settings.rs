@@ -45,6 +45,8 @@ pub struct Settings {
     pub memory_limit_mb: Option<u32>,
     /// Cor do time do modelo 3D da tela inicial (#rrggbb). `None` = cor da facção.
     pub showcase_team_color: Option<String>,
+    /// Prioridade do processo do jogo ao abrir pelo launcher: `normal`, `above_normal` ou `high`.
+    pub game_priority: String,
     /// Versão das migrações de configuração já aplicadas.
     pub ui_version: u32,
 }
@@ -69,6 +71,7 @@ impl Default for Settings {
             showcase: true,
             memory_limit_mb: None,
             showcase_team_color: None,
+            game_priority: "normal".into(),
             ui_version: CURRENT_UI_VERSION,
         }
     }

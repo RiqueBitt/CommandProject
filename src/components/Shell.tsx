@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, openUrl, windowAction } from "../lib/api";
 import { switchProfile, useStore, type Page } from "../lib/store";
+import { KIND_META, useTabs } from "../lib/tabs";
+import { confirmDialog } from "../lib/api";
 import { Field, hueOf, Icon, Modal, monogram, Tip } from "./ui";
 
 /** Tarefas demoradas: aparecem na barra do topo em qualquer tela, com o progresso. */
@@ -44,17 +46,57 @@ function TaskDock() {
   );
 }
 
+/** Abas do topo: o launcher e cada projeto aberto (mapa, tropa, modelo). */
+function TabStrip() {
+  const tabs = useTabs((s) => s.tabs);
+  const active = useTabs((s) => s.active);
+  const { activate, close } = useTabs.getState();
+  const go = useStore((s) => s.go);
+  const closeTab = async (id: string) => {
+    const t = useTabs.getState().tabs.find((x) => x.id === id);
+    if (t?.dirty) {
+      const save = await confirmDialog(`"${t.title}" tem alterações não salvas. Salvar antes de fechar?`, "Salvar e fechar", "Fechar sem salvar");
+      if (save) {
+        const ok = await useTabs.getState().savers[id]?.();
+        if (ok === false) return;
+      }
+    }
+    close(id);
+  };
+  if (!tabs.length) return null;
+  return (
+    <div className="tab-strip" role="tablist" aria-label="Abas">
+      <button role="tab" aria-selected={active === null} className="ptab home" onClick={() => activate(null)} title="Launcher">
+        <Icon name="rocket_launch" size={16} /> <span>Launcher</span>
+      </button>
+      {tabs.map((t) => (
+        <div key={t.id} role="tab" aria-selected={active === t.id} className="ptab" title={t.title}
+          style={{ ["--kc" as string]: KIND_META[t.kind].color }}
+          onClick={() => activate(t.id)}
+          onAuxClick={(e) => { if (e.button === 1) void closeTab(t.id); }}>
+          <Icon name={KIND_META[t.kind].icon} size={15} className="kic" />
+          <span className="tt">{t.title}</span>
+          {t.dirty && <i className="dirty" aria-label="não salvo" />}
+          <button className="tx" aria-label={`Fechar ${t.title}`} onClick={(e) => { e.stopPropagation(); void closeTab(t.id); }}><Icon name="close" size={14} /></button>
+        </div>
+      ))}
+      <button className="ptab add" title="Novo projeto" aria-label="Novo projeto" onClick={() => go("create")}><Icon name="add" size={17} /></button>
+    </div>
+  );
+}
+
 export function SystemBar() {
   const setPalette = useStore((s) => s.setPalette);
   const go = useStore((s) => s.go);
   return (
     <header className="systembar">
+      <TabStrip />
       <div className="drag" data-tauri-drag-region />
       <TaskDock />
       <button className="sys-btn" onClick={() => setPalette(true)}>
         <Icon name="search" size={19} /> Ação rápida <span className="kbd">Ctrl+K</span>
       </button>
-      <button className="sys-btn" onClick={() => go("studio")} title="Estúdio"><Icon name="construction" size={19} /> Estúdio</button>
+      <button className="sys-btn" onClick={() => go("create")} title="Criar mapas, tropas e modelos"><Icon name="add_box" size={19} /> Criar</button>
       <button className="sys-btn" onClick={() => openUrl("https://github.com/RiqueBitt/CommandProject#readme")}>
         <Icon name="help_center" size={19} /> Ajuda
       </button>
@@ -118,7 +160,9 @@ export function Rail() {
       </div>
       <div className="rail-divider" />
       <div className="rail-section">
-        <RailItem label="Estúdio de criação" page="studio"><Icon name="construction" size={24} /></RailItem>
+        <RailItem label="Criar: mapas, tropas e modelos 3D" page="create"><Icon name="add_box" size={24} /></RailItem>
+        <RailItem label="Estúdio de criação (arquivos, texturas HD, skins)" page="studio"><Icon name="construction" size={24} /></RailItem>
+        <RailItem label="Desempenho e diagnóstico" page="performance"><Icon name="speed" size={24} /></RailItem>
         <RailItem label="Multiplayer" page="multiplayer"><Icon name="hub" size={24} /></RailItem>
         <RailItem label="Configurações" page="settings" badge={appUpdate ? 1 : 0}><Icon name="settings" size={24} /></RailItem>
       </div>
@@ -195,7 +239,9 @@ export function CommandPalette() {
       nav("library", "Mods do perfil", "extension"),
       nav("hub", "Hub de mods", "store"),
       nav("multiplayer", "Multiplayer: salas e chat", "hub"),
+      nav("create", "Criar: mapas, tropas e modelos 3D", "add_box"),
       nav("studio", "Estúdio de criação", "construction"),
+      nav("performance", "Desempenho e diagnóstico", "speed"),
       nav("me", "Meus perfis", "account_circle"),
       nav("settings", "Configurações", "settings"),
       ...(profiles?.profiles ?? []).map<Cmd>((p) => ({

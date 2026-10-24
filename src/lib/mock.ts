@@ -159,10 +159,97 @@ function shaderStatus(): T.ShaderStatus {
   };
 }
 
+
+// projetos de criação no navegador: guardados no localStorage (só para desenvolver a interface)
+type MockProj = { meta: T.CreationMeta; doc: unknown; versions: { file: string; savedAt: string; doc: unknown }[]; assets: Record<string, string>; autosave?: unknown; thumb?: string };
+const PKEY = "cp.mock.creations";
+function loadProjects(): Record<string, MockProj> {
+  try { return JSON.parse(localStorage.getItem(PKEY) ?? "{}"); } catch { return {}; }
+}
+function saveProjects(p: Record<string, MockProj>) {
+  try { localStorage.setItem(PKEY, JSON.stringify(p)); } catch { /* sem espaço: fica só na memória */ }
+}
+const creationsDb = loadProjects();
+function proj(id: string): MockProj {
+  const p = creationsDb[id];
+  if (!p) throw new Error(`projeto não encontrado: ${id}`);
+  return p;
+}
+
 export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<R> {
   await sleep(120);
   const r = (v: unknown) => v as R;
   switch (cmd) {
+    case "creations_list": return r(Object.values(creationsDb).map((p) => p.meta).sort((x, y) => y.updatedAt.localeCompare(x.updatedAt)));
+    case "creation_create": {
+      const kind = a.kind as T.CreationKind, name = String(a.name).trim();
+      const slug = { map: "mapa", unit: "tropa", model: "modelo" }[kind];
+      const id = `${slug}-${name.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32)}-${Date.now().toString(36)}`;
+      const t = new Date().toISOString();
+      const meta: T.CreationMeta = { id, kind, name, description: "", createdAt: t, updatedAt: t, favorite: false, tags: [], hasThumb: false };
+      creationsDb[id] = { meta, doc: a.doc, versions: [], assets: {} };
+      saveProjects(creationsDb);
+      return r(meta);
+    }
+    case "creation_load": {
+      const p = proj(String(a.id));
+      return r({ meta: p.meta, doc: p.doc, recoveryAt: p.autosave ? new Date().toISOString() : null });
+    }
+    case "creation_save": {
+      const p = proj(String(a.id));
+      if (a.snapshot && JSON.stringify(p.doc) !== JSON.stringify(a.doc)) p.versions.unshift({ file: `${Date.now()}.json`, savedAt: new Date().toISOString(), doc: p.doc });
+      p.versions = p.versions.slice(0, 40);
+      p.doc = a.doc; p.autosave = undefined; p.meta.updatedAt = new Date().toISOString();
+      saveProjects(creationsDb);
+      return r(p.meta);
+    }
+    case "creation_autosave": { proj(String(a.id)).autosave = a.doc; saveProjects(creationsDb); return r(undefined); }
+    case "creation_recovery": return r(proj(String(a.id)).autosave ?? null);
+    case "creation_discard_recovery": { proj(String(a.id)).autosave = undefined; saveProjects(creationsDb); return r(undefined); }
+    case "creation_versions": return r(proj(String(a.id)).versions.map((v) => ({ file: v.file, savedAt: v.savedAt, size: JSON.stringify(v.doc).length })));
+    case "creation_restore": {
+      const p = proj(String(a.id));
+      const v = p.versions.find((x) => x.file === a.file);
+      if (!v) throw new Error("versão não encontrada");
+      p.versions.unshift({ file: `${Date.now()}.json`, savedAt: new Date().toISOString(), doc: p.doc });
+      p.doc = v.doc; saveProjects(creationsDb);
+      return r(v.doc);
+    }
+    case "creation_update": {
+      const p = proj(String(a.id));
+      if (typeof a.name === "string" && a.name.trim()) p.meta.name = a.name.trim();
+      if (typeof a.description === "string") p.meta.description = a.description;
+      if (typeof a.favorite === "boolean") p.meta.favorite = a.favorite;
+      if (Array.isArray(a.tags)) p.meta.tags = a.tags as string[];
+      p.meta.updatedAt = new Date().toISOString(); saveProjects(creationsDb);
+      return r(p.meta);
+    }
+    case "creation_set_thumb": { const p = proj(String(a.id)); p.thumb = String(a.png); p.meta.hasThumb = true; saveProjects(creationsDb); return r(undefined); }
+    case "creation_thumb": return r(proj(String(a.id)).thumb ?? null);
+    case "creation_duplicate": {
+      const p = proj(String(a.id));
+      const id = `${p.meta.id}-c${Date.now().toString(36)}`;
+      const t = new Date().toISOString();
+      creationsDb[id] = { meta: { ...p.meta, id, name: `${p.meta.name} (cópia)`, createdAt: t, updatedAt: t }, doc: p.doc, versions: [], assets: { ...p.assets }, thumb: p.thumb };
+      saveProjects(creationsDb);
+      return r(creationsDb[id].meta);
+    }
+    case "creation_delete": { delete creationsDb[String(a.id)]; saveProjects(creationsDb); return r(undefined); }
+    case "creation_asset_put": {
+      const p = proj(String(a.id));
+      const name = `${String(a.name).replace(/[^A-Za-z0-9._-]/g, "_")}`;
+      p.assets[name] = String(a.data); saveProjects(creationsDb);
+      return r(name);
+    }
+    case "creation_asset": {
+      const d = proj(String(a.id)).assets[String(a.name)];
+      if (!d) throw new Error("arquivo não encontrado");
+      return r(d.startsWith("data:") ? d : `data:application/octet-stream;base64,${d}`);
+    }
+    case "creation_assets": return r(Object.entries(proj(String(a.id)).assets).map(([name, d]) => ({ name, size: d.length })));
+    case "creation_export": return r(undefined);
+    case "creation_import": throw new Error("importar projetos só funciona no app instalado");
+
     case "app_info": return r({ version: __APP_VERSION__, dataDir: "%APPDATA%\\io.github.riquebitt.commandproject", resourcesDir: null, os: "browser" });
     case "recover": return r(null);
     case "dashboard": {
@@ -558,7 +645,149 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       const extra = ((a.spec as { extra_mass?: unknown[] }).extra_mass ?? []).length;
       return r({ result: { mass: 52, sites: 9, extraMass: extra, warnings: extra ? ["massa 1 movida para (412, 380): o ponto escolhido não era plano/seco"] : [] }, manifest: m });
     }
+    // ---------------------------------------------------------- tropas (simulado)
+    case "unit_catalog": return r(mockUnits);
+    case "unit_animations": return r(["/units/uul0101/uul0101_awalk.sca", "/units/uul0101/uul0101_aidle.sca", "/units/uul0101/uul0101_adeath.sca", "/units/uil0101/uil0101_awalk.sca", "/units/ucl0103/ucl0103_aactivate.sca"]);
+    case "unit_details": {
+      const u = mockUnits.find((x) => x.id === a.id) ?? mockUnits[0];
+      const leaf = (path: string, v: number | string | boolean): T.BpLeaf => typeof v === "number" ? { path, kind: "number", number: v, text: null, flag: null } : typeof v === "boolean" ? { path, kind: "bool", number: null, text: null, flag: v } : { path, kind: "text", number: null, text: v, flag: null };
+      const leaves = Object.entries({
+        "Defense.MaxHealth": 520, "Defense.Health": 520, "Defense.RegenRate": 0, "Defense.ArmorType": "Normal",
+        "Economy.BuildCostMass": 60, "Economy.BuildCostEnergy": 300, "Economy.BuildTime": 6,
+        "Physics.MotionType": "RULEUMT_Land", "Physics.MaxSpeed": 4.2, "Physics.MaxAcceleration": 3, "Physics.MaxBrake": 4, "Physics.TurnRate": 120,
+        "Intel.VisionRadius": 26, "Display.UniformScale": 0.1, "SizeX": 0.9, "SizeY": 0.6, "SizeZ": 1.2,
+        "Weapon.1.Label": "MainGun", "Weapon.1.Damage": 32, "Weapon.1.DamageRadius": 0, "Weapon.1.MaxRadius": 24, "Weapon.1.MinRadius": 0, "Weapon.1.RateOfFire": 0.8,
+        "Weapon.1.MuzzleVelocity": 30, "Weapon.1.ProjectileId": "/projectiles/UUnitTankShell01/UUnitTankShell01_proj.bp", "Weapon.1.TurretYawSpeed": 90, "Weapon.1.TurretPitchSpeed": 30, "Weapon.1.DamageType": "Normal",
+      }).map(([k, v]) => leaf(k, v));
+      return r({
+        id: u.id, name: u.name, description: u.description, faction: u.faction, role: u.role,
+        text: `UnitBlueprint {\n    Description = '${u.name}',\n    -- simulado no navegador\n}`,
+        leaves, categories: ["UEF", "MOBILE", "LAND", "DIRECTFIRE", "BUILTBYTIER1FACTORY", "SELECTABLE", "VISIBLETORECON", "RECLAIMABLE"],
+        weapons: [{ index: 1, label: "MainGun", dummy: false }],
+        animations: [["Display.AnimationWalk", `/units/${u.id}/${u.id}_awalk.sca`], ["Display.AnimationDeath", `/units/${u.id}/${u.id}_adeath.sca`]],
+        bones: ["Root", "Turret", "Turret_Barrel", "Turret_Muzzle"], files: [[`${u.id}_lod0.scm`, 180_000], [`${u.id}_albedo.dds`, 700_000]],
+        mesh: `/units/${u.id}/${u.id}_lod0.scm`, albedo: null,
+      } satisfies T.UnitDetails);
+    }
+    case "unit_preview": return r(mockTank());
+    case "anim_read": {
+      const frames = Array.from({ length: 31 }, (_, i) => {
+        const t = (i / 30) * 2, ang = Math.sin((i / 30) * Math.PI * 2) * 0.6;
+        return { time: t, flags: 0, positions: [[0, 0, 0], [0, 0.55, 0], [0, 0.15, 0.35], [0, 0, 1.1]] as [number, number, number][], rotations: [[1, 0, 0, 0], [Math.cos(ang / 2), 0, Math.sin(ang / 2), 0], [1, 0, 0, 0], [1, 0, 0, 0]] as [number, number, number, number][] };
+      });
+      return r({ version: 5, duration: 2, bones: ["Root", "Turret", "Turret_Barrel", "Turret_Muzzle"], parents: [-1, 0, 1, 2], deltaPosition: [0, 0, 0], deltaRotation: [1, 0, 0, 0], frames } satisfies T.ScaAnimation);
+    }
+    case "unit_blueprint_preview": {
+      const q = a.req as T.UnitBuildReq;
+      return r(`UnitBlueprint {\n    Description = '<LOC ${q.newId}_desc>${q.name}',\n${Object.entries(q.overrides).map(([k, v]) => `    -- ${k} = ${JSON.stringify(v)}`).join("\n")}\n    -- (resto igual ao blueprint de ${q.base})\n}`);
+    }
+    case "unit_build": {
+      const q = a.req as T.UnitBuildReq;
+      await sleep(500);
+      const m = manifest(`tropa-${q.newId}`, q.name, "1.0.0", "gameplay", [`_cp_${q.newId}.scd`], { source: { kind: "studio" } });
+      mods.push(m);
+      active().mods.push({ id: m.id, enabled: true });
+      return r({ report: { files: 7, warnings: q.modelCreation ? ["o modelo próprio não tem o osso Turret_Muzzle: os tiros saem do centro"] : [], blueprint: "" }, manifest: m } satisfies T.UnitBuildResult);
+    }
+    case "anim_create": return r(`${String(a.name)}.sca`);
+    case "model_prepare": return r({ triangles: (a.baked as T.BakedModel).indices.length / 3, warnings: [] });
+    case "model_baked": return r(null);
+    case "model_export_game": return r([`${String(a.name)}_lod0.scm`, `${String(a.name)}_albedo.dds`, `${String(a.name)}_specteam.dds`, `${String(a.name)}_normalsts.dds`]);
+    case "creation_asset_copy": return r(undefined);
+
+    // ---------------------------------------------------------- otimizador (simulado)
+    case "perf_report": return r(perfDb());
+    case "perf_process": return r(null);
+    case "perf_prefs_set": {
+      const db = perfDb();
+      let changed = 0;
+      for (const [k, v] of a.changes as [string, T.PrefValue][]) { const o = db.prefs!.options.find((x) => x.path === k); if (o && o.value !== v) { o.value = v; changed++; } }
+      if (changed) db.backups.unshift({ name: `Game-${Date.now()}.prefs`, size: 2400, modified: new Date().toISOString() });
+      return r({ backup: changed ? db.backups[0].name : null, changed, skipped: [] });
+    }
+    case "perf_backup_now": { const db = perfDb(); db.backups.unshift({ name: `Game-${Date.now()}.prefs`, size: 2400, modified: new Date().toISOString() }); return r(db.backups[0].name); }
+    case "perf_backup_restore": return r(undefined);
+    case "perf_profile_save": {
+      const db = perfDb();
+      const p = { id: `p${Date.now()}`, name: String(a.name), description: String(a.description), createdAt: new Date().toISOString(), values: db.prefs!.options.map((o) => [o.path, o.value] as [string, T.PrefValue]) };
+      db.profiles.push(p);
+      return r(p);
+    }
+    case "perf_profile_apply": {
+      const db = perfDb();
+      const p = db.profiles.find((x) => x.id === a.id);
+      let changed = 0;
+      for (const [k, v] of p?.values ?? []) { const o = db.prefs!.options.find((x) => x.path === k); if (o && o.value !== v) { o.value = v; changed++; } }
+      return r({ backup: changed ? "Game-mock.prefs" : null, changed, skipped: [] });
+    }
+    case "perf_profile_delete": { const db = perfDb(); db.profiles = db.profiles.filter((x) => x.id !== a.id); return r(undefined); }
+    case "perf_dumps_delete": { const db = perfDb(); const names = a.names as string[]; db.dumps = db.dumps.filter((d) => !names.includes(d.name)); return r(names.length); }
+    case "perf_set_priority": { perfDb().priority = String(a.level); return r(String(a.level)); }
     default:
       throw new Error(`mock: comando não simulado: ${cmd}`);
   }
+}
+
+// ------------------------------------------------------------------ tropas e otimizador simulados
+const mockUnits: T.UnitInfo[] = [
+  { id: "uul0101", name: "Rock Head", faction: "UEF", role: "Tanque", description: "Tanque de assalto" },
+  { id: "uil0101", name: "Sharp Shooter", faction: "Illuminate", role: "Tanque", description: "Tanque flutuante" },
+  { id: "ucl0103", name: "Bonesmasher", faction: "Cybran", role: "Artilharia", description: "Artilharia móvel" },
+];
+
+function mockTank(): T.UnitPreview {
+  const pos: number[] = [], nor: number[] = [], uv: number[] = [], idx: number[] = [], bi: number[] = [];
+  const box = (c: [number, number, number], h: [number, number, number], bone: number) => {
+    const faces: [number, number, number][] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+    for (const n of faces) {
+      const b = pos.length / 3;
+      const [u, v] = n[0] ? [[0, 1, 0], [0, 0, 1]] : n[1] ? [[1, 0, 0], [0, 0, 1]] : [[1, 0, 0], [0, 1, 0]];
+      for (const [su, sv] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        pos.push(...[0, 1, 2].map((k) => c[k] + (n[k] + u[k] * su + v[k] * sv) * h[k]));
+        nor.push(...n); uv.push((su + 1) / 2, (sv + 1) / 2); bi.push(bone);
+      }
+      const flip = n[0] + n[1] + n[2] > 0 ? n[1] === 0 : n[1] !== 0;
+      if (flip) idx.push(b, b + 1, b + 2, b, b + 2, b + 3); else idx.push(b, b + 2, b + 1, b, b + 3, b + 2);
+    }
+  };
+  box([0, 0.3, 0], [0.6, 0.25, 0.9], 0);
+  box([-0.65, 0.2, 0], [0.12, 0.2, 0.95], 0);
+  box([0.65, 0.2, 0], [0.12, 0.2, 0.95], 0);
+  box([0, 0.7, -0.05], [0.35, 0.15, 0.4], 1);
+  box([0, 0.7, 0.75], [0.06, 0.06, 0.45], 2);
+  return {
+    mesh: {
+      positions: pos, normals: nor, uvs: uv, indices: idx,
+      bones: [
+        { name: "Root", parent: -1, position: [0, 0, 0], rotation: [1, 0, 0, 0] },
+        { name: "Turret", parent: 0, position: [0, 0.55, 0], rotation: [1, 0, 0, 0] },
+        { name: "Turret_Barrel", parent: 1, position: [0, 0.15, 0.35], rotation: [1, 0, 0, 0] },
+        { name: "Turret_Muzzle", parent: 2, position: [0, 0, 1.1], rotation: [1, 0, 0, 0] },
+      ],
+      bboxMin: [-0.8, 0, -1], bboxMax: [0.8, 0.9, 1.2], version: 6, triangles: idx.length / 3, info: "tanque simulado",
+    },
+    boneIndex: bi, albedo: null, team: null,
+  };
+}
+
+let perfState: T.PerfReport | null = null;
+function perfDb(): T.PerfReport {
+  perfState ??= {
+    prefs: {
+      path: "%LOCALAPPDATA%\\Gas Powered Games\\Supreme Commander 2\\Game.prefs", exists: true, error: null,
+      options: [
+        { path: "options.fidelity", value: 2 }, { path: "options.shadow_quality", value: 2 }, { path: "options.antialiasing", value: 4 },
+        { path: "options.texture_level", value: 0 }, { path: "options.vsync", value: true }, { path: "options.bloom_render", value: true },
+        { path: "options.primary_adapter", value: "1920,1080,60" }, { path: "options.sound_effects_volume", value: 80 },
+      ],
+    },
+    backups: [{ name: "Game-20261020-201500-120.prefs", size: 2380, modified: "2026-10-20T20:15:00Z" }],
+    profiles: [], dumps: [
+      { name: "SupremeCommander2_2026-10-21.mdmp", size: 1_240_000, modified: "2026-10-21T22:41:00Z", error: null,
+        info: { code: 0xc0000005, codeName: "acesso inválido à memória", address: 0x10012ab4, module: "fmod_event.dll", moduleOffset: 0x12ab4, modules: 84, hint: "Falhou no sistema de som (FMOD). Já aconteceu com muitos pacotes de mods montados ao mesmo tempo ou mods com sons: desligue os mods mais recentes e teste de novo." } },
+    ],
+    version: "1.260.0.0", latest: true, knownLatest: "1.26", exe: "C:\\Steam\\steamapps\\common\\Supreme Commander 2\\bin\\SupremeCommander2.exe",
+    priority: "normal", priorities: ["normal", "above_normal", "high"], modsEnabled: 4,
+  };
+  return perfState;
 }

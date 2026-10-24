@@ -289,7 +289,7 @@ function UpdateNow() {
 const fmtGb = (mb: number) => `${(mb / 1024).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} GB`;
 
 /** Quanta memória o jogo pode usar: de 2 GB (original) até 4 GB (máximo de um jogo de 32 bits). */
-function MemoryLimit() {
+export function MemoryLimit() {
   const { run } = useStore.getState();
   const busy = useStore((s) => s.busy.memory);
   const [st, setSt] = useState<MemoryStatus | null | undefined>(undefined);

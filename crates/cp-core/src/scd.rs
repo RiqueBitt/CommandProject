@@ -246,6 +246,26 @@ fn clean_internal_name(name: &str) -> Result<String> {
     Ok(n)
 }
 
+/// Acrescenta arquivos a um `.scd` que já existe (ex.: decorações próprias dentro de um mapa
+/// gerado pelo toolkit). Nomes que já existem no arquivo são ignorados.
+pub fn append_files(path: &Path, files: &[(String, Vec<u8>)]) -> Result<usize> {
+    let existing: std::collections::HashSet<String> = Scd::open(path)?.entries()?.into_iter().map(|e| e.key).collect();
+    let f = fs::OpenOptions::new().read(true).write(true).open(path).at(path)?;
+    let mut z = ZipWriter::new_append(f).map_err(|e| Error::archive(path, e))?;
+    let mut n = 0;
+    for (name, data) in files {
+        let clean = clean_internal_name(name)?;
+        if existing.contains(&normalize_key(&clean)) {
+            continue;
+        }
+        z.start_file(clean.as_str(), ScdBuilder::options(&clean)).map_err(|e| Error::archive(path, e))?;
+        z.write_all(data).at(path)?;
+        n += 1;
+    }
+    z.finish().map_err(|e| Error::archive(path, e))?;
+    Ok(n)
+}
+
 /// Verdadeiro se o arquivo parece um ZIP/SCD válido (assinatura `PK`).
 pub fn looks_like_zip(path: &Path) -> bool {
     let mut sig = [0u8; 4];
@@ -271,9 +291,10 @@ mod tests {
         b.finish().unwrap();
 
         assert!(looks_like_zip(&p));
+        assert_eq!(append_files(&p, &[("props/cp/a/a_prop.bp".into(), b"x".to_vec()), ("lua/ui/game/hud.lua".into(), b"y".to_vec())]).unwrap(), 1);
         let mut s = Scd::open(&p).unwrap();
         let e = s.entries().unwrap();
-        assert_eq!(e.len(), 2);
+        assert_eq!(e.len(), 3);
         assert_eq!(e[0].key, "/lua/ui/game/hud.lua");
         assert_eq!(s.read("\\LUA\\UI\\game\\hud.lua").unwrap(), b"-- hud");
         let out = t.path().join("x");

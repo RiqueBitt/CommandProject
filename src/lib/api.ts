@@ -46,10 +46,10 @@ export async function pickSave(defaultPath: string, filters: { name: string; ext
   return (await save({ defaultPath, filters })) ?? null;
 }
 
-export async function confirmDialog(message: string, title = "CommandProject"): Promise<boolean> {
+export async function confirmDialog(message: string, okLabel = "Confirmar", cancelLabel = "Cancelar"): Promise<boolean> {
   if (!isTauri) return window.confirm(message);
   const { ask } = await import("@tauri-apps/plugin-dialog");
-  return ask(message, { title, kind: "warning", okLabel: "Confirmar", cancelLabel: "Cancelar" });
+  return ask(message, { title: "CommandProject", kind: "warning", okLabel, cancelLabel });
 }
 
 /** Abre um link no navegador do sistema. */
@@ -160,6 +160,16 @@ export const api = {
   enhancePreview: (entry: string, mode: T.EnhanceMode, opts: T.EnhanceOptions) => call<T.EnhancePreview>("enhance_preview", { entry, mode, opts }),
   buildEnhance: (opts: T.EnhanceOptions, enable = true) => call<T.Manifest>("build_enhance", { opts, enable }),
   memoryStatus: () => call<T.MemoryStatus>("memory_status"),
+  perfReport: () => call<T.PerfReport>("perf_report"),
+  perfProcess: () => call<T.ProcessStats | null>("perf_process"),
+  perfPrefsSet: (changes: [string, T.PrefValue][]) => call<T.PrefsWriteReport>("perf_prefs_set", { changes }),
+  perfBackupRestore: (name: string) => call<void>("perf_backup_restore", { name }),
+  perfBackupNow: () => call<string>("perf_backup_now"),
+  perfProfileSave: (name: string, description: string) => call<T.PrefProfile>("perf_profile_save", { name, description }),
+  perfProfileApply: (id: string) => call<T.PrefsWriteReport>("perf_profile_apply", { id }),
+  perfProfileDelete: (id: string) => call<void>("perf_profile_delete", { id }),
+  perfDumpsDelete: (names: string[]) => call<number>("perf_dumps_delete", { names }),
+  perfSetPriority: (level: string) => call<string>("perf_set_priority", { level }),
   memorySet: (limitMb: number) => call<T.MemoryStatus>("memory_set", { limitMb }),
   appUpdateCheck: () => call<T.AppUpdate | null>("app_update_check"),
   appUpdateInstall: (update: T.AppUpdate) => call<void>("app_update_install", { update }),
@@ -178,6 +188,39 @@ export const api = {
   maptkPreview: (terrain: string, size = 512) => call<T.TerrainPreview>("maptk_run", { command: "preview", input: { terrain, size } }),
   maptkExamples: () => call<{ examples: { key: string; spec: Record<string, unknown> }[] }>("maptk_run", { command: "examples", input: {} }),
   mapAssets: () => call<T.MapAssets>("map_assets"),
+  // projetos de criação (abas de mapa, tropa e modelo)
+  creations: () => call<T.CreationMeta[]>("creations_list"),
+  creationCreate: (kind: T.CreationKind, name: string, doc: unknown) => call<T.CreationMeta>("creation_create", { kind, name, doc }),
+  creationLoad: <D>(id: string) => call<T.CreationLoaded<D>>("creation_load", { id }),
+  creationSave: (id: string, doc: unknown, snapshot: boolean) => call<T.CreationMeta>("creation_save", { id, doc, snapshot }),
+  creationAutosave: (id: string, doc: unknown) => call<void>("creation_autosave", { id, doc }),
+  creationRecovery: <D>(id: string) => call<D>("creation_recovery", { id }),
+  creationDiscardRecovery: (id: string) => call<void>("creation_discard_recovery", { id }),
+  creationVersions: (id: string) => call<T.CreationVersion[]>("creation_versions", { id }),
+  creationRestore: <D>(id: string, file: string) => call<D>("creation_restore", { id, file }),
+  creationUpdate: (id: string, patch: { name?: string; description?: string; favorite?: boolean; tags?: string[] }) => call<T.CreationMeta>("creation_update", { id, ...patch }),
+  creationSetThumb: (id: string, png: string) => call<void>("creation_set_thumb", { id, png }),
+  creationThumb: (id: string) => call<string | null>("creation_thumb", { id }),
+  creationDuplicate: (id: string) => call<T.CreationMeta>("creation_duplicate", { id }),
+  creationDelete: (id: string) => call<void>("creation_delete", { id }),
+  creationAssetPut: (id: string, name: string, data: string) => call<string>("creation_asset_put", { id, name, data }),
+  creationAsset: (id: string, name: string) => call<string>("creation_asset", { id, name }),
+  creationAssetCopy: (id: string, name: string, dest: string) => call<void>("creation_asset_copy", { id, name, dest }),
+  creationAssets: (id: string) => call<T.CreationAsset[]>("creation_assets", { id }),
+  creationExport: (id: string, dest: string) => call<void>("creation_export", { id, dest }),
+  creationImport: (path: string) => call<T.CreationMeta>("creation_import", { path }),
+  unitCatalog: () => call<T.UnitInfo[]>("unit_catalog"),
+  unitDetails: (id: string) => call<T.UnitDetails>("unit_details", { id }),
+  unitAnimations: () => call<string[]>("unit_animations"),
+  unitPreview: (id: string) => call<T.UnitPreview>("unit_preview", { id }),
+  animRead: (path: string) => call<T.ScaAnimation>("anim_read", { path }),
+  unitBuild: (creation: string, req: T.UnitBuildReq) => call<T.UnitBuildResult>("unit_build", { creation, req }),
+  unitBlueprintPreview: (req: T.UnitBuildReq) => call<string>("unit_blueprint_preview", { req }),
+  animCreate: (creation: string, name: string, source: { unit?: string; model?: string }, keys: T.AnimKey[], duration: number, fps = 30) =>
+    call<string>("anim_create", { creation, name, source, keys, duration, fps }),
+  modelPrepare: (id: string, baked: T.BakedModel) => call<{ triangles: number; warnings: string[] }>("model_prepare", { id, baked }),
+  modelBaked: (id: string) => call<T.BakedModel | null>("model_baked", { id }),
+  modelExportGame: (baked: T.BakedModel, dir: string, name: string) => call<string[]>("model_export_game", { baked, dir, name }),
   gameTexture: (path: string, max = 128) => call<string>("game_texture", { path, max }),
   propPreview: (bp: string, lod = 0) => call<T.PropPreview>("prop_preview", { bp, lod }),
   maptkTerrain3d: (terrain: string, size = 256) => call<T.Terrain3D>("maptk_terrain3d", { terrain, size }),
