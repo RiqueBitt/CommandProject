@@ -218,6 +218,7 @@ impl Shaders {
         if ini_get(&ini, "INPUT", "KeyEffects").is_none_or(|v| v.trim().is_empty() || v.starts_with("0,")) {
             ini = ini_set(&ini, "INPUT", "KeyEffects", TOGGLE_KEY);
         }
+        ini = quiet(&ini);
         self.write_ini(&ini)?;
         state.pack_version = PACK_VERSION.into();
         self.save_state(&state)?;
@@ -225,6 +226,22 @@ impl Shaders {
     }
 
     /// Volta os presets aos valores originais (descarta ajustes feitos no menu do ReShade).
+    /// Tira a faixa do ReShade de cima do jogo (ver [`quiet`]). Chamado antes de abrir o jogo;
+    /// não faz nada se o ReShade não estiver instalado pelo launcher ou o arquivo já estiver certo.
+    pub fn quiet_overlay(&self) -> Result<bool> {
+        let path = self.ini_path();
+        if !self.bin.join(DLL).is_file() || !path.is_file() {
+            return Ok(false);
+        }
+        let ini = self.read_ini()?;
+        let fixed = quiet(&ini);
+        if fixed == ini {
+            return Ok(false);
+        }
+        self.write_ini(&fixed)?;
+        Ok(true)
+    }
+
     pub fn reset_presets(&self) -> Result<ShaderStatus> {
         Self::ensure_game_closed()?;
         let mut state = self.state()?;
@@ -336,6 +353,22 @@ fn preset_from_path(p: &str) -> Option<String> {
             ))
         })
         .map(|(id, ..)| id.to_string())
+}
+
+/// Sem o tutorial marcado como visto, o ReShade deixa a faixa "Pressione Home para iniciar o
+/// tutorial" fixa no topo da tela o jogo inteiro. Marcado (4 = concluído), ela só aparece enquanto
+/// os efeitos compilam ao abrir. Também desliga mensagens que cobrem o jogo.
+fn quiet(ini: &str) -> String {
+    let mut out = ini.to_string();
+    if ini_get(&out, "OVERLAY", "TutorialProgress").and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0) < 4 {
+        out = ini_set(&out, "OVERLAY", "TutorialProgress", "4");
+    }
+    for key in ["ShowPresetTransitionMessage", "ShowPresetName", "ShowClock", "ShowFPS", "ShowFrameTime"] {
+        if ini_get(&out, "OVERLAY", key).is_none_or(|v| v.trim() != "0") {
+            out = ini_set(&out, "OVERLAY", key, "0");
+        }
+    }
+    out
 }
 
 fn ensure_search_path(ini: &str) -> String {
@@ -669,6 +702,14 @@ mod tests {
         let d = ensure_search_path("[GENERAL]\nEffectSearchPaths=.\\outra\n");
         assert!(d.contains("EffectSearchPaths=.\\outra,.\\reshade-shaders\\Shaders\\CommandProject"));
         assert!(!ini_remove(&a, "GENERAL", "PresetPath").contains("PresetPath"));
+    }
+
+    #[test]
+    fn quiet_hides_tutorial_banner() {
+        let a = quiet("[OVERLAY]\r\nTutorialProgress=0\r\nShowFPS=2\r\n");
+        assert!(a.contains("TutorialProgress=4"));
+        assert!(a.contains("ShowFPS=0"));
+        assert_eq!(quiet(&a), a);
     }
 
     #[test]

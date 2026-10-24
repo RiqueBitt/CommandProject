@@ -45,6 +45,25 @@ export function decorKind(bp: string): DecorKind {
   return "other";
 }
 
+/** Teste rápido "o ponto está dentro de algum corte?" (grade de 64 unidades: milhares de
+ *  decorações × centenas de cortes sem travar a edição). */
+export function cutTester(cuts: [number, number, number][]): (x: number, z: number) => boolean {
+  if (!cuts.length) return () => false;
+  const S = 64, cells = new Map<number, [number, number, number][]>();
+  for (const c of cuts) {
+    const [x, z, r] = c;
+    for (let i = Math.floor((x - r) / S); i <= Math.floor((x + r) / S); i++)
+      for (let j = Math.floor((z - r) / S); j <= Math.floor((z + r) / S); j++) {
+        const k = i * 4096 + j;
+        (cells.get(k) ?? cells.set(k, []).get(k)!).push(c);
+      }
+  }
+  return (x, z) => {
+    const list = cells.get(Math.floor(x / S) * 4096 + Math.floor(z / S));
+    return !!list && list.some(([cx, cz, r]) => (x - cx) ** 2 + (z - cz) ** 2 <= r * r);
+  };
+}
+
 /** Uma troca de camada vira o mapeamento de caminhos que o toolkit aplica (d, n e s quando cabem). */
 export function reskinPaths(old: GroundLayer, neo: GroundLayer): Record<string, string> {
   const out: Record<string, string> = {};

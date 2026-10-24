@@ -2,10 +2,11 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { heightAt, type DecorKind, type Pt, type Rect } from "../pages/studio/mapEdit";
+import { propModel, propModelNow } from "./propModels";
 
 export interface Marker { p: Pt; color: string; label: string }
 /** decoração mostrada no editor: x, z, yaw (graus), escala, tipo; `added` = colocada por você */
-export interface DecorPoint { x: number; z: number; yaw: number; scale: number; kind: DecorKind; added?: boolean }
+export interface DecorPoint { x: number; z: number; yaw: number; scale: number; kind: DecorKind; bp?: string; added?: boolean }
 export type Brush = { shape: "circle"; radius: number; color: string } | { shape: "point"; color: string } | null;
 
 interface Props {
@@ -53,7 +54,9 @@ export default function MapView3D(props: Props) {
     const el = host.current!;
     const { size, grid } = live.current;
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+    renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio));
+    let dirty = true;
+    const invalidate = () => { dirty = true; };
     renderer.setSize(el.clientWidth, el.clientHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -163,6 +166,7 @@ export default function MapView3D(props: Props) {
         mat.map = t;
         mat.vertexColors = false;
         mat.needsUpdate = true;
+        invalidate();
       });
     };
 
@@ -297,33 +301,53 @@ export default function MapView3D(props: Props) {
     const clearDecor = () => {
       for (const g of [decorGroup, cutRing]) for (const o of [...g.children]) {
         g.remove(o);
+        if (o.userData.shared) { (o as THREE.InstancedMesh).dispose(); continue; } // modelo do jogo: reaproveitado
         const m = o as THREE.Mesh;
         m.geometry.dispose();
         (m.material as THREE.Material).dispose();
       }
     };
+    // quando um modelo termina de carregar, a cena é refeita (agrupando vários num quadro só)
+    let decorQueued = 0;
+    const queueDecor = () => {
+      if (decorQueued) return;
+      decorQueued = window.setTimeout(() => { decorQueued = 0; api.current?.setDecor(); }, 120);
+    };
     const setDecor = () => {
       clearDecor();
       const { decor = [], cuts = [] } = live.current;
+      // agrupa por modelo (blueprint); sem modelo, por tipo
       const by = new Map<string, DecorPoint[]>();
       for (const d of decor) {
-        const key = d.kind + (d.added ? "+" : "");
+        const key = d.bp ? `bp:${d.bp.toLowerCase()}` : `k:${d.kind}`;
         (by.get(key) ?? by.set(key, []).get(key)!).push(d);
       }
       const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
       for (const [key, list] of by) {
-        const kind = key.replace("+", "") as DecorKind, added = key.endsWith("+");
-        const color = new THREE.Color(KIND_COLOR[kind]);
-        if (added) color.lerp(new THREE.Color(0xa3e635), 0.35);
-        const mesh = new THREE.InstancedMesh(KIND_GEO[kind](), new THREE.MeshStandardMaterial({ color, roughness: 0.85, flatShading: true, emissive: added ? 0x2a3a10 : 0x000000 }), list.length);
+        const bp = key.startsWith("bp:") ? list[0].bp! : null;
+        // muitas cópias do mesmo modelo: versão mais simples (nível 2), para o editor continuar leve
+        const lod = list.length > 1500 ? 2 : 1;
+        const model = bp ? propModelNow(bp, lod) : null;
+        if (bp && model === undefined) void propModel(bp, lod).then(queueDecor);
+        let mesh: THREE.InstancedMesh;
+        if (model) {
+          mesh = new THREE.InstancedMesh(model.geo, model.mat, list.length);
+          mesh.userData.shared = true;
+        } else {
+          const kind = list[0].kind;
+          mesh = new THREE.InstancedMesh(KIND_GEO[kind](), new THREE.MeshStandardMaterial({ color: KIND_COLOR[kind], roughness: 0.85, flatShading: true }), list.length);
+        }
+        const fresh = new THREE.Color(0xc8f08a), plain = new THREE.Color(0xffffff);
         list.forEach((d, i) => {
           q.setFromAxisAngle(up, (d.yaw * Math.PI) / 180);
-          const s = Math.max(0.3, Math.min(4, d.scale || 1));
+          const s = Math.max(0.01, d.scale || 1);
           sc.set(s, s, s);
           v.set(d.x, hAt(d.x, d.z), d.z);
           mesh.setMatrixAt(i, m4.compose(v, q, sc));
+          mesh.setColorAt(i, d.added ? fresh : plain); // as que você colocou ficam levemente verdes
         });
         mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
         mesh.computeBoundingSphere();
         decorGroup.add(mesh);
       }
@@ -414,6 +438,7 @@ export default function MapView3D(props: Props) {
         const p = pick(lastMove);
         cursor = p;
         redrawBrush();
+        invalidate();
         if (down) live.current.onPointer("move", p);
       });
     };
@@ -423,7 +448,7 @@ export default function MapView3D(props: Props) {
       renderer.domElement.releasePointerCapture(ev.pointerId);
       live.current.onPointer("up", pick(ev));
     };
-    const onLeave = () => { cursor = null; redrawBrush(); };
+    const onLeave = () => { cursor = null; redrawBrush(); invalidate(); };
     const cv = renderer.domElement;
     cv.addEventListener("pointerdown", onDown);
     cv.addEventListener("pointermove", onMove);
@@ -431,23 +456,37 @@ export default function MapView3D(props: Props) {
     cv.addEventListener("pointerleave", onLeave);
     cv.addEventListener("contextmenu", (e) => e.preventDefault());
 
+    // desenha só quando algo muda (câmera, pincel, edição); parado, quase não usa a placa de vídeo.
+    // Um quadro a cada 400 ms pega texturas que terminaram de carregar em segundo plano.
     let raf = 0;
-    const tick = () => {
+    let lastDraw = 0;
+    const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
       if (document.hidden) return;
-      controls.update();
-      renderer.render(scene, camera);
+      const moved = controls.update();
+      if (moved || dirty || now - lastDraw > 400) {
+        renderer.render(scene, camera);
+        dirty = false;
+        lastDraw = now;
+      }
     };
     raf = requestAnimationFrame(tick);
 
+    controls.addEventListener("change", invalidate);
     const ro = new ResizeObserver(() => {
+      invalidate();
       camera.aspect = el.clientWidth / Math.max(1, el.clientHeight);
       camera.updateProjectionMatrix();
       renderer.setSize(el.clientWidth, el.clientHeight);
     });
     ro.observe(el);
 
-    api.current = { setHeights, setTexture, setMarkers, setDecor, setOrbit, setExaggeration: setHeights, redrawBrush };
+    // toda mudança na cena pede um quadro novo
+    const dirtying = <A extends unknown[]>(f: (...a: A) => void) => (...a: A) => { f(...a); invalidate(); };
+    api.current = {
+      setHeights: dirtying(setHeights), setTexture: dirtying(setTexture), setMarkers: dirtying(setMarkers), setDecor: dirtying(setDecor),
+      setOrbit: dirtying(setOrbit), setExaggeration: dirtying(setHeights), redrawBrush: dirtying(redrawBrush),
+    };
     setHeights();
     setTexture(live.current.texture);
 
@@ -462,6 +501,7 @@ export default function MapView3D(props: Props) {
       cv.removeEventListener("pointerleave", onLeave);
       clearGroup();
       clearDecor();
+      clearTimeout(decorQueued);
       texture?.dispose();
       scene.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.Line) {

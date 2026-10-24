@@ -5,7 +5,7 @@ import type { ThemeOptions, ThemePreview } from "../lib/types";
 import { Icon, Notice, Switch, TaskProgress } from "./ui";
 
 /** Versão do gerador do tema no núcleo (`menu_theme::THEME_VERSION`). */
-export const THEME_VERSION = "2.0.0";
+export const THEME_VERSION = "2.1.0";
 
 const DEFAULTS: ThemeOptions = { name: "Menu moderno", recolor: true, fonts: false, accent: "#a3e635", hover: "", bgDarkness: 0.55, bgTint: 0.12, panelOpacity: 1, glow: 0.3, sharpness: 0.5, deblock: 0.5 };
 

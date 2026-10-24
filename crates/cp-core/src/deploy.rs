@@ -153,6 +153,9 @@ struct TocState {
     written: Option<String>,
     /// Quantos arquivos do jogo estão sendo lidos dos .scd de mods.
     redirected: usize,
+    /// Arquivos que o launcher deixou soltos na pasta do jogo (relativos à raiz, com `/`).
+    #[serde(default)]
+    loose: Vec<String>,
 }
 
 pub struct Deployer<'a> {
@@ -461,6 +464,10 @@ impl<'a> Deployer<'a> {
             self.save_journal(&j)?;
         }
 
+        // 1b) cópias soltas com nome de arquivo gerado pelo launcher que ele não controla (sobras de
+        // um teste ou de uma versão antiga): vão para a quarentena para não serem montadas pelo jogo
+        self.quarantine_strays(&j, &baseline, targets)?;
+
         // 2) implantar o que falta
         fs::create_dir_all(self.backups_dir()).at(self.backups_dir())?;
         for t in targets {
@@ -571,7 +578,11 @@ impl<'a> Deployer<'a> {
         let current = fs::read(&path).at(&path)?;
         let cur_sha = sha256_bytes(&current);
         let mut st: TocState = read_json_or_default(&state_path)?;
-        let original = if st.written.as_deref() == Some(cur_sha.as_str()) && orig_path.is_file() {
+        let ours = st.written.as_deref() == Some(cur_sha.as_str())
+            // índice com .scd do launcher que não é o último gravado (ex.: interrompido no meio):
+            // nunca vira o "original"
+            || crate::toc::has_launcher_archives(&current);
+        let original = if ours && orig_path.is_file() {
             fs::read(&orig_path).at(&orig_path)?
         } else {
             fs::create_dir_all(&dir).at(&dir)?;
@@ -598,11 +609,30 @@ impl<'a> Deployer<'a> {
                 .collect();
             mods.push((n, entries));
         }
-        let (new, redirected) = if mods.is_empty() {
-            (original, 0)
+        // um .scd novo no índice no máximo (veja crate::toc): o que mais substitui fica como .scd,
+        // os outros viram arquivos soltos quando dá
+        let stats = crate::toc::override_stats(&original, &mods)?;
+        // prefere manter como .scd o que não pode ficar solto (arquivos ".win") e, depois, o maior
+        let keep = stats
+            .iter()
+            .enumerate()
+            .filter(|(_, (hits, _))| *hits > 0)
+            .max_by_key(|(_, (hits, loose_ok))| (!loose_ok, *hits))
+            .map(|(i, _)| i);
+        let plan: Vec<(String, Vec<crate::toc::ModEntry>, bool)> = mods
+            .into_iter()
+            .enumerate()
+            .map(|(i, (n, e))| {
+                let (hits, loose_ok) = stats[i];
+                (n, e, hits > 0 && Some(i) != keep && loose_ok)
+            })
+            .collect();
+        let (new, redirected, loose) = if plan.is_empty() {
+            (original, 0, Vec::new())
         } else {
-            crate::toc::apply_overrides(&original, &mods)?
+            crate::toc::apply_mixed(&original, &plan)?
         };
+        self.sync_loose(&mut st, &plan, &loose)?;
         if new != current {
             write_atomic(&path, &new)?;
         }
@@ -610,6 +640,84 @@ impl<'a> Deployer<'a> {
         st.redirected = redirected;
         write_json(&state_path, &st)?;
         Ok(redirected)
+    }
+
+    fn quarantine_strays(&mut self, j: &Journal, baseline: &Baseline, targets: &[Target]) -> Result<()> {
+        let Ok(rd) = fs::read_dir(&self.game.gamedata) else { return Ok(()) };
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let low = name.to_ascii_lowercase();
+            if !(low.starts_with("zz_cp_") || low.starts_with("_cp_")) || !low.ends_with(".scd") {
+                continue;
+            }
+            let known = j.find(&name).is_some()
+                || baseline.files.contains_key(&low)
+                || targets.iter().any(|t| t.name.eq_ignore_ascii_case(&name));
+            if known || !e.path().is_file() {
+                continue;
+            }
+            let q = self.quarantine_dir();
+            fs::create_dir_all(&q).at(&q)?;
+            let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+            let dest = q.join(format!("{stamp}-{name}"));
+            let src = e.path();
+            fs::rename(&src, &dest)
+                .or_else(|_| fs::copy(&src, &dest).map(|_| ()).and_then(|_| fs::remove_file(&src)))
+                .at(&src)?;
+        }
+        Ok(())
+    }
+
+    /// Deixa na pasta do jogo exatamente os arquivos soltos de `loose` (tira os da vez anterior).
+    fn sync_loose(
+        &mut self,
+        st: &mut TocState,
+        plan: &[(String, Vec<crate::toc::ModEntry>, bool)],
+        loose: &[crate::toc::LooseFile],
+    ) -> Result<()> {
+        let root = self.game.root.clone();
+        let wanted: std::collections::HashSet<&str> = loose.iter().map(|l| l.path.as_str()).collect();
+        for old in std::mem::take(&mut st.loose) {
+            if wanted.contains(old.as_str()) {
+                continue;
+            }
+            let p = root.join(&old);
+            if p.is_file() {
+                fs::remove_file(&p).at(&p)?;
+            }
+            prune_empty_dirs(&root, p.parent());
+        }
+        let mut by_mod: BTreeMap<usize, Vec<&crate::toc::LooseFile>> = BTreeMap::new();
+        for l in loose {
+            by_mod.entry(l.mod_index).or_default().push(l);
+        }
+        let q = self.quarantine_dir();
+        for (mi, files) in by_mod {
+            let src = self.game.gamedata.join(&plan[mi].0);
+            let mut scd = crate::scd::Scd::open(&src)?;
+            for l in files {
+                if l.path.split('/').any(|c| c.is_empty() || c == "." || c == "..") {
+                    return Err(Error::Format(format!("caminho inválido no mod: {}", l.path)));
+                }
+                let data = scd.read_at(l.entry as usize)?;
+                let dest = root.join(&l.path);
+                // arquivo que não é do launcher no caminho: guardado, nunca sobrescrito em silêncio
+                if dest.is_file() && !st.loose.contains(&l.path) && fs::read(&dest).ok().as_deref() != Some(&data[..]) {
+                    fs::create_dir_all(&q).at(&q)?;
+                    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+                    let name = l.path.replace('/', "_");
+                    fs::copy(&dest, q.join(format!("{stamp}-{name}"))).at(&dest)?;
+                }
+                if let Some(parent) = dest.parent() {
+                    fs::create_dir_all(parent).at(parent)?;
+                }
+                if fs::read(&dest).ok().as_deref() != Some(&data[..]) {
+                    write_atomic(&dest, &data)?;
+                }
+                st.loose.push(l.path.clone());
+            }
+        }
+        Ok(())
     }
 
     /// Volta a pasta ao estado original (remove tudo que o launcher colocou).
@@ -732,6 +840,16 @@ impl<'a> Deployer<'a> {
 
 /// Cria `dst` como hard link de `src` (troca atômica). `false` se o sistema não deixar
 /// (discos diferentes, FAT32, permissão) — aí quem chamou copia.
+/// Remove pastas vazias de `dir` para cima, sem passar da raiz do jogo.
+fn prune_empty_dirs(root: &Path, mut dir: Option<&Path>) {
+    while let Some(d) = dir {
+        if d == root || !d.starts_with(root) || fs::remove_dir(d).is_err() {
+            break;
+        }
+        dir = d.parent();
+    }
+}
+
 fn link_file(src: &Path, dst: &Path) -> bool {
     let tmp = crate::fsutil::tmp_sibling(dst);
     let _ = fs::remove_file(&tmp);
@@ -863,6 +981,48 @@ mod tests {
         // voltar ao original restaura o índice byte a byte
         d.purge(&mut |_| {}).unwrap();
         assert_eq!(fs::read(&toc_path).unwrap(), original);
+    }
+
+    #[test]
+    fn second_override_mod_is_served_loose() {
+        let mut e = env();
+        let toc_path = e.game.root.join("toc.win.bdf");
+        let original = crate::toc::tests::sample();
+        fs::write(&toc_path, &original).unwrap();
+        let src = e.data.join("in");
+        fs::create_dir_all(&src).unwrap();
+        make_scd(&src.join("zz_cp_hd.scd"), &[("textures\\ui\\BG.win.dds", b"hd")]);
+        make_scd(&src.join("zz_cp_zz_menu.scd"), &[("textures/ui/logo.dds", b"logo novo")]);
+        let a = e.lib.import(&src.join("zz_cp_hd.scd"), &ImportOptions::default()).unwrap();
+        let b = e.lib.import(&src.join("zz_cp_zz_menu.scd"), &ImportOptions::default()).unwrap();
+        let mut w = vec![];
+        let mut d = Deployer { game: &e.game, data_dir: &e.data, hashes: &mut e.cache };
+        d.apply(&[], None, &mut |_| {}).unwrap(); // primeira varredura
+        // sobra de teste com nome do launcher, depois da varredura: vai para a quarentena
+        fs::write(e.game.gamedata.join("zz_cp_sobra.scd"), b"x").unwrap();
+        let targets = d.targets(&e.lib, &profile(&[a.id.as_str(), b.id.as_str()]), &mut w).unwrap();
+        d.apply(&targets, Some("p"), &mut |_| {}).unwrap();
+        assert!(!e.game.gamedata.join("zz_cp_sobra.scd").exists());
+
+        let toc = crate::toc::Toc::parse(&fs::read(&toc_path).unwrap()).unwrap();
+        assert_eq!(toc.archives().unwrap().len(), 3, "um .scd novo só");
+        let logo = toc.files().unwrap().into_iter().find(|f| f.key == "textures/ui/logo.dds").unwrap();
+        assert_eq!((logo.archive, logo.size), (None, 9));
+        let loose = e.game.root.join("textures/ui/logo.dds");
+        assert_eq!(fs::read(&loose).unwrap(), b"logo novo");
+
+        // índice deixado com .scd do launcher (ex.: teste manual) não vira o "original"
+        let patched = fs::read(&toc_path).unwrap();
+        let mut odd = crate::toc::Toc::parse(&patched).unwrap();
+        odd.add_archive("gamedata\\zz_cp_outro.scd").unwrap();
+        fs::write(&toc_path, odd.to_bytes().unwrap()).unwrap();
+        d.apply(&targets, Some("p"), &mut |_| {}).unwrap();
+        assert_eq!(fs::read(&toc_path).unwrap(), patched);
+
+        d.purge(&mut |_| {}).unwrap();
+        assert_eq!(fs::read(&toc_path).unwrap(), original);
+        assert!(!loose.exists());
+        assert!(!e.game.root.join("textures").exists(), "pastas vazias saem");
     }
 
     #[test]

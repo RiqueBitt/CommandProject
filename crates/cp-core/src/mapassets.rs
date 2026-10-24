@@ -208,33 +208,26 @@ pub fn texture_png(sources: &[PathBuf], path: &str, max: u32) -> Result<Vec<u8>>
 }
 
 /// Modelo de uma decoração para pré-visualizar: malha (LOD0) e a primeira textura de cor.
-pub fn prop_preview(sources: &[PathBuf], bp: &str) -> Result<(crate::scm::MeshView, Option<Vec<u8>>)> {
+/// Modelo de uma decoração. `lod` escolhe o nível de detalhe (0 = o mais detalhado; o editor de
+/// mapas usa 1, que é leve para milhares de cópias); sem esse nível, usa o mais próximo.
+pub fn prop_preview(sources: &[PathBuf], bp: &str, lod: u8) -> Result<(crate::scm::MeshView, Option<Vec<u8>>)> {
     let key = crate::scd::normalize_key(bp);
+    let cache_key = format!("{key}#{lod}");
+    if let Some(hit) = PREVIEWS.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(|m| m.get(&cache_key)) {
+        return Ok(hit.clone());
+    }
     let dir = key.rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default();
     let stem = key.rsplit('/').next().unwrap_or_default().trim_end_matches("_prop.bp").to_string();
-    let mut best: Option<(PathBuf, usize, String)> = None;
-    for src in sources {
-        let mut scd = Scd::open(src)?;
-        for (i, e) in scd.entries()?.iter().enumerate() {
-            if !e.key.starts_with(&dir) || !e.key.ends_with(".scm") || e.key[dir.len()..].contains('/') {
-                continue;
-            }
-            let file = &e.key[dir.len()..];
-            let rank = (!file.starts_with(&stem), !file.contains("lod0"), file.contains("fall"), file.len());
-            let better = match &best {
-                None => true,
-                Some((_, _, f)) => {
-                    let r2 = (!f.starts_with(&stem), !f.contains("lod0"), f.contains("fall"), f.len());
-                    rank < r2
-                }
-            };
-            if better {
-                best = Some((src.clone(), i, file.to_string()));
-            }
-        }
-    }
+    let index = scm_index(sources)?;
+    let lod_of = |f: &str| f.find("_lod").and_then(|i| f[i + 4..].chars().next()).and_then(|c| c.to_digit(10)).unwrap_or(0) as i32;
+    let rank = |f: &str| (!f.starts_with(&stem), f.contains("fall"), (lod_of(f) - lod as i32).abs(), lod_of(f) > lod as i32, f.len());
+    let best = index
+        .iter()
+        .filter(|(_, _, k)| k.starts_with(&dir) && !k[dir.len()..].contains('/'))
+        .min_by_key(|(_, _, k)| rank(&k[dir.len()..]))
+        .cloned();
     let (src, idx, _) = best.ok_or_else(|| Error::Other("o modelo dessa decoração não foi encontrado".into()))?;
-    let mesh = crate::scm::view(&crate::scm::read(&Scd::open(&src)?.read_at(idx)?)?);
+    let mesh = crate::scm::view(&crate::scm::read(&Scd::open(&sources[src])?.read_at(idx)?)?);
     // a textura vem do blueprint em texto (uncompiled): DiffuseName = '/props/…_Diffuse.dds'
     let texture = read_game_file(sources, &format!("/uncompiled{key}"))
         .ok()
@@ -245,8 +238,42 @@ pub fn prop_preview(sources: &[PathBuf], bp: &str) -> Result<(crate::scm::MeshVi
             let q2 = t[q1..].find('\'')? + q1;
             Some(t[q1..q2].to_string())
         })
-        .and_then(|p| texture_png(sources, &p, 512).ok());
-    Ok((mesh, texture))
+        .and_then(|p| texture_png(sources, &p, 256).ok());
+    let out = (mesh, texture);
+    let mut g = PREVIEWS.lock().unwrap_or_else(|p| p.into_inner());
+    let cache = g.get_or_insert_with(Default::default);
+    if cache.len() > 400 {
+        cache.clear();
+    }
+    cache.insert(cache_key, out.clone());
+    Ok(out)
+}
+
+/// Modelos já lidos (o editor pede o mesmo modelo para milhares de decorações).
+type Preview = (crate::scm::MeshView, Option<Vec<u8>>);
+static PREVIEWS: Mutex<Option<std::collections::HashMap<String, Preview>>> = Mutex::new(None);
+
+/// Todos os `.scm` dos arquivos do jogo: (nº da fonte, entrada, caminho normalizado). Lido uma vez.
+type ScmIndex = (Vec<PathBuf>, Vec<(usize, usize, String)>);
+static SCM_INDEX: Mutex<Option<ScmIndex>> = Mutex::new(None);
+
+fn scm_index(sources: &[PathBuf]) -> Result<Vec<(usize, usize, String)>> {
+    let mut g = SCM_INDEX.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some((src, list)) = g.as_ref() {
+        if src == sources {
+            return Ok(list.clone());
+        }
+    }
+    let mut list = Vec::new();
+    for (si, src) in sources.iter().enumerate() {
+        for (i, e) in Scd::open(src)?.entries()?.into_iter().enumerate() {
+            if e.key.ends_with(".scm") {
+                list.push((si, i, e.key));
+            }
+        }
+    }
+    *g = Some((sources.to_vec(), list.clone()));
+    Ok(list)
 }
 
 #[cfg(test)]

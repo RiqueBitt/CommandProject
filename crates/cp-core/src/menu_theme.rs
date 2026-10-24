@@ -20,7 +20,7 @@ use crate::scd::{Scd, ScdBuilder};
 use crate::ttf;
 
 /// Versão do tema gravada no mod (a interface oferece regerar quando muda).
-pub const THEME_VERSION: &str = "2.0.0";
+pub const THEME_VERSION: &str = "2.1.0";
 /// Nome do `.scd` gerado: começa com `zz_cp_zz_` para montar DEPOIS das Texturas HD
 /// (`zz_cp_texturas_hd.scd`), senão as texturas do menu ficam com a versão das Texturas HD.
 pub const ARCHIVE_NAME: &str = "zz_cp_zz_menu_moderno.scd";
@@ -249,7 +249,19 @@ pub fn theme_dds(key: &str, data: &[u8], opts: &ThemeOptions) -> Result<Option<V
         return Ok(None);
     }
     let mips = if info.mip_count <= 1 { 1 } else { 0 };
-    dds::encode(&out, info.format, mips, Quality::Normal).map(Some)
+    let mut enc = dds::encode(&out, info.format, mips, Quality::Normal)?;
+    keep_original_header(data, &mut enc);
+    Ok(Some(enc))
+}
+
+/// Mesmo formato, tamanho e nº de mips: o arquivo novo leva o cabeçalho original byte a byte
+/// (o jogo grava `pitchOrLinearSize` e as flags de um jeito próprio; nada muda além dos pixels).
+fn keep_original_header(original: &[u8], new: &mut [u8]) {
+    const HEAD: usize = 128;
+    let dx10 = |d: &[u8]| d.len() > 88 && &d[84..88] == b"DX10";
+    if original.len() == new.len() && new.len() > HEAD && &original[..4] == b"DDS " && !dx10(original) && !dx10(new) {
+        new[..HEAD].copy_from_slice(&original[..HEAD]);
+    }
 }
 
 /// Qual Roboto substitui uma fonte do jogo (`None` = a fonte fica).
@@ -458,6 +470,21 @@ mod tests {
         }
         assert_eq!(parse_hex("#a3e635"), Some([163, 230, 53]));
         assert_eq!(parse_hex("xyz"), None);
+    }
+
+    #[test]
+    fn themed_dds_keeps_original_header() {
+        let blue = Rgba { width: 16, height: 16, pixels: [40u8, 110, 220, 255].repeat(256) };
+        let mut orig = dds::encode(&blue, dds::DdsFormat::Bgra8, 1, Quality::Fast).unwrap();
+        // cabeçalho como o do jogo: LINEARSIZE, pitch = tamanho total, mips = 0
+        orig[8..12].copy_from_slice(&0x81007u32.to_le_bytes());
+        orig[20..24].copy_from_slice(&1024u32.to_le_bytes());
+        orig[28..32].copy_from_slice(&0u32.to_le_bytes());
+        let opts = ThemeOptions::default();
+        let out = theme_dds("textures/ui/common/pc/frontend/mainmenu/btn_u.dds", &orig, &opts).unwrap().unwrap();
+        assert_eq!(out.len(), orig.len());
+        assert_eq!(&out[..128], &orig[..128]);
+        assert_ne!(&out[128..], &orig[128..]);
     }
 
     #[test]

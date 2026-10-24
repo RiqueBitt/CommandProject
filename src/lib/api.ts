@@ -179,7 +179,7 @@ export const api = {
   maptkExamples: () => call<{ examples: { key: string; spec: Record<string, unknown> }[] }>("maptk_run", { command: "examples", input: {} }),
   mapAssets: () => call<T.MapAssets>("map_assets"),
   gameTexture: (path: string, max = 128) => call<string>("game_texture", { path, max }),
-  propPreview: (bp: string) => call<T.PropPreview>("prop_preview", { bp }),
+  propPreview: (bp: string, lod = 0) => call<T.PropPreview>("prop_preview", { bp, lod }),
   maptkTerrain3d: (terrain: string, size = 256) => call<T.Terrain3D>("maptk_terrain3d", { terrain, size }),
   maptkBuild: (spec: Record<string, unknown>) => call<{ result: T.MapBuildResult; manifest: T.Manifest }>("maptk_build", { spec }),
 

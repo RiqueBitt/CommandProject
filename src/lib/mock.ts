@@ -541,12 +541,12 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       const seg = 10;
       for (let i = 0; i < seg; i++) {
         const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2, b = pos.length / 3;
-        pos.push(0, 2, 0, Math.cos(a0) * 0.6, 0, Math.sin(a0) * 0.6, Math.cos(a1) * 0.6, 0, Math.sin(a1) * 0.6);
+        pos.push(0, 9, 0, Math.cos(a0) * 2.6, 0, Math.sin(a0) * 2.6, Math.cos(a1) * 2.6, 0, Math.sin(a1) * 2.6);
         for (const a of [a0, a0, a1]) nor.push(Math.cos(a), 0.3, Math.sin(a));
         uv.push(0.5, 0, 0, 1, 1, 1);
         idx.push(b, b + 2, b + 1);
       }
-      return r({ mesh: { positions: pos, normals: nor, uvs: uv, indices: idx, bones: [], bboxMin: [-0.6, 0, -0.6], bboxMax: [0.6, 2, 0.6], version: 6, triangles: idx.length / 3, info: "prévia simulada" }, texture: null });
+      return r({ mesh: { positions: pos, normals: nor, uvs: uv, indices: idx, bones: [], bboxMin: [-2.6, 0, -2.6], bboxMax: [2.6, 9, 2.6], version: 6, triangles: idx.length / 3, info: "prévia simulada" }, texture: null });
     }
     case "maptk_build": {
       const steps = ["terrain SC2_MP_002 (Open Palms), 3 layers, land layer L0", "placeable cells: 18211", "min spawn separation: 420", "total mass points: 52", "VERIFIED: all 52 positions navigable; all spawns mutually reachable", "packaged: _cp_meumapa.scd (0.1 MB)"];

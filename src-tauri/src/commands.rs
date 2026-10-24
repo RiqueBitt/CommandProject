@@ -391,6 +391,10 @@ pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<Launch
         if let Err(e) = ws.ensure_large_address() {
             eprintln!("modo 4 GB não reaplicado: {e}");
         }
+        // faixa do tutorial do ReShade fixa em cima do jogo
+        if let Ok(sh) = ws.shaders() {
+            let _ = sh.quiet_overlay();
+        }
         let applied = if ws.settings.apply_before_launch {
             Some(ws.apply_active(&mut |p: Progress| emit_progress(&app2, "apply", p.step, p.total, p.message))?)
         } else {
@@ -1503,10 +1507,10 @@ pub struct PropPreview {
 
 /// Modelo 3D de uma decoração (para ver antes de colocar no mapa).
 #[tauri::command]
-pub async fn prop_preview(state: State<'_, AppState>, bp: String) -> R<PropPreview> {
+pub async fn prop_preview(state: State<'_, AppState>, bp: String, lod: Option<u8>) -> R<PropPreview> {
     let srcs = sources(&state.ws).await?;
     off_lock(move || {
-        let (mesh, tex) = cp_core::mapassets::prop_preview(&srcs, &bp)?;
+        let (mesh, tex) = cp_core::mapassets::prop_preview(&srcs, &bp, lod.unwrap_or(0).min(3))?;
         Ok(PropPreview { mesh, texture: tex.map(|p| data_url("image/png", &p)) })
     })
     .await

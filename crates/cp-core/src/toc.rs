@@ -16,6 +16,11 @@
 //!
 //! Para acrescentar um `.scd`, a tabela de `.scd` é copiada para o fim do conteúdo com a entrada nova
 //! (e os *fixups* dela); o resto do conteúdo não muda de lugar.
+//!
+//! **Um `.scd` novo no máximo.** Com dois `.scd` de mods acrescentados ao índice o jogo fecha logo ao
+//! abrir (falha ao listar `/sounds/mod/*.fev`, visto nos relatórios de travamento). Por isso só o mod
+//! que mais substitui arquivos ganha uma entrada de `.scd`; os outros têm os arquivos extraídos
+//! soltos na pasta do jogo (como os sons e o executável, que o índice já lista como "soltos").
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -250,6 +255,7 @@ impl<R: std::io::Read> ReadLimited for R {
 }
 
 /// Arquivo de um `.scd` de mod, na posição em que está no zip.
+#[derive(Debug, Clone)]
 pub struct ModEntry {
     pub name: String,
     pub index: u32,
@@ -260,14 +266,57 @@ pub struct ModEntry {
 /// vence) passa a ser a origem dos arquivos que ele traz e que já existiam no jogo.
 /// Devolve os bytes novos e quantos caminhos foram redirecionados.
 pub fn apply_overrides(original: &[u8], mods: &[(String, Vec<ModEntry>)]) -> Result<(Vec<u8>, usize)> {
+    let plan: Vec<_> = mods.iter().map(|(n, e)| (n.clone(), e.clone(), false)).collect();
+    let (out, n, _) = apply_mixed(original, &plan)?;
+    Ok((out, n))
+}
+
+/// Arquivo que deve ficar solto na pasta do jogo: `path` relativo à raiz (com `/`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LooseFile {
+    pub mod_index: usize,
+    pub entry: u32,
+    pub path: String,
+    pub size: u32,
+}
+
+/// Quantos arquivos do índice cada `.scd` substitui e se dá para servi-los soltos (nenhum com `.win`).
+pub fn override_stats(original: &[u8], mods: &[(String, Vec<ModEntry>)]) -> Result<Vec<(usize, bool)>> {
+    let toc = Toc::parse(original)?;
+    let keys: std::collections::HashSet<String> = toc.files()?.into_iter().map(|f| f.key).collect();
+    Ok(mods
+        .iter()
+        .map(|(_, entries)| {
+            let hits: Vec<bool> = entries
+                .iter()
+                .filter_map(|e| {
+                    let (k, win) = toc_key(&e.name);
+                    keys.contains(&k).then_some(win)
+                })
+                .collect();
+            (hits.len(), hits.iter().all(|w| !w))
+        })
+        .collect())
+}
+
+/// Como [`apply_overrides`], mas os mods marcados com `true` não ganham `.scd` no índice: os
+/// arquivos deles passam a ser "soltos" e a lista do que extrair para a pasta do jogo é devolvida.
+pub fn apply_mixed(original: &[u8], mods: &[(String, Vec<ModEntry>, bool)]) -> Result<(Vec<u8>, usize, Vec<LooseFile>)> {
     let mut toc = Toc::parse(original)?;
     let index: HashMap<String, usize> = toc.files()?.into_iter().enumerate().map(|(i, f)| (f.key, i)).collect();
     let mut changed = std::collections::HashSet::new();
-    for (archive_name, entries) in mods {
+    let mut loose: HashMap<usize, LooseFile> = HashMap::new();
+    for (mi, (archive_name, entries, as_loose)) in mods.iter().enumerate() {
         let mut slot = None;
         for e in entries {
             let (key, win) = toc_key(&e.name);
             let Some(&rec) = index.get(&key) else { continue }; // arquivo novo: o jogo acha sozinho
+            if *as_loose && !win {
+                toc.redirect(rec, LOOSE, 0, e.size, false)?;
+                loose.insert(rec, LooseFile { mod_index: mi, entry: e.index, path: key, size: e.size });
+                changed.insert(rec);
+                continue;
+            }
             let a = match slot {
                 Some(a) => a,
                 None => {
@@ -277,10 +326,26 @@ pub fn apply_overrides(original: &[u8], mods: &[(String, Vec<ModEntry>)]) -> Res
                 }
             };
             toc.redirect(rec, a, e.index, e.size, win)?;
+            loose.remove(&rec); // um mod montado depois venceu
             changed.insert(rec);
         }
     }
-    Ok((toc.to_bytes()?, changed.len()))
+    let mut files: Vec<LooseFile> = loose.into_values().collect();
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok((toc.to_bytes()?, changed.len(), files))
+}
+
+/// O índice tem `.scd` colocados pelo launcher (`_cp_…`/`zz_cp_…`)? Então não é o original do jogo.
+pub fn has_launcher_archives(data: &[u8]) -> bool {
+    Toc::parse(data)
+        .and_then(|t| t.archives())
+        .map(|a| {
+            a.iter().any(|n| {
+                let f = n.rsplit(['\\', '/']).next().unwrap_or(n).to_ascii_lowercase();
+                f.starts_with("zz_cp_") || f.starts_with("_cp_")
+            })
+        })
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -434,6 +499,27 @@ pub(crate) mod tests {
         let (same, n0) = apply_overrides(&bytes, &[]).unwrap();
         assert_eq!(n0, 0);
         assert_eq!(Toc::parse(&same).unwrap().payload, toc.payload);
+    }
+
+    #[test]
+    fn second_mod_goes_loose() {
+        let bytes = sample();
+        let e = |n: &str, i: u32, s: u32| ModEntry { name: n.into(), index: i, size: s };
+        let mods = vec![
+            ("zz_cp_a.scd".to_string(), vec![e("textures/ui/bg.win.dds", 0, 10)], false),
+            ("zz_cp_b.scd".to_string(), vec![e("textures/ui/logo.dds", 5, 77), e("textures/ui/novo.dds", 6, 1)], true),
+        ];
+        let (out, n, loose) = apply_mixed(&bytes, &mods).unwrap();
+        assert_eq!(n, 2);
+        let t = Toc::parse(&out).unwrap();
+        assert_eq!(t.archives().unwrap().len(), 3, "só um .scd novo");
+        let logo = t.files().unwrap().into_iter().find(|f| f.key == "textures/ui/logo.dds").unwrap();
+        assert_eq!((logo.archive, logo.size, logo.win), (None, 77, false));
+        assert_eq!(loose, vec![LooseFile { mod_index: 1, entry: 5, path: "textures/ui/logo.dds".into(), size: 77 }]);
+        assert!(has_launcher_archives(&out));
+        assert!(!has_launcher_archives(&bytes));
+        let st = override_stats(&bytes, &mods.iter().map(|(a, b, _)| (a.clone(), b.clone())).collect::<Vec<_>>()).unwrap();
+        assert_eq!(st, vec![(1, false), (1, true)]);
     }
 
     /// Com `CP_REAL_TOC` apontando para o toc.win.bdf do jogo, confere leitura e regravação.

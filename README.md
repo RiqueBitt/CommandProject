@@ -76,13 +76,18 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
   intactas. Liga e desliga na biblioteca como qualquer mod; não afeta o multiplayer.
 - Se o jogo fechar com erro logo depois de abrir, o launcher avisa e oferece desligar os mods que
   estavam ativos naquela partida.
+- O jogo só aceita um `.scd` de mod a mais no índice de arquivos (com dois, fecha ao abrir). Quando
+  mais de um mod substitui arquivos do jogo, o maior (ex.: Texturas HD) fica como `.scd` e os outros
+  (ex.: Menu moderno) são colocados como arquivos soltos na pasta do jogo, que o launcher remove ao
+  desligar o mod.
 - A tela inicial do launcher tem a aba **Mods**, com o que está ligado no perfil e atalho para desligar.
 
 **Shaders (deixa o jogo mais bonito)**
 - Mod de pós-processamento próprio para o ReShade (DirectX 9): anti-serrilhado, nitidez adaptativa,
   relevo no terreno, bloom nas explosões e correção de cor. Presets **Natural**, **Vívido** e **Cinemático**.
 - O launcher instala o ReShade oficial com um clique (assinatura conferida) e troca o preset; é só
-  visual e não dessincroniza o multiplayer. Detalhes em [resources/shaders](resources/shaders/README.md).
+  visual e não dessincroniza o multiplayer. A faixa "Pressione Home para iniciar o tutorial" do ReShade some
+  sozinha (o launcher marca o tutorial como visto). Detalhes em [resources/shaders](resources/shaders/README.md).
 
 **Texturas HD (mais resolução e nitidez)**
 - No Estúdio, gera um mod a partir das texturas **originais do seu jogo**: tira os blocos da compressão

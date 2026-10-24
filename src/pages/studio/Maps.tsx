@@ -5,7 +5,7 @@ import { api, onProgress } from "../../lib/api";
 import { load, useStore } from "../../lib/store";
 import type { MapAssets, MapBuildResult, MaptkStatus, Terrain, TerrainPreview } from "../../lib/types";
 import {
-  applyRelief, decodeHeights, decorKind, EMPTY_EDITS, heightAt, meanInDisc, RELIEF_LABEL, reliefShape, reskinPaths, round1,
+  applyRelief, cutTester, decodeHeights, decorKind, EMPTY_EDITS, heightAt, meanInDisc, RELIEF_LABEL, reliefShape, reskinPaths, round1,
   type Edits, type GroundLayer, type PlacedProp, type Pt, type Relief, type Relief3D, type ReliefKind,
 } from "./mapEdit";
 import { GroundTextures, PropPicker } from "./MapDecor";
@@ -293,22 +293,23 @@ export default function Maps() {
     setPropBp((assets.props.find((p) => used.has(p.bp.toLowerCase())) ?? assets.props.find((p) => p.category === "Trees") ?? assets.props[0]).bp);
   }, [tool, propBp, assets, usedProps]);
 
+  // decorações do terreno que sobram depois dos cortes (e quantas saíram)
+  const [kept, removedCount] = useMemo(() => {
+    const bps = donor?.kinds ?? [];
+    const kinds = bps.map(decorKind);
+    const inCut = cutTester(edits.cuts);
+    const out: DecorPoint[] = [];
+    let removed = 0;
+    for (const [x, z, , yaw, scale, k] of donor?.props ?? []) {
+      if (inCut(x, z)) { removed++; continue; }
+      out.push({ x, z, yaw, scale, kind: kinds[k] ?? "other", bp: bps[k] });
+    }
+    return [out, removed] as const;
+  }, [donor, edits.cuts]);
   const decor: DecorPoint[] = useMemo(() => {
     if (!showDecor) return [];
-    const kinds = (donor?.kinds ?? []).map(decorKind);
-    const cut = edits.cuts;
-    const out: DecorPoint[] = [];
-    for (const [x, z, , yaw, scale, k] of donor?.props ?? []) {
-      if (cut.length && cut.some(([cx, cz, r]) => (x - cx) ** 2 + (z - cz) ** 2 <= r * r)) continue;
-      out.push({ x, z, yaw, scale, kind: kinds[k] ?? "other" });
-    }
-    for (const q of edits.props) out.push({ x: q.x, z: q.z, yaw: q.yaw, scale: q.scale, kind: decorKind(q.bp), added: true });
-    return out;
-  }, [donor, edits.cuts, edits.props, showDecor]);
-  const removedCount = useMemo(() => {
-    if (!edits.cuts.length || !donor) return 0;
-    return donor.props.reduce((n, [x, z]) => n + (edits.cuts.some(([cx, cz, r]) => (x - cx) ** 2 + (z - cz) ** 2 <= r * r) ? 1 : 0), 0);
-  }, [donor, edits.cuts]);
+    return kept.concat(edits.props.map((q) => ({ x: q.x, z: q.z, yaw: q.yaw, scale: q.scale, kind: decorKind(q.bp), bp: q.bp, added: true })));
+  }, [kept, edits.props, showDecor]);
 
   const spec = useMemo(() => {
     if (!terrain) return null;
