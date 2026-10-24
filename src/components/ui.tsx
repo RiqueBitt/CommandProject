@@ -199,9 +199,13 @@ export function CopyButton({ text, label = "Copiar" }: { text: string; label?: s
   const [done, setDone] = useState(false);
   return (
     <button className="btn sm" onClick={async () => {
-      await navigator.clipboard.writeText(text);
-      setDone(true);
-      setTimeout(() => setDone(false), 1600);
+      try {
+        await navigator.clipboard.writeText(text);
+        setDone(true);
+        setTimeout(() => setDone(false), 1600);
+      } catch {
+        useStore.getState().toast("error", "Não deu para copiar. Selecione o texto e use Ctrl+C.");
+      }
     }}><Icon name={done ? "check" : "content_copy"} /> {done ? "Copiado" : label}</button>
   );
 }

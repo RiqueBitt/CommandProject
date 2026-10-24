@@ -3,7 +3,6 @@ import { CommandPalette, Rail, SystemBar } from "./components/Shell";
 import { Toasts } from "./components/ui";
 import { api, onEvent } from "./lib/api";
 import { errorText, useStore } from "./lib/store";
-import { checkAppUpdate } from "./lib/update";
 import Home from "./pages/Home";
 import Hub from "./pages/Hub";
 import Library from "./pages/Library";
@@ -28,11 +27,12 @@ export default function App() {
         useStore.setState({ info });
         await refresh();
         if (useStore.getState().settings?.checkAppUpdates) {
-          const up = await checkAppUpdate(info.version);
-          if (up) {
+          // em segundo plano: sem internet ou GitHub lento não atrasa a abertura
+          void api.appUpdateCheck().then((up) => {
+            if (!up) return;
             useStore.setState({ appUpdate: up });
-            toast("info", `CommandProject ${up.version} disponível — veja em Configurações.`);
-          }
+            toast("info", `CommandProject ${up.version} disponível. Em Configurações → Atualizações é só clicar em "Atualizar agora".`);
+          }).catch(() => {});
         }
       } catch (e) {
         toast("error", errorText(e));
@@ -45,6 +45,8 @@ export default function App() {
         void refresh();
       }),
       onEvent("cp://game-started", () => toast("info", "Jogo aberto. Os arquivos serão restaurados quando ele fechar.")),
+      onEvent<number>("cp://memory-limited", (mb) => toast("ok", `Memória do jogo limitada a ${(mb / 1024).toLocaleString("pt-BR")} GB.`)),
+      onEvent<string>("cp://memory-limit-failed", (e) => toast("error", `Não deu para aplicar o limite de memória: ${e}. O jogo está usando até 4 GB.`)),
     ];
     return () => offs.forEach((p) => p.then((off) => off()));
   }, [refresh, toast]);

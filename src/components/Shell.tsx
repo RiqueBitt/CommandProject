@@ -1,7 +1,48 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, openUrl, windowAction } from "../lib/api";
-import { useStore, type Page } from "../lib/store";
+import { switchProfile, useStore, type Page } from "../lib/store";
 import { Field, hueOf, Icon, Modal, monogram, Tip } from "./ui";
+
+/** Tarefas demoradas: aparecem na barra do topo em qualquer tela, com o progresso. */
+const LONG_TASKS: Record<string, { label: string; page: Page; tab?: string }> = {
+  hd: { label: "Texturas HD", page: "studio", tab: "hd" },
+  theme: { label: "Menu moderno", page: "library" },
+  map: { label: "Gerando mapa", page: "studio", tab: "maps" },
+  reshade: { label: "Instalando ReShade", page: "library" },
+  shaders: { label: "Shaders", page: "library" },
+  apply: { label: "Aplicando mods", page: "home" },
+  purge: { label: "Restaurando o jogo", page: "home" },
+  launch: { label: "Abrindo o jogo", page: "home" },
+  update: { label: "Baixando atualização", page: "settings" },
+  link: { label: "Baixando mod", page: "library" },
+  skin: { label: "Skin de interface", page: "studio" },
+};
+
+function TaskDock() {
+  const busy = useStore((s) => s.busy);
+  const progress = useStore((s) => s.progress);
+  const { go, setStudioTab } = useStore.getState();
+  const items = Object.keys(busy)
+    .map((k) => {
+      const meta = LONG_TASKS[k] ?? (k.startsWith("hub:") ? { label: "Baixando do hub", page: "hub" as Page } : null);
+      if (!meta) return null;
+      const p = progress[k];
+      const pct = p && p.total > 0 ? Math.min(100, Math.round((p.step / p.total) * 100)) : null;
+      return { k, meta, pct, msg: p?.message };
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x);
+  if (!items.length) return null;
+  const first = items[0];
+  return (
+    <button className="task-dock" title={items.map((i) => `${i.meta.label}${i.msg ? `: ${i.msg}` : ""}`).join("\n")}
+      onClick={() => { if (first.meta.tab) setStudioTab(first.meta.tab); go(first.meta.page); }}>
+      <span className="spin"><Icon name="autorenew" size={16} /></span>
+      <span className="lbl">{first.meta.label}{items.length > 1 ? ` +${items.length - 1}` : ""}</span>
+      {first.pct !== null && <span className="pct">{first.pct}%</span>}
+      <span className="mini-bar"><i style={{ width: `${first.pct ?? 35}%` }} className={first.pct === null ? "ind" : ""} /></span>
+    </button>
+  );
+}
 
 export function SystemBar() {
   const setPalette = useStore((s) => s.setPalette);
@@ -9,6 +50,7 @@ export function SystemBar() {
   return (
     <header className="systembar">
       <div className="drag" data-tauri-drag-region />
+      <TaskDock />
       <button className="sys-btn" onClick={() => setPalette(true)}>
         <Icon name="search" size={19} /> Ação rápida <span className="kbd">Ctrl+K</span>
       </button>
@@ -47,7 +89,7 @@ export function Rail() {
   const page = useStore((s) => s.page);
   const settings = useStore((s) => s.settings);
   const appUpdate = useStore((s) => s.appUpdate);
-  const { back, go, run, refresh } = useStore.getState();
+  const { back } = useStore.getState();
   const [creating, setCreating] = useState(false);
   const nick = settings?.nickname?.trim() || "Você";
 
@@ -65,11 +107,7 @@ export function Rail() {
           const active = p.id === profiles.active;
           return (
             <RailItem key={p.id} label={`${p.name} (${p.mods.filter((m) => m.enabled).length} mods)`} selected={active && (page === "home" || page === "library")}
-              onClick={async () => {
-                if (!active) await run("profile", () => api.setActiveProfile(p.id));
-                await refresh();
-                go("home");
-              }}>
+              onClick={() => void switchProfile(p.id, p.name, active)}>
               <span className="instance-tile" style={{ ["--tile-a" as string]: `hsl(${h} 42% 38%)`, ["--tile-b" as string]: `hsl(${(h + 35) % 360} 45% 18%)` }}>
                 {monogram(p.name)}
               </span>
@@ -92,8 +130,10 @@ export function Rail() {
 export function NewProfile({ onClose }: { onClose: () => void }) {
   const profiles = useStore((s) => s.profiles);
   const { run, refresh, go } = useStore.getState();
+  const busy = useStore((s) => s.busy.newprofile || s.busy.activate);
   const [name, setName] = useState("");
   const [copy, setCopy] = useState(false);
+  const taken = profiles?.profiles.some((p) => p.name.trim().toLowerCase() === name.trim().toLowerCase());
   return (
     <Modal title="Criar perfil" icon="add" onClose={onClose}>
       <form className="col" style={{ gap: 14 }} onSubmit={async (e) => {
@@ -107,9 +147,9 @@ export function NewProfile({ onClose }: { onClose: () => void }) {
         onClose();
       }}>
         <p className="muted small">Cada perfil guarda quais mods ficam ligados e em que ordem — como uma instância do jogo.</p>
-        <Field label="Nome"><input className="input" value={name} placeholder="Ex.: Liga 2v2" onChange={(e) => setName(e.target.value)} /></Field>
+        <Field label="Nome" hint={taken ? "Já existe um perfil com esse nome." : undefined}><input className="input" value={name} placeholder="Ex.: Liga 2v2" onChange={(e) => setName(e.target.value)} /></Field>
         <label className="row small"><input type="checkbox" checked={copy} onChange={(e) => setCopy(e.target.checked)} /> Começar com os mods do perfil ativo</label>
-        <footer><button type="button" className="btn text" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!name.trim()}>Criar</button></footer>
+        <footer><button type="button" className="btn text" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!name.trim() || busy || taken}>{busy ? "Criando…" : "Criar"}</button></footer>
       </form>
     </Modal>
   );
@@ -160,11 +200,14 @@ export function CommandPalette() {
       nav("settings", "Configurações", "settings"),
       ...(profiles?.profiles ?? []).map<Cmd>((p) => ({
         id: "profile-" + p.id, label: `Usar o perfil ${p.name}`, icon: "swap_horiz", hint: "perfil",
-        run: async () => { await run("profile", () => api.setActiveProfile(p.id)); await refresh(); go("home"); },
+        run: async () => { await switchProfile(p.id, p.name); },
       })),
       ...mods.map<Cmd>((m) => ({
         id: "mod-" + m.manifest.id, label: `${m.enabled ? "Desligar" : "Ligar"} ${m.manifest.name}`, icon: m.enabled ? "toggle_on" : "toggle_off", hint: "mod",
-        run: async () => { await run("toggle", () => api.setModEnabled(m.manifest.id, !m.enabled)); await refreshMods(); },
+        run: async () => {
+          const ok = await run("toggle:" + m.manifest.id, () => api.setModEnabled(m.manifest.id, !m.enabled), `${m.manifest.name} ${m.enabled ? "desligado" : "ligado"}.`);
+          if (ok !== undefined) await refreshMods();
+        },
       })),
     ];
     const t = q.trim().toLowerCase();

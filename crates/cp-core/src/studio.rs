@@ -266,6 +266,7 @@ impl Studio {
                 url: None,
                 hub_id: None,
             }),
+            move_source: false,
         };
         library.import(&out, &opts)
     }

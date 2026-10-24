@@ -83,13 +83,16 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
   desenha muitas imagens dela no tamanho da própria textura).
 - Calcula antes quanto de memória de vídeo as texturas vão ocupar e ajusta sozinho para caber.
 
-**Modo 4 GB de memória**
-- O SC2 é um programa de 32 bits (2 GB de RAM). O launcher liga a flag *Large Address Aware* no
-  executável, que passa a usar até 4 GB num Windows 64 bits. Guarda o original, desfaz com um clique
-  e reaplica sozinho se a Steam restaurar o arquivo. (Transformar o jogo em 64 bits de verdade
-  exigiria recompilar o motor, cujo código não é público.)
+**Memória do jogo (2 a 4 GB)**
+- O SC2 é um programa de 32 bits: sozinho usa até 2 GB, e o máximo possível para ele é 4 GB.
+  Em Configurações você escolhe o teto (2, 2,5, 3, 3,5 ou 4 GB). Acima de 2 GB o launcher liga a flag
+  *Large Address Aware* no executável (guarda o original e reaplica se a Steam restaurar o arquivo);
+  entre 2 e 4 GB, quando o jogo abre, ele entra num *Job Object* do Windows com o limite escolhido.
+  A tela mostra a RAM do PC e sugere um valor; as Texturas HD calculam quanto cabe nesse teto.
+  (Transformar o jogo em 64 bits de verdade exigiria recompilar o motor, cujo código não é público.)
 
-**Atualizações do app**: avisa quando sai uma versão nova nas Releases do GitHub (dá para desligar).
+**Atualizações do app**: avisa quando sai uma versão nova nas Releases do GitHub e atualiza com um
+clique (baixa com retomada, confere o SHA-256 publicado pelo GitHub, instala e reabre sozinho).
 
 | | |
 |---|---|

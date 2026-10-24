@@ -77,9 +77,12 @@ export default function Home() {
   };
   const share = async () => {
     const code = await run("code", () => api.exportSyncCode());
-    if (code) {
+    if (!code) return;
+    try {
       await navigator.clipboard.writeText(code);
       useStore.getState().toast("ok", "Código do perfil copiado. Seu amigo cola em Multiplayer → Códigos.");
+    } catch {
+      useStore.getState().toast("error", "Não deu para copiar o código. Tente de novo com a janela em foco.");
     }
   };
 
@@ -90,7 +93,10 @@ export default function Home() {
           <h1>Supreme Commander 2</h1>
           <div className="card pad col" style={{ maxWidth: 720 }}>
             <Empty icon="travel_explore" title="Onde está o jogo?"
-              action={<div className="row"><button className="btn primary" onClick={chooseFolder}><Icon name="folder_open" /> Escolher pasta</button><button className="btn text" onClick={() => run("game", () => api.setGamePath(null)).then(refresh)}><Icon name="refresh" /> Procurar de novo</button></div>}>
+              action={<div className="row"><button className="btn primary" onClick={chooseFolder}><Icon name="folder_open" /> Escolher pasta</button><button className="btn text" disabled={busy.game} onClick={async () => {
+                const g = await run("game", () => api.setGamePath(null), (x) => (x ? "Jogo encontrado." : "Ainda não achei o jogo nas pastas da Steam e da GOG. Use \"Escolher pasta\"."));
+                if (g !== undefined) await refresh();
+              }}><Icon name="refresh" /> {busy.game ? "Procurando…" : "Procurar de novo"}</button></div>}>
               Procuramos nas bibliotecas da Steam e na GOG. Se o jogo está em outra pasta, aponte para ela — pode ser a pasta do jogo, a gamedata ou a bin.
             </Empty>
           </div>
@@ -158,9 +164,9 @@ export default function Home() {
             </div>
             <div className="icon-actions">
               <button className="btn icon-btn" title="Renomear perfil" aria-label="Renomear perfil" onClick={() => setRename(true)}><Icon name="edit" /></button>
-              <button className="btn icon-btn" title="Conflitos" aria-label="Conflitos" onClick={async () => setConflicts((await run("conflicts", () => api.conflicts())) ?? null)}><Icon name="compare_arrows" /></button>
-              <button className="btn icon-btn" title="Abrir a pasta do jogo" aria-label="Abrir a pasta do jogo" onClick={() => api.openPath(d.game!.gamedata)}><Icon name="folder" /></button>
-              <button className="btn icon-btn" title="Copiar código do perfil" aria-label="Copiar código do perfil" onClick={share}><Icon name="share" /></button>
+              <button className="btn icon-btn" title="Conflitos" aria-label="Conflitos" disabled={busy.conflicts} onClick={async () => setConflicts((await run("conflicts", () => api.conflicts())) ?? null)}><Icon name={busy.conflicts ? "hourglass_top" : "compare_arrows"} /></button>
+              <button className="btn icon-btn" title="Abrir a pasta do jogo" aria-label="Abrir a pasta do jogo" onClick={() => void run("open", () => api.openPath(d.game!.gamedata))}><Icon name="folder" /></button>
+              <button className="btn icon-btn" title="Copiar código do perfil" aria-label="Copiar código do perfil" disabled={busy.code} onClick={share}><Icon name={busy.code ? "hourglass_top" : "share"} /></button>
             </div>
           </div>
 

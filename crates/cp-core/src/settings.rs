@@ -39,6 +39,8 @@ pub struct Settings {
     pub showcase_unit: Option<String>,
     /// Mostrar o modelo 3D na tela inicial.
     pub showcase: bool,
+    /// Teto de memória do jogo em MB (2048 a 4096). `None` = segue `keep_large_address`.
+    pub memory_limit_mb: Option<u32>,
 }
 
 impl Default for Settings {
@@ -59,11 +61,21 @@ impl Default for Settings {
             keep_large_address: false,
             showcase_unit: None,
             showcase: true,
+            memory_limit_mb: None,
         }
     }
 }
 
 impl Settings {
+    /// Teto de memória em vigor (MB).
+    pub fn memory_mb(&self) -> u32 {
+        match self.memory_limit_mb {
+            Some(mb) => crate::memory::normalize_mb(mb),
+            None if self.keep_large_address => crate::memory::MAX_MB,
+            None => crate::memory::MIN_MB,
+        }
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         read_json_or_default(path)
     }

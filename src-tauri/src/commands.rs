@@ -64,6 +64,21 @@ where
     .map_err(err)?
 }
 
+/// Roda `f` fora da thread principal e SEM travar o workspace: para trabalho pesado que só lê
+/// arquivos do jogo (gerar texturas, prévias, mapas). Os outros botões continuam respondendo.
+async fn off_lock<T, F>(f: F) -> R<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> cp_core::Result<T> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f).await.map_err(err)?.map_err(err)
+}
+
+/// Arquivos originais do jogo (na ordem de montagem), lidos com o workspace travado só por um instante.
+async fn sources(ws: &Arc<Mutex<Workspace>>) -> R<Vec<PathBuf>> {
+    with_ws(ws, |ws| ws.stock_sources()).await
+}
+
 fn data_url(mime: &str, bytes: &[u8]) -> String {
     format!(
         "data:{mime};base64,{}",
@@ -133,6 +148,10 @@ pub async fn save_settings(state: State<'_, AppState>, settings: Settings) -> R<
             hub::check_url(u)?;
         }
         settings.nickname = settings.nickname.trim().chars().take(20).collect();
+        // memória é controlada por memory_set/laa_set (mexem no executável): a tela de
+        // configurações nunca sobrescreve com um valor antigo
+        settings.keep_large_address = ws.settings.keep_large_address;
+        settings.memory_limit_mb = ws.settings.memory_limit_mb;
         ws.settings = settings;
         ws.save_settings()?;
         ws.refresh_game();
@@ -341,7 +360,7 @@ pub struct LaunchResult {
 #[tauri::command]
 pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<LaunchResult> {
     let app2 = app.clone();
-    let (plan, applied, restore) = with_ws(&state.ws, move |ws| {
+    let (plan, applied, restore, memory_mb) = with_ws(&state.ws, move |ws| {
         if let Err(e) = ws.ensure_large_address() {
             eprintln!("modo 4 GB não reaplicado: {e}");
         }
@@ -350,7 +369,7 @@ pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<Launch
         } else {
             None
         };
-        Ok((ws.launch_plan()?, applied, ws.settings.restore_on_exit))
+        Ok((ws.launch_plan()?, applied, ws.settings.restore_on_exit, ws.settings.memory_mb()))
     })
     .await?;
     match &plan {
@@ -358,6 +377,28 @@ pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<Launch
         LaunchPlan::Exe { .. } => {
             cp_core::game::spawn_exe(&plan).map_err(err)?;
         }
+    }
+    if cp_core::memory::needs_job_limit(memory_mb) {
+        // teto entre 2 e 4 GB: aplicado assim que o processo do jogo aparecer
+        let app5 = app.clone();
+        tauri::async_runtime::spawn(async move {
+            for _ in 0..120 {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                let r = tauri::async_runtime::spawn_blocking(move || cp_core::memory::limit_running_game(memory_mb)).await;
+                match r {
+                    Ok(Ok(_)) => {
+                        let _ = app5.emit("cp://memory-limited", memory_mb);
+                        return;
+                    }
+                    Ok(Err(cp_core::Error::Other(m))) if m.contains("não está aberto") => continue,
+                    Ok(Err(e)) => {
+                        let _ = app5.emit("cp://memory-limit-failed", e.to_string());
+                        return;
+                    }
+                    Err(_) => return,
+                }
+            }
+        });
     }
     if restore {
         let ws = state.ws.clone();
@@ -1008,8 +1049,9 @@ pub async fn ui_skin_targets(state: State<'_, AppState>, opts: UiSkinOptions) ->
 
 #[tauri::command]
 pub async fn ui_skin_preview(state: State<'_, AppState>, entry: String, adjust: ColorAdjust) -> R<TextureView> {
-    with_ws(&state.ws, move |ws| {
-        for src in ws.stock_sources()?.iter().rev() {
+    let srcs = sources(&state.ws).await?;
+    off_lock(move || {
+        for src in srcs.iter().rev() {
             if let Ok(d) = cp_core::scd::Scd::open(src)?.read(&entry) {
                 return texture_view(&d, Some(&adjust));
             }
@@ -1055,6 +1097,7 @@ pub async fn build_ui_skin(
             )),
             multiplayer: Some(cp_core::manifest::MpPolicy::Local),
             replace: true,
+            move_source: true,
             ..Default::default()
         };
         let m = ws.import_mod(&res.archive, &import, enable)?;
@@ -1093,6 +1136,12 @@ pub async fn maptk_status(state: State<'_, AppState>) -> R<MaptkStatus> {
     .await
 }
 
+/// Python do toolkit, gamedata e pasta de saída: pega com o workspace travado e devolve,
+/// para o toolkit rodar sem bloquear o resto do launcher.
+async fn map_ctx(ws: &Arc<Mutex<Workspace>>) -> R<(cp_core::maptk::Bridge, PathBuf, PathBuf)> {
+    with_ws(ws, |ws| Ok((ws.map_bridge()?, ws.game()?.gamedata.clone(), ws.maps_out_dir()))).await
+}
+
 /// Comandos rápidos do toolkit: `ping`, `catalog`, `preview`, `examples`.
 #[tauri::command]
 pub async fn maptk_run(
@@ -1104,8 +1153,9 @@ pub async fn maptk_run(
     if !matches!(command.as_str(), "ping" | "catalog" | "preview" | "examples") {
         return Err("comando de mapa desconhecido".into());
     }
-    with_ws(&state.ws, move |ws| {
-        let mut out = ws.run_map_tool(&command, &input, &mut |ev| {
+    let (bridge, gamedata, out_dir) = map_ctx(&state.ws).await?;
+    off_lock(move || {
+        let mut out = bridge.run(&command, &input, &gamedata, &out_dir, &mut |ev| {
             if let BridgeEvent::Progress { message, .. } = ev {
                 emit_progress(&app, "maptk", 0, 0, message.clone());
             }
@@ -1129,9 +1179,10 @@ pub async fn maptk_terrain3d(
     terrain: String,
     size: Option<u32>,
 ) -> R<serde_json::Value> {
-    with_ws(&state.ws, move |ws| {
+    let (bridge, gamedata, out_dir) = map_ctx(&state.ws).await?;
+    off_lock(move || {
         let input = serde_json::json!({ "terrain": terrain, "size": size.unwrap_or(256).clamp(32, 512) });
-        let mut out = ws.run_map_tool("terrain3d", &input, &mut |ev| {
+        let mut out = bridge.run("terrain3d", &input, &gamedata, &out_dir, &mut |ev| {
             if let BridgeEvent::Progress { message, .. } = ev {
                 emit_progress(&app, "maptk", 0, 0, message.clone());
             }
@@ -1161,15 +1212,19 @@ pub struct MapBuild {
 
 #[tauri::command]
 pub async fn maptk_build(app: AppHandle, state: State<'_, AppState>, spec: serde_json::Value) -> R<MapBuild> {
-    with_ws(&state.ws, move |ws| {
+    let (bridge, gamedata, out_dir) = map_ctx(&state.ws).await?;
+    let result = off_lock(move || {
         let mut n = 0;
-        let result = ws.run_map_tool("build", &serde_json::json!({ "spec": spec }), &mut |ev| match ev {
+        bridge.run("build", &serde_json::json!({ "spec": spec }), &gamedata, &out_dir, &mut |ev| match ev {
             BridgeEvent::Progress { message, .. } | BridgeEvent::Log { message } => {
                 n += 1;
                 emit_progress(&app, "map", n, 0, message.clone());
             }
             _ => {}
-        })?;
+        })
+    })
+    .await?;
+    with_ws(&state.ws, move |ws| {
         let scd = result
             .get("scd")
             .and_then(|s| s.as_str())
@@ -1241,14 +1296,13 @@ pub async fn shaders_install_reshade(
     })
     .await?;
     let app2 = app.clone();
-    let mut step = 0usize;
-    cp_core::shaders::install_reshade(&exe, &cache, &mut move |m| {
-        step += 1;
-        emit_progress(&app2, "reshade", step, 4, m);
+    cp_core::shaders::install_reshade(&exe, &cache, &mut move |m, f| {
+        let step = f.map(|f| (f * 1000.0) as usize).unwrap_or(0);
+        emit_progress(&app2, "reshade", step, if f.is_some() { 1000 } else { 0 }, m);
     })
     .await
     .map_err(err)?;
-    emit_progress(&app, "reshade", 4, 4, "Ativando os shaders");
+    emit_progress(&app, "reshade", 980, 1000, "Ativando os shaders");
     with_ws(&state.ws, move |ws| {
         ws.shaders()?.apply(Some(preset.as_deref().unwrap_or("Vivido")))
     })
@@ -1259,7 +1313,8 @@ pub async fn shaders_install_reshade(
 
 #[tauri::command]
 pub async fn enhance_groups(state: State<'_, AppState>) -> R<Vec<cp_core::enhance::GroupSummary>> {
-    with_ws(&state.ws, |ws| cp_core::enhance::groups(&ws.stock_sources()?)).await
+    let src = sources(&state.ws).await?;
+    off_lock(move || cp_core::enhance::groups(&src)).await
 }
 
 #[derive(Serialize)]
@@ -1310,17 +1365,22 @@ pub async fn build_enhance(
     opts: cp_core::enhance::EnhanceOptions,
     enable: bool,
 ) -> R<Manifest> {
-    with_ws(&state.ws, move |ws| {
-        let dest = ws.data_dir.join("cache").join("hd").join("zz_cp_texturas_hd.scd");
+    let (srcs, data_dir) = with_ws(&state.ws, |ws| Ok((ws.stock_sources()?, ws.data_dir.clone()))).await?;
+    let opts2 = opts.clone();
+    let res = off_lock(move || {
+        let dest = data_dir.join("cache").join("hd").join("zz_cp_texturas_hd.scd");
         let started = std::time::Instant::now();
-        let res = cp_core::enhance::build(&ws.stock_sources()?, &opts, &dest, &mut |i, n, name| {
+        cp_core::enhance::build(&srcs, &opts2, &dest, &mut |i, n, name| {
             if i % 4 == 0 || i == n {
                 let secs = started.elapsed().as_secs_f64();
                 let left = if i > 8 { (secs / i as f64 * (n - i) as f64) as u64 } else { 0 };
                 let eta = if left > 0 { format!(" (faltam ~{}:{:02})", left / 60, left % 60) } else { String::new() };
                 emit_progress(&app, "hd", i, n, format!("{name}{eta}"));
             }
-        })?;
+        })
+    })
+    .await?;
+    with_ws(&state.ws, move |ws| {
         let mb = |b: u64| b as f64 / 1_048_576.0;
         let import = ImportOptions {
             id: Some("texturas-hd".into()),
@@ -1339,6 +1399,7 @@ pub async fn build_enhance(
             )),
             multiplayer: Some(cp_core::manifest::MpPolicy::Local),
             replace: true,
+            move_source: true,
             ..Default::default()
         };
         let m = ws.import_mod(&res.archive, &import, enable)?;
@@ -1366,9 +1427,9 @@ pub async fn menu_theme_preview(
     state: State<'_, AppState>,
     opts: cp_core::menu_theme::ThemeOptions,
 ) -> R<Vec<ThemePreview>> {
-    with_ws(&state.ws, move |ws| {
-        let mut sources: Vec<_> = ws
-            .stock_sources()?
+    let srcs = sources(&state.ws).await?;
+    off_lock(move || {
+        let mut sources: Vec<_> = srcs
             .into_iter()
             .rev()
             .filter_map(|p| cp_core::scd::Scd::open(&p).ok())
@@ -1405,14 +1466,25 @@ pub async fn build_menu_theme(
     opts: cp_core::menu_theme::ThemeOptions,
     enable: bool,
 ) -> R<Manifest> {
-    with_ws(&state.ws, move |ws| {
-        let dest = ws.data_dir.join("cache").join("theme").join("zz_cp_menu_moderno.scd");
-        let fonts = if opts.fonts { ws.fonts_dir()? } else { std::path::PathBuf::new() };
-        let res = cp_core::menu_theme::build(&ws.stock_sources()?, &fonts, &opts, &dest, &mut |i, n, name| {
+    let (srcs, data_dir, fonts) = with_ws(&state.ws, {
+        let want_fonts = opts.fonts;
+        move |ws| {
+            let fonts = if want_fonts { ws.fonts_dir()? } else { PathBuf::new() };
+            Ok((ws.stock_sources()?, ws.data_dir.clone(), fonts))
+        }
+    })
+    .await?;
+    let opts2 = opts.clone();
+    let res = off_lock(move || {
+        let dest = data_dir.join("cache").join("theme").join("zz_cp_menu_moderno.scd");
+        cp_core::menu_theme::build(&srcs, &fonts, &opts2, &dest, &mut |i, n, name| {
             if i % 8 == 0 || i == n {
                 emit_progress(&app, "theme", i, n, name.to_string());
             }
-        })?;
+        })
+    })
+    .await?;
+    with_ws(&state.ws, move |ws| {
         let import = ImportOptions {
             id: Some("menu-moderno".into()),
             name: Some(opts.name.clone()),
@@ -1427,6 +1499,7 @@ pub async fn build_menu_theme(
             )),
             multiplayer: Some(cp_core::manifest::MpPolicy::Local),
             replace: true,
+            move_source: true,
             ..Default::default()
         };
         let m = ws.import_mod(&res.archive, &import, enable)?;
@@ -1454,10 +1527,106 @@ pub async fn laa_set(state: State<'_, AppState>, enabled: bool) -> R<cp_core::la
         let l = ws.laa()?;
         let st = if enabled { l.enable()? } else { l.disable()? };
         ws.settings.keep_large_address = enabled;
+        ws.settings.memory_limit_mb = Some(if enabled { cp_core::memory::MAX_MB } else { cp_core::memory::MIN_MB });
         ws.save_settings()?;
         Ok(st)
     })
     .await
+}
+
+// ---------------------------------------------------------------- atualização do launcher
+
+#[tauri::command]
+pub async fn app_update_check() -> R<Option<cp_core::update::AppUpdate>> {
+    cp_core::update::check(env!("CARGO_PKG_VERSION")).await.map_err(err)
+}
+
+/// Baixa o instalador da versão nova (com progresso e retomada), abre em modo passivo
+/// (só a barra de progresso, reabre o launcher no fim) e fecha o launcher para ele trabalhar.
+#[tauri::command]
+pub async fn app_update_install(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    update: cp_core::update::AppUpdate,
+) -> R<()> {
+    let dir = with_ws(&state.ws, |ws| Ok(ws.data_dir.join("cache").join("update"))).await?;
+    let app2 = app.clone();
+    let version = update.version.clone();
+    let setup = cp_core::update::download(&update, &dir, &mut move |p| {
+        let (step, total) = match p.fraction() {
+            Some(f) => ((f * 1000.0) as usize, 1000),
+            None => (0, 0),
+        };
+        emit_progress(&app2, "update", step, total, format!("Baixando a versão {version}: {}", p.describe()));
+    })
+    .await
+    .map_err(err)?;
+    emit_progress(&app, "update", 1000, 1000, "Abrindo o instalador");
+    #[cfg(windows)]
+    {
+        std::process::Command::new(&setup)
+            .args(["/P", "/R", "/UPDATE"])
+            .spawn()
+            .map_err(|e| format!("não consegui abrir o instalador: {e}"))?;
+        // o instalador espera o launcher fechar
+        let app3 = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            app3.exit(0);
+        });
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        Err(format!("instalador baixado em {}, mas a instalação automática é só no Windows", setup.display()))
+    }
+}
+
+// ---------------------------------------------------------------- memória do jogo
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryStatus {
+    system: cp_core::memory::SystemMemory,
+    limit_mb: u32,
+    recommended_mb: u32,
+    choices: Vec<u32>,
+    laa: Option<cp_core::laa::LaaStatus>,
+}
+
+#[tauri::command]
+pub async fn memory_status(state: State<'_, AppState>) -> R<MemoryStatus> {
+    with_ws(&state.ws, |ws| {
+        let system = cp_core::memory::system_memory();
+        Ok(MemoryStatus {
+            recommended_mb: cp_core::memory::recommended_mb(system.total_mb),
+            system,
+            limit_mb: ws.settings.memory_mb(),
+            choices: cp_core::memory::CHOICES_MB.to_vec(),
+            laa: ws.laa().ok().and_then(|l| l.status().ok()),
+        })
+    })
+    .await
+}
+
+/// Define quanta memória o jogo pode usar: 2 GB (original) até 4 GB (máximo de um jogo de 32 bits).
+#[tauri::command]
+pub async fn memory_set(state: State<'_, AppState>, limit_mb: u32) -> R<MemoryStatus> {
+    let ws_arc = state.ws.clone();
+    with_ws(&ws_arc, move |ws| {
+        if cp_core::game::is_running() {
+            return Err(cp_core::Error::Other("feche o jogo para mudar a memória".into()));
+        }
+        let mb = cp_core::memory::normalize_mb(limit_mb);
+        let large = cp_core::memory::needs_large_address(mb);
+        let l = ws.laa()?;
+        if large { l.enable()? } else { l.disable()? };
+        ws.settings.keep_large_address = large;
+        ws.settings.memory_limit_mb = Some(mb);
+        ws.save_settings()
+    })
+    .await?;
+    memory_status(state).await
 }
 
 // ---------------------------------------------------------------- vitrine 3D da tela inicial
@@ -1475,17 +1644,19 @@ pub struct Showcase {
 /// Sem `unit`, usa a escolha salva ou o Comandante (ACU). `None` se o jogo não tem modelos.
 #[tauri::command]
 pub async fn showcase(state: State<'_, AppState>, unit: Option<String>) -> R<Option<Showcase>> {
-    with_ws(&state.ws, move |ws| {
+    let found = with_ws(&state.ws, |ws| {
         if ws.game().is_err() {
             return Ok(None);
         }
-        let models = ws.unit_models()?;
+        Ok(Some((ws.unit_models()?, ws.settings.showcase_unit.clone())))
+    })
+    .await?;
+    let Some((models, saved)) = found else { return Ok(None) };
+    off_lock(move || {
         if models.is_empty() {
             return Ok(None);
         }
-        let wanted = unit
-            .or_else(|| ws.settings.showcase_unit.clone())
-            .map(|u| u.to_ascii_lowercase());
+        let wanted = unit.or(saved).map(|u| u.to_ascii_lowercase());
         let pick = wanted
             .filter(|u| models.contains_key(u))
             .or_else(|| {

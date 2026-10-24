@@ -18,6 +18,7 @@ export const CATEGORY_ICON: Record<Category, string> = {
 export default function Library() {
   const mods = useStore((s) => s.mods);
   const d = useStore((s) => s.dashboard);
+  const busyConflicts = useStore((s) => s.busy.conflicts);
   const { run, refreshMods, go } = useStore.getState();
   const [query, setQuery] = useState("");
   const [cat, setCat] = useState<Category | "all" | "on">("all");
@@ -84,7 +85,7 @@ export default function Library() {
             <p className="muted" style={{ marginTop: 6 }}>Ligue, desligue e arraste para mudar a ordem de carga — quando dois mods trazem o mesmo arquivo, vale o que estiver mais abaixo.</p>
           </div>
           <div className="row">
-            <button className="btn text" onClick={async () => setConflicts((await run("conflicts", () => api.conflicts())) ?? null)}><Icon name="compare_arrows" /> Conflitos</button>
+            <button className="btn text" disabled={busyConflicts} onClick={async () => setConflicts((await run("conflicts", () => api.conflicts())) ?? null)}><Icon name={busyConflicts ? "hourglass_top" : "compare_arrows"} /> {busyConflicts ? "Analisando…" : "Conflitos"}</button>
             <button className="btn text" onClick={() => setLink(true)}><Icon name="link" /> De um link</button>
             <button className="btn" onClick={() => importFrom(true)}><Icon name="folder_open" /> Pasta</button>
             <button className="btn primary" onClick={() => importFrom(false)}><Icon name="add" /> Importar .scd ou .zip</button>

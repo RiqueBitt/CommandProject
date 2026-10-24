@@ -48,7 +48,7 @@ export function HomeShowcase() {
     if (!settings) return;
     setPicker(false);
     cached = null;
-    await run("settings", () => api.saveSettings({ ...settings, showcaseUnit: unit }));
+    await run("showcase-unit", () => api.saveSettings({ ...settings, showcaseUnit: unit }), unit ? `Carregando ${unitLabel(unit)}…` : "Voltando ao Comandante…");
     await refresh();
   };
 
@@ -140,7 +140,7 @@ export function EnhancementsCard() {
     {
       icon: "memory", title: "Memória", on: !!laa?.enabled,
       value: laa ? (laa.enabled ? "Até 4 GB" : "Até 2 GB") : "—",
-      action: () => go("settings"),
+      action: () => useStore.getState().openSettings("jogo"),
     },
   ];
   return (

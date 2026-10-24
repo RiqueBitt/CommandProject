@@ -76,7 +76,7 @@ export default function Multiplayer() {
           </div>
           {tab === "rooms" ? (
             !base ? (
-              <div className="card"><Empty icon="hub" title="Conecte a um servidor da comunidade" action={<button className="btn primary" onClick={() => useStore.getState().go("settings")}>Configurar servidor</button>}>
+              <div className="card"><Empty icon="hub" title="Conecte a um servidor da comunidade" action={<button className="btn primary" onClick={() => useStore.getState().openSettings("comunidade")}>Configurar servidor</button>}>
                 O servidor (cp-server) mostra as salas abertas, tem chat e pode publicar um hub de mods. Qualquer pessoa pode hospedar um.
               </Empty></div>
             ) : nick.length < 2 ? (
@@ -196,7 +196,7 @@ function Rooms({ base, nick, joined, onJoined }: { base: string; nick: string; j
       </div>
       {err ? (
         <div className="card"><Empty icon="cloud_off" title="Sem conexão com o servidor"
-          action={<div className="row"><button className="btn" onClick={load}><Icon name="refresh" /> Tentar de novo</button><button className="btn text" onClick={() => useStore.getState().go("settings")}><Icon name="dns" /> Configurar servidor</button></div>}>
+          action={<div className="row"><button className="btn" onClick={load}><Icon name="refresh" /> Tentar de novo</button><button className="btn text" onClick={() => useStore.getState().openSettings("comunidade")}><Icon name="dns" /> Configurar servidor</button></div>}>
           {err} As partidas continuam pelo lobby da Steam; salas e chat voltam quando o servidor responder.
         </Empty></div>
       ) : rooms === null ? <div className="bar indeterminate"><i /></div> : rooms.length === 0 ? (

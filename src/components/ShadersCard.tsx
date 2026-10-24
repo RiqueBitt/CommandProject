@@ -55,7 +55,7 @@ export default function ShadersCard() {
               {menu && (
                 <Menu anchor={menuBtn.current} placement="below" onClose={() => setMenu(false)}>
                   <MenuItem icon="restart_alt" onClick={async () => { setMenu(false); update(await run("shaders", () => api.shadersReset(), "Presets de volta ao padrão.")); }}>Restaurar os presets</MenuItem>
-                  <MenuItem icon="folder_open" onClick={() => { setMenu(false); void api.openPath(st.binDir); }}>Abrir a pasta do jogo</MenuItem>
+                  <MenuItem icon="folder_open" onClick={() => { setMenu(false); void run("open", () => api.openPath(st.binDir)); }}>Abrir a pasta do jogo</MenuItem>
                   <hr />
                   <MenuItem icon="delete" onClick={async () => {
                     setMenu(false);

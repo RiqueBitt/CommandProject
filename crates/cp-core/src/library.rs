@@ -38,6 +38,9 @@ pub struct ImportOptions {
     pub replace: bool,
     #[serde(skip)]
     pub source: Option<Source>,
+    /// O `.scd` de origem é descartável (gerado pelo launcher): pode ser movido em vez de copiado.
+    #[serde(skip)]
+    pub move_source: bool,
 }
 
 pub struct Library {
@@ -157,6 +160,8 @@ impl Library {
             .at(&self.root)?;
         let stage = staging.path();
         let ext = src.extension().map(|e| e.to_string_lossy().to_ascii_lowercase());
+        // hashes já calculados durante a cópia (evita ler arquivos grandes duas vezes)
+        let mut known_sha: std::collections::HashMap<PathBuf, String> = std::collections::HashMap::new();
 
         let (mut scds, packaged): (Vec<PathBuf>, Option<Manifest>) = if src.is_dir() {
             collect_from_dir(src, stage)?
@@ -169,7 +174,14 @@ impl Library {
                     Scd::open(src)?; // valida estrutura
                     let name = safe_file_name(&src.file_name().unwrap().to_string_lossy())?;
                     let dst = stage.join("files").join(&name);
-                    copy_atomic(src, &dst)?;
+                    // arquivo gerado pelo launcher no mesmo disco: mover é instantâneo (Texturas HD têm >1 GB)
+                    let moved = opts.move_source
+                        && fs::create_dir_all(stage.join("files")).is_ok()
+                        && fs::rename(src, &dst).is_ok();
+                    if !moved {
+                        let sha = copy_atomic(src, &dst)?;
+                        known_sha.insert(dst.clone(), sha);
+                    }
                     (vec![dst], None)
                 }
                 Some("zip") => {
@@ -209,7 +221,10 @@ impl Library {
             let size = p.metadata().at(p)?.len();
             files.push(ModFile {
                 name: p.file_name().unwrap().to_string_lossy().into_owned(),
-                sha256: fsutil::sha256_file(p)?,
+                sha256: match known_sha.remove(p) {
+                    Some(h) => h,
+                    None => fsutil::sha256_file(p)?,
+                },
                 size,
             });
         }

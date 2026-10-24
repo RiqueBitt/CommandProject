@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Empty, Notice, Icon } from "../../components/ui";
 import { api, pickSave } from "../../lib/api";
-import { fmtBytes, useStore } from "../../lib/store";
+import { fmtBytes, load, useStore } from "../../lib/store";
 import type { ArchiveInfo, EntryView, MeshView, Project, ScdEntry, TextureView } from "../../lib/types";
 import { FILE_ICON } from "./Projects";
 
@@ -13,20 +13,25 @@ const kindOf = (p: string) =>
 const LIMIT = 600;
 
 export default function Explorer({ projects, target, setTarget }: { projects: Project[]; target: string | null; setTarget: (id: string) => void }) {
-  const { run } = useStore.getState();
   const [archives, setArchives] = useState<ArchiveInfo[] | null>(null);
   const [archive, setArchive] = useState<string | null>(null);
   const [entries, setEntries] = useState<ScdEntry[]>([]);
   const [query, setQuery] = useState("");
   const [entry, setEntry] = useState<string | null>(null);
 
-  useEffect(() => { run("archives", () => api.archives()).then((a) => setArchives(a ?? [])); }, [run]);
+  useEffect(() => {
+    let alive = true;
+    void load(() => api.archives()).then((a) => { if (alive) setArchives(a ?? []); });
+    return () => { alive = false; };
+  }, []);
   useEffect(() => {
     if (!archive) return;
+    let alive = true; // trocou de arquivo antes de terminar: ignora a resposta antiga
     setEntries([]);
     setEntry(null);
-    run("entries", () => api.archiveEntries(archive)).then((e) => setEntries((e ?? []).filter((x) => !x.isDir)));
-  }, [archive, run]);
+    void load(() => api.archiveEntries(archive)).then((e) => { if (alive) setEntries((e ?? []).filter((x) => !x.isDir)); });
+    return () => { alive = false; };
+  }, [archive]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

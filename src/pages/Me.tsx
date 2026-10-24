@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { NewProfile } from "../components/Shell";
 import { Field, hueOf, Icon, Modal, monogram } from "../components/ui";
-import { api, openUrl } from "../lib/api";
+import { api } from "../lib/api";
 import { community } from "../lib/community";
-import { useStore } from "../lib/store";
+import { switchProfile, useStore } from "../lib/store";
 import type { ServerInfo } from "../lib/types";
 
 interface News { tag: string; title: string; text: string; icon: string; hue: number; action?: { label: string; run: () => void } }
@@ -13,7 +13,7 @@ export default function Me() {
   const profiles = useStore((s) => s.profiles);
   const appUpdate = useStore((s) => s.appUpdate);
   const d = useStore((s) => s.dashboard);
-  const { run, refresh, go } = useStore.getState();
+  const { go } = useStore.getState();
   const [server, setServer] = useState<ServerInfo | null>(null);
   const [serverErr, setServerErr] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -27,11 +27,11 @@ export default function Me() {
   }, [settings?.serverUrl]);
 
   const news: News[] = [
-    ...(appUpdate ? [{ tag: "Atualização", title: `CommandProject ${appUpdate.version}`, text: "Uma versão nova do launcher está disponível.", icon: "system_update", hue: 90, action: { label: "Ver novidades", run: () => openUrl(appUpdate.url) } }] : []),
+    ...(appUpdate ? [{ tag: "Atualização", title: `CommandProject ${appUpdate.version}`, text: "Uma versão nova do launcher está disponível.", icon: "system_update", hue: 90, action: { label: "Atualizar agora", run: () => useStore.getState().openSettings("atualizacoes") } }] : []),
     ...(server?.motd ? [{ tag: server.name, title: "Recado do servidor", text: server.motd, icon: "campaign", hue: 200 }] : []),
     { tag: "Dica", title: "Ação rápida", text: "Aperte Ctrl+K em qualquer tela para jogar, trocar de perfil ou ligar um mod sem tirar a mão do teclado.", icon: "bolt", hue: 75 },
-    { tag: "Estúdio", title: "Skin de interface em minutos", text: "Recolora a HUD inteira do jogo, veja antes e depois e gere o mod direto na biblioteca.", icon: "palette", hue: 160, action: { label: "Abrir o Estúdio", run: () => go("studio") } },
-    { tag: "Mapas", title: "Crie mapas de escaramuça", text: "Escolha um terreno, clique para posicionar as bases e o toolkit verifica se todo mundo se alcança.", icon: "map", hue: 25, action: { label: "Criar um mapa", run: () => go("studio") } },
+    { tag: "Estúdio", title: "Skin de interface em minutos", text: "Recolora a HUD inteira do jogo, veja antes e depois e gere o mod direto na biblioteca.", icon: "palette", hue: 160, action: { label: "Abrir o Estúdio", run: () => { useStore.getState().setStudioTab("skin"); go("studio"); } } },
+    { tag: "Mapas", title: "Crie mapas de escaramuça", text: "Escolha um terreno, clique para posicionar as bases e o toolkit verifica se todo mundo se alcança.", icon: "map", hue: 25, action: { label: "Criar um mapa", run: () => { useStore.getState().setStudioTab("maps"); go("studio"); } } },
   ];
   const n = news[slide % news.length];
   const nick = settings?.nickname?.trim() || "";
@@ -53,7 +53,7 @@ export default function Me() {
           {!settings?.serverUrl ? (
             <>
               <p className="small muted">Conecte a um servidor para ver salas, conversar e baixar mods do hub dele.</p>
-              <button className="btn sm tonal" onClick={() => go("settings")}>Configurar</button>
+              <button className="btn sm tonal" onClick={() => useStore.getState().openSettings("comunidade")}>Configurar</button>
             </>
           ) : server ? (
             <>
@@ -106,11 +106,7 @@ export default function Me() {
                 const h = hueOf(p.id);
                 const isActive = p.id === profiles?.active;
                 return (
-                  <button key={p.id} className="list-row clickable" style={{ textAlign: "left" }} onClick={async () => {
-                    if (!isActive) await run("profile", () => api.setActiveProfile(p.id));
-                    await refresh();
-                    go("home");
-                  }}>
+                  <button key={p.id} className="list-row clickable" style={{ textAlign: "left" }} onClick={() => void switchProfile(p.id, p.name, isActive)}>
                     <span className="instance-tile" style={{ ["--tile-a" as string]: `hsl(${h} 42% 38%)`, ["--tile-b" as string]: `hsl(${(h + 35) % 360} 45% 18%)` }}>{monogram(p.name)}</span>
                     <span className="grow">
                       <span className="title" style={{ display: "block" }}>{p.name}</span>

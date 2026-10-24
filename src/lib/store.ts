@@ -4,7 +4,7 @@ import type * as T from "./types";
 
 export type Page = "me" | "home" | "library" | "hub" | "multiplayer" | "studio" | "settings";
 
-export interface AppUpdate { version: string; url: string; notes: string }
+export type AppUpdate = T.AppUpdate;
 
 export interface Toast { id: number; kind: "ok" | "error" | "info"; text: string }
 
@@ -26,6 +26,9 @@ interface State {
   /** Aba a abrir no Estúdio na próxima visita (ex.: "hd"). */
   studioTab: string | null;
   setStudioTab: (t: string | null) => void;
+  /** Seção das Configurações a abrir na próxima visita (ex.: "atualizacoes"). */
+  settingsSection: string | null;
+  openSettings: (section: string) => void;
   back: () => void;
   setPalette: (open: boolean) => void;
   refresh: () => Promise<void>;
@@ -53,13 +56,15 @@ export const useStore = create<State>((set, get) => ({
   appUpdate: null,
   studioTab: null,
   setStudioTab: (studioTab) => set({ studioTab }),
+  settingsSection: null,
+  openSettings: (section) => { set({ settingsSection: section }); get().go("settings"); },
   go: (page) => set((s) => (s.page === page ? {} : { page, history: [...s.history.slice(-30), s.page] })),
   back: () => set((s) => (s.history.length ? { page: s.history[s.history.length - 1], history: s.history.slice(0, -1) } : {})),
   setPalette: (palette) => set({ palette }),
   refresh: async () => {
-    const [dashboard, profiles, settings] = await Promise.all([api.dashboard(), api.getProfiles(), api.getSettings()]);
-    set({ dashboard, profiles, settings });
-    await get().refreshMods();
+    // uma rodada só, em paralelo (o painel é a consulta mais cara: não pedir duas vezes)
+    const [dashboard, profiles, settings, mods] = await Promise.all([api.dashboard(), api.getProfiles(), api.getSettings(), api.listMods()]);
+    set({ dashboard, profiles, settings, mods });
   },
   refreshMods: async () => {
     const [mods, dashboard] = await Promise.all([api.listMods(), api.dashboard()]);
@@ -92,6 +97,28 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 }));
+
+/** Troca o perfil ativo e abre a tela inicial (ignora cliques repetidos enquanto troca). */
+export async function switchProfile(id: string, name: string, alreadyActive = false) {
+  const { run, refresh, go } = useStore.getState();
+  if (!alreadyActive) {
+    const ok = await run("profile", () => api.setActiveProfile(id), `Perfil "${name}" ativo.`);
+    if (ok === undefined) return;
+  }
+  await refresh();
+  go("home");
+}
+
+/** Carrega dados de uma tela (sem a trava de "ocupado" do `run`): cada montagem da tela busca de
+ * novo, e um erro vira aviso em vez de uma lista vazia falsa. */
+export async function load<R>(fn: () => Promise<R>): Promise<R | undefined> {
+  try {
+    return await fn();
+  } catch (e) {
+    useStore.getState().toast("error", errorText(e));
+    return undefined;
+  }
+}
 
 export function errorText(e: unknown): string {
   if (typeof e === "string") return e;

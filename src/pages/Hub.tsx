@@ -18,7 +18,7 @@ export default function Hub() {
   const settings = useStore((s) => s.settings);
   const mods = useStore((s) => s.mods);
   const busy = useStore((s) => s.busy);
-  const { run, refreshMods, go } = useStore.getState();
+  const { run, refreshMods } = useStore.getState();
   const [indexes, setIndexes] = useState<HubIndex[]>([]);
   const [errors, setErrors] = useState<{ url: string; message: string }[]>([]);
   const [loading, setLoading] = useState(false);
@@ -76,7 +76,7 @@ export default function Hub() {
     return (
       <div className="scroll"><div className="page">
         <h1 className="page-title">Hub de mods</h1>
-        <div className="card"><Empty icon="store" title="Nenhum hub configurado" action={<button className="btn primary" onClick={() => go("settings")}>Abrir configurações</button>}>
+        <div className="card"><Empty icon="store" title="Nenhum hub configurado" action={<button className="btn primary" onClick={() => useStore.getState().openSettings("hub")}>Abrir configurações</button>}>
           Conecte a um servidor da comunidade (cp-server) ou adicione o endereço de um índice de mods em Configurações.
         </Empty></div>
       </div></div>

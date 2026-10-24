@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Empty, Field, Notice, Switch, Icon } from "../../components/ui";
 import type { Marker } from "../../components/MapView3D";
 import { api, onProgress } from "../../lib/api";
-import { useStore } from "../../lib/store";
+import { load, useStore } from "../../lib/store";
 import type { MapBuildResult, MaptkStatus, Terrain, TerrainPreview } from "../../lib/types";
 import {
   applyRelief, decodeHeights, EMPTY_EDITS, heightAt, meanInDisc, RELIEF_LABEL, reliefShape, round1,
@@ -72,13 +72,14 @@ export default function Maps() {
   const [log, setLog] = useState<string[]>([]);
   const [lastBuild, setLastBuild] = useState<MapBuildResult | null>(null);
   const stage = useRef<HTMLDivElement>(null);
+  const pickSeq = useRef(0);
 
   useEffect(() => {
     api.maptkStatus().then(async (s) => {
       setStatus(s);
-      if (s.ready) setTerrains((await run("catalog", () => api.maptkCatalog()))?.terrains ?? []);
+      if (s.ready) setTerrains((await load(() => api.maptkCatalog()))?.terrains ?? []);
     });
-  }, [run]);
+  }, []);
 
   useEffect(() => {
     const off = onProgress((e) => e.task === "map" && setLog((l) => [...l.slice(-200), e.message]));
@@ -92,10 +93,12 @@ export default function Maps() {
     setHist({ cur: EMPTY_EDITS, past: [], future: [] });
     setLastBuild(null);
     setPatch(t.kind === "campaign" || t.navmesh === "pocket");
+    const ticket = ++pickSeq.current; // clicou em outro terreno antes deste carregar: vale o último
     const [p, r] = await Promise.all([
-      run("preview", () => api.maptkPreview(t.id, 512)),
-      run("terrain3d", () => api.maptkTerrain3d(t.id, 256)),
+      load(() => api.maptkPreview(t.id, 512)),
+      load(() => api.maptkTerrain3d(t.id, 256)),
     ]);
+    if (ticket !== pickSeq.current) return;
     setPreview(p ?? null);
     if (r) {
       setRelief3d({ size: r.size, grid: r.grid, heights: decodeHeights(r.heights, r.heightScale), waterLevel: r.waterLevel, yMin: r.yMin, yMax: r.yMax, texture: r.texture });

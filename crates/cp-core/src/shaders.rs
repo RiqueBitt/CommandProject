@@ -486,20 +486,16 @@ pub struct ReshadeInstall {
 pub async fn install_reshade(
     game_exe: &Path,
     cache_dir: &Path,
-    progress: &mut (dyn FnMut(&str) + Send),
+    progress: &mut (dyn FnMut(&str, Option<f64>) + Send),
 ) -> Result<ReshadeInstall> {
     if !cfg!(windows) {
         return Err(Error::Other("a instalação do ReShade só funciona no Windows".into()));
     }
-    progress("Procurando a versão mais nova do ReShade");
-    let client = reqwest::Client::builder()
-        .user_agent(concat!("CommandProject/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(std::time::Duration::from_secs(15))
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
-        .map_err(|e| Error::Network(e.to_string()))?;
+    progress("Procurando a versão mais nova do ReShade", Some(0.02));
+    let client = crate::net::client()?;
     let html = client
         .get(RESHADE_SITE)
+        .timeout(std::time::Duration::from_secs(25))
         .send()
         .await
         .and_then(|r| r.error_for_status())
@@ -512,27 +508,31 @@ pub async fn install_reshade(
 
     std::fs::create_dir_all(cache_dir).at(cache_dir)?;
     let setup = cache_dir.join(format!("ReShade_Setup_{version}.exe"));
-    if !setup.is_file() {
-        progress(&format!("Baixando o ReShade {version}"));
-        let bytes = client
-            .get(&url)
-            .send()
-            .await
-            .and_then(|r| r.error_for_status())
-            .map_err(|e| Error::Network(format!("falha ao baixar o ReShade: {e}")))?
-            .bytes()
-            .await
-            .map_err(|e| Error::Network(e.to_string()))?;
-        if bytes.len() < 1024 || &bytes[..2] != b"MZ" {
-            return Err(Error::Integrity(
-                "o download do ReShade não é um executável válido".into(),
-            ));
+    let cached_ok = std::fs::read(&setup).map(|b| b.len() > 1024 && &b[..2] == b"MZ").unwrap_or(false);
+    if !cached_ok {
+        let label = format!("Baixando o ReShade {version}");
+        progress(&label, Some(0.05));
+        crate::net::download(
+            &client,
+            &url,
+            &setup,
+            &crate::net::Expect { max_bytes: Some(64 * 1024 * 1024), ..Default::default() },
+            &mut |p| progress(&format!("{label}: {}", p.describe()), p.fraction().map(|f| 0.05 + f * 0.75)),
+        )
+        .await?;
+        let head = std::fs::read(&setup).map(|b| b.get(..2) == Some(b"MZ")).unwrap_or(false);
+        if !head {
+            let _ = std::fs::remove_file(&setup);
+            return Err(Error::Integrity("o download do ReShade não é um executável válido".into()));
         }
-        fsutil::write_atomic(&setup, &bytes)?;
     }
 
-    progress("Conferindo a assinatura digital");
-    let signer = match platform::verify_signature(&setup) {
+    progress("Conferindo a assinatura digital", Some(0.82));
+    let check = setup.clone();
+    let verified = tokio::task::spawn_blocking(move || platform::verify_signature(&check))
+        .await
+        .map_err(|e| Error::Other(e.to_string()))?;
+    let signer = match verified {
         Ok(s) => s,
         Err(e) => {
             let _ = std::fs::remove_file(&setup);
@@ -540,14 +540,26 @@ pub async fn install_reshade(
         }
     };
 
-    progress("Instalando (se o Windows pedir permissão, aceite)");
-    platform::run_setup(&setup, game_exe)?;
+    progress("Instalando (se o Windows pedir permissão, aceite)", Some(0.88));
+    let (run, exe) = (setup.clone(), game_exe.to_path_buf());
+    tokio::task::spawn_blocking(move || platform::run_setup(&run, &exe))
+        .await
+        .map_err(|e| Error::Other(e.to_string()))??;
 
     let dll = game_exe.parent().unwrap_or(Path::new(".")).join(DLL);
     // se o instalador precisou de administrador, ele reabre com janela: esperamos o usuário concluir
-    for _ in 0..360 {
+    for i in 0..360u32 {
         if std::fs::read(&dll).map(|b| is_reshade_dll(&b)).unwrap_or(false) {
             return Ok(ReshadeInstall { version, signer });
+        }
+        if i == 6 || (i > 6 && i % 20 == 0) {
+            progress(
+                &format!(
+                    "Esperando o instalador do ReShade terminar ({} s). Se abriu uma janela, conclua por lá.",
+                    i / 2
+                ),
+                Some(0.88 + 0.08 * (i as f64 / 360.0)),
+            );
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }

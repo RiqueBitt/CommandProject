@@ -71,6 +71,10 @@ const game: T.GameInstall = {
 
 let deployed: string[] = ["storm", "littlepatch", "kael-maps"];
 
+const mem = { limitMb: 2048 };
+function memStatus(): T.MemoryStatus {
+  return { system: { totalMb: 16_303, availableMb: 9_120 }, limitMb: mem.limitMb, recommendedMb: 4096, choices: [2048, 2560, 3072, 3584, 4096], laa: laaStatus() };
+}
 function active() { return profiles.profiles.find((p) => p.id === profiles.active)!; }
 function enabledIds() { return active().mods.filter((m) => m.enabled).map((m) => m.id); }
 function plan(): T.Plan {
@@ -372,6 +376,17 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     case "build_enhance": {
       for (let i = 0; i <= 40; i += 4) { mockEvents.emit("cp://progress", { task: "hd", step: i, total: 40, message: `units/uel${String(100 + i).padStart(4, "0")}/albedo.dds (faltam ~0:${String(40 - i).padStart(2, "0")})` }); await sleep(150); }
       return r({ ...mods[0], id: "texturas-hd", name: (a.opts as T.EnhanceOptions).name, category: "textures" });
+    }
+    case "memory_status": return r(memStatus());
+    case "memory_set": {
+      mem.limitMb = a.limitMb as number;
+      laa.enabled = mem.limitMb > 2048;
+      return r(memStatus());
+    }
+    case "app_update_check": return r({ version: "9.9.0", notes: "Atualização de demonstração.", url: "https://github.com/RiqueBitt/CommandProject/releases", assetName: "CommandProject_9.9.0_x64-setup.exe", assetUrl: "https://github.com/x.exe", size: 13_700_000, sha256: null });
+    case "app_update_install": {
+      for (let i = 0; i <= 20; i++) { mockEvents.emit("cp://progress", { task: "update", step: i * 50, total: 1000, message: `Baixando a versão 9.9.0: ${(i * 0.65).toFixed(1).replace(".", ",")} de 13,1 MB · 4,2 MB/s` }); await sleep(120); }
+      return r(undefined);
     }
     case "menu_theme_preview": {
       const o = a.opts as T.ThemeOptions;

@@ -53,13 +53,20 @@ export async function confirmDialog(message: string, title = "CommandProject"): 
 }
 
 /** Abre um link no navegador do sistema. */
+/** Abre um link no navegador. Erros viram aviso na tela (antes o clique "não fazia nada"). */
 export async function openUrl(url: string) {
-  if (!isTauri) {
-    window.open(url, "_blank", "noopener");
-    return;
+  try {
+    if (!/^(https?:|mailto:)/i.test(url)) throw new Error(`endereço inválido: ${url || "(vazio)"}`);
+    if (!isTauri) {
+      window.open(url, "_blank", "noopener");
+      return;
+    }
+    const { openUrl: open } = await import("@tauri-apps/plugin-opener");
+    await open(url);
+  } catch (e) {
+    const { useStore, errorText } = await import("./store");
+    useStore.getState().toast("error", `Não deu para abrir o link: ${errorText(e)}`);
   }
-  const { openUrl: open } = await import("@tauri-apps/plugin-opener");
-  await open(url);
 }
 
 export async function windowAction(action: "minimize" | "maximize" | "close") {
@@ -152,6 +159,10 @@ export const api = {
   enhanceGroups: () => call<T.EnhanceGroup[]>("enhance_groups"),
   enhancePreview: (entry: string, mode: T.EnhanceMode, opts: T.EnhanceOptions) => call<T.EnhancePreview>("enhance_preview", { entry, mode, opts }),
   buildEnhance: (opts: T.EnhanceOptions, enable = true) => call<T.Manifest>("build_enhance", { opts, enable }),
+  memoryStatus: () => call<T.MemoryStatus>("memory_status"),
+  memorySet: (limitMb: number) => call<T.MemoryStatus>("memory_set", { limitMb }),
+  appUpdateCheck: () => call<T.AppUpdate | null>("app_update_check"),
+  appUpdateInstall: (update: T.AppUpdate) => call<void>("app_update_install", { update }),
   menuThemePreview: (opts: T.ThemeOptions) => call<T.ThemePreview[]>("menu_theme_preview", { opts }),
   buildMenuTheme: (opts: T.ThemeOptions, enable = true) => call<T.Manifest>("build_menu_theme", { opts, enable }),
   showcase: (unit?: string | null) => call<T.Showcase | null>("showcase", { unit: unit ?? null }),

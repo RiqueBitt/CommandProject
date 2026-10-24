@@ -506,7 +506,15 @@ impl<'a> Deployer<'a> {
             };
             j.pending = Some(Pending::Add { entry: entry.clone() });
             self.save_journal(&j)?;
-            let copied = copy_atomic(&t.source, &dest)?;
+            // arquivo novo (nome que o jogo não tem): no mesmo disco vira um hard link, instantâneo
+            // e sem ocupar espaço de novo. Arquivos que substituem os do jogo sempre são copiados,
+            // para que um "verificar arquivos" da Steam nunca escreva dentro da biblioteca.
+            let linked = entry.kind == DeployKind::Added && link_file(&t.source, &dest);
+            let copied = if linked {
+                self.hashes.sha256(&t.source)?
+            } else {
+                copy_atomic(&t.source, &dest)?
+            };
             if copied != t.sha256 {
                 // arquivo da biblioteca corrompido: desfaz este item
                 if let (DeployKind::Replaced, Some(b)) = (entry.kind, &entry.backup) {
@@ -720,6 +728,21 @@ impl<'a> Deployer<'a> {
         self.hashes.save()?;
         Ok(out)
     }
+}
+
+/// Cria `dst` como hard link de `src` (troca atômica). `false` se o sistema não deixar
+/// (discos diferentes, FAT32, permissão) — aí quem chamou copia.
+fn link_file(src: &Path, dst: &Path) -> bool {
+    let tmp = crate::fsutil::tmp_sibling(dst);
+    let _ = fs::remove_file(&tmp);
+    if fs::hard_link(src, &tmp).is_err() {
+        return false;
+    }
+    if fs::rename(&tmp, dst).is_err() {
+        let _ = fs::remove_file(&tmp);
+        return false;
+    }
+    true
 }
 
 #[cfg(test)]
@@ -1022,5 +1045,26 @@ mod tests {
         let t = d.targets(&e.lib, &profile(&[&m.id]), &mut w).unwrap();
         d.apply(&t, None, &mut |_| {}).unwrap();
         assert!(manual.exists());
+    }
+
+    #[test]
+    fn links_new_files_instead_of_copying() {
+        let t = tempfile::tempdir().unwrap();
+        let src = t.path().join("lib.scd");
+        let dst = t.path().join("game").join("zz_mod.scd");
+        fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        fs::write(&src, b"PK conteudo").unwrap();
+        fs::write(&dst, b"antigo").unwrap();
+        assert!(link_file(&src, &dst));
+        assert_eq!(fs::read(&dst).unwrap(), b"PK conteudo");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(fs::metadata(&src).unwrap().nlink(), 2);
+        }
+        // apagar o instalado não mexe na biblioteca
+        fs::remove_file(&dst).unwrap();
+        assert!(src.is_file());
+        assert!(!link_file(&t.path().join("nao-existe"), &dst));
     }
 }

@@ -72,6 +72,7 @@ export interface Settings {
   nickname: string;
   checkAppUpdates: boolean;
   keepLargeAddress: boolean;
+  memoryLimitMb?: number | null;
   showcaseUnit?: string | null;
   showcase: boolean;
 }
@@ -197,3 +198,7 @@ export interface Showcase { unit: string; mesh: MeshView; albedo?: string | null
 /** Tema "Menu moderno" para os menus do jogo. */
 export interface ThemeOptions { name: string; recolor: boolean; fonts: boolean; accent: string; sharpness: number; deblock: number }
 export interface ThemePreview { key: string; before: string; after: string; width: number; height: number }
+
+export interface SystemMemory { totalMb: number; availableMb: number }
+export interface MemoryStatus { system: SystemMemory; limitMb: number; recommendedMb: number; choices: number[]; laa: LaaStatus | null }
+export interface AppUpdate { version: string; notes: string; url: string; assetName?: string | null; assetUrl?: string | null; size: number; sha256?: string | null }

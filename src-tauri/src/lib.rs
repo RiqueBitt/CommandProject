@@ -120,6 +120,10 @@ pub fn run() {
             commands::maptk_terrain3d,
             commands::menu_theme_preview,
             commands::build_menu_theme,
+            commands::memory_status,
+            commands::memory_set,
+            commands::app_update_check,
+            commands::app_update_install,
             commands::open_path,
         ])
         .run(tauri::generate_context!())

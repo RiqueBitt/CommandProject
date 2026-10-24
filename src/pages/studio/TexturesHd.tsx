@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Compare, Empty, Field, Icon, Notice, TaskProgress } from "../../components/ui";
 import { api } from "../../lib/api";
-import { fmtBytes, useStore } from "../../lib/store";
+import { fmtBytes, load, useStore } from "../../lib/store";
 import { hdOutdated } from "../../lib/hd";
 import type { EnhanceGroup, EnhanceMode, EnhanceOptions, EnhancePreview } from "../../lib/types";
 
@@ -33,8 +33,11 @@ export function targetSize(w: number, h: number, mode: EnhanceMode, scale: numbe
   return tw <= w || th <= h ? [w, h] : [tw, th];
 }
 
-/** Limite prudente: o SC2 é um programa de 32 bits. */
-const SAFE_EXTRA = 1.2 * 1024 ** 3;
+/** Quanto de textura a mais cabe, conforme a memória escolhida para o jogo (32 bits: 2 a 4 GB). */
+export function textureBudget(limitMb: number) {
+  const f = Math.max(0, Math.min(1, (limitMb - 2048) / 2048));
+  return (0.25 + 0.95 * f) * 1024 ** 3;
+}
 
 function estimate(groups: EnhanceGroup[], modes: Record<string, EnhanceMode>, scale: number, maxSize: number) {
   let count = 0, upscaled = 0, before = 0, after = 0;
@@ -54,7 +57,7 @@ function estimate(groups: EnhanceGroup[], modes: Record<string, EnhanceMode>, sc
 }
 
 export default function TexturesHd() {
-  const { run, refreshMods, go } = useStore.getState();
+  const { run, refreshMods } = useStore.getState();
   const busy = useStore((s) => s.busy.hd);
   const hdMod = useStore((s) => s.mods.find((m) => m.manifest.id === "texturas-hd"));
   const [groups, setGroups] = useState<EnhanceGroup[] | null>(null);
@@ -62,14 +65,20 @@ export default function TexturesHd() {
   const [opts, setOpts] = useState<Omit<EnhanceOptions, "groups">>({ name: "Texturas HD", scale: 2, maxSize: 2048, sharpness: 0.6, deblock: 0.5, quality: "normal" });
   const [sample, setSample] = useState<string | null>(null);
   const [preview, setPreview] = useState<EnhancePreview | null>(null);
+  const [limitMb, setLimitMb] = useState(4096);
+  useEffect(() => { api.memoryStatus().then((m) => setLimitMb(m.limitMb)).catch(() => {}); }, []);
+  const budget = textureBudget(limitMb);
 
   useEffect(() => {
-    run("hdgroups", () => api.enhanceGroups()).then((g) => {
+    let alive = true;
+    void load(() => api.enhanceGroups()).then((g) => {
+      if (!alive) return;
       setGroups(g ?? []);
       setModes(Object.fromEntries((g ?? []).map((x) => [x.group, x.suggested])));
       setSample(g?.find((x) => x.suggested === "upscale")?.sample[0] ?? g?.[0]?.sample[0] ?? null);
     });
-  }, [run]);
+    return () => { alive = false; };
+  }, []);
 
   const full: EnhanceOptions = useMemo(() => ({ ...opts, groups: Object.entries(modes).map(([group, mode]) => ({ group, mode })) }), [opts, modes]);
   const sampleGroup = groups?.find((g) => g.sample.includes(sample ?? ""));
@@ -92,7 +101,7 @@ export default function TexturesHd() {
       for (const max of [4096, 2048, 1024, 512]) {
         if (max > opts.maxSize || scale > opts.scale) continue;
         const t = estimate(groups ?? [], modes, scale, max);
-        if (t.after - t.before <= SAFE_EXTRA) {
+        if (t.after - t.before <= budget) {
           setOpts((o) => ({ ...o, scale, maxSize: max }));
           return;
         }
@@ -165,13 +174,17 @@ export default function TexturesHd() {
             <span><b>{totals.count.toLocaleString("pt-BR")}</b> texturas, {totals.upscaled.toLocaleString("pt-BR")} ampliadas</span>
             <span title="Memória de vídeo das texturas alteradas">{fmtBytes(totals.before)} → <b>{fmtBytes(totals.after)}</b></span>
           </div>
-          {extra > SAFE_EXTRA && (
+          <p className="faint small">
+            Memória do jogo: até {(limitMb / 1024).toLocaleString("pt-BR")} GB, então cabem uns {fmtBytes(budget)} a mais de texturas
+            ({extra > 0 ? `${Math.round((extra / budget) * 100)}% usado` : "nada usado"}).
+          </p>
+          {extra > budget && (
             <Notice kind="warn">
-              Isso soma uns {fmtBytes(extra)} de texturas. O SC2 é um programa de 32 bits e pode fechar por falta de memória.
-              Ligue o <b>Modo 4 GB</b> em Configurações e, se ainda passar muito, ajuste.
+              Isso soma uns {fmtBytes(extra)} de texturas, mais do que cabe com o jogo em até {(limitMb / 1024).toLocaleString("pt-BR")} GB:
+              ele pode fechar por falta de memória. Aumente a memória do jogo em Configurações ou ajuste para caber.
               <div className="row" style={{ marginTop: 8 }}>
                 <button className="btn sm" onClick={autoFit}><Icon name="tune" /> Ajustar para caber</button>
-                <button className="btn sm text" onClick={() => go("settings")}><Icon name="memory" /> Modo 4 GB</button>
+                <button className="btn sm text" onClick={() => useStore.getState().openSettings("jogo")}><Icon name="memory" /> Memória do jogo</button>
               </div>
             </Notice>
           )}

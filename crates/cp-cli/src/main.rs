@@ -341,7 +341,7 @@ async fn run(args: &[String]) -> cp_core::Result<()> {
                 .clone()
                 .ok_or_else(|| cp_core::Error::Other("executável do jogo não encontrado".into()))?;
             let cache = ws.data_dir.join("cache").join("reshade");
-            let r = cp_core::shaders::install_reshade(&exe, &cache, &mut |m| eprintln!("  {m}")).await?;
+            let r = cp_core::shaders::install_reshade(&exe, &cache, &mut |m, _| eprintln!("  {m}")).await?;
             println!("ReShade {} instalado (assinado por {})", r.version, r.signer);
         }
         "launch" => print_json(&ws.launch_plan()?),

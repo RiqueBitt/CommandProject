@@ -8,10 +8,7 @@ use crate::library::{ImportOptions, Library};
 use crate::manifest::{compare_versions, Category, Dependency, Manifest, MpPolicy, Source};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-use tokio::io::AsyncWriteExt;
 
 const MAX_INDEX_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PACKAGE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
@@ -107,14 +104,7 @@ impl HubMod {
 }
 
 fn client(url: &reqwest::Url) -> Result<reqwest::Client> {
-    let mut b = reqwest::Client::builder()
-        .user_agent(concat!("CommandProject/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(Duration::from_secs(15))
-        .read_timeout(Duration::from_secs(60));
-    if is_loopback(url) {
-        b = b.no_proxy();
-    }
-    b.build().map_err(|e| Error::Network(e.to_string()))
+    crate::net::client_for(url.as_str())
 }
 
 fn is_loopback(u: &reqwest::Url) -> bool {
@@ -223,49 +213,29 @@ pub async fn download(
     if let Some(p) = final_path.parent() {
         tokio::fs::create_dir_all(p).await.map_err(|e| Error::io(p, e))?;
     }
-    let part = final_path.with_extension("part");
-    let resp = client(&url)?
-        .get(url.clone())
-        .send()
-        .await
-        .map_err(|e| Error::Network(format!("falha no download: {e}")))?;
-    if !resp.status().is_success() {
-        return Err(Error::Network(format!("download respondeu {}", resp.status())));
-    }
-    let mut file = tokio::fs::File::create(&part).await.map_err(|e| Error::io(&part, e))?;
-    let mut hasher = Sha256::new();
-    let mut got: u64 = 0;
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| Error::Network(e.to_string()))?;
-        got += chunk.len() as u64;
-        if got > pkg.size {
-            drop(file);
-            let _ = tokio::fs::remove_file(&part).await;
-            return Err(Error::Integrity(
-                "o download é maior do que o anunciado — cancelado".into(),
-            ));
-        }
-        hasher.update(&chunk);
-        file.write_all(&chunk).await.map_err(|e| Error::io(&part, e))?;
-        progress(DownloadProgress {
-            downloaded: got,
-            total: pkg.size,
-        });
-    }
-    file.flush().await.map_err(|e| Error::io(&part, e))?;
-    file.sync_all().await.map_err(|e| Error::io(&part, e))?;
-    drop(file);
-    let sha = hex::encode(hasher.finalize());
-    if got != pkg.size || !sha.eq_ignore_ascii_case(&pkg.sha256) {
-        let _ = tokio::fs::remove_file(&part).await;
-        return Err(Error::Integrity(
-            "o arquivo baixado não confere com o hub (SHA-256) — não foi instalado".into(),
-        ));
-    }
-    tokio::fs::rename(&part, &final_path)
-        .await
-        .map_err(|e| Error::io(&final_path, e))?;
+    crate::net::download(
+        &client(&url)?,
+        url.as_str(),
+        &final_path,
+        &crate::net::Expect {
+            size: Some(pkg.size),
+            sha256: Some(pkg.sha256.clone()),
+            max_bytes: Some(MAX_PACKAGE_BYTES),
+        },
+        &mut |p| {
+            progress(DownloadProgress {
+                downloaded: p.downloaded,
+                total: pkg.size,
+            })
+        },
+    )
+    .await
+    .map_err(|e| match e {
+        Error::Integrity(_) => Error::Integrity(
+            "o arquivo baixado não confere com o hub (tamanho ou SHA-256) — não foi instalado".into(),
+        ),
+        other => other,
+    })?;
     Ok(final_path)
 }
 
@@ -324,25 +294,21 @@ pub async fn download_url(
     let dir = cache_dir.join(format!("url-{:x}", rand_suffix()));
     tokio::fs::create_dir_all(&dir).await.map_err(|e| Error::io(&dir, e))?;
     let dest = dir.join(&name);
-    let mut file = tokio::fs::File::create(&dest).await.map_err(|e| Error::io(&dest, e))?;
-    let mut got: u64 = 0;
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| Error::Network(e.to_string()))?;
-        got += chunk.len() as u64;
-        if got > MAX_PACKAGE_BYTES {
-            drop(file);
-            let _ = tokio::fs::remove_dir_all(&dir).await;
-            return Err(Error::Network("arquivo grande demais".into()));
-        }
-        file.write_all(&chunk).await.map_err(|e| Error::io(&dest, e))?;
-        progress(DownloadProgress {
-            downloaded: got,
-            total: total.max(got),
-        });
+    // a 1ª resposta só serviu para descobrir nome e tipo; o download em si retoma se cair
+    let final_url = resp.url().to_string();
+    drop(resp);
+    if let Err(e) = crate::net::download(
+        &client(&url)?,
+        &final_url,
+        &dest,
+        &crate::net::Expect { size: (total > 0).then_some(total), sha256: None, max_bytes: Some(MAX_PACKAGE_BYTES) },
+        &mut |p| progress(DownloadProgress { downloaded: p.downloaded, total: p.total.max(p.downloaded) }),
+    )
+    .await
+    {
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        return Err(e);
     }
-    file.flush().await.map_err(|e| Error::io(&dest, e))?;
-    drop(file);
     if !crate::scd::looks_like_zip(&dest) {
         let _ = tokio::fs::remove_dir_all(&dir).await;
         return Err(Error::Format(
@@ -384,6 +350,7 @@ pub fn install_downloaded(
             url: Some(index_url.to_string()),
             hub_id: Some(m.id.clone()),
         }),
+        move_source: false,
     };
     let mut manifest = library.import(path, &opts)?;
     // completa o manifesto com dados do hub

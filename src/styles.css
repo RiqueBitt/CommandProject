@@ -381,7 +381,7 @@ button.chip[aria-pressed="true"] { background: var(--primary); color: var(--on-p
 .palette .menu-item small { margin-left: auto; color: var(--faint); }
 
 /* ---------- toasts ---------- */
-.toasts { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 80; display: flex; flex-direction: column; gap: 8px; width: min(520px, 92vw); }
+.toasts { position: fixed; left: 50%; transform: translateX(-50%); bottom: 96px; z-index: 80; display: flex; flex-direction: column; gap: 8px; width: min(520px, 92vw); }
 .toast { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; background: #2b2d34; border-radius: 6px; box-shadow: 0 10px 30px rgba(0, 0, 0, .45); animation: pop .2s var(--ease); user-select: text; white-space: pre-wrap; }
 .toast .mi { font-size: 20px; }
 .toast.ok .mi:first-child { color: var(--primary); }
@@ -473,18 +473,25 @@ button.chip[aria-pressed="true"] { background: var(--primary); color: var(--on-p
 .hd-total { display: flex; justify-content: space-between; padding: 10px 2px 0; border-top: 1px solid var(--border); }
 
 /* ---------- tela inicial: vitrine 3D e aprimoramentos ---------- */
-.home-stage { position: absolute; top: 96px; right: 0; bottom: 0; width: min(60%, 980px); z-index: 0; }
-.home-stage .showcase-canvas { position: absolute; inset: 0; cursor: grab; }
+/* sem z-index próprio: a etiqueta da vitrine fica acima da coluna rolável e o modelo, abaixo */
+.home-stage { position: absolute; top: 96px; right: 0; bottom: 0; width: min(60%, 980px); }
+.home-stage .showcase-canvas { position: absolute; inset: 0; cursor: grab; z-index: 0; }
 .home-stage .showcase-canvas:active { cursor: grabbing; }
 .home-stage .stage-glow { position: absolute; left: 50%; top: 52%; width: 70%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%;
   background: radial-gradient(circle, rgba(163, 230, 53, .16) 0%, rgba(56, 189, 248, .06) 38%, transparent 68%); filter: blur(10px); pointer-events: none; }
-.showcase-label { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; z-index: 2;
+.showcase-label { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; z-index: 3;
   padding: 8px 8px 8px 16px; border-radius: 999px; background: rgba(19, 20, 23, .72); border: 1px solid var(--border); backdrop-filter: blur(10px); white-space: nowrap; }
 .showcase-label b { font-weight: 500; }
 .showcase-label .overline { font-size: 10px; }
 .btn.icon-btn.sm-icon { width: 34px; height: 34px; }
 .scroll.home-scroll { pointer-events: none; position: relative; z-index: 1; }
 .scroll.home-scroll .page > * { pointer-events: auto; }
+/* o cabeçalho ocupa a largura toda, mas só os botões dele recebem clique (o resto deixa girar o modelo) */
+.scroll.home-scroll .page > .head { pointer-events: none; }
+.scroll.home-scroll .page > .head > * { pointer-events: auto; }
+.scroll.home-scroll .page > .head > .grow { pointer-events: none; }
+.scroll.home-scroll .page > .head > .grow h1, .scroll.home-scroll .page > .head .meta { pointer-events: auto; }
+.scroll.home-scroll .page > .notice, .scroll.home-scroll .page > .card { max-width: min(40%, 520px); min-width: 340px; }
 .content-inline { padding: 10px 6px 6px; }
 .content-inline .tabline { display: inline-block; margin: 0 10px 6px; font-weight: 500; border-bottom: 2px solid var(--warn); padding-bottom: 2px; }
 .home-col { display: flex; flex-direction: column; gap: 14px; width: min(40%, 520px); min-width: 340px; }
@@ -613,3 +620,35 @@ button.mod-line { cursor: pointer; }
 .accent-swatch { width: 26px; height: 26px; border-radius: 99px; border: 2px solid transparent; cursor: pointer; box-shadow: inset 0 0 0 2px rgba(0,0,0,.35); }
 .accent-swatch[aria-pressed="true"] { border-color: var(--text); }
 .accent-swatches input[type="color"] { width: 30px; height: 28px; border: 0; padding: 0; background: none; cursor: pointer; }
+
+/* ---------- tarefas em andamento (barra do topo) ---------- */
+.task-dock { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; margin-right: 6px; border-radius: 99px; border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent); background: color-mix(in srgb, var(--primary) 10%, transparent); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; max-width: 340px; }
+.task-dock:hover { background: color-mix(in srgb, var(--primary) 18%, transparent); }
+.task-dock .spin { display: grid; color: var(--primary); animation: cp-spin 1.1s linear infinite; }
+.task-dock .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-dock .pct { color: var(--primary); font-variant-numeric: tabular-nums; }
+.task-dock .mini-bar { width: 56px; height: 4px; border-radius: 99px; background: rgba(255,255,255,.1); overflow: hidden; flex: none; }
+.task-dock .mini-bar i { display: block; height: 100%; background: var(--primary); border-radius: 99px; transition: width .3s; }
+.task-dock .mini-bar i.ind { animation: cp-ind 1.2s ease-in-out infinite; }
+@keyframes cp-spin { to { transform: rotate(360deg); } }
+@keyframes cp-ind { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
+@media (prefers-reduced-motion: reduce) { .task-dock .spin, .task-dock .mini-bar i.ind { animation: none; } }
+
+/* ---------- configurações: salvamento automático e memória ---------- */
+.save-state { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; color: var(--faint); font-size: 12.5px; }
+.save-state.saving { color: var(--muted); }
+.save-state.saving .mi { animation: cp-spin 1.1s linear infinite; }
+.save-state.saved .mi { color: var(--primary); }
+.memory-box { display: flex; flex-direction: column; gap: 12px; padding: 14px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.memory-box .txt { display: flex; flex-direction: column; gap: 4px; }
+.mem-pc { display: flex; flex-direction: column; align-items: flex-end; text-align: right; padding: 8px 12px; border-radius: 10px; background: var(--surface-bright); min-width: 120px; }
+.mem-pc b { font-size: 20px; font-weight: 600; }
+.mem-choices { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.mem-choice { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font: inherit; transition: border-color .15s, background .15s; }
+.mem-choice b { font-size: 15px; font-weight: 600; }
+.mem-choice span { font-size: 11.5px; color: var(--faint); white-space: nowrap; }
+.mem-choice:hover:not(:disabled) { border-color: color-mix(in srgb, var(--primary) 50%, var(--border)); }
+.mem-choice[aria-checked="true"] { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, var(--surface)); }
+.mem-choice[aria-checked="true"] span { color: var(--primary); }
+.mem-choice:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 720px) { .mem-choices { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
