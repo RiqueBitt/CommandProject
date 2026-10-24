@@ -37,13 +37,31 @@ Layout: caixa de recursos à esquerda, vista 3D no centro, explorador e propried
 - **Cavidades**: crateras, cânions e campos de dunas.
 - **Vida e estruturas**: florestas em manchas naturais, pedras (mais nas encostas), ruínas e postos
   em áreas planas, destroços espalhados.
+- **Estratégia**: expansões de massa por jogador (a primeira **segura**, bem mais perto da própria
+  base; a última **disputada**, no meio do caminho), **centro disputado** (área plana com 4 pontos de
+  massa) e **paredões** que criam gargalos. A massa gerada é simétrica, fica em chão plano, seco e
+  alcançável, aparece no explorador e pode ser movida. Em "Massa: automática do toolkit" o toolkit
+  sorteia as expansões na hora de gerar.
 - **Acabamento**: bordas (montanhas, borda rochosa ou mar), economia e cores do minimapa.
+- **Ver 6 variações**: a mesma configuração com sementes vizinhas, lado a lado; clique para escolher.
 
 A prévia ao vivo mostra o mapa de cima, as bases, as linhas de rios e cordilheiras, o total de
 formas e decorações e a % caminhável. O gerador:
 
 - deixa a área de cada base plana;
-- confere se todas as bases se alcançam a pé e, se alguma ficar isolada, abre passagens.
+- confere se todas as bases se alcançam a pé e, se alguma ficar isolada, abre passagens;
+- não coloca decorações em cima da massa nem uma em cima da outra.
+
+**Validar** (faixa Jogo) confere o mapa inteiro e roda também antes de gerar (erros graves pedem
+confirmação):
+
+- bases fora do mapa, na água, em declive, coladas na borda, muito perto ou sem caminho;
+- distâncias até o inimigo e massa desiguais entre os times;
+- massa fora do mapa, na água, em declive, sobreposta, no centro de uma base ou inacessível;
+- decorações sobrepostas, dentro das bases, em cima da massa, fora do mapa ou debaixo d'água.
+
+**Corrigir automaticamente** move a massa para o chão válido mais perto e tira as decorações com
+problema (bases e relevo não mudam; Ctrl+Z desfaz).
 
 **Depois de gerar, tudo é editável**:
 
@@ -145,7 +163,46 @@ pode ser ligada, desligada ou apagada como qualquer mod.
   As animações feitas aqui podem ser reabertas e editadas.
 - **Quem constrói**: fábricas (categorias BUILTBY…) com a lista de todas as categorias do jogo.
 - **Pacotes**: várias tropas num mod só (`pacote-<nome>`).
+- **Misturar 3 tropas**: o chassi é a unidade base; escolha a **torre** de uma segunda tropa e a
+  **arma** (cano + arma do blueprint, com projétil, efeitos e sons) de uma terceira.
+  - As peças são transplantadas pelos ossos da torre/cano, com escala automática pela largura do
+    chassi (ou manual), giro e deslocamento.
+  - Os ossos que as armas usam ficam com os nomes do chassi; os demais ganham prefixo (T_/W_).
+  - As texturas (cor, specteam e normal) viram um atlas com os pedaços usados de cada tropa.
+  - As animações da base são adaptadas ao esqueleto novo; o blueprint é conferido e os ossos que
+    sumiram são reparados.
+  - Verificações: peça solta ou enterrada, torre larga demais, UVs, limites do formato.
+- **Gerador de texturas**: trabalha no espaço UV do modelo (base, misturado ou próprio). Cada texel
+  sabe a posição 3D, a normal e a distância às quinas, então a camuflagem não quebra nas emendas e o
+  desgaste aparece onde a tinta realmente gasta.
+  - Estilos prontos: original com desgaste, floresta, deserto, urbana, inverno digital, naval,
+    listras de tigre, veterano enferrujado e parada.
+  - Camadas com semente própria (o dado de cada uma regenera **só aquela camada**): pintura e
+    camuflagem, painéis (frestas, grades, escotilhas, rebites, tom de cada placa), marcações (faixa,
+    placas zebradas), desgaste (lascas nas quinas, arranhões, metal exposto) e sujeira (lama embaixo,
+    frestas, escorridos e poeira em cima).
+  - "Detalhes" e "sombras do original" preservam o trabalho do artista da textura do jogo.
+  - Prévia ao vivo no modelo, **segure para ver o original**, **lado a lado** com divisória e zoom,
+    versões guardadas no projeto (aplicar, comparar com a anterior, exportar PNG).
+  - Se a mistura ou o modelo mudar depois, a validação avisa que a textura precisa ser gerada de novo.
+- **Gerador de ícones**: câmera (giro, altura, perspectiva, preenchimento), luz principal, ambiente e
+  de contorno, fundo (painel tático, degradê, cor lisa, transparente) com moldura, contorno da
+  silhueta, símbolo da função (terrestre, aérea, naval, artilharia, antiaérea, engenheiro,
+  experimental, estrutura, escudo) e nitidez para tamanhos pequenos. Mostra 24, 32, 48 e 64 px em
+  fundo claro e escuro e confere preenchimento e contraste. O estilo é salvo e vale para todas as
+  tropas. Também na área **Ícones**, para tropas do jogo e exportação em lote.
 - **Validação**, inclusive de arquivos citados que não existem no jogo (projéteis, animações…).
+- **Combate, movimento e animações** (roda sozinho na Validação e sempre antes de gerar; erros
+  impedem gerar):
+  - movimento: tipo de movimento × categorias (AIR, NAVAL, LAND), velocidade, aceleração, frenagem,
+    giro, altura do hover;
+  - colisão e seleção: SizeX/Y/Z × tamanho real do modelo × escala;
+  - armas e mira: ossos de giro, elevação, boca e rack existem; a elevação está presa ao giro e a boca
+    à torre (senão o cano não acompanha a torre); boca abaixo do chão; alcance mínimo × máximo,
+    cadência, alcance × visão; categorias de ataque sem arma;
+  - ossos: pais válidos, rotações normalizadas, nomes repetidos, peças soltas do resto do corpo;
+  - animações: ossos que não existem no modelo, valores inválidos, quadros fora de ordem, peças que
+    esticam ou se soltam, rotações bruscas entre quadros, andar/parado que não volta à pose inicial.
 - **Gerar tropa** ou **Gerar e jogar**.
 
 ## O que é experimental

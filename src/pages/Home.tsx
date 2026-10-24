@@ -31,7 +31,7 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (!settings?.checkModUpdates || (!settings.hubUrls.length && !settings.serverUrl)) return;
+    if (!settings?.checkModUpdates || settings.offline || (!settings.hubUrls.length && !settings.serverUrl)) return;
     (async () => {
       try {
         await api.hubFetch();
@@ -40,7 +40,7 @@ export default function Home() {
         /* hub fora do ar não atrapalha a tela inicial */
       }
     })();
-  }, [settings?.checkModUpdates, settings?.hubUrls.length, settings?.serverUrl]);
+  }, [settings?.checkModUpdates, settings?.hubUrls.length, settings?.serverUrl, settings?.offline]);
 
   if (!d) return <div className="page muted">Carregando…</div>;
 

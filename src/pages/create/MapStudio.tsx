@@ -24,6 +24,7 @@ import {
 } from "../studio/mapEdit";
 import { migrateMap, newMapDoc, type MapDoc } from "./docs";
 import { analyzeMap, type Analysis } from "./mapAnalysis";
+import { autoFixMap, checkMap, type MapIssue } from "./mapCheck";
 import {
   baseHeights, BIOME_LABEL, brushDab, composeWorld, decodeLayer, encodeDelta, encodeLayer, FEATURE_COLOR, FEATURE_ICON, FEATURE_LABEL, fullCuts, invert,
   LINE_FEATURES, mapYaw, propCatalog, WORLD_PRESETS, reliefImage, simplex, SYMMETRY_LABEL, symmetryOps,
@@ -141,6 +142,7 @@ export default function MapStudio({ id }: { id: string }) {
   const [builtMod, setBuiltMod] = useState<string | null>(null);
   const [genOpen, setGenOpen] = useState(false);
   const [lobbyOpen, setLobbyOpen] = useState(false);
+  const [issues, setIssues] = useState<MapIssue[] | null>(null);
   const [liveSculpt, setLiveSculpt] = useState<Float32Array | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const snapshot = useRef<(() => string | null) | null>(null);
@@ -638,9 +640,24 @@ export default function MapStudio({ id }: { id: string }) {
     return ok;
   }, [p, doc.lobbyName, id, renameTab]);
 
+  const runCheck = () => (relief3d && heights ? checkMap(relief3d, heights, water, hasWater, edits.spawns, edits.mass, edits.props, teamOf) : null);
+  const autoFix = () => {
+    if (!relief3d || !heights) return;
+    const f = autoFixMap(relief3d, heights, water, hasWater, edits.spawns, edits.mass, edits.props);
+    if (!f.changes.length) { toast("info", "Nada para corrigir automaticamente."); return; }
+    p.commit((d) => ({ ...d, edits: { ...d.edits, mass: f.mass, props: f.props } }));
+    toast("ok", `Corrigido: ${f.changes.slice(0, 4).join("; ")}${f.changes.length > 4 ? ` e mais ${f.changes.length - 4}` : ""}. Dá para desfazer com Ctrl+Z.`);
+    window.setTimeout(() => setIssues(runCheck()), 50);
+  };
   const build = async (play: boolean) => {
     if (!spec) return;
     if (usesWorld && (!relief3d || !composed)) { toast("info", "Espere o relevo do terreno carregar para gerar."); return; }
+    const found = runCheck();
+    const errs = found?.filter((x) => x.level === "err") ?? [];
+    if (errs.length) {
+      setIssues(found);
+      if (!(await confirmDialog(`O mapa tem ${errs.length} problema(s) grave(s):\n\n- ${errs.slice(0, 5).map((x) => x.text).join("\n- ")}\n\nGerar mesmo assim?`, "Gerar mesmo assim", "Revisar"))) return;
+    }
     setLog([]);
     setLastBuild(null);
     await saveNow();
@@ -661,7 +678,14 @@ export default function MapStudio({ id }: { id: string }) {
     if (!builtMod) { toast("info", "Gere o mapa primeiro: o .scd sai do botão Gerar mapa."); return; }
     const dir = await pickFile([], true);
     if (!dir) return;
-    await run("export", () => api.modExportFiles(builtMod, dir), (files) => `Mapa salvo em ${files[0] ?? dir}.`);
+    await run("export", async () => {
+      try { return await api.modExportFiles(builtMod, dir); } catch (e) {
+        const m = /EXISTE: (.*)/.exec(String(e));
+        if (!m) throw e;
+        if (!(await confirmDialog(`Já existe nessa pasta: ${m[1]}\n\nSubstituir?`, "Substituir"))) throw new Error("Exportação cancelada: o arquivo existente foi mantido.");
+        return api.modExportFiles(builtMod, dir, true);
+      }
+    }, (files) => `Mapa salvo em ${files[0] ?? dir}.`);
   };
 
   const selIds = [...sel].filter((s) => s !== "map");
@@ -673,21 +697,29 @@ export default function MapStudio({ id }: { id: string }) {
     setTimeout(() => setSel(new Set(created.length ? created : ["map"])), 0);
   };
 
-  const applyWorld = (wg: WorldGen, res: WorldResult) => {
+  const applyWorld = async (wg: WorldGen, res: WorldResult) => {
+    const genMass = (wg.resources ?? "generated") === "generated";
+    let replaceMass = true;
+    if (genMass && edits.mass.length) {
+      replaceMass = await confirmDialog(`O mapa já tem ${edits.mass.length} ponto(s) de massa. Trocar pelos ${res.mass.length} pontos simétricos do gerador?\n\n(Cancelar mantém os seus e soma os novos.)`, "Trocar", "Manter os meus");
+    }
     p.commit((d) => {
       const props = [...d.edits.props.filter((q) => !q.gen), ...res.props].slice(0, MAX_PROPS);
-      const economy = wg.economy === "poor" ? { baseMass: 3, sites: 5, perSite: 2 } : wg.economy === "rich" ? { baseMass: 6, sites: 12, perSite: 4 } : { baseMass: 4, sites: 8, perSite: 3 };
+      const eco = wg.economy === "poor" ? { baseMass: 3, sites: 5, perSite: 2 } : wg.economy === "rich" ? { baseMass: 6, sites: 12, perSite: 4 } : { baseMass: 4, sites: 8, perSite: 3 };
+      // massa gerada aqui (visível e editável): o toolkit não sorteia expansões por cima
+      const economy = genMass ? { ...eco, sites: 0 } : eco;
+      const mass = genMass ? (replaceMass ? res.mass : [...d.edits.mass, ...res.mass]).slice(0, MAX_MASS) : d.edits.mass;
       const minimap: MapDoc["minimap"] = wg.biome === "desert" ? "desert" : wg.biome === "snow" ? "snow" : wg.biome === "volcanic" ? "dark" : "natural";
       return {
         ...d, world: wg, features: [...d.features.filter((f) => !f.gen), ...res.features], economy, minimap, patch: true,
         teams: wg.players % 2 === 0 && wg.symmetry !== "none" ? "2" : "ffa", rugged: wg.edge === "rugged",
-        edits: { ...d.edits, spawns: res.spawns, props },
+        edits: { ...d.edits, spawns: res.spawns, props, mass },
       };
     });
     setGenOpen(false);
     setSkin("relief");
     setSel(new Set(["map"]));
-    toast("ok", `Mundo gerado: ${res.features.filter((f) => f.kind !== "pad").length} formas, ${res.props.length} decorações e ${res.spawns.length} bases. Tudo pode ser editado.`);
+    toast("ok", `Mundo gerado: ${res.features.filter((f) => f.kind !== "pad").length} formas, ${res.props.length} decorações, ${res.mass.length} pontos de massa e ${res.spawns.length} bases. Tudo pode ser editado.`);
   };
   const removeWorld = async () => {
     if (!(await confirmDialog("Tirar o mundo gerado? Formas e decorações criadas pelo gerador saem; as que você colocou ficam.", "Tirar"))) return;
@@ -1106,6 +1138,7 @@ export default function MapStudio({ id }: { id: string }) {
             <RibbonGroup label="Configurar">
               <RibbonButton icon="tune" label="Propriedades do mapa" onClick={() => setSel(new Set(["map"]))} />
               <RibbonButton icon="insights" label="Análise" onClick={() => setSkin("analysis")} />
+              <RibbonButton icon="fact_check" label="Validar" onClick={() => setIssues(runCheck())} disabled={!relief3d || !heights} hint="Bases, massa, decorações e equilíbrio" />
             </RibbonGroup>
           </>}
         </Ribbon>
@@ -1258,6 +1291,20 @@ export default function MapStudio({ id }: { id: string }) {
           <WorldGenModal grid={relief3d} donor={relief3d.heights} water={water} hasWater={hasWater} terrains={terrains} terrain={doc.terrain}
             initial={doc.world} catalog={catalog} onTerrain={(t) => setDoc((d) => ({ ...d, terrain: t }))} onClose={() => setGenOpen(false)} onApply={applyWorld} />
         </Suspense>
+      )}
+      {issues && (
+        <Modal title="Validação do mapa" icon="fact_check" onClose={() => setIssues(null)}>
+          <div className="col" style={{ gap: 6 }}>
+            {issues.map((x, i) => (
+              <button key={i} className={`check-item ${x.level}`} disabled={!x.sel} onClick={() => { if (x.sel) { setSel(new Set([x.sel])); setIssues(null); } }}>{x.text}</button>
+            ))}
+            <p className="faint small">Clique num item para selecionar o objeto. A correção automática move a massa para o chão plano mais perto e tira decorações sobrepostas, em cima das bases ou da massa. Bases e relevo não são alterados.</p>
+            <footer>
+              <button className="btn text" onClick={() => setIssues(runCheck())}><Icon name="refresh" size={16} /> Conferir de novo</button>
+              <button className="btn primary" disabled={!issues.some((x) => x.fixable)} onClick={autoFix}><Icon name="auto_fix_high" size={16} /> Corrigir automaticamente</button>
+            </footer>
+          </div>
+        </Modal>
       )}
       {lobbyOpen && (
         <Modal title="Prévia do lobby" icon="preview" onClose={() => setLobbyOpen(false)}>

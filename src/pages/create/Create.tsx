@@ -18,7 +18,9 @@ const DESC: Record<CreationKind, string> = {
 export default function Create() {
   const [list, setList] = useState<CreationMeta[] | null>(null);
   const [q, setQ] = useState("");
-  const [kind, setKind] = useState<CreationKind | "all" | "fav">("all");
+  const createKind = useStore((x) => x.createKind);
+  const [kind, setKind] = useState<CreationKind | "all" | "fav">(createKind);
+  useEffect(() => { setKind(createKind); }, [createKind]);
   const [creating, setCreating] = useState<CreationKind | null>(null);
   const [ctx, setCtx] = useState<{ x: number; y: number; m: CreationMeta } | null>(null);
   const [renaming, setRenaming] = useState<CreationMeta | null>(null);
@@ -66,16 +68,29 @@ export default function Create() {
     } },
   ];
 
+  const go = useStore((x) => x.go);
+  const setStudioTab = useStore((x) => x.setStudioTab);
+  const area = createKind === "map"
+    ? { icon: "map", over: "Mapas", title: "Editor e gerador de mapas", text: "Gere mundos por semente (relevo, água, massa, florestas e áreas estratégicas), edite à mão, valide e exporte o .scd. Tudo fica no seu computador.", links: [] as { icon: string; label: string; go: () => void }[] }
+    : createKind === "unit"
+    ? { icon: "smart_toy", over: "Tropas", title: "Gerador e editor de tropas", text: "Parta de uma unidade do jogo ou misture três (chassi, torre e arma). Ajuste atributos, armas, animações, textura e ícone; a verificação de combate e movimento roda antes de gerar.", links: [{ icon: "photo_camera", label: "Gerador de ícones", go: () => go("icons") }] }
+    : createKind === "model"
+    ? { icon: "view_in_ar", over: "Modelos 3D e texturas", title: "Modelos 3D e texturas", text: "Modele com formas, edite vértices, UVs e materiais. Texturas procedurais (camuflagem, painéis, desgaste e sujeira) ficam no editor de tropas; texturas HD e skins dos arquivos do jogo, no Estúdio.", links: [{ icon: "texture", label: "Texturas HD e skins (Estúdio)", go: () => { setStudioTab("hd"); go("studio"); } }, { icon: "smart_toy", label: "Texturas de tropas", go: () => useStore.getState().goCreate("unit") }] }
+    : { icon: "auto_awesome", over: "Estúdio de criação", title: "O que vamos criar hoje?", text: "Cada projeto abre numa aba própria, com salvamento automático, versões anteriores e cópias de segurança locais.", links: [] };
+
   return (
     <div className="page create-page">
       <header className="create-hero">
         <div>
-          <span className="overline"><Icon name="auto_awesome" size={15} /> Estúdio de criação</span>
-          <h1>O que vamos criar hoje?</h1>
-          <p className="muted">Cada projeto abre numa aba própria, com salvamento automático e versões anteriores.</p>
+          <span className="overline"><Icon name={area.icon} size={15} /> {area.over}</span>
+          <h1>{area.title}</h1>
+          <p className="muted">{area.text}</p>
+          {area.links.length > 0 && <div className="row" style={{ gap: 8, marginTop: 12, flexWrap: "wrap" }}>{area.links.map((l) => (
+            <button key={l.label} className="btn sm" onClick={l.go}><Icon name={l.icon} size={16} /> {l.label}</button>
+          ))}</div>}
         </div>
         <div className="create-actions">
-          {(["map", "unit", "model"] as CreationKind[]).map((k) => (
+          {(createKind === "all" ? (["map", "unit", "model"] as CreationKind[]) : [createKind]).map((k) => (
             <button key={k} className="create-card" style={{ ["--kc" as string]: KIND_META[k].color }} onClick={() => setCreating(k)}>
               <span className="ic"><Icon name={KIND_META[k].icon} size={30} /></span>
               <b>{k === "map" ? "Criar novo mapa" : k === "unit" ? "Criar nova tropa" : "Criar modelo 3D"}</b>
@@ -95,7 +110,7 @@ export default function Create() {
           <div className="chips" style={{ padding: 0 }}>
             <button className="chip" aria-pressed={kind === "all"} onClick={() => setKind("all")}>Todos ({list?.length ?? 0})</button>
             {(["map", "unit", "model"] as CreationKind[]).map((k) => (
-              <button key={k} className="chip" aria-pressed={kind === k} onClick={() => setKind(k)}><Icon name={KIND_META[k].icon} size={15} /> {KIND_META[k].label}s ({counts[k]})</button>
+              <button key={k} className="chip" aria-pressed={kind === k} onClick={() => setKind(k)}><Icon name={KIND_META[k].icon} size={15} /> {k === "model" ? "Modelos 3D" : `${KIND_META[k].label}s`} ({counts[k]})</button>
             ))}
             <button className="chip" aria-pressed={kind === "fav"} onClick={() => setKind("fav")}><Icon name="star" size={15} /> Favoritos</button>
           </div>

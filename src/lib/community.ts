@@ -3,11 +3,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
+import { useStore } from "./store";
 import type { ChatMsg, Room, ServerInfo } from "./types";
+
+export const OFFLINE_TEXT = "O modo local está ligado: o launcher não usa a internet. Desligue em Configurações → Modo local para usar o multiplayer.";
+const isOffline = () => !!useStore.getState().settings?.offline;
 
 async function req<T>(base: string, path: string, init: RequestInit & { token?: string } = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (init.token) headers.Authorization = `Bearer ${init.token}`;
+  if (isOffline()) throw new Error(OFFLINE_TEXT);
   let r: Response;
   try {
     r = await fetch(base.replace(/\/$/, "") + path, { ...init, headers, signal: AbortSignal.timeout(12000) });
@@ -99,6 +104,7 @@ export function useChat(base: string | null | undefined, nick: string, channel: 
 
   useEffect(() => {
     if (!base || nick.trim().length < 2) return;
+    if (isOffline()) { setState("offline"); setNotice(OFFLINE_TEXT); return; }
     let closed = false;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;

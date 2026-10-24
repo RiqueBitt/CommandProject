@@ -7,6 +7,22 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
 
 ## O que ele faz
 
+**Tudo local**: configurações, projetos, mapas, tropas, texturas e ícones ficam em arquivos no seu
+computador (sem banco de dados, sem conta e sem nuvem). O **Modo local** (Sistema → Configurações)
+desliga até o que é opcional e usa a rede: hub, servidor da comunidade e busca de atualizações.
+
+**Áreas** (trilho da esquerda, estilo painel de comando): Início · Arquivos · Mapas · Tropas ·
+Modelos · Ícones · Mods · Rede · Sistema. O visual **Comando** (painéis táticos, botões chanfrados,
+cor da facção UEF/Cybran/Illuminate) é arte própria do launcher; o visual **Clássico** continua
+disponível em Sistema → Visual.
+
+**Arquivos locais** ([detalhes](docs/arquivos-locais.md))
+- Espaço usado por tipo (projetos, lixeira, cópias, biblioteca, originais do jogo, cache).
+- **Cópias de segurança** `.zip` dos projetos: manual, "salvar em…" e **automática** (a cada N dias,
+  guarda as 5 mais recentes). Restaurar cria projetos novos: nada existente é substituído.
+- **Lixeira** de projetos com restauração e **conferência dos arquivos**: um documento danificado é
+  recuperado do salvamento automático ou da versão anterior (o danificado fica guardado).
+
 **Tela inicial**
 - Uma unidade do seu jogo em 3D, pintada com as **cores da facção** como no jogo (azul UEF, vermelho
   Cybran, dourado Illuminate, ou a cor de time que você escolher) e com as partes que brilham acesas,
@@ -103,7 +119,10 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
   recuperação após fechar sem salvar, **versões**, desfazer/refazer e exportação `.cpproj`.
 - **Gerador de mundos por semente**: montanhas, cordilheiras, lagos, rios, ilhas, cânions,
   crateras, dunas, florestas, ruínas e destroços, com simetria para 2 a 8 jogadores e passagens
-  automáticas entre as bases. Depois de gerar, tudo continua editável.
+  automáticas entre as bases. **Massa simétrica** (expansões seguras e disputadas, centro disputado),
+  paredões que criam gargalos e galeria de variações. Depois de gerar, tudo continua editável.
+- **Validação do mapa** com correção automática: bases na água/declive/isoladas, massa inacessível,
+  em declive ou sobreposta, decorações em cima de bases e massa, distâncias e massa desiguais.
 - **Editor de mapas** no estilo de um editor de jogo:
   - vista 3D, explorador (esconder e travar), propriedades;
   - pincel de escultura, formas do terreno, simetria;
@@ -112,6 +131,19 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
   - *Gerar e jogar* e exportar o `.scd`.
 - **Editor de modelos 3D**: formas, importação OBJ/GLB, edição de vértices, grupos que viram ossos,
   materiais com imagem, cor do time e brilho; exporta `.scm` + `.dds` para o jogo, OBJ e GLB.
+- **Misturador de 3 tropas**: chassi de uma, torre de outra e arma/cano de uma terceira, com
+  modelos, texturas (atlas), animações e ossos combinados e verificados (peças soltas, encaixe,
+  ossos das armas).
+- **Gerador de texturas** procedural no espaço UV do próprio modelo: camuflagens (floresta,
+  digital, estilhaços, listras, urbana), painéis com frestas, grades, escotilhas e rebites, marcações,
+  desgaste nas quinas vivas, arranhões, sujeira por altura/frestas, escorridos e poeira. Prévia ao vivo,
+  comparação lado a lado, versões, regenerar só uma camada e exportar PNG.
+- **Gerador de ícones**: câmera, luz, fundo (painel tático, degradê, transparente), contorno e
+  símbolo da função, prévia em 24–64 px e exportação em lote para uma pasta.
+- **Verificação de combate e movimento** antes de gerar: tipo de movimento × categorias,
+  velocidade/aceleração, colisão × tamanho do modelo, seleção, ossos de cada arma, torre que
+  carrega o cano, boca abaixo do chão, alcance × visão, animações (ossos inexistentes, peças que
+  esticam ou se soltam, rotações bruscas, laço que não fecha). Erros impedem gerar.
 - **Criador de tropas** (experimental): parte de uma unidade do jogo.
   - Edita aparência (pintar direto no modelo, ícone gerado do 3D, assistente de ossos), atributos
     e armas (copiar de outras unidades).
@@ -146,6 +178,10 @@ clique (baixa com retomada, confere o SHA-256 publicado pelo GitHub, instala e r
 | ![Criador de tropas](docs/screenshots/tropa.png) | ![Desempenho](docs/screenshots/desempenho.png) |
 | ![Gerador de mundos](docs/screenshots/gerador.png) | ![Mundo gerado](docs/screenshots/mundo-gerado.png) |
 | ![Análise do mapa](docs/screenshots/analise-mapa.png) | ![Linha do tempo de animação](docs/screenshots/tropa-animacao.png) |
+| ![Arquivos locais](docs/screenshots/arquivos.png) | ![Gerador de ícones](docs/screenshots/icones.png) |
+| ![Gerador de texturas](docs/screenshots/gerador-texturas.png) | ![Ícone de uma tropa](docs/screenshots/gerador-icones.png) |
+| ![Misturar 3 tropas](docs/screenshots/misturador.png) | ![Verificação de combate](docs/screenshots/tropa-verificacao.png) |
+| ![Validação do mapa](docs/screenshots/validacao-mapa.png) | |
 
 ## Segurança dos arquivos do jogo
 
@@ -251,6 +287,14 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
 - **Decorações** são visuais: não bloqueiam a passagem das unidades.
 - **Tropas novas, animações criadas e modelos próprios no jogo** são experimentais: veja a tabela
   em [docs/criacao.md](docs/criacao.md#o-que-é-experimental).
+- **Misturador de tropas**: as peças são encaixadas pelos ossos (corpo rígido, sem fundir as malhas) e as
+  animações da torre/arma são adaptadas pela diferença em relação à pose de repouso. Combinações de
+  tamanhos muito diferentes podem precisar de ajuste manual de escala e posição.
+- **Texturas procedurais** geram a cor (albedo); os mapas de normal, brilho e a máscara da cor do time
+  continuam os do modelo.
+- **Verificação de combate**: confere a consistência entre blueprint, modelo e animações (o que a engine
+  vai usar); não simula a partida. O comportamento final é sempre o do jogo.
+- **Ícones** novos substituem o ícone da unidade base no mesmo tamanho e formato do original.
 - **Partidas**: o jogo em si continua nos lobbies da Steam; o launcher organiza as salas, o chat e os
   mods, mas não substitui o netcode do SC2.
 

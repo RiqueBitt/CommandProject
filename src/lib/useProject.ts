@@ -62,6 +62,7 @@ export function useProject<D>(id: string, migrate: (raw: unknown) => D, empty: D
       setMeta(l.meta);
       setHist({ cur: migrate(l.doc), past: [], future: [] });
       setRecoveryAt(l.recoveryAt);
+      if (l.repaired) useStore.getState().toast("info", `O arquivo de "${l.meta.name}" estava danificado e foi recuperado do ${l.repaired}. O arquivo danificado ficou guardado na pasta do projeto.`);
       setStatus("ready");
     }).catch((e) => {
       if (!alive) return;

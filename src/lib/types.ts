@@ -77,6 +77,10 @@ export interface Settings {
   gamePriority?: string;
   showcaseUnit?: string | null;
   showcase: boolean;
+  /** modo local: desliga tudo que usa rede */
+  offline?: boolean;
+  autoBackupDays?: number;
+  uiPrefs?: Record<string, unknown>;
 }
 
 export interface ServerInfo { name: string; motd: string; version: string; rooms: number; online: number; hub: boolean }
@@ -222,7 +226,12 @@ export interface CreationMeta {
   createdAt: string; updatedAt: string; favorite: boolean; tags: string[];
   builtMod?: string | null; hasThumb: boolean;
 }
-export interface CreationLoaded<D = unknown> { meta: CreationMeta; doc: D; recoveryAt: string | null }
+export interface CreationLoaded<D = unknown> { meta: CreationMeta; doc: D; recoveryAt: string | null; repaired?: string | null }
+export interface StorageItem { key: string; label: string; path: string; bytes: number }
+export interface StorageReport { dataDir: string; items: StorageItem[]; total: number }
+export interface BackupEntry { path: string; name: string; createdAt: string; size: number; auto: boolean; projects: number }
+export interface RestoreReport { restored: string[]; skipped: string[] }
+export interface TrashItem { entry: string; id: string; name: string; kind: CreationKind; deletedAt: string; size: number }
 export interface CreationVersion { file: string; savedAt: string; size: number }
 export interface CreationAsset { name: string; size: number }
 
@@ -245,9 +254,14 @@ export interface UnitBuildReq {
   overrides: Record<string, number | string | boolean>; categories: string[] | null; scale: number | null;
   animations: [string, string, number | null][]; modelCreation: string | null; albedoAsset: string | null; tint: [number, number, number];
   weaponCopies?: [number, string, number][]; iconAsset?: string | null; boneMap?: Record<string, string>; pack?: string | null;
+  mix?: MixSpec | null;
 }
+export interface MixSpec { chassis: string; turret: string | null; weapon: string | null; turretScale: number; weaponScale: number; turretOffset: [number, number, number]; turretYaw: number }
+export interface MixCheck { level: "ok" | "warn" | "err" | "fix"; text: string }
+export interface MixPreview extends UnitPreview { checks: MixCheck[]; bones: string[] }
 export interface UnitPack { slug: string; name: string; units: string[] }
-export interface UnitBuildResult { report: { files: number; warnings: string[]; blueprint: string }; manifest: Manifest }
+export interface Finding { level: "err" | "warn" | "ok"; area: string; text: string }
+export interface UnitBuildResult { report: { files: number; warnings: string[]; blueprint: string; checks?: Finding[] }; manifest: Manifest }
 export interface BakedModel {
   positions: number[]; normals: number[]; uvs: number[]; indices: number[]; boneIndex: number[];
   bones: { name: string; parent: number; pos: [number, number, number]; rot: [number, number, number, number] }[];

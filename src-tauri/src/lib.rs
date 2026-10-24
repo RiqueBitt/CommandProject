@@ -3,6 +3,7 @@
 
 mod commands;
 mod creator_cmds;
+mod files_cmds;
 mod perf_cmds;
 
 use cp_core::hub::HubIndex;
@@ -57,6 +58,17 @@ pub fn run() {
             perf_cmds::perf_set_priority,
             creator_cmds::creations_list,
             creator_cmds::unit_packs,
+            creator_cmds::unit_mix_preview,
+            creator_cmds::export_data,
+            files_cmds::storage_report,
+            files_cmds::backups_list,
+            files_cmds::backup_create,
+            files_cmds::backup_inspect,
+            files_cmds::backup_restore,
+            files_cmds::backup_auto,
+            files_cmds::trash_list,
+            files_cmds::trash_restore,
+            creator_cmds::unit_validate,
             creator_cmds::unit_refs_check,
             creator_cmds::unit_catalog,
             creator_cmds::unit_details,

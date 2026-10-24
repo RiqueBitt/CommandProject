@@ -52,6 +52,25 @@ export async function confirmDialog(message: string, okLabel = "Confirmar", canc
   return ask(message, { title: "CommandProject", kind: "warning", okLabel, cancelLabel });
 }
 
+/** Salva um arquivo gerado (data URL) num lugar escolhido pelo usuário; pede confirmação antes de sobrescrever. */
+export async function saveGenerated(defaultName: string, dataUrl: string, filters: { name: string; extensions: string[] }[]): Promise<string | null> {
+  const path = await pickSave(defaultName, filters);
+  if (!path) return null;
+  return (await writeGenerated(path, dataUrl)) ? path : null;
+}
+/** Grava num caminho; se já existe, pergunta antes. Devolve false se o usuário desistiu. */
+export async function writeGenerated(path: string, dataUrl: string, askedAll = false): Promise<boolean> {
+  try {
+    await api.exportData(path, dataUrl, askedAll);
+  } catch (e) {
+    if (String(e).includes("EXISTE")) {
+      if (!(await confirmDialog(`O arquivo já existe:\n${path}\n\nSubstituir?`, "Substituir"))) return false;
+      await api.exportData(path, dataUrl, true);
+    } else throw e;
+  }
+  return true;
+}
+
 /** Abre um link no navegador do sistema. */
 /** Abre um link no navegador. Erros viram aviso na tela (antes o clique "não fazia nada"). */
 export async function openUrl(url: string) {
@@ -160,7 +179,7 @@ export const api = {
   enhancePreview: (entry: string, mode: T.EnhanceMode, opts: T.EnhanceOptions) => call<T.EnhancePreview>("enhance_preview", { entry, mode, opts }),
   buildEnhance: (opts: T.EnhanceOptions, enable = true) => call<T.Manifest>("build_enhance", { opts, enable }),
   memoryStatus: () => call<T.MemoryStatus>("memory_status"),
-  modExportFiles: (id: string, dir: string) => call<string[]>("mod_export_files", { id, dir }),
+  modExportFiles: (id: string, dir: string, overwrite = false) => call<string[]>("mod_export_files", { id, dir, overwrite }),
   perfReport: () => call<T.PerfReport>("perf_report"),
   perfProcess: () => call<T.ProcessStats | null>("perf_process"),
   perfPrefsSet: (changes: [string, T.PrefValue][]) => call<T.PrefsWriteReport>("perf_prefs_set", { changes }),
@@ -212,6 +231,17 @@ export const api = {
   creationImport: (path: string) => call<T.CreationMeta>("creation_import", { path }),
   unitCatalog: () => call<T.UnitInfo[]>("unit_catalog"),
   unitPacks: () => call<T.UnitPack[]>("unit_packs"),
+  exportData: (path: string, data: string, overwrite: boolean) => call<void>("export_data", { path, data, overwrite }),
+  unitValidate: (creation: string, req: T.UnitBuildReq) => call<T.Finding[]>("unit_validate", { creation, req }),
+  storageReport: () => call<T.StorageReport>("storage_report"),
+  backupsList: () => call<T.BackupEntry[]>("backups_list"),
+  backupCreate: (dest: string | null, overwrite = false) => call<T.BackupEntry>("backup_create", { dest, overwrite }),
+  backupInspect: (path: string) => call<T.BackupEntry>("backup_inspect", { path }),
+  backupRestore: (path: string, only: string[] = []) => call<T.RestoreReport>("backup_restore", { path, only }),
+  backupAuto: () => call<T.BackupEntry | null>("backup_auto"),
+  trashList: () => call<T.TrashItem[]>("trash_list"),
+  trashRestore: (entry: string) => call<T.CreationMeta>("trash_restore", { entry }),
+  unitMixPreview: (base: string, spec: T.MixSpec) => call<T.MixPreview>("unit_mix_preview", { base, spec }),
   unitRefsCheck: (paths: string[]) => call<string[]>("unit_refs_check", { paths }),
   unitDetails: (id: string) => call<T.UnitDetails>("unit_details", { id }),
   unitAnimations: () => call<string[]>("unit_animations"),

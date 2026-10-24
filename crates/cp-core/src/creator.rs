@@ -76,6 +76,22 @@ pub struct Loaded {
     pub doc: Value,
     /// Há um salvamento automático mais novo que o documento (quando o launcher fechou sem salvar).
     pub recovery_at: Option<String>,
+    /// O `doc.json` estava corrompido e foi recuperado (de onde veio a cópia).
+    #[serde(default)]
+    pub repaired: Option<String>,
+}
+
+/// Projeto na lixeira.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashItem {
+    /// nome da pasta na lixeira
+    pub entry: String,
+    pub id: String,
+    pub name: String,
+    pub kind: Kind,
+    pub deleted_at: String,
+    pub size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -222,12 +238,28 @@ impl Creations {
     pub fn load(&self, id: &str) -> Result<Loaded> {
         let d = self.dir(id)?;
         let meta: Meta = read_json(&d.join("meta.json"))?;
-        let doc: Value = read_json(&d.join("doc.json"))?;
+        let (doc, repaired) = match read_json::<Value>(&d.join("doc.json")) {
+            Ok(v) => (v, None),
+            Err(e) => {
+                // documento corrompido: guarda o arquivo ruim e recupera do salvamento automático
+                // ou da versão anterior mais nova (nada é apagado)
+                let mut cands: Vec<(PathBuf, String)> = vec![(d.join("autosave.json"), "salvamento automático".into())];
+                for v in self.versions(id).unwrap_or_default() {
+                    cands.push((d.join("versions").join(&v.file), format!("versão de {}", v.saved_at)));
+                }
+                let found = cands.into_iter().find_map(|(p, label)| read_json::<Value>(&p).ok().map(|v| (v, label)));
+                let Some((v, label)) = found else { return Err(e) };
+                let bad = d.join(format!("doc.corrompido-{}.json", chrono::Utc::now().format("%Y%m%d%H%M%S")));
+                let _ = fs::rename(d.join("doc.json"), &bad);
+                write_atomic(&d.join("doc.json"), &Self::check_doc(&v)?)?;
+                (v, Some(label))
+            }
+        };
         let recovery_at = modified(&d.join("autosave.json")).and_then(|auto| {
             let saved = modified(&d.join("doc.json"))?;
             (auto > saved).then(|| chrono::DateTime::<chrono::Utc>::from(auto).to_rfc3339())
         });
-        Ok(Loaded { meta, doc, recovery_at })
+        Ok(Loaded { meta, doc, recovery_at, repaired })
     }
 
     /// Salva o documento. `snapshot` guarda o anterior em `versions/` (antes de sobrescrever).
@@ -369,6 +401,43 @@ impl Creations {
         Ok(copy)
     }
 
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Projetos na lixeira (mais recentes primeiro).
+    pub fn trash_list(&self) -> Vec<TrashItem> {
+        let mut out = Vec::new();
+        let Ok(rd) = fs::read_dir(&self.trash) else { return out };
+        for e in rd.flatten() {
+            let Ok(m) = read_json::<Meta>(&e.path().join("meta.json")) else { continue };
+            let entry = e.file_name().to_string_lossy().into_owned();
+            let deleted_at = modified(&e.path()).map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339()).unwrap_or_default();
+            out.push(TrashItem { size: dir_size(&e.path()), entry, id: m.id, name: m.name, kind: m.kind, deleted_at });
+        }
+        out.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+        out
+    }
+
+    /// Tira da lixeira. Se já existe um projeto com o mesmo id, volta com um id novo.
+    pub fn trash_restore(&self, entry: &str) -> Result<Meta> {
+        if entry.is_empty() || entry.contains(['/', '\\']) || entry.starts_with('.') {
+            return Err(Error::Other("item da lixeira inválido".into()));
+        }
+        let src = self.trash.join(entry);
+        let mut meta: Meta = read_json(&src.join("meta.json"))?;
+        let mut id = meta.id.clone();
+        if bad_id(&id) || self.root.join(&id).exists() {
+            id = self.new_id(meta.kind, &meta.name);
+        }
+        let dst = self.root.join(&id);
+        fs::rename(&src, &dst).at(&src)?;
+        meta.id = id;
+        meta.updated_at = now();
+        write_json(&dst.join("meta.json"), &meta)?;
+        Ok(meta)
+    }
+
     /// Manda para a lixeira (não apaga de vez).
     pub fn delete(&self, id: &str) -> Result<()> {
         let src = self.dir(id)?;
@@ -460,8 +529,13 @@ impl Creations {
     pub fn import(&self, src: &Path) -> Result<Meta> {
         let f = fs::File::open(src).at(src)?;
         let mut z = zip::ZipArchive::new(f).map_err(|e| Error::archive(src, e))?;
+        self.import_from(&mut z, "", src)
+    }
+
+    /// Importa o projeto que está em `prefix` dentro de um zip (cópia de segurança ou `.cpproj`).
+    pub fn import_from<R: Read + std::io::Seek>(&self, z: &mut zip::ZipArchive<R>, prefix: &str, src: &Path) -> Result<Meta> {
         let mut read = |name: &str| -> Option<Vec<u8>> {
-            let mut e = z.by_name(name).ok()?;
+            let mut e = z.by_name(&format!("{prefix}{name}")).ok()?;
             if e.size() as usize > MAX_DOC {
                 return None;
             }
@@ -477,8 +551,9 @@ impl Creations {
         let mut created = self.create(meta.kind, &meta.name, &doc)?;
         let dst = self.root.join(&created.id);
         let names: Vec<String> = (0..z.len()).filter_map(|i| z.by_index(i).ok().and_then(|e| e.name().ok().map(|n| n.into_owned()))).collect();
+        let assets_prefix = format!("{prefix}assets/");
         for n in names {
-            let Some(rest) = n.strip_prefix("assets/") else { continue };
+            let Some(rest) = n.strip_prefix(&assets_prefix) else { continue };
             let Some(clean) = safe_asset_name(rest) else { continue };
             let mut e = z.by_name(&n).map_err(|e| Error::archive(src, e))?;
             if e.size() as usize > MAX_ASSET {
@@ -513,6 +588,17 @@ fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Tamanho de uma pasta (recursivo).
+pub fn dir_size(p: &Path) -> u64 {
+    let Ok(rd) = fs::read_dir(p) else { return fs::metadata(p).map(|m| m.len()).unwrap_or(0) };
+    rd.flatten()
+        .map(|e| {
+            let path = e.path();
+            if path.is_dir() { dir_size(&path) } else { e.metadata().map(|m| m.len()).unwrap_or(0) }
+        })
+        .sum()
 }
 
 #[cfg(test)]

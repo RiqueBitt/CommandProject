@@ -6,6 +6,7 @@ import { errorText, useStore } from "./lib/store";
 import { useTabs } from "./lib/tabs";
 import Home from "./pages/Home";
 import Hub from "./pages/Hub";
+import Files from "./pages/Files";
 import Library from "./pages/Library";
 import Me from "./pages/Me";
 import Multiplayer from "./pages/Multiplayer";
@@ -16,6 +17,7 @@ const Studio = lazy(() => import("./pages/studio/Studio"));
 const Create = lazy(() => import("./pages/create/Create"));
 const ProjectHost = lazy(() => import("./pages/create/ProjectHost"));
 const Performance = lazy(() => import("./pages/Performance"));
+const Icons = lazy(() => import("./pages/Icons"));
 
 export default function App() {
   const page = useStore((s) => s.page);
@@ -23,6 +25,9 @@ export default function App() {
   const activeTab = useTabs((s) => s.active);
   const hasTabs = useTabs((s) => s.tabs.length > 0);
   const toast = useStore((s) => s.toast);
+  const prefs = useStore((s) => s.settings?.uiPrefs);
+  const skin = (prefs?.skin as string | undefined) ?? "sc";
+  const fac = (prefs?.faction as string | undefined) ?? "uef";
 
   useEffect(() => {
     (async () => {
@@ -39,7 +44,9 @@ export default function App() {
           await refresh();
           toast("info", "Desliguei o Menu moderno antigo, que fazia o jogo fechar ao abrir. Gere de novo na Biblioteca para usar a versão corrigida.");
         }
-        if (useStore.getState().settings?.checkAppUpdates) {
+        // cópia de segurança automática dos projetos (local, de tempos em tempos)
+        void api.backupAuto().then((b) => { if (b) toast("info", `Cópia de segurança automática dos projetos feita (${b.projects} projeto(s)).`); }).catch(() => {});
+        if (useStore.getState().settings?.checkAppUpdates && !useStore.getState().settings?.offline) {
           // em segundo plano: sem internet ou GitHub lento não atrasa a abertura
           void api.appUpdateCheck().then((up) => {
             if (!up) return;
@@ -71,7 +78,7 @@ export default function App() {
   }, [refresh, toast]);
 
   return (
-    <div className={`app ${activeTab ? "in-project" : ""}`}>
+    <div className={`app ${activeTab ? "in-project" : ""}`} data-skin={skin} data-fac={fac} data-motion={prefs?.reduceMotion ? "off" : "on"}>
       <SystemBar />
       {hasTabs && (
         <div className="project-area" hidden={!activeTab}>
@@ -101,6 +108,12 @@ export default function App() {
           </Suspense>
         )}
         {page === "settings" && <SettingsPage />}
+        {page === "files" && <Files />}
+        {page === "icons" && (
+          <Suspense fallback={<div className="page muted">Carregando…</div>}>
+            <Icons />
+          </Suspense>
+        )}
       </main>
       <CommandPalette />
       <Toasts />

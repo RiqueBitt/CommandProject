@@ -333,6 +333,10 @@ pub struct UnitBuild {
     pub weapon_copies: Vec<(usize, String, usize)>,
     /// ícone (PNG) que substitui os ícones da base
     pub icon_png: Option<Vec<u8>>,
+    /// ossos renomeados (unidade de origem → tropa) aplicados nas armas copiadas
+    pub bone_renames: Vec<(String, String)>,
+    /// esqueleto final: referências a ossos que não existem são trocadas pelo osso de mesmo papel
+    pub skeleton: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -341,6 +345,47 @@ pub struct BuildReport {
     pub files: usize,
     pub warnings: Vec<String>,
     pub blueprint: String,
+    /// verificação de combate, movimento, colisão, ossos e animações
+    pub checks: Vec<crate::unitcheck::Finding>,
+}
+
+/// Modelo final (o próprio ou o da base) e as animações citadas, para a verificação.
+fn checks_for(sources: &[PathBuf], b: &UnitBuild, text: &str) -> Result<Vec<crate::unitcheck::Finding>> {
+    let model = match &b.model {
+        Some(m) => crate::scm::read(&m.scm)?,
+        None => {
+            let files = unit_files(sources, &b.base)?;
+            let pick = files
+                .iter()
+                .filter(|f| f.2.to_ascii_lowercase().ends_with(".scm"))
+                .min_by_key(|f| (!f.2.to_ascii_lowercase().contains("lod0"), f.2.len()));
+            match pick {
+                Some((si, i, _, _)) => match Scd::open(&sources[*si]).and_then(|mut s| s.read_at(*i)).and_then(|d| crate::scm::read(&d)) {
+                    Ok(m) => m,
+                    Err(e) => return Ok(vec![crate::unitcheck::Finding { level: "warn", area: "Modelo", text: format!("não deu para ler o modelo da base para conferir: {e}") }]),
+                },
+                None => return Ok(vec![crate::unitcheck::Finding { level: "warn", area: "Modelo", text: "não achei o modelo da unidade base para conferir".into() }]),
+            }
+        }
+    };
+    let bp = blueprint::parse(text)?;
+    let new = b.new_id.to_ascii_lowercase();
+    let anims = crate::unitcheck::load_anims(&bp, &mut |path: &str| {
+        let key = path.trim_start_matches('/').to_ascii_lowercase();
+        if let Some((_, d)) = b.extra_files.iter().find(|(p, _)| p.to_ascii_lowercase() == key) {
+            return Some(d.clone());
+        }
+        // arquivos da base copiados com o nome novo
+        let orig = key.replace(&format!("units/{new}/{new}"), &format!("units/{0}/{0}", b.base.to_ascii_lowercase()));
+        crate::mapassets::read_game_file(sources, &format!("/{orig}")).ok()
+    });
+    Ok(crate::unitcheck::check(text, &model, &anims))
+}
+
+/// Só verifica (sem gerar nada): blueprint final, modelo e animações.
+pub fn validate(sources: &[PathBuf], b: &UnitBuild) -> Result<Vec<crate::unitcheck::Finding>> {
+    let (text, _) = make_blueprint(sources, b)?;
+    checks_for(sources, b, &text)
 }
 
 pub fn valid_id(id: &str) -> bool {
@@ -348,7 +393,7 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 /// troca `base` por `new` nos nomes (sem diferenciar maiúsculas), mantendo o resto
-fn rename(s: &str, base: &str, new: &str) -> String {
+pub fn rename(s: &str, base: &str, new: &str) -> String {
     let lower = s.to_ascii_lowercase();
     let mut out = String::with_capacity(s.len());
     let mut i = 0;
@@ -409,6 +454,7 @@ pub fn make_blueprint(sources: &[PathBuf], b: &UnitBuild) -> Result<(String, Vec
             warnings.push(format!("a arma {src} de {unit} não existe"));
             continue;
         };
+        let w = crate::unitmix::rename_bones_in(&w, &b.bone_renames);
         if *target == 0 {
             text = match blueprint::append_item(&text, "Weapon", &w) {
                 Ok((t, _)) => t,
@@ -422,6 +468,12 @@ pub fn make_blueprint(sources: &[PathBuf], b: &UnitBuild) -> Result<(String, Vec
     // 4) alterações do editor
     if !b.changes.is_empty() {
         text = blueprint::apply(&text, &b.changes)?;
+    }
+    // 5) ossos citados pelas armas/efeitos precisam existir no esqueleto final
+    if let Some(bones) = &b.skeleton {
+        let (t, fixes) = crate::unitmix::repair_bone_refs(&text, bones)?;
+        text = t;
+        warnings.extend(fixes.into_iter().map(|c| c.text));
     }
     Ok((text, warnings))
 }
@@ -461,6 +513,12 @@ pub fn build(sources: &[PathBuf], b: &UnitBuild, dest: &Path) -> Result<BuildRep
         return Err(Error::Other(format!("já existe uma unidade {new} no jogo: escolha outro id")));
     }
     let (text, mut warnings) = make_blueprint(sources, b)?;
+    let checks = checks_for(sources, b, &text)?;
+    let errs: Vec<String> = checks.iter().filter(|c| c.level == "err").map(|c| format!("{}: {}", c.area, c.text)).collect();
+    if !errs.is_empty() {
+        return Err(Error::Other(format!("a tropa não passou na verificação:\n- {}", errs.join("\n- "))));
+    }
+    warnings.extend(checks.iter().filter(|c| c.level == "warn").map(|c| format!("{}: {}", c.area, c.text)));
     let header = format!("# Gerado pelo CommandProject a partir de {base}. Editar este arquivo à mão é seguro.\n");
 
     // 3) arquivos copiados com o nome novo
@@ -481,6 +539,10 @@ pub fn build(sources: &[PathBuf], b: &UnitBuild, dest: &Path) -> Result<BuildRep
     );
     add(&mut out, &format!("units/{new}/{new}_script.lua"), script.as_bytes())?;
 
+    // arquivos próprios primeiro: substituem os de mesmo nome copiados da base
+    for (path, data) in &b.extra_files {
+        add(&mut out, path, data)?;
+    }
     let files = unit_files(sources, &base)?;
     let mut have_albedo = false;
     let lower_name = |n: &str| n.rsplit('/').next().unwrap_or(n).to_ascii_lowercase();
@@ -504,7 +566,15 @@ pub fn build(sources: &[PathBuf], b: &UnitBuild, dest: &Path) -> Result<BuildRep
             } else if is_dds {
                 data = if ln.contains("diffuse") || ln.contains("albedo") {
                     have_albedo = true;
-                    m.albedo.clone()
+                    let mut d = match &b.albedo_png {
+                        Some(png) => replace_texture(&m.albedo, png)?,
+                        None => m.albedo.clone(),
+                    };
+                    let (h, s2, v) = b.tint;
+                    if h != 0.0 || s2 != 0.0 || v != 0.0 {
+                        d = tint_texture(&d, h, s2, v)?;
+                    }
+                    d
                 } else if ln.contains("team") {
                     m.team.clone()
                 } else if ln.contains("normal") {
@@ -526,9 +596,6 @@ pub fn build(sources: &[PathBuf], b: &UnitBuild, dest: &Path) -> Result<BuildRep
             }
         }
         add(&mut out, &new_name, &data)?;
-    }
-    for (path, data) in &b.extra_files {
-        add(&mut out, path, data)?;
     }
     if !have_albedo && (b.albedo_png.is_some() || b.tint != (0.0, 0.0, 0.0)) {
         warnings.push("não achei a textura de cor da unidade base; a cor não foi alterada".into());
@@ -554,7 +621,7 @@ pub fn build(sources: &[PathBuf], b: &UnitBuild, dest: &Path) -> Result<BuildRep
     }
     let count = added.len();
     out.finish()?;
-    Ok(BuildReport { files: count, warnings, blueprint: text })
+    Ok(BuildReport { files: count, warnings, blueprint: text, checks })
 }
 
 fn replace_texture(orig: &[u8], png: &[u8]) -> Result<Vec<u8>> {

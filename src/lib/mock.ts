@@ -672,6 +672,38 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       } satisfies T.UnitDetails);
     }
     case "unit_preview": return r(mockTank());
+    case "storage_report": return r({ dataDir: "C:\\Users\\voce\\AppData\\Roaming\\CommandProject", total: 1_480_000_000, items: [
+      { key: "creations", label: "Projetos (mapas, tropas, modelos, texturas, ícones)", path: "creations", bytes: 84_000_000 },
+      { key: "creations-trash", label: "Lixeira de projetos", path: "creations-trash", bytes: 3_200_000 },
+      { key: "project-backups", label: "Cópias de segurança dos projetos", path: "project-backups", bytes: 61_000_000 },
+      { key: "library", label: "Biblioteca de mods", path: "library", bytes: 912_000_000 },
+      { key: "backups", label: "Arquivos originais do jogo (para restaurar)", path: "backups", bytes: 380_000_000 },
+      { key: "cache", label: "Cache e temporários", path: "cache", bytes: 21_000_000 },
+      { key: "other", label: "Configurações e outros", path: ".", bytes: 18_800_000 },
+    ] } satisfies T.StorageReport);
+    case "backups_list": return r(mockBackups);
+    case "backup_create": { await sleep(400); const b = { path: (a.dest as string) ?? `project-backups/copia-${Date.now()}.zip`, name: `copia-${new Date().toISOString().slice(0, 10)}.zip`, createdAt: new Date().toISOString(), size: 30_500_000, auto: false, projects: 5 }; if (!a.dest) mockBackups.unshift(b); return r(b); }
+    case "backup_inspect": return r({ path: a.path as string, name: String(a.path).split(/[\\/]/).pop() ?? "", createdAt: new Date().toISOString(), size: 30_500_000, auto: false, projects: 5 } satisfies T.BackupEntry);
+    case "backup_restore": { await sleep(400); return r({ restored: ["Vale do rio", "Tanque pesado"], skipped: [] } satisfies T.RestoreReport); }
+    case "backup_auto": return r(null);
+    case "trash_list": return r(mockTrash);
+    case "trash_restore": { const i = mockTrash.findIndex((t) => t.entry === a.entry); const [t] = mockTrash.splice(i, 1); return r({ id: t.id, kind: t.kind, name: t.name, description: "", createdAt: t.deletedAt, updatedAt: new Date().toISOString(), favorite: false, tags: [], builtMod: null, hasThumb: false } as unknown as T.CreationMeta); }
+    case "export_data": { console.info("[mock] export_data", a.path, String(a.data).length, "bytes"); return r(undefined); }
+    case "unit_mix_preview": {
+      const sp = a.spec as T.MixSpec;
+      const t = mockTank();
+      const k = sp.turretScale > 0 ? sp.turretScale : 1.2;
+      // torre maior para mostrar a troca
+      const pos = t.mesh.positions.slice();
+      t.boneIndex.forEach((b, i) => { if (b >= 1) { pos[i * 3] *= k; pos[i * 3 + 2] *= k; pos[i * 3 + 1] = 0.55 + (pos[i * 3 + 1] - 0.55) * k + sp.turretOffset[1]; } });
+      t.mesh.positions = pos;
+      const checks: T.MixCheck[] = [
+        ...(sp.turret ? [{ level: "fix" as const, text: "Display.AnimationDeath: 1 osso(s) que não existem mais foram tirados da animação" }] : []),
+        ...(k > 1.6 ? [{ level: "warn" as const, text: "a torre ficou 60% mais larga que o corpo" }] : []),
+        { level: "ok", text: `4 ossos, ${t.mesh.positions.length / 3} vértices, atlas 1024×512` },
+      ];
+      return r({ ...t, checks, bones: ["Root", "Turret", "Turret_Barrel", "Turret_Muzzle"] } satisfies T.MixPreview);
+    }
     case "anim_read": {
       const frames = Array.from({ length: 31 }, (_, i) => {
         const t = (i / 30) * 2, ang = Math.sin((i / 30) * Math.PI * 2) * 0.6;
@@ -683,13 +715,14 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       const q = a.req as T.UnitBuildReq;
       return r(`UnitBlueprint {\n    Description = '<LOC ${q.newId}_desc>${q.name}',\n${Object.entries(q.overrides).map(([k, v]) => `    -- ${k} = ${JSON.stringify(v)}`).join("\n")}\n    -- (resto igual ao blueprint de ${q.base})\n}`);
     }
+    case "unit_validate": { await sleep(250); return r(mockFindings(a.req as T.UnitBuildReq)); }
     case "unit_build": {
       const q = a.req as T.UnitBuildReq;
       await sleep(500);
       const m = manifest(`tropa-${q.newId}`, q.name, "1.0.0", "gameplay", [`_cp_${q.newId}.scd`], { source: { kind: "studio" } });
       mods.push(m);
       active().mods.push({ id: m.id, enabled: true });
-      return r({ report: { files: 7, warnings: q.modelCreation ? ["o modelo próprio não tem o osso Turret_Muzzle: os tiros saem do centro"] : [], blueprint: "" }, manifest: m } satisfies T.UnitBuildResult);
+      return r({ report: { files: 7, warnings: q.modelCreation ? ["o modelo próprio não tem o osso Turret_Muzzle: os tiros saem do centro"] : [], blueprint: "", checks: mockFindings(q) }, manifest: m } satisfies T.UnitBuildResult);
     }
     case "anim_create": return r(`${String(a.name)}.sca`);
     case "model_prepare": return r({ triangles: (a.baked as T.BakedModel).indices.length / 3, warnings: [] });
@@ -794,3 +827,22 @@ function perfDb(): T.PerfReport {
   };
   return perfState;
 }
+
+function mockFindings(q: T.UnitBuildReq): T.Finding[] {
+  const out: T.Finding[] = [];
+  const speed = q.overrides["Physics.MaxSpeed"];
+  if (typeof speed === "number" && speed <= 0) out.push({ level: "err", area: "Movimento", text: "velocidade máxima zero ou negativa" });
+  out.push({ level: "ok", area: "Colisão", text: "colisão 1.2×0.8×1.9 combina com o modelo (1.1×0.9×2.0)" });
+  out.push({ level: "ok", area: "Armas", text: "1 arma(s): ossos de giro, elevação e boca ligados" });
+  if (q.mix?.turret) out.push({ level: "warn", area: "Animações", text: "AnimationWalk: 1 osso(s) da animação não existem no modelo e serão ignorados" });
+  else out.push({ level: "ok", area: "Animações", text: "2 animação(ões) conferidas: ossos, laços e articulações em ordem" });
+  out.push({ level: "ok", area: "Ossos", text: "4 ossos sem peças soltas" });
+  return out;
+}
+
+const mockBackups: T.BackupEntry[] = [
+  { path: "project-backups/auto-20261020-101500.zip", name: "auto-20261020-101500.zip", createdAt: "2026-10-20T10:15:00Z", size: 28_400_000, auto: true, projects: 4 },
+];
+const mockTrash: T.TrashItem[] = [
+  { entry: "mapa-velho-261001-20261012", id: "mapa-velho-261001", name: "Mapa velho", kind: "map", deletedAt: "2026-10-12T18:00:00Z", size: 1_200_000 },
+];

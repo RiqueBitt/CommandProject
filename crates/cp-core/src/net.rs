@@ -10,13 +10,31 @@ use tokio::io::AsyncWriteExt;
 
 use crate::error::{Error, Result};
 
+static OFFLINE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Modo local: nenhuma conexão de rede sai do launcher (hub, servidor, atualizações).
+pub fn set_offline(v: bool) {
+    OFFLINE.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+pub fn is_offline() -> bool {
+    OFFLINE.load(std::sync::atomic::Ordering::Relaxed)
+}
+fn guard() -> Result<()> {
+    if is_offline() {
+        return Err(Error::Network("o modo local está ligado (sem internet). Desligue em Configurações → Modo local para usar o hub, o multiplayer e as atualizações".into()));
+    }
+    Ok(())
+}
+
 /// Cliente HTTP padrão do launcher.
 pub fn client() -> Result<reqwest::Client> {
+    guard()?;
     builder().build().map_err(|e| Error::Network(e.to_string()))
 }
 
 /// Cliente para um endereço específico: servidores locais (localhost) não passam por proxy.
 pub fn client_for(url: &str) -> Result<reqwest::Client> {
+    guard()?;
     let local = reqwest::Url::parse(url)
         .ok()
         .and_then(|u| u.host_str().map(|h| matches!(h, "localhost" | "127.0.0.1" | "[::1]")))

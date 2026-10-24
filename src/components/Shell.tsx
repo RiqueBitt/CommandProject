@@ -126,21 +126,45 @@ function RailItem({ label, page, onClick, children, selected, badge }: { label: 
   );
 }
 
+/** Áreas do launcher (trilho da esquerda, no estilo do painel de comando do jogo). */
+function AreaItem({ label, icon, active, onClick, badge, off }: { label: string; icon: string; active: boolean; onClick: () => void; badge?: number; off?: boolean }) {
+  return (
+    <button className={`area-item ${active ? "on" : ""} ${off ? "off" : ""}`} aria-current={active ? "page" : undefined} onClick={onClick} title={off ? `${label} (modo local ligado)` : label}>
+      <Icon name={icon} size={22} />
+      <span>{label}</span>
+      {!!badge && <i className="badge">{badge}</i>}
+    </button>
+  );
+}
+
 export function Rail() {
   const profiles = useStore((s) => s.profiles);
   const page = useStore((s) => s.page);
+  const createKind = useStore((s) => s.createKind);
   const settings = useStore((s) => s.settings);
   const appUpdate = useStore((s) => s.appUpdate);
-  const { back } = useStore.getState();
+  const { back, go, goCreate } = useStore.getState();
   const [creating, setCreating] = useState(false);
   const nick = settings?.nickname?.trim() || "Você";
+  const offline = !!settings?.offline;
+  const area = (k: "map" | "unit" | "model") => page === "create" && createKind === k;
 
   return (
     <nav className="rail" aria-label="Navegação principal">
       <div className="rail-section">
         <Tip text="Voltar"><button className="rail-back" onClick={back} aria-label="Voltar"><Icon name="arrow_back" size={18} /></button></Tip>
         <RailItem label="Eu e meus perfis" page="me"><span className="avatar">{monogram(nick)}</span></RailItem>
-        <RailItem label="Hub de mods" page="hub"><Icon name="store" size={28} /></RailItem>
+      </div>
+      <div className="rail-areas">
+        <AreaItem label="Início" icon="sports_esports" active={page === "home"} onClick={() => go("home")} />
+        <AreaItem label="Arquivos" icon="folder_open" active={page === "files"} onClick={() => go("files")} />
+        <AreaItem label="Mapas" icon="map" active={area("map")} onClick={() => goCreate("map")} />
+        <AreaItem label="Tropas" icon="smart_toy" active={area("unit")} onClick={() => goCreate("unit")} />
+        <AreaItem label="Modelos" icon="view_in_ar" active={area("model") || page === "studio"} onClick={() => goCreate("model")} />
+        <AreaItem label="Ícones" icon="photo_camera" active={page === "icons"} onClick={() => go("icons")} />
+        <AreaItem label="Mods" icon="extension" active={page === "library" || page === "hub"} onClick={() => go("library")} />
+        <AreaItem label="Rede" icon="hub" active={page === "multiplayer"} onClick={() => go("multiplayer")} off={offline} />
+        <AreaItem label="Sistema" icon="settings" active={page === "settings" || page === "performance"} onClick={() => go("settings")} badge={appUpdate ? 1 : 0} />
       </div>
       <div className="rail-divider" />
       <div className="rail-list">
@@ -148,7 +172,7 @@ export function Rail() {
           const h = hueOf(p.id);
           const active = p.id === profiles.active;
           return (
-            <RailItem key={p.id} label={`${p.name} (${p.mods.filter((m) => m.enabled).length} mods)`} selected={active && (page === "home" || page === "library")}
+            <RailItem key={p.id} label={`Perfil ${p.name} (${p.mods.filter((m) => m.enabled).length} mods)`} selected={active && (page === "home" || page === "library")}
               onClick={() => void switchProfile(p.id, p.name, active)}>
               <span className="instance-tile" style={{ ["--tile-a" as string]: `hsl(${h} 42% 38%)`, ["--tile-b" as string]: `hsl(${(h + 35) % 360} 45% 18%)` }}>
                 {monogram(p.name)}
@@ -158,14 +182,7 @@ export function Rail() {
         })}
         <RailItem label="Novo perfil" onClick={() => setCreating(true)}><Icon name="add" /></RailItem>
       </div>
-      <div className="rail-divider" />
-      <div className="rail-section">
-        <RailItem label="Criar: mapas, tropas e modelos 3D" page="create"><Icon name="add_box" size={24} /></RailItem>
-        <RailItem label="Estúdio de criação (arquivos, texturas HD, skins)" page="studio"><Icon name="construction" size={24} /></RailItem>
-        <RailItem label="Desempenho e diagnóstico" page="performance"><Icon name="speed" size={24} /></RailItem>
-        <RailItem label="Multiplayer" page="multiplayer"><Icon name="hub" size={24} /></RailItem>
-        <RailItem label="Configurações" page="settings" badge={appUpdate ? 1 : 0}><Icon name="settings" size={24} /></RailItem>
-      </div>
+      {offline && <Tip text="Modo local: sem internet. Mude em Sistema → Configurações."><span className="rail-offline"><Icon name="cloud_off" size={16} /> LOCAL</span></Tip>}
       {creating && <NewProfile onClose={() => setCreating(false)} />}
     </nav>
   );
@@ -240,6 +257,8 @@ export function CommandPalette() {
       nav("hub", "Hub de mods", "store"),
       nav("multiplayer", "Multiplayer: salas e chat", "hub"),
       nav("create", "Criar: mapas, tropas e modelos 3D", "add_box"),
+      nav("files", "Arquivos: espaço, cópias de segurança e lixeira", "folder_open"),
+      nav("icons", "Gerador de ícones de tropas", "photo_camera"),
       nav("studio", "Estúdio de criação", "construction"),
       nav("performance", "Desempenho e diagnóstico", "speed"),
       nav("me", "Meus perfis", "account_circle"),

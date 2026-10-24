@@ -61,6 +61,10 @@ const SLIDERS: { group: string; icon: string; items: { key: keyof WorldGen; labe
     { key: "structures", label: "Estruturas e ruínas", min: 0, max: 12 },
     { key: "wrecks", label: "Destroços", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
   ] },
+  { group: "Estratégia", icon: "flag", items: [
+    { key: "expansions", label: "Expansões por jogador", min: 0, max: 4 },
+    { key: "obstacles", label: "Paredões (gargalos)", min: 0, max: 8 },
+  ] },
 ];
 
 export default function WorldGenModal(props: Props) {
@@ -92,6 +96,19 @@ export default function WorldGenModal(props: Props) {
     return Math.round((n / m.length) * 100);
   }, [res, small, water, hasWater]);
 
+  // galeria: a mesma configuração com 6 sementes vizinhas (clique para escolher)
+  const [gallery, setGallery] = useState<{ seed: number; img: string }[]>([]);
+  const [tiny, tinyDonor] = useMemo(() => downsample(grid, donor, 64), [grid, donor]);
+  const showGallery = () => {
+    const base = wg.seed;
+    const out: { seed: number; img: string }[] = [];
+    for (let k = 1; k <= 6; k++) {
+      const sd = (base + k * 7919) % 999999;
+      const r = generateWorld(tiny, tinyDonor, water, hasWater, { ...wg, seed: sd }, catalog);
+      out.push({ seed: sd, img: reliefImage(tiny, r.heights, water, hasWater, wg.biome, 128) });
+    }
+    setGallery(out);
+  };
   const syms = symmetriesFor(wg.players);
   const terrainName = props.terrains?.find((t) => t.id === props.terrain)?.name ?? props.terrain ?? "—";
   const G = grid.grid;
@@ -154,7 +171,7 @@ export default function WorldGenModal(props: Props) {
             <section key={g.group} className="wg-group">
               <h4><Icon name={g.icon} size={17} /> {g.group}</h4>
               {g.items.map((it) => {
-                const v = wg[it.key] as number;
+                const v = (wg[it.key] as number | undefined) ?? 0;
                 const off = it.water && !hasWater;
                 return (
                   <label key={it.key} className={`range ${off ? "off" : ""}`} title={off ? "Precisa de um terreno com água" : undefined}>
@@ -178,6 +195,12 @@ export default function WorldGenModal(props: Props) {
                   <option value="water" disabled={!hasWater}>Mar em volta{hasWater ? "" : " (precisa de água)"}</option>
                 </select>
               </label>
+              <label className="field"><span className="label">Massa</span>
+                <select className="select" value={wg.resources ?? "generated"} onChange={(e) => set("resources", e.target.value as WorldGen["resources"])}>
+                  <option value="generated">Gerada aqui (simétrica, editável)</option>
+                  <option value="auto">Automática do toolkit</option>
+                </select>
+              </label>
               <label className="field"><span className="label">Economia</span>
                 <select className="select" value={wg.economy} onChange={(e) => set("economy", e.target.value as WorldGen["economy"])}>
                   <option value="poor">Pouca massa</option>
@@ -191,6 +214,7 @@ export default function WorldGenModal(props: Props) {
                 </select>
               </label>
             </div>
+            <label className="check"><input type="checkbox" checked={wg.center !== false} disabled={wg.symmetry === "none"} onChange={(e) => set("center", e.target.checked)} /> Centro disputado (área plana com massa no meio)</label>
             <label className="check"><input type="checkbox" checked={wg.clearDonor} onChange={(e) => set("clearDonor", e.target.checked)} /> Tirar as decorações originais do terreno (recomendado com relevo novo)</label>
           </section>
         </div>
@@ -206,6 +230,8 @@ export default function WorldGenModal(props: Props) {
                 {res.features.filter((f) => f.kind === "pass").map((f) => (
                   <polyline key={f.id} points={f.pts.map((p) => svgPt(p).join(",")).join(" ")} fill="none" stroke="#f2b33d" strokeWidth={0.6} strokeDasharray="1.4 1" />
                 ))}
+                {res.mass.map((p, i) => { const [x, y] = svgPt(p); return <path key={`m${i}`} d={`M${x} ${y - 1.1}L${x + 0.8} ${y}L${x} ${y + 1.1}L${x - 0.8} ${y}Z`} fill="#7bd88f" stroke="#0d1b26" strokeWidth={0.25} />; })}
+                {res.strategic.filter((q) => q.kind !== "safe").map((q, i) => { const [x, y] = svgPt(q.pos); return <circle key={`s${i}`} cx={x} cy={y} r={3.6} fill="none" stroke={q.kind === "center" ? "#ffd166" : "#ff9f43"} strokeWidth={0.4} strokeDasharray="1 0.8" />; })}
                 {res.spawns.map((p, i) => {
                   const [x, y] = svgPt(p);
                   const team = wg.players % 2 === 0 && wg.symmetry !== "none" ? (i < res.spawns.length / 2 ? 0 : 1) : i;
@@ -220,8 +246,16 @@ export default function WorldGenModal(props: Props) {
               <span><b>{res.props.length}</b> decorações</span>
               <span><b>{walkPct}%</b> caminhável</span>
               <span><b>{wg.players}</b> bases</span>
+              <span><b>{res.mass.length}</b> massa</span>
             </div>
           )}
+          <div className="row" style={{ gap: 6 }}>
+            <button className="btn sm" onClick={showGallery}><Icon name="grid_view" size={16} /> Ver 6 variações</button>
+            {gallery.length > 0 && <button className="btn sm text" onClick={() => setGallery([])}><Icon name="close" size={16} /></button>}
+          </div>
+          {gallery.length > 0 && <div className="wg-gallery">{gallery.map((g) => (
+            <button key={g.seed} className={wg.seed === g.seed ? "on" : ""} onClick={() => set("seed", g.seed)} title={`Semente ${g.seed}`}><img src={g.img} alt={`Semente ${g.seed}`} /><small>{g.seed}</small></button>
+          ))}</div>}
           {res?.notes.map((n, i) => <Notice key={i} kind="info">{n}</Notice>)}
           <p className="faint small">Depois de gerar, tudo vira objetos editáveis: mova montanhas e lagos, mude raio e altura, apague, pinte o relevo com o pincel e espalhe mais decorações. A mesma semente sempre gera o mesmo mundo.</p>
           <p className="faint small">No jogo o chão usa as texturas do terreno base ({terrainName}); troque as camadas em <b>Chão</b>. As cores acima são da prévia e do minimapa.</p>

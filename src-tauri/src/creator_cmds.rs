@@ -261,6 +261,95 @@ pub struct UnitBuildReq {
     /// pacote: várias tropas no mesmo mod
     #[serde(default)]
     pack: Option<String>,
+    /// misturador: chassi (a base), torre e arma de outras unidades
+    #[serde(default)]
+    mix: Option<cp_core::unitmix::MixSpec>,
+}
+
+/// Peças do misturador já prontas para o gerador de tropas.
+struct MixParts {
+    model: ModelFiles,
+    extra: Vec<(String, Vec<u8>)>,
+    copies: Vec<(usize, String, usize)>,
+    renames: Vec<(String, String)>,
+    bones: Vec<String>,
+}
+
+fn mix_sources(srcs: &[PathBuf], base: &str, ms: &cp_core::unitmix::MixSpec) -> cp_core::Result<cp_core::unitmix::MixOut> {
+    use cp_core::unitmix::{load_source, mix};
+    let chassis = load_source(srcs, base)?;
+    let other = |x: &Option<String>| -> cp_core::Result<Option<cp_core::unitmix::Source>> {
+        match x.as_deref().map(str::trim).filter(|v| !v.is_empty() && !v.eq_ignore_ascii_case(base)) {
+            Some(id) => Ok(Some(load_source(srcs, id)?)),
+            None => Ok(None),
+        }
+    };
+    let t = other(&ms.turret)?;
+    let w = other(&ms.weapon)?;
+    mix(&chassis, t.as_ref(), w.as_ref(), ms)
+}
+
+fn mix_parts(srcs: &[PathBuf], base: &str, new_id: &str, ms: &cp_core::unitmix::MixSpec, copies: &[(usize, String, usize)]) -> cp_core::Result<MixParts> {
+    let out = mix_sources(srcs, base, ms)?;
+    if let Some(e) = out.checks.iter().find(|c| c.level == "err") {
+        return Err(cp_core::Error::Other(format!("a mistura tem um erro: {}", e.text)));
+    }
+    let model = ModelFiles {
+        scm: cp_core::scm::write(&out.model)?,
+        albedo: out.albedo.clone(),
+        team: out.specteam.clone(),
+        mask: out.specteam.clone(),
+        normal: out.normal.clone(),
+        triangles: out.model.indices.len() / 3,
+        warnings: out.checks.iter().filter(|c| c.level == "warn" || c.level == "fix").map(|c| c.text.clone()).collect(),
+    };
+    let base_l = base.to_ascii_lowercase();
+    let extra = out
+        .anims
+        .iter()
+        .map(|(_, path, data)| (cp_core::units::rename(path.trim_start_matches('/'), &base_l, &new_id.to_ascii_lowercase()), data.clone()))
+        .collect();
+    // a arma vem da unidade da arma (ou da torre): copia a tabela inteira dela para a arma 1
+    let mut copies = copies.to_vec();
+    let wsrc = ms.weapon.clone().filter(|x| !x.trim().is_empty()).or(ms.turret.clone().filter(|x| !x.trim().is_empty())).filter(|x| !x.eq_ignore_ascii_case(base));
+    if let Some(u) = wsrc {
+        if !copies.iter().any(|c| c.0 == 1) {
+            let d = cp_core::units::details(srcs, &u)?;
+            if let Some(w) = d.weapons.iter().find(|w| !w.dummy).or(d.weapons.first()) {
+                copies.insert(0, (1, u.to_ascii_lowercase(), w.index));
+            }
+        }
+    }
+    Ok(MixParts { model, extra, copies, renames: out.weapon_bones.clone(), bones: out.bones.clone() })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MixPreview {
+    mesh: cp_core::scm::MeshView,
+    bone_index: Vec<u8>,
+    albedo: Option<String>,
+    team: Option<String>,
+    checks: Vec<cp_core::unitmix::Check>,
+    bones: Vec<String>,
+}
+
+/// Prévia do misturador (malha, atlas e verificações), sem gerar nada.
+#[tauri::command]
+pub async fn unit_mix_preview(state: State<'_, AppState>, base: String, spec: cp_core::unitmix::MixSpec) -> R<MixPreview> {
+    let srcs = sources(&state.ws).await?;
+    off_lock(move || {
+        let out = mix_sources(&srcs, &base, &spec)?;
+        Ok(MixPreview {
+            bone_index: out.model.vertices.iter().map(|v| v.bones[0]).collect(),
+            mesh: cp_core::scm::view(&out.model),
+            albedo: Some(data_url("image/png", &out.albedo_png)),
+            team: out.team_png.as_ref().map(|p| data_url("image/png", p)),
+            checks: out.checks,
+            bones: out.bones,
+        })
+    })
+    .await
 }
 
 #[derive(serde::Serialize)]
@@ -335,6 +424,86 @@ pub async fn unit_refs_check(state: State<'_, AppState>, paths: Vec<String>) -> 
     off_lock(move || cp_core::units::missing_files(&srcs, &paths)).await
 }
 
+/// Junta tudo que a tropa precisa (alterações, mistura, modelo próprio, texturas, animações).
+fn prepare_build(srcs: &[PathBuf], c: &Creations, creation_id: &str, req: &UnitBuildReq) -> cp_core::Result<cp_core::units::UnitBuild> {
+    use cp_core::blueprint::Set;
+    let changes = req
+        .overrides
+        .iter()
+        .filter_map(|(k, v)| {
+            let s = match v {
+                Value::Number(n) => Set::Number(n.as_f64()?),
+                Value::String(s) => Set::Str(s.clone()),
+                Value::Bool(b) => Set::Bool(*b),
+                _ => return None,
+            };
+            Some((k.clone(), s))
+        })
+        .collect();
+    let mixed = match &req.mix {
+        Some(ms) => Some(mix_parts(srcs, &req.base, &req.new_id, ms, &req.weapon_copies)?),
+        None => None,
+    };
+    let model = match (&req.model_creation, &mixed) {
+        (Some(m), _) => Some(baked_files(c, m, &req.bone_map)?),
+        (None, Some(mp)) => Some(mp.model.clone()),
+        (None, None) => None,
+    };
+    let icon_png = match &req.icon_asset {
+        Some(a) => Some(c.asset_get(creation_id, a)?),
+        None => None,
+    };
+    let albedo_png = match &req.albedo_asset {
+        Some(a) => Some(c.asset_get(creation_id, a)?),
+        None => None,
+    };
+    let new_id = req.new_id.to_ascii_lowercase();
+    // animações criadas no editor (arquivos do projeto) vão para a pasta da tropa
+    let mut extra_files: Vec<(String, Vec<u8>)> = mixed.as_ref().map(|m| m.extra.clone()).unwrap_or_default();
+    let mut animations = Vec::new();
+    for (field, path, rate) in &req.animations {
+        if let Some(asset) = path.strip_prefix("asset:") {
+            let data = c.asset_get(creation_id, asset)?;
+            let stem: String = asset.trim_end_matches(".sca").chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c.to_ascii_lowercase() } else { '_' }).collect();
+            let internal = format!("units/{new_id}/{new_id}_{stem}.sca");
+            extra_files.push((internal.clone(), data));
+            animations.push((field.clone(), format!("/{internal}"), *rate));
+        } else {
+            animations.push((field.clone(), path.clone(), *rate));
+        }
+    }
+    Ok(cp_core::units::UnitBuild {
+        base: req.base.clone(),
+        new_id,
+        name: req.name.clone(),
+        description: req.description.clone(),
+        changes,
+        categories: req.categories.clone(),
+        scale: req.scale,
+        animations,
+        model,
+        albedo_png,
+        tint: req.tint,
+        extra_files,
+        weapon_copies: mixed.as_ref().map(|m| m.copies.clone()).unwrap_or_else(|| req.weapon_copies.clone()),
+        icon_png,
+        bone_renames: mixed.as_ref().map(|m| m.renames.clone()).unwrap_or_default(),
+        skeleton: mixed.as_ref().map(|m| m.bones.clone()),
+    })
+}
+
+/// Verificação de combate, movimento, colisão, ossos e animações, sem gerar nada.
+#[tauri::command]
+pub async fn unit_validate(state: State<'_, AppState>, creation: String, req: UnitBuildReq) -> R<Vec<cp_core::unitcheck::Finding>> {
+    let srcs = sources(&state.ws).await?;
+    let c = store(&state).await?;
+    off_lock(move || {
+        let ub = prepare_build(&srcs, &c, &creation, &req)?;
+        cp_core::units::validate(&srcs, &ub)
+    })
+    .await
+}
+
 /// Gera a tropa (mod) e coloca na biblioteca, ligada no perfil ativo.
 #[tauri::command]
 pub async fn unit_build(state: State<'_, AppState>, creation: String, req: UnitBuildReq) -> R<UnitBuildResult> {
@@ -343,69 +512,11 @@ pub async fn unit_build(state: State<'_, AppState>, creation: String, req: UnitB
     let (dir, data): (PathBuf, PathBuf) = with_ws(&state.ws, |ws| Ok((ws.data_dir.join("cache").join("tmp"), ws.data_dir.clone()))).await?;
     let creation_id = creation.clone();
     let (scd, report, new_id, name, pack) = off_lock(move || {
-        use cp_core::blueprint::Set;
-        let changes = req
-            .overrides
-            .iter()
-            .filter_map(|(k, v)| {
-                let s = match v {
-                    Value::Number(n) => Set::Number(n.as_f64()?),
-                    Value::String(s) => Set::Str(s.clone()),
-                    Value::Bool(b) => Set::Bool(*b),
-                    _ => return None,
-                };
-                Some((k.clone(), s))
-            })
-            .collect();
-        let model = match &req.model_creation {
-            Some(m) => Some(baked_files(&c, m, &req.bone_map)?),
-            None => None,
-        };
-        let icon_png = match &req.icon_asset {
-            Some(a) => Some(c.asset_get(&creation_id, a)?),
-            None => None,
-        };
-        let albedo_png = match &req.albedo_asset {
-            Some(a) => Some(c.asset_get(&creation_id, a)?),
-            None => None,
-        };
+        let ub = prepare_build(&srcs, &c, &creation_id, &req)?;
         std::fs::create_dir_all(&dir).map_err(|e| cp_core::Error::Other(e.to_string()))?;
-        let new_id = req.new_id.to_ascii_lowercase();
-        // animações criadas no editor (arquivos do projeto) vão para a pasta da tropa
-        let mut extra_files = Vec::new();
-        let mut animations = Vec::new();
-        for (field, path, rate) in req.animations {
-            if let Some(asset) = path.strip_prefix("asset:") {
-                let data = c.asset_get(&creation_id, asset)?;
-                let stem: String = asset.trim_end_matches(".sca").chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c.to_ascii_lowercase() } else { '_' }).collect();
-                let internal = format!("units/{new_id}/{new_id}_{stem}.sca");
-                extra_files.push((internal.clone(), data));
-                animations.push((field, format!("/{internal}"), rate));
-            } else {
-                animations.push((field, path, rate));
-            }
-        }
+        let new_id = ub.new_id.clone();
         let dest = dir.join(format!("_cp_tropa_{new_id}.scd"));
-        let report = cp_core::units::build(
-            &srcs,
-            &cp_core::units::UnitBuild {
-                base: req.base,
-                new_id: new_id.clone(),
-                name: req.name.clone(),
-                description: req.description,
-                changes,
-                categories: req.categories,
-                scale: req.scale,
-                animations,
-                model,
-                albedo_png,
-                tint: req.tint,
-                extra_files,
-                weapon_copies: req.weapon_copies,
-                icon_png,
-            },
-            &dest,
-        )?;
+        let report = cp_core::units::build(&srcs, &ub, &dest)?;
         // pacote: guarda esta tropa na pasta do pacote e junta todas num .scd só
         let pack = match req.pack.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
             Some(p) => {
@@ -587,6 +698,10 @@ pub async fn unit_blueprint_preview(state: State<'_, AppState>, req: UnitBuildRe
                 None => (f, p, r),
             })
             .collect();
+        let mixed = match &req.mix {
+            Some(ms) => Some(mix_parts(&srcs, &req.base, &req.new_id, ms, &req.weapon_copies)?),
+            None => None,
+        };
         let (text, _) = cp_core::units::make_blueprint(
             &srcs,
             &cp_core::units::UnitBuild {
@@ -598,7 +713,9 @@ pub async fn unit_blueprint_preview(state: State<'_, AppState>, req: UnitBuildRe
                 categories: req.categories,
                 scale: req.scale,
                 animations,
-                weapon_copies: req.weapon_copies,
+                weapon_copies: mixed.as_ref().map(|m| m.copies.clone()).unwrap_or(req.weapon_copies),
+                bone_renames: mixed.as_ref().map(|m| m.renames.clone()).unwrap_or_default(),
+                skeleton: mixed.as_ref().map(|m| m.bones.clone()),
                 ..Default::default()
             },
         )?;
@@ -644,6 +761,27 @@ pub async fn anim_create(
         let bytes = cp_core::anim::write(&anim)?;
         let file = format!("{}.sca", name.trim().trim_end_matches(".sca"));
         c.asset_put(&creation, &file, &bytes)
+    })
+    .await
+}
+
+/// Grava um arquivo gerado (textura, ícone…) num caminho escolhido pelo usuário, de forma atômica.
+/// Se o arquivo já existe e `overwrite` não veio, devolve "EXISTE" para a tela pedir confirmação.
+#[tauri::command]
+pub async fn export_data(path: String, data: String, overwrite: bool) -> R<()> {
+    let p = PathBuf::from(path.trim());
+    if !p.is_absolute() || p.file_name().is_none() {
+        return Err(format!("caminho inválido: {path}"));
+    }
+    if p.exists() && !overwrite {
+        return Err("EXISTE".into());
+    }
+    let bytes = decode_b64(&data)?;
+    off_lock(move || {
+        if let Some(d) = p.parent() {
+            std::fs::create_dir_all(d).map_err(|e| cp_core::Error::Other(format!("{}: {e}", d.display())))?;
+        }
+        cp_core::fsutil::write_atomic(&p, &bytes)
     })
     .await
 }

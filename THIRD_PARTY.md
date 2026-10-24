@@ -9,6 +9,7 @@
 | three.js | visualizador 3D | MIT |
 | Material Icons (via Fontsource) | ícones | Apache-2.0 |
 | Roboto (via Fontsource) | tipografia | OFL-1.1 |
+| Rajdhani (via Fontsource, Indian Type Foundry) | títulos do visual Comando | OFL-1.1 |
 | texpresso | compressão DXT/BC | MIT |
 | zip, image, reqwest, sha2, sysinfo e demais crates | núcleo em Rust | MIT / Apache-2.0 |
 | axum, tokio, tower-http | servidor da comunidade | MIT |

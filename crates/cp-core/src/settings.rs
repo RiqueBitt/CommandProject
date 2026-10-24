@@ -47,6 +47,12 @@ pub struct Settings {
     pub showcase_team_color: Option<String>,
     /// Prioridade do processo do jogo ao abrir pelo launcher: `normal`, `above_normal` ou `high`.
     pub game_priority: String,
+    /// Modo local: nada de rede (hub de mods, servidor da comunidade e busca de atualizações).
+    pub offline: bool,
+    /// Cópia de segurança automática dos projetos a cada N dias (0 = desligada).
+    pub auto_backup_days: i64,
+    /// Preferências da interface guardadas no arquivo de configurações (estilo de ícones etc.).
+    pub ui_prefs: std::collections::BTreeMap<String, serde_json::Value>,
     /// Versão das migrações de configuração já aplicadas.
     pub ui_version: u32,
 }
@@ -72,6 +78,9 @@ impl Default for Settings {
             memory_limit_mb: None,
             showcase_team_color: None,
             game_priority: "normal".into(),
+            offline: false,
+            auto_backup_days: 7,
+            ui_prefs: Default::default(),
             ui_version: CURRENT_UI_VERSION,
         }
     }
@@ -95,9 +104,11 @@ impl Settings {
             s.showcase = true;
             s.ui_version = 1;
         }
+        crate::net::set_offline(s.offline);
         Ok(s)
     }
     pub fn save(&self, path: &Path) -> Result<()> {
+        crate::net::set_offline(self.offline);
         write_json(path, self)
     }
 }

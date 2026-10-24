@@ -334,7 +334,18 @@ export interface WorldGen {
   economy: "poor" | "normal" | "rich";
   /** paleta de cores da prévia e do minimapa */
   biome: "temperate" | "desert" | "snow" | "volcanic";
+  /** massa: "generated" = pontos simétricos visíveis e editáveis; "auto" = o toolkit escolhe */
+  resources?: "generated" | "auto";
+  /** expansões de massa por jogador (fora da base) */
+  expansions?: number;
+  /** centro disputado: área plana com massa no meio do mapa */
+  center?: boolean;
+  /** obstáculos: paredões rochosos que criam gargalos entre as bases */
+  obstacles?: number;
 }
+
+/** Áreas estratégicas marcadas pelo gerador (aparecem na prévia e na análise). */
+export interface Strategic { kind: "center" | "safe" | "contested" | "choke"; pos: Pt; label: string }
 
 export const WORLD_PRESETS: { id: string; label: string; icon: string; desc: string; over: Partial<WorldGen> }[] = [
   { id: "valleys", label: "Vales verdes", icon: "forest", desc: "Morros suaves, rios e muita floresta.", over: { blend: 0.85, hilliness: 9, scale: 260, mountains: 2, mountainHeight: 55, ridges: 1, hills: 6, plateaus: 1, craters: 0, canyons: 0, lakes: 2, rivers: 1, dunes: 0, islands: 0, edge: "mountains", forests: 0.75, rocks: 0.35, structures: 2, wrecks: 0.2, biome: "temperate" } },
@@ -351,7 +362,7 @@ export const newWorld = (over: Partial<WorldGen> = {}): WorldGen => ({
   seed: Math.floor(Math.random() * 999999), preset: "valleys", players: 2, symmetry: "rot2",
   blend: 0.85, elevation: 22, hilliness: 9, scale: 260, mountains: 2, mountainHeight: 55, ridges: 1, hills: 6, plateaus: 1, craters: 0,
   canyons: 0, lakes: 2, rivers: 1, dunes: 0, islands: 0, edge: "mountains", forests: 0.75, rocks: 0.35, structures: 2, wrecks: 0.2,
-  clearDonor: true, economy: "normal", biome: "temperate", ...over,
+  clearDonor: true, economy: "normal", biome: "temperate", resources: "generated", expansions: 2, center: true, obstacles: 0, ...over,
 });
 
 /** simetrias possíveis para um número de jogadores */
@@ -408,6 +419,9 @@ export interface WorldResult {
   props: PlacedProp[];
   heights: Float32Array;
   notes: string[];
+  /** pontos de massa gerados (simétricos) */
+  mass: Pt[];
+  strategic: Strategic[];
 }
 
 let idSeq = 0;
@@ -528,7 +542,9 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
   const spawns = placeSpawns(wg.players, wg.symmetry, G, r);
   const canonSpawns = spawns.slice(0, Math.max(1, Math.round(wg.players / ops.length)));
   const features: Feature[] = [];
-  const nearSpawn = (p: Pt, d: number) => spawns.some((s) => Math.hypot(s[0] - p[0], s[1] - p[1]) < d);
+  const centerOn = wg.center !== false && wg.symmetry !== "none";
+  const keep: Pt[] = centerOn ? [...spawns, [G / 2, G / 2]] : spawns;
+  const nearSpawn = (p: Pt, d: number) => keep.some((s) => Math.hypot(s[0] - p[0], s[1] - p[1]) < d);
   const nearFeature = (p: Pt, d: number) => features.some((f) => f.pts.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < d));
 
   /** coloca uma forma (e as cópias da simetria) num ponto livre */
@@ -596,6 +612,9 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
   for (let i = 0; i < per(wg.lakes); i++) put("lake", [45, 95], [6, 12], 0.75, 140, 30);
   for (let i = 0; i < per(wg.rivers); i++) putLine("river", [16, 28], [5, 9], 0.6, [380, 700], true);
   if (hasWater) for (let i = 0; i < per(wg.islands); i++) put("island", [70, 120], [14, 26], 0.7, 130, 40);
+  // obstáculos: paredões curtos e íngremes entre as bases (criam gargalos; o passe de conexão garante caminho)
+  for (let i = 0; i < per(wg.obstacles ?? 0); i++) putLine("ridge", [16, 24], [26, 40], 0.9, [110, 200], false);
+  if (centerOn) features.push({ id: fid(), kind: "pad", pts: [[G / 2, G / 2]], r: 46, h: 0, rough: 0, seed: 2, gen: true, name: "Centro" });
   if (!hasWater && (wg.lakes || wg.rivers)) notes.push("Este terreno não tem água: lagos e rios viram vales e leitos secos. Para água de verdade escolha um terreno com água (ex.: Open Palms ou Treallach Island).");
 
   // áreas planas das bases (sempre por último)
@@ -621,9 +640,73 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
     if (round === 0) notes.push("Algumas bases ficaram isoladas: o gerador abriu passagens entre elas.");
   }
 
-  const props = placeProps(g, H, water, hasWater, wg, cat, spawns, features, r, ops);
-  void canonSpawns;
-  return { features, spawns, props, heights: H, notes };
+  const strategic: Strategic[] = [];
+  const mass = (wg.resources ?? "generated") === "generated" ? placeMass(g, H, water, hasWater, wg, spawns, canonSpawns, ops, r, centerOn, strategic, notes) : [];
+  const props = placeProps(g, H, water, hasWater, wg, cat, spawns, features, r, ops, mass);
+  return { features, spawns, props, heights: H, notes, mass, strategic };
+}
+
+/** Massa simétrica: expansões seguras e disputadas por jogador e o centro, em chão plano, seco e alcançável. */
+function placeMass(g: Grid, H: Float32Array, water: number, hasWater: boolean, wg: WorldGen, spawns: Pt[], canon: Pt[], ops: ReturnType<typeof symmetryOps>,
+  r: () => number, centerOn: boolean, strategic: Strategic[], notes: string[]): Pt[] {
+  const G = g.grid, s = g.size, w = s + 1, step = G / s;
+  const hAt = (x: number, z: number) => H[Math.max(0, Math.min(s, Math.round(z / step))) * w + Math.max(0, Math.min(s, Math.round(x / step)))];
+  const mask = walkMask(g, H, water, hasWater);
+  const d0 = walkDistances(g, mask, spawns[0]);
+  const flat = (p: Pt, rad = 12) => {
+    if (p[0] < 30 || p[1] < 30 || p[0] > G - 30 || p[1] > G - 30) return false;
+    const y = hAt(p[0], p[1]);
+    if (hasWater && y < water + 3) return false;
+    for (const [dx, dz] of [[rad, 0], [-rad, 0], [0, rad], [0, -rad]]) if (Math.abs(hAt(p[0] + dx, p[1] + dz) - y) > rad * 0.35) return false;
+    return distAt(g, d0, p) >= 0;
+  };
+  const per = wg.economy === "poor" ? 2 : wg.economy === "rich" ? 4 : 3;
+  const out: Pt[] = [];
+  const sites: Pt[] = [];
+  const cluster = (c: Pt, n: number, rot: number): Pt[] => (n <= 1 ? [c] : Array.from({ length: n }, (_, i) => {
+    const a = rot + (i / n) * Math.PI * 2;
+    return [Math.round(c[0] + Math.cos(a) * 11), Math.round(c[1] + Math.sin(a) * 11)] as Pt;
+  }));
+  const big = Math.max(0.6, Math.min(1.4, G / 1024));
+  const exp = Math.max(0, Math.min(4, wg.expansions ?? 2));
+  for (const sp of canon) {
+    for (let e = 0; e < exp; e++) {
+      const contested = exp >= 2 && e === exp - 1;
+      let done = false;
+      for (let t = 0; t < 260 && !done; t++) {
+        const a = r() * Math.PI * 2, d = (contested ? lerp(260, 460, r()) : lerp(150, 300, r())) * big;
+        const c: Pt = [Math.round(sp[0] + Math.cos(a) * d), Math.round(sp[1] + Math.sin(a) * d)];
+        const own = Math.hypot(c[0] - sp[0], c[1] - sp[1]);
+        const enemy = Math.min(...spawns.filter((x) => x !== sp).map((x) => Math.hypot(c[0] - x[0], c[1] - x[1])));
+        if (!contested && enemy < own * 1.35) continue; // segura: bem mais perto da própria base
+        if (contested && Math.abs(enemy - own) > own * 0.35) continue; // disputada: no meio do caminho
+        if (spawns.some((x) => Math.hypot(c[0] - x[0], c[1] - x[1]) < 110)) continue;
+        const copies = ops.map((o) => o.pt(c));
+        if (copies.some((q, k) => copies.some((q2, k2) => k2 > k && Math.hypot(q[0] - q2[0], q[1] - q2[1]) < 60))) continue;
+        if (copies.some((q) => sites.some((x) => Math.hypot(q[0] - x[0], q[1] - x[1]) < 90))) continue;
+        const pts = cluster(c, per, r() * Math.PI);
+        if (!copies.every((q) => flat(q, 16)) || !pts.every((q) => ops.every((o) => flat(o.pt(q), 8)))) continue;
+        for (const o of ops) {
+          sites.push(o.pt(c));
+          for (const q of pts) out.push(o.pt(q).map((v) => Math.round(v)) as Pt);
+          strategic.push({ kind: contested ? "contested" : "safe", pos: o.pt(c), label: contested ? "Expansão disputada" : "Expansão segura" });
+        }
+        done = true;
+      }
+      if (!done) notes.push(`Não achei chão plano para ${contested ? "a expansão disputada" : `a expansão ${e + 1}`} de uma das bases: coloque à mão com a ferramenta Massa.`);
+    }
+  }
+  if (centerOn) {
+    const c: Pt = [G / 2, G / 2];
+    if (flat(c, 10)) {
+      for (const [dx, dz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) out.push([Math.round(c[0] + dx * 10), Math.round(c[1] + dz * 10)]);
+      strategic.push({ kind: "center", pos: c, label: "Centro disputado" });
+    } else notes.push("O centro ficou na água ou num declive: a massa do centro não foi colocada.");
+  }
+  // sem duplicados (simetrias que levam um ponto nele mesmo)
+  const uniq: Pt[] = [];
+  for (const q of out) if (!uniq.some((u) => Math.hypot(u[0] - q[0], u[1] - q[1]) < 4)) uniq.push(q);
+  return uniq.slice(0, 200);
 }
 
 export function invert(m: [number, number, number, number]): [number, number, number, number] {
@@ -649,9 +732,10 @@ function meander(a: Pt, b: Pt, n: number, amp: number, r: () => number): Pt[] {
 
 /** Florestas, pedras, estruturas e destroços (na região fundamental, repetidos pela simetria). */
 function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, wg: WorldGen, cat: PropCatalog, spawns: Pt[], features: Feature[], r: () => number,
-  ops: ReturnType<typeof symmetryOps>): PlacedProp[] {
+  ops: ReturnType<typeof symmetryOps>, mass: Pt[] = []): PlacedProp[] {
   const G = g.grid, s = g.size, w = s + 1, step = G / s;
   const out: PlacedProp[] = [];
+  const taken = new Set<string>();
   const MAX = 4800;
   const hAt = (x: number, z: number) => {
     const i = Math.max(0, Math.min(s, Math.round(x / step))), j = Math.max(0, Math.min(s, Math.round(z / step)));
@@ -675,6 +759,12 @@ function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, 
     for (const o of ops) {
       if (out.length >= MAX) return;
       const [px, pz] = o.pt([x, z]);
+      // nada em cima da massa nem fora do mapa
+      if (px < 4 || pz < 4 || px > G - 4 || pz > G - 4 || mass.some((m) => Math.hypot(m[0] - px, m[1] - pz) < 14)) continue;
+      // uma decoração por lugar (sem sobreposição)
+      const key = `${Math.round(px / 1.5)},${Math.round(pz / 1.5)}`;
+      if (taken.has(key)) continue;
+      taken.add(key);
       out.push({ bp, x: Math.round(px * 10) / 10, z: Math.round(pz * 10) / 10, yaw: mapYaw(yaw, o.m), scale: Math.round(scale * 100) / 100, gen: true });
     }
   };

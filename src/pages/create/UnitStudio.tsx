@@ -9,13 +9,15 @@ import { Empty, Icon, Modal, Notice } from "../../components/ui";
 import { api } from "../../lib/api";
 import { errorText, useStore } from "../../lib/store";
 import { useTabs } from "../../lib/tabs";
-import type { AnimKey, BpLeaf, CreationMeta, ScaAnimation, UnitBuildReq, UnitBuildResult, UnitDetails, UnitInfo, UnitPack } from "../../lib/types";
+import type { AnimKey, BpLeaf, CreationMeta, Finding, MixCheck, MixSpec, ScaAnimation, UnitBuildReq, UnitBuildResult, UnitDetails, UnitInfo, UnitPack } from "../../lib/types";
 import { useProject } from "../../lib/useProject";
 import { ANIM_TEMPLATES, animFromKeys, sampleKey } from "./animKeys";
 import { migrateUnit, newUnitDoc, type UnitDoc } from "./docs";
+import IconStudio from "./IconStudio";
+import TextureLab from "./TextureLab";
 import UnitViewport, { viewFromBaked, viewFromPreview, type ViewModel } from "./UnitViewport";
 
-type Section = "general" | "look" | "balance" | `attr:${string}` | `weapon:${number}` | "weapons" | "anims" | `anim:${string}` | "cats" | "advanced" | "bp" | "check";
+type Section = "general" | "look" | "mix" | "texture" | "balance" | `attr:${string}` | `weapon:${number}` | "weapons" | "anims" | `anim:${string}` | "cats" | "advanced" | "bp" | "check";
 
 const ATTRS: { id: string; label: string; icon: string; fields: [string, string][] }[] = [
   { id: "defense", label: "Defesa", icon: "shield", fields: [["Defense.MaxHealth", "Vida máxima"], ["Defense.Health", "Vida inicial"], ["Defense.RegenRate", "Regeneração por segundo"], ["Defense.ArmorType", "Tipo de blindagem"], ["Defense.Shield.ShieldMaxHealth", "Escudo (vida)"], ["Defense.Shield.ShieldRegenRate", "Regeneração do escudo"], ["Defense.Shield.ShieldSize", "Tamanho do escudo"]] },
@@ -101,6 +103,11 @@ export default function UnitStudio({ id }: { id: string }) {
   const [missing, setMissing] = useState<string[]>([]);
   const [newPack, setNewPack] = useState("");
   const [scrub, setScrub] = useState(0);
+  const [mixChecks, setMixChecks] = useState<MixCheck[] | null>(null);
+  const [texPreview, setTexPreview] = useState<string | null>(null);
+  const [iconLab, setIconLab] = useState(false);
+  const [findings, setFindings] = useState<Finding[] | null>(null);
+  const [checking, setChecking] = useState(false);
   const snapshot = useRef<(() => string | null) | null>(null);
   const iconShot = useRef<(() => string | null) | null>(null);
   const imageInput = useRef<HTMLInputElement>(null);
@@ -126,17 +133,29 @@ export default function UnitStudio({ id }: { id: string }) {
     for (const u of wantOthers) if (!others[u]) void api.unitDetails(u).then((d) => setOthers((o) => ({ ...o, [u]: d }))).catch(() => {});
   }, [wantOthers, others]);
   const modelSrc = doc.appearance.model;
+  // misturador ativo: chassi = base, torre/arma de outras tropas (só com o modelo da base)
+  const mix: MixSpec | null = modelSrc.source === "base" && doc.base && doc.mix && (doc.mix.turret || doc.mix.weapon) ? { ...doc.mix, chassis: doc.base } : null;
+  const mixKey = mix ? JSON.stringify(mix) : "";
   useEffect(() => {
     if (p.status !== "ready" || !doc.base) return;
     let alive = true;
     setView(null);
-    const req = modelSrc.source === "creation"
-      ? api.modelBaked(modelSrc.creation).then((b) => (b ? viewFromBaked(b) : null))
-      : api.unitPreview(doc.base).then(viewFromPreview);
-    void req.then((v) => alive && setView(v)).catch(() => alive && setView(null));
-    return () => { alive = false; };
+    setMixChecks(null);
+    const t = window.setTimeout(() => {
+      const req = modelSrc.source === "creation"
+        ? api.modelBaked(modelSrc.creation).then((b) => (b ? viewFromBaked(b) : null))
+        : mix
+          ? api.unitMixPreview(doc.base!, mix).then((m) => { if (alive) setMixChecks(m.checks); return viewFromPreview(m); })
+          : api.unitPreview(doc.base!).then(viewFromPreview);
+      void req.then((v) => alive && setView(v)).catch((e) => {
+        if (!alive) return;
+        setView(null);
+        if (mix) setMixChecks([{ level: "err", text: errorText(e) }]);
+      });
+    }, mix ? 350 : 0);
+    return () => { alive = false; window.clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc.base, p.status, modelSrc.source, modelSrc.source === "creation" ? modelSrc.creation : ""]);
+  }, [doc.base, p.status, modelSrc.source, modelSrc.source === "creation" ? modelSrc.creation : "", mixKey]);
   useEffect(() => {
     if (!doc.appearance.albedoAsset) { setAlbedoUrl(null); return; }
     void api.creationAsset(id, doc.appearance.albedoAsset).then(setAlbedoUrl).catch(() => setAlbedoUrl(null));
@@ -226,6 +245,7 @@ export default function UnitStudio({ id }: { id: string }) {
     albedoAsset: doc.appearance.albedoAsset,
     tint: [doc.appearance.tint.hue, doc.appearance.tint.sat, doc.appearance.tint.bright],
     weaponCopies: copies, iconAsset: doc.appearance.iconAsset ?? null, boneMap: doc.appearance.boneMap ?? {}, pack: doc.pack ?? null,
+    mix,
   });
 
   // arquivos citados (projéteis, animações…) que não existem no jogo
@@ -270,13 +290,27 @@ export default function UnitStudio({ id }: { id: string }) {
       if (miss.length) out.push({ level: "warn", text: `O modelo próprio não tem ${miss.length} osso(s) que as armas usam (${miss.slice(0, 4).join(", ")}${miss.length > 4 ? "…" : ""}). Ligue no assistente de ossos.`, section: "look" });
     }
     for (const m of missing) out.push({ level: "err", text: `Arquivo citado não existe no jogo: ${m}`, section: "advanced" });
+    const tv = doc.texgen?.versions.find((v) => v.asset === doc.appearance.albedoAsset);
+    if (tv && tv.modelKey !== `${doc.base}|${modelSrc.source === "creation" ? modelSrc.creation : ""}|${mixKey}`) out.push({ level: "warn", text: "A textura gerada foi feita para outro modelo: gere e aplique de novo.", section: "texture" });
+    if (mix && mixChecks === null) out.push({ level: "warn", text: "A mistura ainda está sendo montada.", section: "mix" });
+    for (const c of mixChecks ?? []) if (c.level === "err" || c.level === "warn") out.push({ level: c.level, text: `Mistura: ${c.text}`, section: "mix" });
     if (!categories.length) out.push({ level: "err", text: "A tropa ficou sem categorias.", section: "cats" });
     if (!categories.some((c) => c.toUpperCase().startsWith("BUILTBY"))) out.push({ level: "warn", text: "Nenhuma categoria BUILTBY…: talvez nenhuma fábrica consiga construir a tropa.", section: "cats" });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, details, catalog, categories, weapons, missing, view]);
+  }, [doc, details, catalog, categories, weapons, missing, view, mixChecks, mixKey]);
 
   const save = async () => p.save({ thumb: snapshot.current?.() ?? null });
+  // verificação completa no núcleo (mesma que roda antes de gerar)
+  const runChecks = async () => {
+    if (!doc.base || problems.some((x) => x.level === "err")) return;
+    setChecking(true);
+    try { setFindings(await api.unitValidate(id, request())); } catch (e) { setFindings([{ level: "err", area: "Verificação", text: errorText(e) }]); } finally { setChecking(false); }
+  };
+  useEffect(() => { setFindings(null); }, [doc]);
+  useEffect(() => { if (section === "check" && findings === null && !checking) void runChecks(); },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [section, findings]);
   const build = async (play: boolean) => {
     const errs = problems.filter((x) => x.level === "err");
     if (errs.length) { setSection("check"); toast("error", errs[0].text); return; }
@@ -325,6 +359,8 @@ export default function UnitStudio({ id }: { id: string }) {
     children: [
       { id: "general", label: "Geral", icon: "badge", detail: doc.pack ? `pacote ${doc.pack}` : undefined },
       { id: "look", label: "Aparência", icon: "palette", detail: modelSrc.source === "creation" ? "modelo próprio" : undefined },
+      { id: "texture", label: "Gerador de texturas", icon: "texture", detail: doc.texgen?.versions.length ? `${doc.texgen.versions.length} versões` : undefined },
+      { id: "mix", label: "Misturar 3 tropas", icon: "merge_type", color: mix ? "#ffd166" : undefined, detail: mix ? [mix.turret && "torre", mix.weapon && "arma"].filter(Boolean).join(" + ") : undefined },
       { id: "balance", label: "Equilíbrio", icon: "balance" },
       { id: "grp:attr", label: "Atributos", icon: "tune", children: ATTRS.map((a) => ({ id: `attr:${a.id}`, label: a.label, icon: a.icon, detail: String(a.fields.filter(([f]) => changed(f)).length || "") })) },
       { id: "weapons", label: "Armas", icon: "gps_fixed", detail: String(weapons.length), children: weapons.map((w) => ({ id: `weapon:${w.index}`, label: String(value(`Weapon.${w.index}.Label`) ?? w.label), icon: w.dummy ? "block" : w.from ? "content_copy" : "gps_fixed", detail: w.from ? `de ${w.from}` : w.dummy ? "efeito" : undefined })) },
@@ -450,7 +486,8 @@ export default function UnitStudio({ id }: { id: string }) {
         { kind: "custom", label: "", node: <span className="row" style={{ gap: 10, alignItems: "center" }}>
           <span className="unit-icon">{iconUrl ? <img src={iconUrl} alt="Ícone" /> : <Icon name="smart_toy" size={26} />}</span>
           <span className="col" style={{ gap: 6 }}>
-            <button className="btn sm" onClick={() => void makeIcon()}><Icon name="photo_camera" size={15} /> Gerar da vista 3D</button>
+            <button className="btn sm primary" onClick={() => setIconLab(true)}><Icon name="tune" size={15} /> Gerador de ícones</button>
+            <button className="btn sm" onClick={() => void makeIcon()}><Icon name="photo_camera" size={15} /> Foto da vista 3D</button>
             <span className="row" style={{ gap: 6 }}>
               <button className="btn sm text" onClick={() => iconInput.current?.click()}><Icon name="upload" size={15} /> PNG</button>
               {a.iconAsset && <button className="btn sm text" onClick={() => setA((x) => ({ ...x, iconAsset: null }))}><Icon name="close" size={15} /></button>}
@@ -460,6 +497,39 @@ export default function UnitStudio({ id }: { id: string }) {
         { kind: "info", label: "", value: a.iconAsset ? "Substitui o ícone da base (mesmo tamanho e formato)." : "Sem ícone próprio: usa o da base." },
       ] });
       out.push({ title: "Prévia", props: [{ kind: "custom", label: "Cor do time", node: <span className="swatches">{TEAM.map((c) => <button key={c} style={{ background: c, outline: teamColor === c ? "2px solid #fff" : undefined }} aria-label={c} onClick={() => setTeamColor(c)} />)}</span> }] });
+    } else if (section === "texture") {
+      out.push({ title: "Gerador de texturas", props: [{ kind: "custom", label: "", node: <TextureLab projectId={id} name={doc.name} model={view}
+        modelKey={`${doc.base}|${modelSrc.source === "creation" ? modelSrc.creation : ""}|${mixKey}`}
+        value={doc.texgen ?? null} onChange={(v) => p.commit((d) => ({ ...d, texgen: v }))} onPreview={setTexPreview}
+        applied={doc.appearance.albedoAsset} onApply={(asset) => p.commit((d) => ({ ...d, appearance: { ...d.appearance, albedoAsset: asset } }))} /> }] });
+    } else if (section === "mix") {
+      const m = doc.mix ?? { chassis: doc.base, turret: null, weapon: null, turretScale: 0, weaponScale: 0, turretOffset: [0, 0, 0] as [number, number, number], turretYaw: 0 };
+      const setM = (fn: (x: typeof m) => typeof m) => p.commit((d) => ({ ...d, mix: fn(d.mix ?? m) }));
+      const unitOpts = [{ value: "", label: "— a do chassi —" }, ...(catalog ?? []).filter((u) => u.id !== doc.base).map((u) => ({ value: u.id, label: `${u.name} (${u.id}) · ${u.faction}` }))];
+      if (modelSrc.source === "creation") {
+        out.push({ title: "Misturar 3 tropas", props: [{ kind: "info", label: "", value: "O misturador usa o modelo do jogo como chassi. Volte para \"O da unidade base\" em Aparência para usá-lo." }] });
+      } else {
+        out.push({ title: "Peças", props: [
+          { kind: "info", label: "", value: "Junte o chassi (a unidade base), a torre de uma segunda tropa e o cano/arma de uma terceira. Os modelos, as texturas e as animações são combinados num modelo só, com os ossos que o jogo espera." },
+          { kind: "info", label: "1 · Chassi", value: details ? `${details.name} (${doc.base})` : doc.base ?? "—" },
+          { kind: "select", label: "2 · Torre de", value: m.turret ?? "", onChange: (v) => setM((x) => ({ ...x, turret: v || null })), options: unitOpts },
+          { kind: "select", label: "3 · Arma de", value: m.weapon ?? "", onChange: (v) => setM((x) => ({ ...x, weapon: v || null })), options: unitOpts, hint: "O cano e a arma do blueprint (projétil, dano, efeitos) vêm desta tropa." },
+        ] });
+        out.push({ title: "Encaixe", props: [
+          { kind: "slider", label: "Escala da torre", value: Math.round((m.turretScale || 0) * 100), min: 0, max: 280, unit: "%", onChange: (v) => setM((x) => ({ ...x, turretScale: v < 30 ? 0 : v / 100 })), hint: m.turretScale ? undefined : "0 = automática (pela largura do chassi)" },
+          { kind: "slider", label: "Escala da arma", value: Math.round((m.weaponScale || 0) * 100), min: 0, max: 300, unit: "%", onChange: (v) => setM((x) => ({ ...x, weaponScale: v < 30 ? 0 : v / 100 })), hint: m.weaponScale ? undefined : "0 = automática" },
+          { kind: "slider", label: "Giro da torre", value: m.turretYaw, min: -180, max: 180, unit: "°", onChange: (v) => setM((x) => ({ ...x, turretYaw: v })) },
+          ...(["Lado", "Altura", "Frente"] as const).map((lab, k) => ({ kind: "number", label: lab, value: m.turretOffset[k], step: 0.01, min: -2, max: 2,
+            onChange: (v: number) => setM((x) => { const o = [...x.turretOffset] as [number, number, number]; o[k] = v; return { ...x, turretOffset: o }; }) } as Prop)),
+          { kind: "custom", label: "", node: <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+            <button className="btn sm text" onClick={() => setM((x) => ({ ...x, turretScale: 0, weaponScale: 0, turretOffset: [0, 0, 0], turretYaw: 0 }))}><Icon name="restart_alt" size={15} /> Encaixe automático</button>
+            {doc.mix && <button className="btn sm text" onClick={() => p.commit((d) => ({ ...d, mix: null }))}><Icon name="undo" size={15} /> Desfazer mistura</button>}
+          </span> },
+        ] });
+        out.push({ title: "Verificações", props: !mix ? [{ kind: "info", label: "", value: "Escolha a torre ou a arma de outra tropa." }]
+          : mixChecks === null ? [{ kind: "info", label: "", value: "Montando a mistura…" }]
+          : mixChecks.map((c) => ({ kind: "custom", label: c.level === "err" ? "Erro" : c.level === "warn" ? "Aviso" : c.level === "fix" ? "Corrigido" : "OK", node: <span className={`check-item ${c.level}`}>{c.text}</span> } as Prop)) });
+      }
     } else if (section === "balance") {
       const rows: [string, keyof Stats, boolean][] = [
         ["Vida", "hp", true], ["Dano por segundo", "dps", true], ["Alcance", "range", true], ["Velocidade", "speed", true], ["Visão", "vision", true],
@@ -596,11 +666,19 @@ export default function UnitStudio({ id }: { id: string }) {
         { kind: "info", label: "", value: "O blueprint da base com as suas alterações. O resto (comentários, ordem) fica como no original." },
       ] });
     } else if (section === "check") {
-      out.push({ title: "Validação", props: problems.length ? problems.map((x) => ({ kind: "custom", label: x.level === "err" ? "Erro" : "Aviso", node: <button className={`check-item ${x.level}`} onClick={() => setSection(x.section)}>{x.text}</button> } as Prop)) : [{ kind: "info", label: "", value: "Tudo certo para gerar." }] });
+      out.push({ title: "Projeto", props: problems.length ? problems.map((x) => ({ kind: "custom", label: x.level === "err" ? "Erro" : "Aviso", node: <button className={`check-item ${x.level}`} onClick={() => setSection(x.section)}>{x.text}</button> } as Prop)) : [{ kind: "info", label: "", value: "Campos do projeto em ordem." }] });
+      const areas = [...new Set((findings ?? []).map((f) => f.area))];
+      out.push({ title: "Combate, movimento e animações", props: [
+        { kind: "info", label: "", value: "Confere o blueprint final, o modelo e as animações como o jogo vai usar: movimento, colisão, seleção, ossos das armas, giro da torre, peças soltas e articulações. Erros impedem gerar a tropa." },
+        ...(problems.some((x) => x.level === "err") ? [{ kind: "info", label: "", value: "Corrija os erros do projeto acima para rodar esta verificação." } as Prop]
+          : checking || findings === null ? [{ kind: "info", label: "", value: "Conferindo…" } as Prop]
+          : areas.flatMap((ar) => (findings ?? []).filter((f) => f.area === ar).map((f) => ({ kind: "custom", label: ar, node: <span className={`check-item ${f.level}`}>{f.text}</span> } as Prop)))),
+        { kind: "custom", label: "", node: <button className="btn sm" disabled={checking} onClick={() => void runChecks()}><Icon name="refresh" size={15} /> Conferir de novo</button> },
+      ] });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section, doc, details, leaves, catalog, models, animFields, animField, allAnims, categories, problems, newCat, advFilter, view, teamColor, weapons, cur, ref, compareWith, packs, newPack, iconUrl, paint.on, missing, allCats]);
+  }, [section, doc, details, leaves, catalog, models, animFields, animField, allAnims, categories, problems, newCat, advFilter, view, teamColor, weapons, cur, ref, compareWith, packs, newPack, iconUrl, paint.on, missing, allCats, mixChecks, mixKey, findings, checking]);
 
   if (p.status === "loading") return <div className="studio-root"><div className="bar indeterminate" style={{ margin: 30 }}><i /></div></div>;
   if (p.status === "error") return <div className="studio-root"><Empty icon="error" title="Não deu para abrir o projeto">{p.error}</Empty></div>;
@@ -627,12 +705,14 @@ export default function UnitStudio({ id }: { id: string }) {
           {ribbon === "look" && <>
             <RibbonGroup label="Modelo">
               <RibbonButton icon="palette" label="Aparência" active={section === "look"} onClick={() => setSection("look")} />
+              <RibbonButton icon="merge_type" label="Misturar 3 tropas" active={section === "mix"} onClick={() => setSection("mix")} color="#ffd166" />
               <RibbonButton icon="view_in_ar" label="Novo modelo 3D" onClick={async () => {
                 const m = await run("newmodel", () => api.creationCreate("model", `${doc.name} (modelo)`, { schema: 1, parts: [], groups: [], gridSize: 1, notes: "" }));
                 if (m) { useTabs.getState().open(m); toast("info", "Modele, prepare para o jogo e escolha o modelo em Aparência."); }
               }} />
+              <RibbonButton icon="texture" label="Gerar textura" active={section === "texture"} onClick={() => setSection("texture")} color="#7bd88f" />
               <RibbonButton icon="upload" label="Textura PNG" onClick={() => imageInput.current?.click()} />
-              <RibbonButton icon="photo_camera" label="Gerar ícone" onClick={() => void makeIcon()} />
+              <RibbonButton icon="photo_camera" label="Gerador de ícones" onClick={() => setIconLab(true)} />
             </RibbonGroup>
             <RibbonGroup label="Pintar no modelo">
               <RibbonButton icon="brush" label={paint.on ? "Pincel ligado" : "Pincel"} active={paint.on} onClick={() => setPaint((x) => ({ ...x, on: !x.on }))} hint="Pinte direto no modelo 3D. Cada pincelada vira a textura da tropa." />
@@ -688,13 +768,14 @@ export default function UnitStudio({ id }: { id: string }) {
           <div className="unit-center">
             <div className="viewport">
               {!doc.base ? <div style={{ display: "grid", placeItems: "center", height: "100%" }}><Empty icon="smart_toy" title="Escolha a unidade base">Em Geral → Base.</Empty></div> : (
-                <UnitViewport model={view} tint={doc.appearance.tint} albedoOverride={albedoUrl} teamColor={teamColor} anim={shownAnim} playing={playing} speed={speed}
+                <UnitViewport model={view} tint={doc.appearance.tint} albedoOverride={section === "texture" && texPreview ? texPreview : albedoUrl} teamColor={teamColor} anim={shownAnim} playing={playing} speed={speed}
                   snapshotRef={snapshot} iconRef={iconShot} paint={paint} onPainted={(png) => void savePaint(png)} seek={draft && !playing ? scrub : null}
                   onTime={(t) => { if (draft && draftAnim) setScrub(t % Math.max(0.05, draftAnim.duration)); }} />
               )}
               <div className="viewport-overlay">
                 <span className="vp-chip"><Icon name="smart_toy" size={15} /> {doc.name} <small className="faint">({doc.newId || "sem id"})</small></span>
                 {details && <span className="vp-chip"><span className={`fac fac-${details.faction.toLowerCase()}`}>{details.faction.slice(0, 1)}</span> baseada em {details.name}</span>}
+                {mix && <span className="vp-chip"><Icon name="merge_type" size={15} /> Mistura: {[mix.turret && `torre de ${mix.turret}`, mix.weapon && `arma de ${mix.weapon}`].filter(Boolean).join(" · ")}</span>}
                 {paint.on && <span className="vp-chip" style={{ color: "var(--warn)" }}><Icon name="brush" size={15} /> Pintando: arraste sobre o modelo · botão direito gira</span>}
                 {anim && animField && !draft && <span className="vp-chip"><Icon name="animation" size={15} /> {animLabel(animField)} <button aria-label="Parar" onClick={() => { setAnim(null); setAnimField(null); }}><Icon name="stop" size={15} /></button></span>}
               </div>
@@ -757,6 +838,16 @@ export default function UnitStudio({ id }: { id: string }) {
           toast("ok", `Arma de ${d.name} ${target > 0 ? "no lugar da original" : "adicionada"}.`);
         }} />
       )}
+      {iconLab && (
+        <IconStudio title={doc.name} unitId={doc.newId || doc.base || "tropa"} model={view} albedo={albedoUrl} tint={doc.appearance.tint} categories={categories}
+          onClose={() => setIconLab(false)}
+          onUse={async (png) => {
+            const name = await api.creationAssetPut(id, "icone.png", png);
+            p.commit((d) => ({ ...d, appearance: { ...d.appearance, iconAsset: name } }));
+            toast("ok", "Ícone aplicado. Ele substitui o ícone da base no jogo.");
+            setIconLab(false);
+          }} />
+      )}
       {bpText !== null && (
         <Modal title="Blueprint da tropa" icon="description" onClose={() => setBpText(null)} wide>
           <pre className="code-view">{bpText}</pre>
@@ -767,6 +858,7 @@ export default function UnitStudio({ id }: { id: string }) {
           <div className="col" style={{ gap: 10 }}>
             <Notice kind={result.report.warnings.length ? "warn" : "ok"}>
               <b>{result.manifest.name}</b> foi para a biblioteca e está ligada no perfil ativo ({result.report.files} arquivos).
+              {(result.report.checks ?? []).some((c) => c.level === "ok") && <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>{(result.report.checks ?? []).filter((c) => c.level === "ok").map((c, i) => <li key={i}>✓ {c.area}: {c.text}</li>)}</ul>}
               {result.report.warnings.length > 0 && <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>{result.report.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>}
             </Notice>
             <p className="muted small">Tropas novas são <b>experimentais</b>: abra uma escaramuça e procure a unidade na fábrica da mesma facção da base. Se não aparecer ou o jogo reclamar, desligue o mod na biblioteca e relate o que aconteceu nas issues do projeto no GitHub.</p>

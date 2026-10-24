@@ -43,7 +43,8 @@ export default function Hub() {
     }
   }, []);
   const configured = !!settings && (settings.hubUrls.length > 0 || !!settings.serverUrl);
-  useEffect(() => { if (configured) void load(); }, [configured, load]);
+  const offline = !!settings?.offline;
+  useEffect(() => { if (configured && !offline) void load(); }, [configured, load, offline]);
 
   const installed = new Map(mods.map((m) => [m.manifest.source.hubId ?? m.manifest.id, m]));
   const all: Item[] = indexes.flatMap((index) => index.mods.map((mod) => ({ mod, index })));
@@ -76,6 +77,7 @@ export default function Hub() {
     return (
       <div className="scroll"><div className="page">
         <h1 className="page-title">Hub de mods</h1>
+        {offline && <Notice kind="info">O modo local está ligado: o hub não é consultado. Mods que você já tem continuam na biblioteca; para baixar novos, desligue em Sistema → Modo local.</Notice>}
         <div className="card"><Empty icon="store" title="Nenhum hub configurado" action={<button className="btn primary" onClick={() => useStore.getState().openSettings("hub")}>Abrir configurações</button>}>
           Conecte a um servidor da comunidade (cp-server) ou adicione o endereço de um índice de mods em Configurações.
         </Empty></div>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CopyButton, Empty, Field, Icon, Modal, monogram, Notice } from "../components/ui";
 import { api } from "../lib/api";
-import { community, useChat, useHosting } from "../lib/community";
+import { community, OFFLINE_TEXT, useChat, useHosting } from "../lib/community";
 import { useStore } from "../lib/store";
 import type { HubIndex, Room, ServerInfo, SyncItem, SyncPayload } from "../lib/types";
 import { NickModal } from "./Me";
@@ -65,6 +65,7 @@ export default function Multiplayer() {
           <div className="head">
             <div className="grow">
               <h1 className="page-title">Multiplayer</h1>
+              {useStore.getState().settings?.offline && <div style={{ marginTop: 8 }}><Notice kind="info">{OFFLINE_TEXT}</Notice></div>}
               <p className="muted" style={{ marginTop: 6, maxWidth: "75ch" }}>
                 A partida acontece no lobby da Steam. Aqui você encontra gente para jogar, copia o perfil de mods de quem hospeda e confere se os arquivos estão idênticos — senão o SC2 dessincroniza.
               </p>

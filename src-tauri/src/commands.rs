@@ -1842,7 +1842,7 @@ pub async fn showcase(state: State<'_, AppState>, unit: Option<String>) -> R<Opt
 
 /// Copia os arquivos (`.scd`) de um mod da biblioteca para uma pasta escolhida.
 #[tauri::command]
-pub async fn mod_export_files(state: State<'_, AppState>, id: String, dir: String) -> R<Vec<String>> {
+pub async fn mod_export_files(state: State<'_, AppState>, id: String, dir: String, overwrite: Option<bool>) -> R<Vec<String>> {
     with_ws(&state.ws, move |ws| {
         let m = ws
             .mods()?
@@ -1851,6 +1851,11 @@ pub async fn mod_export_files(state: State<'_, AppState>, id: String, dir: Strin
             .ok_or_else(|| cp_core::Error::ModNotFound(id.clone()))?;
         let dest = PathBuf::from(&dir);
         std::fs::create_dir_all(&dest).map_err(|e| cp_core::Error::io(&dest, e))?;
+        // não sobrescreve sem confirmação: a tela pergunta e chama de novo com overwrite
+        let existing: Vec<&str> = m.manifest.files.iter().filter(|f| dest.join(&f.name).exists()).map(|f| f.name.as_str()).collect();
+        if !existing.is_empty() && !overwrite.unwrap_or(false) {
+            return Err(cp_core::Error::Other(format!("EXISTE: {}", existing.join(", "))));
+        }
         let mut out = Vec::new();
         for f in &m.manifest.files {
             let src = m.file_path(&f.name);

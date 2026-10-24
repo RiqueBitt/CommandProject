@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, onProgress } from "./api";
 import type * as T from "./types";
 
-export type Page = "me" | "home" | "library" | "hub" | "multiplayer" | "studio" | "create" | "performance" | "settings";
+export type Page = "me" | "home" | "library" | "hub" | "multiplayer" | "studio" | "create" | "performance" | "settings" | "files" | "icons";
 
 export type AppUpdate = T.AppUpdate;
 
@@ -25,6 +25,9 @@ interface State {
   /** O jogo travou na última vez que foi aberto (relatório .mdmp novo na pasta bin). */
   crash: { dump: string; mods: [string, string][] } | null;
   go: (p: Page) => void;
+  /** Filtro da biblioteca de projetos (Mapas, Tropas, Modelos) */
+  createKind: T.CreationKind | "all";
+  goCreate: (k: T.CreationKind | "all") => void;
   /** Aba a abrir no Estúdio na próxima visita (ex.: "hd"). */
   studioTab: string | null;
   setStudioTab: (t: string | null) => void;
@@ -57,6 +60,8 @@ export const useStore = create<State>((set, get) => ({
   palette: false,
   appUpdate: null,
   crash: null,
+  createKind: "all",
+  goCreate: (createKind) => { set({ createKind }); get().go("create"); },
   studioTab: null,
   setStudioTab: (studioTab) => set({ studioTab }),
   settingsSection: null,
@@ -158,3 +163,20 @@ export const fmtDate = (iso?: string | null) => {
 
 /** "1 alteração" / "3 alterações" */
 export const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+// ---- preferências da interface guardadas no settings.json (arquivo local) ----
+let prefTimer: number | undefined;
+export function getUiPref<T>(key: string): T | undefined {
+  return useStore.getState().settings?.uiPrefs?.[key] as T | undefined;
+}
+export function setUiPref(key: string, value: unknown) {
+  const s = useStore.getState().settings;
+  if (!s) return;
+  const next = { ...s, uiPrefs: { ...(s.uiPrefs ?? {}), [key]: value } };
+  useStore.setState({ settings: next });
+  window.clearTimeout(prefTimer);
+  prefTimer = window.setTimeout(() => {
+    const cur = useStore.getState().settings;
+    if (cur) void api.saveSettings(cur).catch(() => {});
+  }, 600);
+}

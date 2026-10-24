@@ -2,6 +2,7 @@
 // iniciais. Sem three.js aqui: a biblioteca de projetos usa isto sem carregar os editores.
 import { EMPTY_EDITS, type Edits } from "../studio/mapEdit";
 import type { Feature, Symmetry, WorldGen } from "./worldgen";
+import type { TexGenDoc } from "./texgen";
 
 // ------------------------------------------------------------------ mapa
 
@@ -226,6 +227,10 @@ export interface UnitDoc {
   weaponCopies?: [number, string, number][];
   /** pacote de tropas (várias tropas num mod só) */
   pack?: string | null;
+  /** misturador: chassi = base; torre e arma de outras unidades */
+  mix?: { chassis: string; turret: string | null; weapon: string | null; turretScale: number; weaponScale: number; turretOffset: [number, number, number]; turretYaw: number } | null;
+  /** gerador de texturas (camadas e sementes) */
+  texgen?: TexGenDoc | null;
   notes: string;
 }
 

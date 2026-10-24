@@ -15,6 +15,9 @@ const ORIGIN: Record<FileStatus["origin"], string> = {
 
 const SECTIONS = [
   { id: "jogo", label: "Jogo", icon: "sports_esports" },
+  { id: "local", label: "Modo local e cópias", icon: "cloud_off" },
+  { id: "visual", label: "Visual", icon: "palette" },
+  { id: "diagnostico", label: "Diagnóstico", icon: "monitor_heart" },
   { id: "comunidade", label: "Comunidade", icon: "hub" },
   { id: "hub", label: "Hub de mods", icon: "store" },
   { id: "mapas", label: "Estúdio de Mapas", icon: "map" },
@@ -143,6 +146,58 @@ export default function SettingsPage() {
               <div className="setting-row">
                 <div className="txt"><b>Voltar ao original quando o jogo fechar</b><span>Útil se você também joga sem o launcher ou usa “Verificar integridade” da Steam.</span></div>
                 <Switch checked={s.restoreOnExit} onChange={(v) => commit({ ...s, restoreOnExit: v })} label="Restaurar ao fechar" />
+              </div>
+            </div>
+          </section>
+
+          <section id="sec-local" className="col">
+            <h2>Modo local e cópias de segurança</h2>
+            <div className="card pad col">
+              <div className="setting-row">
+                <div className="txt"><b>Modo local (sem internet)</b><span>Desliga tudo que usa rede: hub de mods, servidor da comunidade, busca de atualizações do launcher e dos mods. Mapas, tropas, modelos, texturas e ícones funcionam 100% no computador de qualquer jeito.</span></div>
+                <Switch checked={!!s.offline} onChange={(v) => commit({ ...s, offline: v, checkAppUpdates: v ? false : s.checkAppUpdates, checkModUpdates: v ? false : s.checkModUpdates })} label="Modo local" />
+              </div>
+              <div className="setting-row">
+                <div className="txt"><b>Cópia de segurança automática dos projetos</b><span>Um .zip na pasta de dados com todos os projetos e as configurações. As 5 mais recentes ficam guardadas.</span></div>
+                <select className="select dense" value={s.autoBackupDays ?? 7} onChange={(e) => commit({ ...s, autoBackupDays: Number(e.target.value) })}>
+                  <option value={0}>desligada</option><option value={1}>todo dia</option><option value={3}>a cada 3 dias</option><option value={7}>toda semana</option><option value={14}>a cada 2 semanas</option><option value={30}>todo mês</option>
+                </select>
+              </div>
+              <div className="row" style={{ gap: 8 }}><button className="btn" onClick={() => useStore.getState().go("files")}><Icon name="folder_open" /> Arquivos, cópias e lixeira</button></div>
+            </div>
+          </section>
+
+          <section id="sec-visual" className="col">
+            <h2>Visual</h2>
+            <div className="card pad col">
+              <div className="setting-row">
+                <div className="txt"><b>Estilo da interface</b><span>"Comando" usa painéis táticos, botões chanfrados e moldura de comando inspirados no jogo (arte própria do launcher). "Clássico" é o visual anterior.</span></div>
+                <div className="chips" style={{ padding: 0 }}>
+                  {[["sc", "Comando"], ["classic", "Clássico"]].map(([k, l]) => <button key={k} className="chip" aria-pressed={(s.uiPrefs?.skin ?? "sc") === k} onClick={() => commit({ ...s, uiPrefs: { ...(s.uiPrefs ?? {}), skin: k } })}>{l}</button>)}
+                </div>
+              </div>
+              <div className="setting-row">
+                <div className="txt"><b>Cor de destaque</b><span>Cores das facções para o estilo Comando.</span></div>
+                <div className="chips" style={{ padding: 0 }}>
+                  {[["uef", "UEF", "#4cb8ff"], ["cybran", "Cybran", "#ff5a5a"], ["illuminate", "Illuminate", "#f2c14e"], ["original", "Original", "#a3e635"]].map(([k, l, c]) => (
+                    <button key={k} className="chip" aria-pressed={(s.uiPrefs?.faction ?? "uef") === k} onClick={() => commit({ ...s, uiPrefs: { ...(s.uiPrefs ?? {}), faction: k } })}><i className="swatch-dot" style={{ background: c }} /> {l}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="setting-row">
+                <div className="txt"><b>Menos animações</b><span>Tira as transições e brilhos (o sistema também pode pedir isso).</span></div>
+                <Switch checked={!!s.uiPrefs?.reduceMotion} onChange={(v) => commit({ ...s, uiPrefs: { ...(s.uiPrefs ?? {}), reduceMotion: v } })} label="Menos animações" />
+              </div>
+            </div>
+          </section>
+
+          <section id="sec-diagnostico" className="col">
+            <h2>Diagnóstico</h2>
+            <div className="card pad col">
+              <p className="muted small">Desempenho do jogo, memória, prioridade, relatórios de travamento, conflitos entre mods e opções gráficas ficam no Otimizador.</p>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <button className="btn" onClick={() => useStore.getState().go("performance")}><Icon name="speed" /> Abrir o Otimizador</button>
+                <button className="btn" onClick={() => useStore.getState().go("files")}><Icon name="storage" /> Espaço em disco</button>
               </div>
             </div>
           </section>
