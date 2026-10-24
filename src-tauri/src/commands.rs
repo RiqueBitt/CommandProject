@@ -79,6 +79,18 @@ async fn sources(ws: &Arc<Mutex<Workspace>>) -> R<Vec<PathBuf>> {
     with_ws(ws, |ws| ws.stock_sources()).await
 }
 
+/// Relatórios de travamento do jogo (`*.mdmp` na pasta bin).
+fn crash_dumps(bin: &Path) -> Vec<String> {
+    std::fs::read_dir(bin)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| n.to_ascii_lowercase().ends_with(".mdmp"))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn data_url(mime: &str, bytes: &[u8]) -> String {
     format!(
         "data:{mime};base64,{}",
@@ -360,6 +372,21 @@ pub struct LaunchResult {
 #[tauri::command]
 pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<LaunchResult> {
     let app2 = app.clone();
+    // relatórios de travamento que já existiam antes de abrir (para notar um novo)
+    let crash_watch = with_ws(&state.ws, |ws| {
+        let bin = ws.game_bin_dir()?;
+        let before = crash_dumps(&bin);
+        let active = ws.profiles.active().clone();
+        let mods: Vec<(String, String)> = ws
+            .mods()?
+            .into_iter()
+            .filter(|m| active.mods.iter().any(|x| x.id == m.manifest.id && x.enabled))
+            .map(|m| (m.manifest.id, m.manifest.name))
+            .collect();
+        Ok((bin, before, mods))
+    })
+    .await
+    .ok();
     let (plan, applied, restore, memory_mb) = with_ws(&state.ws, move |ws| {
         if let Err(e) = ws.ensure_large_address() {
             eprintln!("modo 4 GB não reaplicado: {e}");
@@ -377,6 +404,31 @@ pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<Launch
         LaunchPlan::Exe { .. } => {
             cp_core::game::spawn_exe(&plan).map_err(err)?;
         }
+    }
+    if let Some((bin, before, mods)) = crash_watch {
+        // o jogo grava um .mdmp na pasta bin quando trava: avisa e sugere o que desligar
+        let app6 = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut seen_running = false;
+            for tick in 0..400u32 {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                let now = crash_dumps(&bin);
+                if let Some(new) = now.iter().find(|d| !before.contains(*d)) {
+                    let _ = app6.emit("cp://game-crashed", serde_json::json!({ "dump": new, "mods": mods }));
+                    return;
+                }
+                let running = tauri::async_runtime::spawn_blocking(cp_core::game::is_running).await.unwrap_or(false);
+                seen_running |= running;
+                // fechou normalmente (sem relatório novo) ou nem chegou a abrir em 2 min
+                if (seen_running && !running && tick > 2) || (!seen_running && tick > 40) {
+                    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                    if let Some(new) = crash_dumps(&bin).iter().find(|d| !before.contains(*d)) {
+                        let _ = app6.emit("cp://game-crashed", serde_json::json!({ "dump": new, "mods": mods }));
+                    }
+                    return;
+                }
+            }
+        });
     }
     if cp_core::memory::needs_job_limit(memory_mb) {
         // teto entre 2 e 4 GB: aplicado assim que o processo do jogo aparecer
@@ -1409,6 +1461,57 @@ pub async fn build_enhance(
     .await
 }
 
+// ---------------------------------------------------------------- editor de mapas: decorações e texturas
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MapAssets {
+    props: Vec<cp_core::mapassets::PropInfo>,
+    layers: Vec<cp_core::mapassets::LayerSet>,
+}
+
+/// Decorações e camadas de textura do chão disponíveis no jogo (de todos os mapas).
+#[tauri::command]
+pub async fn map_assets(state: State<'_, AppState>) -> R<MapAssets> {
+    let srcs = sources(&state.ws).await?;
+    off_lock(move || {
+        Ok(MapAssets {
+            props: cp_core::mapassets::props_catalog(&srcs)?,
+            layers: cp_core::mapassets::terrain_layers(&srcs)?,
+        })
+    })
+    .await
+}
+
+/// Miniatura de uma textura do jogo pelo caminho que os mapas usam.
+#[tauri::command]
+pub async fn game_texture(state: State<'_, AppState>, path: String, max: Option<u32>) -> R<String> {
+    let srcs = sources(&state.ws).await?;
+    off_lock(move || {
+        let png = cp_core::mapassets::texture_png(&srcs, &path, max.unwrap_or(128).clamp(16, 1024))?;
+        Ok(data_url("image/png", &png))
+    })
+    .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PropPreview {
+    mesh: cp_core::scm::MeshView,
+    texture: Option<String>,
+}
+
+/// Modelo 3D de uma decoração (para ver antes de colocar no mapa).
+#[tauri::command]
+pub async fn prop_preview(state: State<'_, AppState>, bp: String) -> R<PropPreview> {
+    let srcs = sources(&state.ws).await?;
+    off_lock(move || {
+        let (mesh, tex) = cp_core::mapassets::prop_preview(&srcs, &bp)?;
+        Ok(PropPreview { mesh, texture: tex.map(|p| data_url("image/png", &p)) })
+    })
+    .await
+}
+
 // ---------------------------------------------------------------- menu moderno
 
 #[derive(Serialize)]
@@ -1441,7 +1544,7 @@ pub async fn menu_theme_preview(
             let key = cp_core::scd::normalize_key(&entry);
             let Some(kind) = cp_core::menu_theme::kind_of(&key) else { continue };
             let (info, img) = dds::decode(&data)?;
-            let after = cp_core::menu_theme::theme_image(&img, kind, info.format, &opts);
+            let after = cp_core::menu_theme::theme_image(&img, kind, cp_core::menu_theme::is_hover_state(&key), info.format, &opts);
             out.push(ThemePreview {
                 key: rel.to_string(),
                 before: data_url("image/png", &dds::to_png(&img)?),
@@ -1476,7 +1579,7 @@ pub async fn build_menu_theme(
     .await?;
     let opts2 = opts.clone();
     let res = off_lock(move || {
-        let dest = data_dir.join("cache").join("theme").join("zz_cp_menu_moderno.scd");
+        let dest = data_dir.join("cache").join("theme").join(cp_core::menu_theme::ARCHIVE_NAME);
         cp_core::menu_theme::build(&srcs, &fonts, &opts2, &dest, &mut |i, n, name| {
             if i % 8 == 0 || i == n {
                 emit_progress(&app, "theme", i, n, name.to_string());
@@ -1637,6 +1740,8 @@ pub struct Showcase {
     unit: String,
     mesh: cp_core::scm::MeshView,
     albedo: Option<String>,
+    team: Option<String>,
+    mask: Option<String>,
     units: Vec<String>,
 }
 
@@ -1668,21 +1773,27 @@ pub async fn showcase(state: State<'_, AppState>, unit: Option<String>) -> R<Opt
             .or_else(|| models.keys().find(|k| k.ends_with("0001")).cloned())
             .or_else(|| models.keys().next().cloned())
             .expect("há modelos");
-        let (src, scm, albedo) = &models[&pick];
-        let mut scd = cp_core::scd::Scd::open(src)?;
-        let mesh = cp_core::scm::view(&cp_core::scm::read(&scd.read(scm)?)?);
-        let albedo = match albedo {
-            Some(n) => scd
-                .read(n)
-                .ok()
-                .and_then(|d| texture_view(&d, None).ok())
-                .map(|t| t.png),
-            None => None,
+        let u = &models[&pick];
+        let mut scd = cp_core::scd::Scd::open(&u.src)?;
+        let mesh = cp_core::scm::view(&cp_core::scm::read(&scd.read(&u.scm)?)?);
+        // texturas em PNG, reduzidas: a vitrine não precisa de 1024 px
+        let mut png = |name: &Option<String>| -> Option<String> {
+            let d = scd.read(name.as_ref()?).ok()?;
+            let (_, mut img) = dds::decode(&d).ok()?;
+            while img.width > 512 {
+                img = dds::downsample(&img);
+            }
+            dds::to_png(&img).ok().map(|p| data_url("image/png", &p))
         };
+        let albedo = png(&u.albedo);
+        let team = png(&u.team);
+        let mask = png(&u.mask);
         Ok(Some(Showcase {
             unit: pick,
             mesh,
             albedo,
+            team,
+            mask,
             units: models.keys().cloned().collect(),
         }))
     })

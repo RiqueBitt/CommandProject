@@ -8,8 +8,9 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
 ## O que ele faz
 
 **Tela inicial**
-- Uma unidade do seu jogo em 3D, com a textura original, girando sobre uma plataforma luminosa
-  (arraste para girar; troque a unidade ou esconda o modelo). O modelo é lido da sua instalação na
+- Uma unidade do seu jogo em 3D, pintada com as **cores da facção** como no jogo (azul UEF, vermelho
+  Cybran, dourado Illuminate, ou a cor de time que você escolher) e com as partes que brilham acesas,
+  girando sobre uma plataforma luminosa (arraste para girar; troque a unidade ou esconda o modelo). O modelo é lido da sua instalação na
   hora de mostrar: o launcher não copia nem distribui arquivos do jogo. Sem o jogo, aparece um robô
   original do CommandProject.
 - Card de **Aprimoramentos** (Shaders, Texturas HD, memória) com atalhos para cada um.
@@ -60,12 +61,21 @@ crie mods sem mexer à mão na pasta do jogo, e encontre gente para jogar com os
   e **pontos de extração de massa**, esculpa morros, vales, planaltos, áreas planas e rampas,
   desenhe passagens sobre a água, ligue a borda rochosa e ajuste a economia. Tudo com desfazer
   (Ctrl+Z). O toolkit verifica se todo ponto é navegável e se as bases se alcançam antes de gerar.
+  - **Decorações**: árvores, pedras, prédios, caixas e restos de unidades de **qualquer mapa do jogo**
+    (catálogo com busca e prévia 3D). Clique para colocar uma ou arraste para espalhar um bosque, com
+    giro e tamanho variados; a ferramenta **Tirar decoração** limpa as do terreno original.
+  - **Texturas do chão**: troca cada camada (grama, terra, rocha…) por uma de outro mapa, como neve,
+    areia ou lava, com miniaturas das texturas reais.
 
 **Menu moderno (repaginada nos menus do jogo)**
 - Mod do próprio launcher, gerado no seu computador a partir dos arquivos do jogo: menu principal,
-  opções, escaramuça, salas e resumo da partida com as cores do launcher (ou outra cor de destaque),
-  imagens com mais nitidez e a fonte Roboto no lugar da MagistralTT. Cores de facção e de time ficam
+  opções, escaramuça, salas e resumo da partida com as cores do launcher. Personalize com estilos
+  prontos (Launcher, Neon, Carmesim, Grafite, Vidro, Original + nitidez), cor de destaque e de
+  passar o mouse, escurecer/tingir fundos, opacidade dos painéis, brilho dos botões e nitidez.
+  A fonte Roboto no lugar da MagistralTT é opcional (experimental). Cores de facção e de time ficam
   intactas. Liga e desliga na biblioteca como qualquer mod; não afeta o multiplayer.
+- Se o jogo fechar com erro logo depois de abrir, o launcher avisa e oferece desligar os mods que
+  estavam ativos naquela partida.
 - A tela inicial do launcher tem a aba **Mods**, com o que está ligado no perfil e atalho para desligar.
 
 **Shaders (deixa o jogo mais bonito)**
@@ -197,6 +207,10 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
   diferentes do original podem deformar nas animações.
 - **Lua compilado**: só dá para editar como texto quando o jogo traz a versão em `uncompiled_lua.scd`.
 - **HUD**: a edição é por textura e por Lua (layout em código); ainda não há editor visual de arrastar.
+- **Texturas do chão dos mapas**: o jogo mistura as camadas com máscaras pré-calculadas junto da
+  iluminação, então a troca vale para a camada inteira (não dá para pintar pixel a pixel). O nome
+  do arquivo novo precisa caber no espaço do original; o editor só mostra as que cabem.
+- **Decorações** são visuais: não bloqueiam a passagem das unidades.
 - **Partidas**: o jogo em si continua nos lobbies da Steam; o launcher organiza as salas, o chat e os
   mods, mas não substitui o netcode do SC2.
 

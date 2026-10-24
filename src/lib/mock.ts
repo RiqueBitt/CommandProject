@@ -394,7 +394,7 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
         const c = document.createElement("canvas"); c.width = w; c.height = h; draw(c.getContext("2d")!, after); return c.toDataURL();
       };
       const accent = o.recolor ? o.accent : "#4f8fe0";
-      const hover = o.recolor ? o.accent : "#e08a2a";
+      const hover = o.recolor ? (o.hover || o.accent) : "#e08a2a";
       const grad = (g: CanvasRenderingContext2D, w: number, h: number, a: string, b: string) => { const x = g.createLinearGradient(0, 0, 0, h); x.addColorStop(0, a); x.addColorStop(1, b); g.fillStyle = x; g.fillRect(0, 0, w, h); };
       const btn = (isHover: boolean) => (g: CanvasRenderingContext2D, after: boolean) => {
         const col = after ? (isHover ? hover : accent) : isHover ? "#e08a2a" : "#4f8fe0";
@@ -403,7 +403,7 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
         g.beginPath(); g.moveTo(240, 4); g.lineTo(252, 20); g.lineTo(240, 36); g.fillStyle = col; g.fill();
       };
       const items: [string, number, number, (g: CanvasRenderingContext2D, after: boolean) => void][] = [
-        ["blue_overlay.dds", 128, 512, (g, after) => grad(g, 128, 512, "#05070a", after && o.recolor ? "#2a2f26" : "#3f7fd0")],
+        ["blue_overlay.dds", 128, 512, (g, after) => { grad(g, 128, 512, "#05070a", after && o.recolor ? "#4a5040" : "#3f7fd0"); if (after && o.recolor) { g.fillStyle = `rgba(0,0,0,${o.bgDarkness * 0.8})`; g.fillRect(0, 0, 128, 512); } }],
         ["top_blue_grad.dds", 256, 32, (g, after) => grad(g, 256, 32, after && o.recolor ? "#3a4030" : "#2a5aa0", "rgba(0,0,0,0)")],
         ["line03.dds", 64, 4, (g, after) => { g.fillStyle = after ? accent : "#4f8fe0"; g.fillRect(0, 0, 64, 4); }],
         ["mainmenu/btn_u.dds", 256, 40, btn(false)],
@@ -491,7 +491,62 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
         g.fillStyle = hgt < 33 ? `hsl(200,30%,${30 + n}%)` : hgt < 36 ? `hsl(42,35%,${52 + n}%)` : `hsl(${95 - (hgt - 40) * 1.5},${30 + n}%,${30 + (hgt - 36) * 0.7 + n}%)`;
         g.fillRect(x, y, 2, 2);
       }
-      return r({ terrain: a.terrain, grid, size, heights: btoa(bin), heightScale: 1 / 128, yMin: 18, yMax: 72, waterLevel: 34, texture: cv.toDataURL() });
+      // bosques e pedras de exemplo (determinístico)
+      const props: [number, number, number, number, number, number][] = [];
+      let seed = 7;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      for (let k = 0; k < 900; k++) {
+        const cx = 160 + (k % 5) * 170, cz = 180 + Math.floor(k / 180) * 160;
+        const x = cx + (rnd() - 0.5) * 120, z = cz + (rnd() - 0.5) * 120;
+        if (field(x, z) < 36) continue;
+        props.push([x, z, field(x, z), rnd() * 360, 0.8 + rnd() * 0.5, k % 9 === 0 ? 1 : 0]);
+      }
+      return r({ terrain: a.terrain, grid, size, heights: btoa(bin), heightScale: 1 / 128, yMin: 18, yMax: 72, waterLevel: 34, texture: cv.toDataURL(), props, propKinds: ["/props/Trees/spruce01/spruce01_prop.bp", "/props/Rocks/rock03/rock03_prop.bp"] });
+    }
+    case "map_assets": {
+      const P = (cat: string, n: string) => ({ bp: `/props/${cat}/${n}/${n}_prop.bp`, name: n, category: cat });
+      const props = [
+        ...["spruce01", "spruce02", "pine01", "pine02", "oak01", "palm01", "palm02", "dead01", "birch01"].map((n) => P("Trees", n)),
+        ...["rock01", "rock02", "rock03", "rock_desert01", "rock_snow01", "boulder01"].map((n) => P("Rocks", n)),
+        ...["warehouse01", "tower01", "silo01", "hangar01"].map((n) => P("Buildings", n)),
+        ...["crate01", "barrel01"].map((n) => P("Crates", n)),
+        ...["uul0101_wreck", "ucl0103_wreck"].map((n) => P("Wreckage", n)),
+      ];
+      const L = (map: string, name: string) => {
+        const base = `/textures/Terrain/${map}/${map.replace(/^SC2_/, "").toLowerCase()}_${name}`;
+        return { map, name, d: `${base}_d.dds`, n: `${base}_n.dds`, s: `${base}_s.dds`, slotD: 64, slotN: 64, slotS: 64 };
+      };
+      const layers = ["SC2_MP_002", "SC2_MP_101", "SC2_MP_302", "SC2_MP_205"].flatMap((m, i) =>
+        [["grass01", "earth01", "cliff01"], ["sand01", "rock01", "dunes01"], ["snow01", "ice01", "rock02"], ["lava01", "ash01", "metal01"]][i].map((n) => L(m, n)));
+      for (const t of ["SC2_MP_001", "SC2_MP_003"]) layers.push(L(t, "grass01"), L(t, "earth01"), L(t, "hill01"));
+      return r({ props, layers });
+    }
+    case "game_texture": {
+      const path = String(a.path).toLowerCase();
+      const hue = path.includes("snow") || path.includes("ice") ? 205 : path.includes("sand") || path.includes("dune") ? 42 : path.includes("lava") ? 12 : path.includes("rock") || path.includes("cliff") || path.includes("metal") ? 30 : path.includes("ash") ? 0 : path.includes("earth") || path.includes("hill") ? 28 : 96;
+      const sat = path.includes("rock") || path.includes("cliff") || path.includes("metal") || path.includes("ash") ? 8 : path.includes("snow") || path.includes("ice") ? 25 : 38;
+      const light = path.includes("snow") || path.includes("ice") ? 82 : path.includes("ash") ? 22 : 40;
+      const cv = document.createElement("canvas");
+      cv.width = cv.height = 64;
+      const g = cv.getContext("2d")!;
+      for (let y = 0; y < 64; y += 4) for (let x = 0; x < 64; x += 4) {
+        g.fillStyle = `hsl(${hue},${sat}%,${light + Math.sin(x * 0.7 + y * 0.3) * 5 + ((x * 7 + y * 13) % 9) - 4}%)`;
+        g.fillRect(x, y, 4, 4);
+      }
+      return r(cv.toDataURL());
+    }
+    case "prop_preview": {
+      // cone simples no lugar do modelo do jogo
+      const pos: number[] = [], nor: number[] = [], uv: number[] = [], idx: number[] = [];
+      const seg = 10;
+      for (let i = 0; i < seg; i++) {
+        const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2, b = pos.length / 3;
+        pos.push(0, 2, 0, Math.cos(a0) * 0.6, 0, Math.sin(a0) * 0.6, Math.cos(a1) * 0.6, 0, Math.sin(a1) * 0.6);
+        for (const a of [a0, a0, a1]) nor.push(Math.cos(a), 0.3, Math.sin(a));
+        uv.push(0.5, 0, 0, 1, 1, 1);
+        idx.push(b, b + 2, b + 1);
+      }
+      return r({ mesh: { positions: pos, normals: nor, uvs: uv, indices: idx, bones: [], bboxMin: [-0.6, 0, -0.6], bboxMax: [0.6, 2, 0.6], version: 6, triangles: idx.length / 3, info: "prévia simulada" }, texture: null });
     }
     case "maptk_build": {
       const steps = ["terrain SC2_MP_002 (Open Palms), 3 layers, land layer L0", "placeable cells: 18211", "min spawn separation: 420", "total mass points: 52", "VERIFIED: all 52 positions navigable; all spawns mutually reachable", "packaged: _cp_meumapa.scd (0.1 MB)"];

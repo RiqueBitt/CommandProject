@@ -16,6 +16,7 @@ pub mod laa;
 pub mod library;
 pub mod lua;
 pub mod manifest;
+pub mod mapassets;
 pub mod maptk;
 pub mod memory;
 pub mod menu_theme;

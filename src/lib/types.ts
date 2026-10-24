@@ -73,6 +73,7 @@ export interface Settings {
   checkAppUpdates: boolean;
   keepLargeAddress: boolean;
   memoryLimitMb?: number | null;
+  showcaseTeamColor?: string | null;
   showcaseUnit?: string | null;
   showcase: boolean;
 }
@@ -153,9 +154,11 @@ export interface Terrain {
 export interface Terrain3D {
   terrain: string; grid: number; size: number; heights: string; heightScale: number;
   yMin: number; yMax: number; waterLevel: number; texture: string | null;
+  /** decorações do terreno: [x, z, y, yaw, escala, índice em propKinds] */
+  props?: [number, number, number, number, number, number][]; propKinds?: string[];
 }
 export interface MapBuildResult {
-  mass?: number; sites?: number; warnings?: string[]; extraMass?: number; [k: string]: unknown;
+  mass?: number; sites?: number; warnings?: string[]; extraMass?: number; propsAdded?: number; propsRemoved?: number; reskinned?: number; [k: string]: unknown;
 }
 export interface TerrainPreview {
   path: string; dataUrl: string; terrain: string; grid: number; size: number; nLayers: number; landLayer: number;
@@ -193,12 +196,20 @@ export interface EnhancePreview { before: string; after: string; info: DdsInfo; 
 
 export interface LaaStatus { exe: string; is64bit: boolean; enabled: boolean; patchedByUs: boolean; revertedByUpdate: boolean; steamStub: boolean }
 
-export interface Showcase { unit: string; mesh: MeshView; albedo?: string | null; units: string[] }
+export interface Showcase { unit: string; mesh: MeshView; albedo?: string | null; team?: string | null; mask?: string | null; units: string[] }
 
 /** Tema "Menu moderno" para os menus do jogo. */
-export interface ThemeOptions { name: string; recolor: boolean; fonts: boolean; accent: string; sharpness: number; deblock: number }
+export interface ThemeOptions {
+  name: string; recolor: boolean; fonts: boolean; accent: string; hover: string;
+  bgDarkness: number; bgTint: number; panelOpacity: number; glow: number; sharpness: number; deblock: number;
+}
 export interface ThemePreview { key: string; before: string; after: string; width: number; height: number }
 
 export interface SystemMemory { totalMb: number; availableMb: number }
 export interface MemoryStatus { system: SystemMemory; limitMb: number; recommendedMb: number; choices: number[]; laa: LaaStatus | null }
 export interface AppUpdate { version: string; notes: string; url: string; assetName?: string | null; assetUrl?: string | null; size: number; sha256?: string | null }
+
+export interface PropInfo { bp: string; name: string; category: string }
+export interface LayerSet { map: string; name: string; d: string; n?: string | null; s?: string | null; slotD: number; slotN: number; slotS: number }
+export interface MapAssets { props: PropInfo[]; layers: LayerSet[] }
+export interface PropPreview { mesh: MeshView; texture?: string | null }

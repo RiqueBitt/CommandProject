@@ -13,14 +13,49 @@ export type SculptOp =
 export type ReliefKind = "hill" | "valley" | "plateau" | "flatten" | "ramp";
 export interface Relief { kind: ReliefKind; op: SculptOp }
 
+/** Decoração colocada pelo jogador. */
+export interface PlacedProp { bp: string; x: number; z: number; yaw: number; scale: number }
+
+/** Camada de textura do chão (de qualquer mapa do jogo). */
+export interface GroundLayer { map: string; name: string; d: string; n?: string | null; s?: string | null; slotD: number; slotN: number; slotS: number }
+
 export interface Edits {
   spawns: Pt[];
   mass: Pt[];
   bridges: Rect[];
   seed: Pt | null;
   relief: Relief[];
+  /** decorações novas */
+  props: PlacedProp[];
+  /** áreas onde as decorações do terreno são retiradas: [x, z, raio] */
+  cuts: [number, number, number][];
+  /** camada original (caminho _d) → camada que entra no lugar */
+  reskin: Record<string, GroundLayer>;
 }
-export const EMPTY_EDITS: Edits = { spawns: [], mass: [], bridges: [], seed: null, relief: [] };
+export const EMPTY_EDITS: Edits = { spawns: [], mass: [], bridges: [], seed: null, relief: [], props: [], cuts: [], reskin: {} };
+
+/** Tipo visual da decoração no editor (a partir da pasta do blueprint). */
+export type DecorKind = "tree" | "rock" | "building" | "wreck" | "other";
+export function decorKind(bp: string): DecorKind {
+  const c = bp.toLowerCase().split("/")[2] ?? "";
+  if (c.startsWith("tree")) return "tree";
+  if (c.startsWith("rock")) return "rock";
+  if (c.startsWith("wreck") || c.startsWith("defaultwreck") || c.startsWith("debris")) return "wreck";
+  if (["buildings", "structures", "warehouses", "cranes", "barges", "lights", "crates"].includes(c)) return "building";
+  return "other";
+}
+
+/** Uma troca de camada vira o mapeamento de caminhos que o toolkit aplica (d, n e s quando cabem). */
+export function reskinPaths(old: GroundLayer, neo: GroundLayer): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (neo.d.length < old.slotD) out[old.d] = neo.d;
+  if (old.n && neo.n && neo.n.length < old.slotN) out[old.n] = neo.n;
+  if (old.s && neo.s && neo.s.length < old.slotS) out[old.s] = neo.s;
+  return out;
+}
+
+/** A camada nova cabe no lugar da antiga (o caminho precisa ser mais curto que o espaço)? */
+export const layerFits = (old: GroundLayer, neo: GroundLayer) => neo.d.length < old.slotD && neo.d !== old.d;
 
 export const RELIEF_LABEL: Record<ReliefKind, string> = {
   hill: "Morro", valley: "Vale", plateau: "Planalto", flatten: "Área plana", ramp: "Rampa",

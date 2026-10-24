@@ -1,9 +1,11 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { heightAt, type Pt, type Rect } from "../pages/studio/mapEdit";
+import { heightAt, type DecorKind, type Pt, type Rect } from "../pages/studio/mapEdit";
 
 export interface Marker { p: Pt; color: string; label: string }
+/** decoração mostrada no editor: x, z, yaw (graus), escala, tipo; `added` = colocada por você */
+export interface DecorPoint { x: number; z: number; yaw: number; scale: number; kind: DecorKind; added?: boolean }
 export type Brush = { shape: "circle"; radius: number; color: string } | { shape: "point"; color: string } | null;
 
 interface Props {
@@ -20,6 +22,10 @@ interface Props {
   seed: Pt | null;
   brush: Brush;
   drag: { a: Pt; b: Pt } | null;
+  /** árvores, pedras, prédios… (instanciados, aguenta dezenas de milhares) */
+  decor?: DecorPoint[];
+  /** áreas onde as decorações do terreno serão retiradas */
+  cuts?: [number, number, number][];
   /** câmera livre: o botão esquerdo gira em vez de editar */
   orbit: boolean;
   onPointer: (type: "down" | "move" | "up", p: Pt | null) => void;
@@ -36,6 +42,7 @@ export default function MapView3D(props: Props) {
     setHeights: () => void;
     setTexture: (url: string | null) => void;
     setMarkers: () => void;
+    setDecor: () => void;
     setOrbit: (on: boolean) => void;
     setExaggeration: () => void;
     redrawBrush: () => void;
@@ -193,6 +200,7 @@ export default function MapView3D(props: Props) {
       water.position.y = waterLevel * e;
       water.visible = waterLevel > lo + 0.5;
       setMarkers();
+      setDecor();
       redrawBrush();
     };
 
@@ -270,6 +278,63 @@ export default function MapView3D(props: Props) {
         c.rotation.x = -Math.PI / 2;
         c.position.set(seed[0], y + 3, seed[1]);
         markers.add(c);
+      }
+    };
+
+    // decorações: uma malha instanciada por tipo (cores sólidas, leve mesmo com 20 mil árvores)
+    const decorGroup = new THREE.Group();
+    scene.add(decorGroup);
+    const KIND_GEO: Record<DecorKind, () => THREE.BufferGeometry> = {
+      tree: () => new THREE.ConeGeometry(2.6, 10, 7).translate(0, 5, 0),
+      rock: () => new THREE.DodecahedronGeometry(2.4, 0).scale(1, 0.6, 1).translate(0, 0.8, 0),
+      building: () => new THREE.BoxGeometry(7, 6, 7).translate(0, 3, 0),
+      wreck: () => new THREE.BoxGeometry(5, 1.6, 3).translate(0, 0.8, 0),
+      other: () => new THREE.OctahedronGeometry(1.8).translate(0, 1.8, 0),
+    };
+    const KIND_COLOR: Record<DecorKind, number> = { tree: 0x3f7d3a, rock: 0x8a8378, building: 0xb39b78, wreck: 0x6b4a3a, other: 0x9aa7b4 };
+    const cutRing = new THREE.Group();
+    scene.add(cutRing);
+    const clearDecor = () => {
+      for (const g of [decorGroup, cutRing]) for (const o of [...g.children]) {
+        g.remove(o);
+        const m = o as THREE.Mesh;
+        m.geometry.dispose();
+        (m.material as THREE.Material).dispose();
+      }
+    };
+    const setDecor = () => {
+      clearDecor();
+      const { decor = [], cuts = [] } = live.current;
+      const by = new Map<string, DecorPoint[]>();
+      for (const d of decor) {
+        const key = d.kind + (d.added ? "+" : "");
+        (by.get(key) ?? by.set(key, []).get(key)!).push(d);
+      }
+      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+      for (const [key, list] of by) {
+        const kind = key.replace("+", "") as DecorKind, added = key.endsWith("+");
+        const color = new THREE.Color(KIND_COLOR[kind]);
+        if (added) color.lerp(new THREE.Color(0xa3e635), 0.35);
+        const mesh = new THREE.InstancedMesh(KIND_GEO[kind](), new THREE.MeshStandardMaterial({ color, roughness: 0.85, flatShading: true, emissive: added ? 0x2a3a10 : 0x000000 }), list.length);
+        list.forEach((d, i) => {
+          q.setFromAxisAngle(up, (d.yaw * Math.PI) / 180);
+          const s = Math.max(0.3, Math.min(4, d.scale || 1));
+          sc.set(s, s, s);
+          v.set(d.x, hAt(d.x, d.z), d.z);
+          mesh.setMatrixAt(i, m4.compose(v, q, sc));
+        });
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.computeBoundingSphere();
+        decorGroup.add(mesh);
+      }
+      for (const [x, z, r] of cuts) {
+        const pts = new Float32Array(64 * 3);
+        for (let i = 0; i < 64; i++) {
+          const a = (i / 64) * Math.PI * 2, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+          pts.set([px, hAt(Math.max(0, Math.min(grid, px)), Math.max(0, Math.min(grid, pz))) + 1, pz], i * 3);
+        }
+        const l = new THREE.LineLoop(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(pts, 3)), new THREE.LineBasicMaterial({ color: 0xe5534b, transparent: true, opacity: 0.8 }));
+        cutRing.add(l);
       }
     };
 
@@ -382,7 +447,7 @@ export default function MapView3D(props: Props) {
     });
     ro.observe(el);
 
-    api.current = { setHeights, setTexture, setMarkers, setOrbit, setExaggeration: setHeights, redrawBrush };
+    api.current = { setHeights, setTexture, setMarkers, setDecor, setOrbit, setExaggeration: setHeights, redrawBrush };
     setHeights();
     setTexture(live.current.texture);
 
@@ -396,6 +461,7 @@ export default function MapView3D(props: Props) {
       cv.removeEventListener("pointerup", onUp);
       cv.removeEventListener("pointerleave", onLeave);
       clearGroup();
+      clearDecor();
       texture?.dispose();
       scene.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.Line) {
@@ -412,6 +478,7 @@ export default function MapView3D(props: Props) {
   useEffect(() => { api.current?.setHeights(); }, [props.heights, props.waterLevel, props.exaggeration]);
   useEffect(() => { api.current?.setTexture(props.texture); }, [props.texture]);
   useEffect(() => { api.current?.setMarkers(); }, [props.spawns, props.mass, props.autoMass, props.bridges, props.seed]);
+  useEffect(() => { api.current?.setDecor(); }, [props.decor, props.cuts]);
   useEffect(() => { api.current?.setOrbit(props.orbit); }, [props.orbit]);
   useEffect(() => { api.current?.redrawBrush(); }, [props.brush, props.drag]);
 

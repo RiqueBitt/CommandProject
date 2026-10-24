@@ -26,6 +26,13 @@ export default function App() {
         const info = await api.appInfo();
         useStore.setState({ info });
         await refresh();
+        // o Menu moderno 1.x trocava a fonte de um jeito que fazia o jogo fechar ao abrir
+        const oldTheme = useStore.getState().mods.find((m) => m.manifest.id === "menu-moderno" && m.enabled && m.manifest.version.startsWith("1."));
+        if (oldTheme) {
+          await api.setModEnabled(oldTheme.manifest.id, false).catch(() => {});
+          await refresh();
+          toast("info", "Desliguei o Menu moderno antigo, que fazia o jogo fechar ao abrir. Gere de novo na Biblioteca para usar a versão corrigida.");
+        }
         if (useStore.getState().settings?.checkAppUpdates) {
           // em segundo plano: sem internet ou GitHub lento não atrasa a abertura
           void api.appUpdateCheck().then((up) => {
@@ -45,6 +52,10 @@ export default function App() {
         void refresh();
       }),
       onEvent("cp://game-started", () => toast("info", "Jogo aberto. Os arquivos serão restaurados quando ele fechar.")),
+      onEvent<{ dump: string; mods: [string, string][] }>("cp://game-crashed", (c) => {
+        useStore.setState({ crash: c });
+        toast("error", "O jogo fechou com erro. Veja na tela inicial o que pode ter causado.");
+      }),
       onEvent<number>("cp://memory-limited", (mb) => toast("ok", `Memória do jogo limitada a ${(mb / 1024).toLocaleString("pt-BR")} GB.`)),
       onEvent<string>("cp://memory-limit-failed", (e) => toast("error", `Não deu para aplicar o limite de memória: ${e}. O jogo está usando até 4 GB.`)),
     ];

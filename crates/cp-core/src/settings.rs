@@ -6,6 +6,8 @@ use crate::game::LaunchMode;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+const CURRENT_UI_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -41,6 +43,10 @@ pub struct Settings {
     pub showcase: bool,
     /// Teto de memória do jogo em MB (2048 a 4096). `None` = segue `keep_large_address`.
     pub memory_limit_mb: Option<u32>,
+    /// Cor do time do modelo 3D da tela inicial (#rrggbb). `None` = cor da facção.
+    pub showcase_team_color: Option<String>,
+    /// Versão das migrações de configuração já aplicadas.
+    pub ui_version: u32,
 }
 
 impl Default for Settings {
@@ -62,6 +68,8 @@ impl Default for Settings {
             showcase_unit: None,
             showcase: true,
             memory_limit_mb: None,
+            showcase_team_color: None,
+            ui_version: CURRENT_UI_VERSION,
         }
     }
 }
@@ -77,7 +85,14 @@ impl Settings {
     }
 
     pub fn load(path: &Path) -> Result<Self> {
-        read_json_or_default(path)
+        let mut s: Settings = read_json_or_default(path)?;
+        if s.ui_version < 1 {
+            // 0.10: o modelo 3D da tela inicial volta ligado para quem tinha desligado sem querer
+            // (versões antigas salvavam "desligado" por padrão)
+            s.showcase = true;
+            s.ui_version = 1;
+        }
+        Ok(s)
     }
     pub fn save(&self, path: &Path) -> Result<()> {
         write_json(path, self)

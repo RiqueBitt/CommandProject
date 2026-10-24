@@ -20,7 +20,10 @@ use crate::scd::{Scd, ScdBuilder};
 use crate::ttf;
 
 /// Versão do tema gravada no mod (a interface oferece regerar quando muda).
-pub const THEME_VERSION: &str = "1.0.0";
+pub const THEME_VERSION: &str = "2.0.0";
+/// Nome do `.scd` gerado: começa com `zz_cp_zz_` para montar DEPOIS das Texturas HD
+/// (`zz_cp_texturas_hd.scd`), senão as texturas do menu ficam com a versão das Texturas HD.
+pub const ARCHIVE_NAME: &str = "zz_cp_zz_menu_moderno.scd";
 pub const FRONTEND: &str = "textures/ui/common/pc/frontend/";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,10 +32,20 @@ pub struct ThemeOptions {
     pub name: String,
     /// Troca as cores (azul/laranja → cor de destaque; fundos → cinza-escuro).
     pub recolor: bool,
-    /// Troca a fonte dos títulos e botões pela Roboto.
+    /// Troca a fonte dos títulos e botões pela Roboto (experimental).
     pub fonts: bool,
-    /// Cor de destaque (#rrggbb).
+    /// Cor de destaque (#rrggbb): botões, barras, linhas e ícones.
     pub accent: String,
+    /// Cor dos botões com o mouse em cima / ativos (#rrggbb). Vazio = a mesma do destaque.
+    pub hover: String,
+    /// Quanto os fundos escurecem (0 = como no jogo, 1 = quase preto).
+    pub bg_darkness: f32,
+    /// Quanto da cor de destaque tinge os fundos (0 = cinza neutro, 1 = bem colorido).
+    pub bg_tint: f32,
+    /// Opacidade dos painéis de fundo (0,4 = translúcidos, 1 = como no jogo).
+    pub panel_opacity: f32,
+    /// Brilho extra dos botões e destaques (0..1).
+    pub glow: f32,
     /// Nitidez (0..1.5) e remoção de blocos DXT (0..1).
     pub sharpness: f32,
     pub deblock: f32,
@@ -43,12 +56,49 @@ impl Default for ThemeOptions {
         ThemeOptions {
             name: "Menu moderno".into(),
             recolor: true,
-            fonts: true,
+            fonts: false,
             accent: "#a3e635".into(),
+            hover: String::new(),
+            bg_darkness: 0.55,
+            bg_tint: 0.12,
+            panel_opacity: 1.0,
+            glow: 0.3,
             sharpness: 0.5,
             deblock: 0.5,
         }
     }
+}
+
+/// Cores e ajustes já interpretados.
+#[derive(Debug, Clone, Copy)]
+pub struct Palette {
+    pub accent: [u8; 3],
+    pub hover: [u8; 3],
+    pub bg_darkness: f32,
+    pub bg_tint: f32,
+    pub panel_opacity: f32,
+    pub glow: f32,
+}
+
+impl ThemeOptions {
+    pub fn palette(&self) -> Palette {
+        let accent = parse_hex(&self.accent).unwrap_or([163, 230, 53]);
+        Palette {
+            accent,
+            hover: parse_hex(&self.hover).unwrap_or(accent),
+            bg_darkness: self.bg_darkness.clamp(0.0, 1.0),
+            bg_tint: self.bg_tint.clamp(0.0, 1.0),
+            panel_opacity: self.panel_opacity.clamp(0.3, 1.0),
+            glow: self.glow.clamp(0.0, 1.0),
+        }
+    }
+}
+
+/// Estado do botão pelo sufixo do arquivo (`_o` = mouse em cima, `_w`/`_at` = ativo/selecionado).
+pub fn is_hover_state(key: &str) -> bool {
+    let k = key.to_ascii_lowercase();
+    let stem = k.rsplit('/').next().unwrap_or(&k).trim_end_matches(".dds");
+    stem.ends_with("_o") || stem.ends_with("_w") || stem.ends_with("_at") || stem.ends_with("_over")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -131,27 +181,33 @@ fn is_theme_hue(h: f32) -> bool {
     (165.0..=268.0).contains(&h) || (14.0..=56.0).contains(&h)
 }
 
-/// Aplica o tema de cores a uma imagem.
-pub fn recolor(img: &mut Rgba, kind: Kind, accent: [u8; 3]) {
+/// Aplica o tema de cores a uma imagem. `hover` usa a cor de "mouse em cima".
+pub fn recolor(img: &mut Rgba, kind: Kind, pal: &Palette, hover: bool) {
     if kind == Kind::Keep {
         return;
     }
-    let (ah, as_, _) = rgb_to_hsv(accent[0] as f32 / 255.0, accent[1] as f32 / 255.0, accent[2] as f32 / 255.0);
+    let target = if hover { pal.hover } else { pal.accent };
+    let (ah, as_, _) = rgb_to_hsv(target[0] as f32 / 255.0, target[1] as f32 / 255.0, target[2] as f32 / 255.0);
+    let dark = 1.0 - 0.85 * pal.bg_darkness;
     for p in img.pixels.chunks_exact_mut(4) {
         let (h, s, v) = rgb_to_hsv(p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0);
         let (nh, ns, nv) = match kind {
             Kind::Accent if s >= 0.08 && is_theme_hue(h) => {
-                // mantém o brilho (relevo do botão) e aproxima a saturação da cor de destaque
-                (ah, (s * 0.6 + as_ * 0.4).min(1.0) * s.min(0.35) / 0.35, v)
+                // mantém o brilho (relevo do botão) e aproxima a saturação da cor escolhida
+                let sat = (s * 0.6 + as_ * 0.4).min(1.0) * s.min(0.35) / 0.35;
+                (ah, sat, (v * (1.0 + 0.35 * pal.glow)).min(1.0))
             }
-            Kind::Background if s >= 0.04 => (ah, s * 0.12, v * 0.45),
-            Kind::Background => (h, s, v * 0.8),
-            _ => continue,
+            Kind::Background if s >= 0.04 => (ah, (s * 0.35 * pal.bg_tint + 0.25 * pal.bg_tint * s.min(0.4)).min(1.0), v * dark),
+            Kind::Background => (h, s, v * (0.4 + 0.6 * dark)),
+            _ => (h, s, v),
         };
         let (r, g, b) = hsv_to_rgb(nh, ns, nv);
         p[0] = (r * 255.0).round().clamp(0.0, 255.0) as u8;
         p[1] = (g * 255.0).round().clamp(0.0, 255.0) as u8;
         p[2] = (b * 255.0).round().clamp(0.0, 255.0) as u8;
+        if kind == Kind::Background && pal.panel_opacity < 1.0 {
+            p[3] = (p[3] as f32 * pal.panel_opacity).round() as u8;
+        }
     }
 }
 
@@ -164,14 +220,14 @@ fn enhance_opts(opts: &ThemeOptions) -> EnhanceOptions {
 }
 
 /// Imagem do tema (mesmo tamanho): nitidez e, se pedido, cores novas.
-pub fn theme_image(img: &Rgba, kind: Kind, format: dds::DdsFormat, opts: &ThemeOptions) -> Rgba {
+pub fn theme_image(img: &Rgba, kind: Kind, hover: bool, format: dds::DdsFormat, opts: &ThemeOptions) -> Rgba {
     let mut out = if opts.sharpness > 0.0 || opts.deblock > 0.0 {
         enhance::enhance_image(img, TextureClass::Color, img.width, img.height, format, &enhance_opts(opts))
     } else {
         img.clone()
     };
     if opts.recolor {
-        recolor(&mut out, kind, parse_hex(&opts.accent).unwrap_or([163, 230, 53]));
+        recolor(&mut out, kind, &opts.palette(), hover);
     }
     out
 }
@@ -188,7 +244,7 @@ pub fn theme_dds(key: &str, data: &[u8], opts: &ThemeOptions) -> Result<Option<V
     if !recolors && !sharpens {
         return Ok(None);
     }
-    let out = theme_image(&img, kind, info.format, opts);
+    let out = theme_image(&img, kind, is_hover_state(key), info.format, opts);
     if out.pixels == img.pixels {
         return Ok(None);
     }
@@ -347,28 +403,50 @@ mod tests {
 
     #[test]
     fn blue_and_orange_become_accent_but_greys_and_reds_stay() {
-        let lime = [163, 230, 53];
+        let pal = ThemeOptions::default().palette();
         let hue = |img: &Rgba| rgb_to_hsv(img.pixels[0] as f32 / 255.0, img.pixels[1] as f32 / 255.0, img.pixels[2] as f32 / 255.0);
         for (r, g, b) in [(60, 120, 220), (230, 140, 30)] {
             let mut i = px(r, g, b);
-            recolor(&mut i, Kind::Accent, lime);
+            recolor(&mut i, Kind::Accent, &pal, false);
             let (h, s, _) = hue(&i);
             assert!((h - 82.0).abs() < 4.0 && s > 0.4, "{r},{g},{b} → {:?}", i.pixels);
         }
         for (r, g, b) in [(128, 128, 128), (200, 40, 40)] {
             let mut i = px(r, g, b);
-            recolor(&mut i, Kind::Accent, lime);
+            recolor(&mut i, Kind::Accent, &pal, false);
             assert_eq!(i.pixels, vec![r, g, b, 255]);
         }
         // fundo azul vira cinza-escuro quase neutro
         let mut bg = px(70, 140, 240);
-        recolor(&mut bg, Kind::Background, lime);
+        recolor(&mut bg, Kind::Background, &pal, false);
         let (_, s, v) = hue(&bg);
         assert!(s < 0.25 && v < 0.65, "{:?}", bg.pixels);
         // facções ficam como estão
         let mut keep = px(70, 140, 240);
-        recolor(&mut keep, Kind::Keep, lime);
+        recolor(&mut keep, Kind::Keep, &pal, false);
         assert_eq!(keep.pixels, vec![70, 140, 240, 255]);
+    }
+
+    #[test]
+    fn hover_buttons_use_hover_color_and_panels_fade() {
+        assert!(is_hover_state("/textures/ui/common/pc/frontend/mainmenu/btn_o.dds"));
+        assert!(is_hover_state("/x/btn_at.dds") && !is_hover_state("/x/btn_u.dds"));
+        let opts = ThemeOptions { accent: "#a3e635".into(), hover: "#38bdf8".into(), panel_opacity: 0.5, ..Default::default() };
+        let pal = opts.palette();
+        let hue = |img: &Rgba| rgb_to_hsv(img.pixels[0] as f32 / 255.0, img.pixels[1] as f32 / 255.0, img.pixels[2] as f32 / 255.0).0;
+        let mut a = px(230, 140, 30);
+        recolor(&mut a, Kind::Accent, &pal, true);
+        assert!((hue(&a) - 199.0).abs() < 6.0, "{:?}", a.pixels);
+        let mut b = px(60, 120, 220);
+        recolor(&mut b, Kind::Background, &pal, false);
+        assert_eq!(b.pixels[3], 128);
+        // mais escuro com bg_darkness maior
+        let dark = ThemeOptions { bg_darkness: 1.0, ..Default::default() }.palette();
+        let light = ThemeOptions { bg_darkness: 0.0, ..Default::default() }.palette();
+        let (mut d, mut l) = (px(90, 90, 90), px(90, 90, 90));
+        recolor(&mut d, Kind::Background, &dark, false);
+        recolor(&mut l, Kind::Background, &light, false);
+        assert!(d.pixels[0] < l.pixels[0]);
     }
 
     #[test]
@@ -404,7 +482,7 @@ mod tests {
         std::fs::write(fonts.join("Roboto-Medium.ttf"), &roboto).unwrap();
 
         let dest = tmp.path().join("out/zz_menu.scd");
-        let r = build(&[src], &fonts, &ThemeOptions::default(), &dest, &mut |_, _, _| {}).unwrap();
+        let r = build(&[src], &fonts, &ThemeOptions { fonts: true, ..Default::default() }, &dest, &mut |_, _, _| {}).unwrap();
         // a cor de time é lisa: nitidez não muda nada, então não entra no mod
         assert_eq!((r.textures, r.recolored, r.fonts), (1, 1, 1), "{:?}", r.failed);
         let mut out = Scd::open(&r.archive).unwrap();
@@ -431,7 +509,7 @@ mod tests {
             let data = std::fs::read(&p).unwrap();
             let (info, before) = dds::decode(&data).unwrap();
             let kind = kind_of(&key).unwrap();
-            let after = theme_image(&before, kind, info.format, &ThemeOptions::default());
+            let after = theme_image(&before, kind, is_hover_state(&key), info.format, &ThemeOptions::default());
             let stem = p.file_stem().unwrap().to_string_lossy().to_string();
             std::fs::write(format!("{out}/{stem}.a.png"), dds::to_png(&before).unwrap()).unwrap();
             std::fs::write(format!("{out}/{stem}.b.png"), dds::to_png(&after).unwrap()).unwrap();

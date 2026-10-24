@@ -172,6 +172,7 @@ export default function Home() {
 
           {working && <div className="card pad" style={{ maxWidth: 720 }}><TaskProgress task={busy.purge ? "purge" : "apply"} label="Preparando os arquivos do jogo…" /></div>}
           {d.gameRunning && <Notice kind="warn">Feche o jogo para aplicar mudanças: o SC2 só lê os arquivos .scd quando abre.</Notice>}
+          <CrashNotice />
 
           <div className={settings?.showcase ? "home-col" : "grid"}>
             <EnhancementsCard />
@@ -260,6 +261,37 @@ export default function Home() {
       {link && <InstallLinkModal onClose={() => setLink(false)} />}
       {rename && <RenameProfile onClose={() => setRename(false)} />}
     </>
+  );
+}
+
+/** O jogo travou ao abrir: mostra os mods ligados e deixa desligar com um clique. */
+function CrashNotice() {
+  const crash = useStore((s) => s.crash);
+  const busy = useStore((s) => s.busy);
+  const { run, refresh } = useStore.getState();
+  if (!crash) return null;
+  // mods gerados no launcher primeiro: são os que mexem em arquivos do motor (fontes, texturas)
+  const order = (id: string) => (id === "menu-moderno" ? 0 : id === "texturas-hd" ? 1 : 2);
+  const mods = [...crash.mods].sort((a, b) => order(a[0]) - order(b[0]));
+  return (
+    <Notice kind="err">
+      <b>O jogo fechou com erro</b> (relatório {crash.dump}).
+      {mods.length ? " Se começou depois de ligar um mod, desligue-o e tente de novo:" : " Nenhum mod estava ligado: tente verificar os arquivos do jogo na Steam."}
+      {mods.length > 0 && (
+        <div className="row wrap" style={{ marginTop: 8, gap: 6 }}>
+          {mods.slice(0, 6).map(([id, name]) => (
+            <button key={id} className="btn sm" disabled={busy["mod:" + id]} onClick={async () => {
+              const ok = await run("mod:" + id, () => api.setModEnabled(id, false), `${name} desligado.`);
+              if (ok !== undefined) {
+                useStore.setState((s) => ({ crash: s.crash && { ...s.crash, mods: s.crash.mods.filter((m) => m[0] !== id) } }));
+                await refresh();
+              }
+            }}><Icon name="toggle_off" /> Desligar {name}</button>
+          ))}
+          <button className="btn text sm" onClick={() => useStore.setState({ crash: null })}>Dispensar</button>
+        </div>
+      )}
+    </Notice>
   );
 }
 

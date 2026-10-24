@@ -1,22 +1,26 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Empty, Field, Notice, Switch, Icon } from "../../components/ui";
-import type { Marker } from "../../components/MapView3D";
+import type { DecorPoint, Marker } from "../../components/MapView3D";
 import { api, onProgress } from "../../lib/api";
 import { load, useStore } from "../../lib/store";
-import type { MapBuildResult, MaptkStatus, Terrain, TerrainPreview } from "../../lib/types";
+import type { MapAssets, MapBuildResult, MaptkStatus, Terrain, TerrainPreview } from "../../lib/types";
 import {
-  applyRelief, decodeHeights, EMPTY_EDITS, heightAt, meanInDisc, RELIEF_LABEL, reliefShape, round1,
-  type Edits, type Pt, type Relief, type Relief3D, type ReliefKind,
+  applyRelief, decodeHeights, decorKind, EMPTY_EDITS, heightAt, meanInDisc, RELIEF_LABEL, reliefShape, reskinPaths, round1,
+  type Edits, type GroundLayer, type PlacedProp, type Pt, type Relief, type Relief3D, type ReliefKind,
 } from "./mapEdit";
+import { GroundTextures, PropPicker } from "./MapDecor";
 
 const MapView3D = lazy(() => import("../../components/MapView3D"));
 
-type Tool = "orbit" | "spawn" | "mass" | ReliefKind | "bridge" | "seed" | "erase";
+type Tool = "orbit" | "spawn" | "mass" | ReliefKind | "bridge" | "decor" | "uncut" | "seed" | "erase";
 const TEAM_COLORS = ["#5aa9e6", "#e5534b", "#7bd88f", "#c78bff"];
 const RELIEF_COLOR: Record<ReliefKind, string> = { hill: "#e3a857", valley: "#4fa3e0", plateau: "#d97757", flatten: "#c9d1d9", ramp: "#f2b33d" };
 const RELIEF_ICON: Record<ReliefKind, string> = { hill: "filter_hdr", valley: "water", plateau: "landscape", flatten: "straighten", ramp: "stairs" };
 const isRelief = (t: Tool): t is ReliefKind => t in RELIEF_LABEL;
 const MAX_MASS = 200;
+const MAX_PROPS = 5000;
+const MAX_CUTS = 400;
+type DonorProp = [number, number, number, number, number, number];
 
 const TOOLS: { id: Tool; icon: string; label: string; hint: string }[] = [
   { id: "orbit", icon: "3d_rotation", label: "Câmera", hint: "Arraste para girar. Botão do meio move, roda dá zoom. Nas outras ferramentas o botão direito também gira." },
@@ -28,6 +32,8 @@ const TOOLS: { id: Tool; icon: string; label: string; hint: string }[] = [
   { id: "flatten", icon: RELIEF_ICON.flatten, label: "Aplainar", hint: "Nivela a área na altura média: bom para abrir espaço de construção." },
   { id: "ramp", icon: RELIEF_ICON.ramp, label: "Rampa", hint: "Arraste do ponto baixo ao alto: liga um platô ao chão com uma subida que dá para andar." },
   { id: "bridge", icon: "route", label: "Passagem", hint: "Arraste um retângulo sobre a água para criar um vau que as unidades atravessam." },
+  { id: "decor", icon: "park", label: "Decorar", hint: "Escolha uma decoração abaixo e clique para colocar. Arraste para espalhar várias (bosque, pedregal…)." },
+  { id: "uncut", icon: "content_cut", label: "Tirar decoração", hint: "Clique ou arraste para retirar árvores, pedras e prédios do terreno original dentro do círculo." },
   { id: "seed", icon: "my_location", label: "Partida", hint: "Ponto de onde a navegação é recalculada; todo chão alcançável a partir dele vira jogável." },
   { id: "erase", icon: "layers_clear", label: "Apagar", hint: "Clique sobre um item ou edição de relevo para removê-lo." },
 ];
@@ -71,6 +77,12 @@ export default function Maps() {
   const [strip, setStrip] = useState<"moving" | "all" | "none">("moving");
   const [log, setLog] = useState<string[]>([]);
   const [lastBuild, setLastBuild] = useState<MapBuildResult | null>(null);
+  const [donor, setDonor] = useState<{ props: DonorProp[]; kinds: string[] } | null>(null);
+  const [assets, setAssets] = useState<MapAssets | null>(null);
+  const [propBp, setPropBp] = useState<string | null>(null);
+  const [density, setDensity] = useState(1);
+  const [sizeVar, setSizeVar] = useState(25);
+  const [showDecor, setShowDecor] = useState(true);
   const stage = useRef<HTMLDivElement>(null);
   const pickSeq = useRef(0);
 
@@ -93,6 +105,8 @@ export default function Maps() {
     setHist({ cur: EMPTY_EDITS, past: [], future: [] });
     setLastBuild(null);
     setPatch(t.kind === "campaign" || t.navmesh === "pocket");
+    setDonor(null);
+    if (!assets) void api.mapAssets().then(setAssets).catch(() => setAssets({ props: [], layers: [] }));
     const ticket = ++pickSeq.current; // clicou em outro terreno antes deste carregar: vale o último
     const [p, r] = await Promise.all([
       load(() => api.maptkPreview(t.id, 512)),
@@ -102,6 +116,7 @@ export default function Maps() {
     setPreview(p ?? null);
     if (r) {
       setRelief3d({ size: r.size, grid: r.grid, heights: decodeHeights(r.heights, r.heightScale), waterLevel: r.waterLevel, yMin: r.yMin, yMax: r.yMax, texture: r.texture });
+      setDonor({ props: r.props ?? [], kinds: r.propKinds ?? [] });
     } else setView("2d");
   };
 
@@ -135,8 +150,8 @@ export default function Maps() {
   }, [undo, redo]);
 
   // estado atual acessível nos eventos do ponteiro (que vêm do canvas 3D)
-  const ctx = useRef({ tool, radius, strength, heights, relief3d, edits, drag });
-  ctx.current = { tool, radius, strength, heights, relief3d, edits, drag };
+  const ctx = useRef({ tool, radius, strength, heights, relief3d, edits, drag, propBp, density, sizeVar });
+  ctx.current = { tool, radius, strength, heights, relief3d, edits, drag, propBp, density, sizeVar };
   const stroke = useRef<Pt | null>(null);
 
   const hAt = (p: Pt) => {
@@ -161,8 +176,11 @@ export default function Maps() {
     const mass = e.mass.filter((q) => !near(q, 18));
     const bridges = e.bridges.filter(([x0, x1, z0, z1]) => !(p[0] >= x0 && p[0] <= x1 && p[1] >= z0 && p[1] <= z1));
     const seed = e.seed && near(e.seed) ? null : e.seed;
+    const props = e.props.filter((q) => !near([q.x, q.z], 10));
+    const cuts = props.length === e.props.length ? e.cuts.filter(([x, z, r]) => Math.hypot(x - p[0], z - p[1]) > r) : e.cuts;
     let relief = e.relief;
-    if (spawns.length === e.spawns.length && mass.length === e.mass.length && bridges.length === e.bridges.length && seed === e.seed) {
+    if (spawns.length === e.spawns.length && mass.length === e.mass.length && bridges.length === e.bridges.length && seed === e.seed
+      && props.length === e.props.length && cuts.length === e.cuts.length) {
       // nenhum marcador: remove a edição de relevo mais recente sob o cursor
       for (let i = relief.length - 1; i >= 0; i--) {
         const sh = reliefShape(relief[i].op);
@@ -170,7 +188,29 @@ export default function Maps() {
         if (inside) { relief = relief.filter((_, j) => j !== i); break; }
       }
     }
-    return { spawns, mass, bridges, seed, relief };
+    return { ...e, spawns, mass, bridges, seed, relief, props, cuts };
+  };
+
+  /** decorações novas em volta de p (1 = só no ponto; mais = espalhadas no raio) */
+  const scatter = (p: Pt): PlacedProp[] => {
+    const { propBp: bp, density: n, radius: rad, sizeVar: v } = ctx.current;
+    if (!bp) return [];
+    const out: PlacedProp[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, d = n === 1 ? 0 : Math.sqrt(Math.random()) * rad;
+      const x = Math.round(Math.max(2, Math.min(grid - 2, p[0] + Math.cos(a) * d)) * 10) / 10;
+      const z = Math.round(Math.max(2, Math.min(grid - 2, p[1] + Math.sin(a) * d)) * 10) / 10;
+      out.push({ bp, x, z, yaw: Math.round(Math.random() * 360), scale: round1(Math.max(0.3, 1 + (Math.random() * 2 - 1) * (v / 100)) * 100) / 100 });
+    }
+    return out;
+  };
+  const addProps = (e: Edits, list: PlacedProp[]): Edits =>
+    list.length && e.props.length < MAX_PROPS ? { ...e, props: [...e.props, ...list.slice(0, MAX_PROPS - e.props.length)] } : e;
+  const addCut = (e: Edits, p: Pt): Edits => {
+    const rad = ctx.current.radius;
+    const props = e.props.filter((q) => Math.hypot(q.x - p[0], q.z - p[1]) > rad);
+    const cuts = e.cuts.length < MAX_CUTS ? [...e.cuts, [p[0], p[1], rad] as [number, number, number]] : e.cuts;
+    return { ...e, props, cuts };
   };
 
   const onPointer = useCallback((type: "down" | "move" | "up", p: Pt | null) => {
@@ -207,6 +247,12 @@ export default function Maps() {
     else if (t === "mass" && type === "down") commit((e) => (e.mass.length >= MAX_MASS ? e : { ...e, mass: [...e.mass, p] }));
     else if (t === "seed" && type === "down") commit((e) => ({ ...e, seed: p }));
     else if (t === "erase" && type === "down") commit((e) => eraseAt(p, e));
+    else if (t === "decor" || t === "uncut") {
+      const apply = (e: Edits) => (t === "decor" ? addProps(e, scatter(p)) : addCut(e, p));
+      const gap = t === "decor" ? (ctx.current.density === 1 ? 8 : rad * 0.8) : rad * 0.6;
+      if (type === "down") { stroke.current = p; commit(apply); }
+      else if (stroke.current && Math.hypot(p[0] - stroke.current[0], p[1] - stroke.current[1]) > gap) { stroke.current = p; amend(apply); }
+    }
     else if (isRelief(t)) {
       if (type === "down") {
         stroke.current = p;
@@ -236,9 +282,37 @@ export default function Maps() {
   const editsTerrain = edits.relief.length > 0 || rugged || edits.bridges.length > 0;
   const usePatch = patch || editsTerrain;
 
+  const groundLayers: GroundLayer[] = useMemo(
+    () => (terrain && assets ? assets.layers.filter((l) => l.map.toLowerCase() === terrain.id.toLowerCase()) : []),
+    [terrain, assets],
+  );
+  const usedProps = useMemo(() => donor?.kinds ?? [], [donor]);
+  useEffect(() => {
+    if (tool !== "decor" || propBp || !assets?.props.length) return;
+    const used = new Set(usedProps.map((u) => u.toLowerCase()));
+    setPropBp((assets.props.find((p) => used.has(p.bp.toLowerCase())) ?? assets.props.find((p) => p.category === "Trees") ?? assets.props[0]).bp);
+  }, [tool, propBp, assets, usedProps]);
+
+  const decor: DecorPoint[] = useMemo(() => {
+    if (!showDecor) return [];
+    const kinds = (donor?.kinds ?? []).map(decorKind);
+    const cut = edits.cuts;
+    const out: DecorPoint[] = [];
+    for (const [x, z, , yaw, scale, k] of donor?.props ?? []) {
+      if (cut.length && cut.some(([cx, cz, r]) => (x - cx) ** 2 + (z - cz) ** 2 <= r * r)) continue;
+      out.push({ x, z, yaw, scale, kind: kinds[k] ?? "other" });
+    }
+    for (const q of edits.props) out.push({ x: q.x, z: q.z, yaw: q.yaw, scale: q.scale, kind: decorKind(q.bp), added: true });
+    return out;
+  }, [donor, edits.cuts, edits.props, showDecor]);
+  const removedCount = useMemo(() => {
+    if (!edits.cuts.length || !donor) return 0;
+    return donor.props.reduce((n, [x, z]) => n + (edits.cuts.some(([cx, cz, r]) => (x - cx) ** 2 + (z - cz) ** 2 <= r * r) ? 1 : 0), 0);
+  }, [donor, edits.cuts]);
+
   const spec = useMemo(() => {
     if (!terrain) return null;
-    const { spawns, mass, bridges, seed, relief } = edits;
+    const { spawns, mass, bridges, seed, relief, props, cuts, reskin } = edits;
     const anchors = Object.fromEntries(spawns.map((p, i) => [String(i + 1), p]));
     const ids = spawns.map((_, i) => i + 1);
     const teamList = teams === "ffa" ? ids.map((i) => [i]) : [ids.filter((_, i) => team(i) === 0), ids.filter((_, i) => team(i) === 1)];
@@ -253,9 +327,16 @@ export default function Maps() {
     if (smooth) s.smooth = { keep_slope: maxSlope, water_margin: waterMargin, mode: "level" };
     if (minimap !== "donor") s.minimap = minimap;
     if (usePatch) s.strip_props = strip === "none" ? false : strip;
+    if (props.length) s.props_add = props.map((q) => [q.bp, q.x, q.z, q.yaw, q.scale]);
+    if (cuts.length) s.props_remove = cuts;
+    const swaps = Object.entries(reskin).reduce<Record<string, string>>((acc, [oldD, neo]) => {
+      const old = groundLayers.find((l) => l.d === oldD);
+      return old ? { ...acc, ...reskinPaths(old, neo) } : acc;
+    }, {});
+    if (Object.keys(swaps).length) s.reskin = swaps;
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [terrain, edits, teams, name, baseMass, sites, perSite, norush, usePatch, maxSlope, waterMargin, rugged, smooth, minimap, strip, grid]);
+  }, [terrain, edits, teams, name, baseMass, sites, perSite, norush, usePatch, maxSlope, waterMargin, rugged, smooth, minimap, strip, grid, groundLayers]);
 
   const build = async () => {
     if (!spec) return;
@@ -273,10 +354,11 @@ export default function Maps() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [edits.spawns, teams],
   );
-  const brushColor = isRelief(tool) ? RELIEF_COLOR[tool] : tool === "erase" ? "#e5534b" : "#a3e635";
+  const brushColor = isRelief(tool) ? RELIEF_COLOR[tool] : tool === "erase" || tool === "uncut" ? "#e5534b" : "#a3e635";
+  const circleBrush = (isRelief(tool) && tool !== "ramp") || tool === "uncut" || (tool === "decor" && density > 1);
   const brush = useMemo(
-    () => (tool === "orbit" ? null : isRelief(tool) && tool !== "ramp" ? { shape: "circle" as const, radius, color: brushColor } : { shape: "point" as const, color: brushColor }),
-    [tool, radius, brushColor],
+    () => (tool === "orbit" ? null : circleBrush ? { shape: "circle" as const, radius, color: brushColor } : { shape: "point" as const, color: brushColor }),
+    [tool, radius, brushColor, circleBrush],
   );
 
   if (!status) return <div className="card pad"><div className="bar indeterminate"><i /></div></div>;
@@ -341,6 +423,18 @@ export default function Maps() {
                   <label className="range" style={{ gridTemplateColumns: "44px 120px 36px" }}><span>Raio</span>
                     <input type="range" min={12} max={200} value={radius} onChange={(e) => setRadius(Number(e.target.value))} /><output>{radius}</output></label>
                 )}
+                {(tool === "uncut" || (tool === "decor" && density > 1)) && (
+                  <label className="range" style={{ gridTemplateColumns: "44px 120px 36px" }}><span>Raio</span>
+                    <input type="range" min={8} max={200} value={radius} onChange={(e) => setRadius(Number(e.target.value))} /><output>{radius}</output></label>
+                )}
+                {tool === "decor" && (
+                  <>
+                    <label className="range" style={{ gridTemplateColumns: "60px 110px 30px" }}><span>Por clique</span>
+                      <input type="range" min={1} max={30} value={density} onChange={(e) => setDensity(Number(e.target.value))} /><output>{density}</output></label>
+                    <label className="range" style={{ gridTemplateColumns: "62px 100px 40px" }}><span>Variação</span>
+                      <input type="range" min={0} max={60} step={5} value={sizeVar} onChange={(e) => setSizeVar(Number(e.target.value))} /><output>±{sizeVar}%</output></label>
+                  </>
+                )}
                 {tool === "ramp" && (
                   <label className="range" style={{ gridTemplateColumns: "56px 120px 36px" }}><span>Largura</span>
                     <input type="range" min={24} max={200} value={radius} onChange={(e) => setRadius(Number(e.target.value))} /><output>{Math.max(24, Math.round(radius / 2))}</output></label>
@@ -361,6 +455,9 @@ export default function Maps() {
                     <button className="btn" aria-pressed={skin === "game"} disabled={!relief3d?.texture} onClick={() => setSkin("game")}><Icon name="texture" size={17} /> Textura do jogo</button>
                     <button className="btn" aria-pressed={skin === "nav"} onClick={() => setSkin("nav")}><Icon name="grid_on" size={17} /> Navegação</button>
                   </div>
+                  <button className="btn sm" aria-pressed={showDecor} onClick={() => setShowDecor((v) => !v)} title="Mostrar ou esconder árvores, pedras e prédios na prévia">
+                    <Icon name={showDecor ? "park" : "visibility_off"} size={17} /> Decorações
+                  </button>
                   {view === "3d" && (
                     <label className="range" style={{ gridTemplateColumns: "54px 90px 34px", marginLeft: "auto" }}><span>Relevo</span>
                       <input type="range" min={1} max={4} step={0.25} value={exag} onChange={(e) => setExag(Number(e.target.value))} /><output>{exag}×</output></label>
@@ -373,6 +470,7 @@ export default function Maps() {
                       size={relief3d.size} grid={relief3d.grid} heights={heights} waterLevel={water}
                       texture={skin === "game" ? relief3d.texture : preview?.dataUrl ?? null} exaggeration={exag}
                       spawns={markers} mass={edits.mass} bridges={edits.bridges} seed={edits.seed}
+                      decor={decor} cuts={edits.cuts}
                       brush={brush} drag={drag} orbit={tool === "orbit"} onPointer={onPointer}
                     />
                   </Suspense>
@@ -393,6 +491,8 @@ export default function Maps() {
                           ? <rect key={i} x={sh.rect[0]} y={sh.rect[2]} width={sh.rect[1] - sh.rect[0]} height={sh.rect[3] - sh.rect[2]} fill={`${c}33`} stroke={c} strokeWidth={3} />
                           : <circle key={i} cx={sh.c[0]} cy={sh.c[1]} r={sh.r} fill={`${c}26`} stroke={c} strokeWidth={2.5} />;
                       })}
+                      {edits.cuts.map(([x, z, r], i) => <circle key={`c${i}`} cx={x} cy={z} r={r} fill="rgba(229,83,75,.12)" stroke="#e5534b" strokeWidth={2} strokeDasharray="8 5" />)}
+                      {showDecor && edits.props.map((q, i) => <circle key={`p${i}`} cx={q.x} cy={q.z} r={4} fill={decorKind(q.bp) === "tree" ? "#4f9a46" : decorKind(q.bp) === "rock" ? "#9a9388" : "#c2a77f"} stroke="#0d1b26" strokeWidth={1.5} />)}
                       {edits.bridges.map(([x0, x1, z0, z1], i) => <rect key={i} x={x0} y={z0} width={x1 - x0} height={z1 - z0} fill="rgba(242,179,61,.25)" stroke="#f2b33d" strokeWidth={3} strokeDasharray="10 6" />)}
                       {drag && <rect x={Math.min(drag.a[0], drag.b[0])} y={Math.min(drag.a[1], drag.b[1])} width={Math.abs(drag.b[0] - drag.a[0])} height={Math.abs(drag.b[1] - drag.a[1])} fill="rgba(242,179,61,.2)" stroke="#f2b33d" strokeWidth={3} />}
                       {edits.seed && <g stroke="#fff" strokeWidth={4}><line x1={edits.seed[0] - 18} y1={edits.seed[1]} x2={edits.seed[0] + 18} y2={edits.seed[1]} /><line x1={edits.seed[0]} y1={edits.seed[1] - 18} x2={edits.seed[0]} y2={edits.seed[1] + 18} /></g>}
@@ -446,6 +546,41 @@ export default function Maps() {
                   </div>
                 </section>
               )}
+              {(tool === "decor" || edits.props.length > 0 || edits.cuts.length > 0) && (
+                <section className="card pad col" style={{ gap: 10 }}>
+                  <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                    <b><Icon name="park" size={18} /> Decorações</b>
+                    <span className="faint small">
+                      {edits.props.length} nova{edits.props.length === 1 ? "" : "s"}{removedCount ? `, ${removedCount} do terreno retirada${removedCount === 1 ? "" : "s"}` : ""}
+                      {donor ? `, ${donor.props.length} no terreno original` : ""}
+                    </span>
+                    <div className="row" style={{ gap: 6 }}>
+                      {edits.props.length > 0 && <button className="btn text sm" onClick={() => commit((e) => ({ ...e, props: [] }))}><Icon name="delete_sweep" size={17} /> Tirar as novas</button>}
+                      {edits.cuts.length > 0 && <button className="btn text sm" onClick={() => commit((e) => ({ ...e, cuts: [] }))}><Icon name="restore" size={17} /> Devolver as do terreno</button>}
+                    </div>
+                  </div>
+                  {tool !== "decor" && <p className="faint small">Use a ferramenta <b>Decorar</b> para escolher árvores, pedras, prédios e restos de unidades de qualquer mapa do jogo.</p>}
+                  {tool === "decor" && <PropPicker props={assets?.props ?? null} used={usedProps} selected={propBp} onSelect={setPropBp} />}
+                  <p className="faint small">Decorações são visuais: não bloqueiam a passagem das unidades no jogo.</p>
+                </section>
+              )}
+
+              <section className="card pad col" style={{ gap: 10 }}>
+                <div className="row" style={{ justifyContent: "space-between" }}>
+                  <b><Icon name="format_paint" size={18} /> Texturas do chão</b>
+                  {Object.keys(edits.reskin).length > 0 && <button className="btn text sm" onClick={() => commit((e) => ({ ...e, reskin: {} }))}><Icon name="restore" size={17} /> Voltar todas</button>}
+                </div>
+                <p className="faint small">Pinte o mapa trocando cada camada do chão (grama, terra, rocha…) por uma de outro mapa do jogo, como neve ou deserto. A troca vale em todo lugar onde a camada aparece.</p>
+                {assets === null ? <div className="bar indeterminate"><i /></div> : (
+                  <GroundTextures layers={groundLayers} all={assets.layers} reskin={edits.reskin}
+                    onChange={(oldD, neo) => commit((e) => {
+                      const reskin = { ...e.reskin };
+                      if (neo) reskin[oldD] = neo; else delete reskin[oldD];
+                      return { ...e, reskin };
+                    })} />
+                )}
+                {Object.keys(edits.reskin).length > 0 && <p className="faint small">A prévia mostra a textura original; a troca aparece no jogo.</p>}
+              </section>
             </div>
 
             <section className="card pad col map-side">
@@ -520,6 +655,8 @@ export default function Maps() {
               {lastBuild && (
                 <Notice kind={lastBuild.warnings?.length ? "warn" : "ok"}>
                   {typeof lastBuild.mass === "number" ? <><b>{lastBuild.mass + (lastBuild.extraMass ?? 0)}</b> pontos de massa no total{lastBuild.extraMass ? `, ${lastBuild.extraMass} colocados por você` : ""}. </> : null}
+                  {lastBuild.propsAdded || lastBuild.propsRemoved ? <>{lastBuild.propsAdded ?? 0} decorações novas, {lastBuild.propsRemoved ?? 0} retiradas. </> : null}
+                  {lastBuild.reskinned ? <>{lastBuild.reskinned} textura{lastBuild.reskinned === 1 ? "" : "s"} do chão trocada{lastBuild.reskinned === 1 ? "" : "s"}. </> : null}
                   {lastBuild.warnings?.length ? <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>{lastBuild.warnings.slice(0, 8).map((w, i) => <li key={i}>{w}</li>)}</ul> : "Tudo verificado e alcançável."}
                 </Notice>
               )}

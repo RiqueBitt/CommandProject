@@ -207,7 +207,24 @@ def cmd_terrain3d(inp):
     if sys.byteorder != "little":
         out.byteswap()
     mm = t.raw.get("minimap.win.dds")
+    # decorações que o terreno já tem (para aparecerem no editor 3D)
+    props, kinds = [], []
+    if t.raw.get("mapobjs.win.bdf"):
+        try:
+            import cp_mapobjs
+            index = {}
+            for x, y, z, yaw, scale, bp in cp_mapobjs.props(t.raw["mapobjs.win.bdf"]):
+                if y < -50 or not bp:
+                    continue
+                if bp not in index:
+                    index[bp] = len(kinds)
+                    kinds.append(bp)
+                props.append([round(x, 1), round(z, 1), round(y, 1), round(yaw), round(scale, 2), index[bp]])
+        except Exception as e:  # noqa: BLE001 — sem decorações no editor não impede o resto
+            emit("progress", message=f"decorações não lidas: {e}")
     return dict(
+        props=props[:20000],
+        propKinds=kinds,
         terrain=tid,
         grid=t.grid,
         size=size,
@@ -293,6 +310,29 @@ def _clean_spec(spec):
     if edits_terrain and not spec.get("patch"):
         first = next(iter(spec["anchors"].values()))
         spec["patch"] = dict(max_slope=6.0, water_margin=4.0, seed=first, causeways=[])
+    # decorações e texturas: precisam enviar os arquivos do terreno junto (sem refazer a navegação)
+    adds = []
+    for p in spec.get("props_add") or []:
+        bp = str(p[0])
+        if not re.match(r"^/props/[\w/.-]+_prop\.bp$", bp, re.I):
+            raise ValueError(f"decoração inválida: {bp}")
+        x, z = float(p[1]), float(p[2])
+        yaw = float(p[3]) if len(p) > 3 else 0.0
+        sc = max(0.2, min(5.0, float(p[4]) if len(p) > 4 else 1.0))
+        adds.append((bp, x, z, yaw, sc))
+    if len(adds) > 5000:
+        raise ValueError("no máximo 5000 decorações novas")
+    spec["props_add"] = adds
+    spec["props_remove"] = [(float(a), float(b), max(1.0, min(300.0, float(r)))) for a, b, r in spec.get("props_remove") or []]
+    reskin = {}
+    for old_p, new_p in (spec.get("reskin") or {}).items():
+        for v in (old_p, new_p):
+            if not re.match(r"^/textures/terrain/[\w/.-]+\.dds$", v, re.I):
+                raise ValueError(f"textura inválida: {v}")
+        reskin[old_p] = new_p
+    spec["reskin"] = reskin
+    if (adds or spec["props_remove"] or reskin) and not spec.get("patch"):
+        spec["ship_terrain"] = True
     if spec.get("playable_area"):
         spec["playable_area"] = tuple(int(v) for v in spec["playable_area"])
     return spec
@@ -334,9 +374,32 @@ def _hooks(sm, spec, state):
                 emit("progress", message=f"pontos de massa manuais: {len(spec['extra_mass'])}")
         return orig_save(blob + extra, n_armies, area)
 
+    orig_pack = sm.package_patched
+
+    def package_patched(out, terrain, *a, **k):
+        # (a troca de texturas do chão, spec["reskin"], o próprio make_map já aplica antes)
+        # decorações novas/removidas: entram antes do strip_props do toolkit
+        if (spec.get("props_add") or spec.get("props_remove")) and terrain.raw.get("mapobjs.win.bdf"):
+            import cp_mapobjs
+            grid = terrain.grid
+            def height(x, z):
+                return terrain.y(min(grid, max(0, x)), min(grid, max(0, z)))
+            data, na, nr = cp_mapobjs.edit(terrain.raw["mapobjs.win.bdf"], spec.get("props_add") or [],
+                                           spec.get("props_remove") or [], height)
+            terrain.raw["mapobjs.win.bdf"] = data
+            state["props"] = (na, nr)
+            emit("progress", message=f"decorações: {na} novas, {nr} removidas")
+            if k.get("strip_props") == "all":
+                k["strip_props"] = "moving"  # "remover todos" apagaria as novas também
+        return orig_pack(out, terrain, *a, **k)
+
     sm.Terrain.__init__, sm.Terrain.set_hfield, sm.make_save = init, set_hfield, make_save
-    return lambda: setattr(sm.Terrain, "__init__", orig_init) or setattr(sm.Terrain, "set_hfield", orig_set) \
-        or setattr(sm, "make_save", orig_save)
+    sm.package_patched = package_patched
+
+    def restore():
+        sm.Terrain.__init__, sm.Terrain.set_hfield, sm.make_save = orig_init, orig_set, orig_save
+        sm.package_patched = orig_pack
+    return restore
 
 
 def _buildable_near(t, x, z, r=10):
@@ -369,6 +432,8 @@ def cmd_build(inp):
     res["spawns"] = {str(k): list(v) for k, v in (res.get("spawns") or {}).items()}
     res["warnings"] = state["warnings"]
     res["extraMass"] = len(spec.get("extra_mass") or [])
+    res["propsAdded"], res["propsRemoved"] = state.get("props", (0, 0))
+    res["reskinned"] = len(spec.get("reskin") or {})
     res["scenarioId"] = spec["scenario_id"]
     res["name"] = spec["name"]
     return res

@@ -7,6 +7,12 @@ import type { MeshView } from "../lib/types";
 export interface ShowcaseModel {
   mesh: MeshView;
   albedo?: string | null;
+  /** `_Team` do jogo: o alfa marca onde entra a cor do time. */
+  team?: string | null;
+  /** `_Mask` do jogo: o verde marca as partes que brilham. */
+  mask?: string | null;
+  /** Cor do time (#rrggbb). */
+  teamColor?: string;
 }
 
 const LIME = 0xa3e635;
@@ -127,32 +133,68 @@ function platformTexture(): THREE.CanvasTexture {
   return t;
 }
 
-function meshFromView(view: MeshView, albedo?: string | null): THREE.Mesh {
+function loadTex(url?: string | null): Promise<THREE.Texture | null> {
+  if (!url) return Promise.resolve(null);
+  return new Promise((ok) => new THREE.TextureLoader().load(url, (t) => {
+    t.flipY = false;
+    t.anisotropy = 4;
+    ok(t);
+  }, undefined, () => ok(null)));
+}
+
+/**
+ * Material do modelo como no jogo: textura base cinza, cor do time onde a máscara `_Team` manda
+ * e brilho próprio nas luzes (`_Mask`, canal verde).
+ */
+function unitMaterial(albedo: THREE.Texture | null, team: THREE.Texture | null, mask: THREE.Texture | null, color: string) {
+  if (albedo) albedo.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.MeshStandardMaterial({ map: albedo, color: albedo ? 0xffffff : 0xaab6c4, metalness: 0.35, roughness: 0.55 });
+  const teamColor = { value: new THREE.Color(color) };
+  mat.userData.teamColor = teamColor;
+  if (!albedo || (!team && !mask)) return mat;
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.teamMap = { value: team };
+    sh.uniforms.glowMap = { value: mask };
+    sh.uniforms.teamColor = teamColor;
+    sh.fragmentShader = sh.fragmentShader
+      .replace("#include <map_pars_fragment>", `#include <map_pars_fragment>
+        uniform sampler2D teamMap; uniform sampler2D glowMap; uniform vec3 teamColor;`)
+      .replace("#include <map_fragment>", `#include <map_fragment>
+        ${team ? `float teamAmt = texture2D(teamMap, vMapUv).a;
+        vec3 tinted = teamColor * (0.25 + diffuseColor.rgb * 1.6);
+        diffuseColor.rgb = mix(diffuseColor.rgb, tinted, teamAmt);` : ""}`)
+      .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
+        ${mask ? `float glowAmt = texture2D(glowMap, vMapUv).g;
+        totalEmissiveRadiance += mix(vec3(1.0), teamColor, 0.55) * glowAmt * 1.6;` : ""}`);
+  };
+  mat.customProgramCacheKey = () => `unit-${!!team}-${!!mask}`;
+  return mat;
+}
+
+async function meshFromView(view: MeshView, m: ShowcaseModel): Promise<THREE.Mesh> {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(view.positions, 3));
   if (view.uvs.length) geo.setAttribute("uv", new THREE.Float32BufferAttribute(view.uvs, 2));
   geo.setIndex(view.indices);
   if (view.normals.some((n) => n !== 0)) geo.setAttribute("normal", new THREE.Float32BufferAttribute(view.normals, 3));
   else geo.computeVertexNormals();
-  const mat = new THREE.MeshStandardMaterial({ color: 0xaab6c4, metalness: 0.45, roughness: 0.5 });
-  if (albedo) {
-    new THREE.TextureLoader().load(albedo, (tex) => {
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.flipY = false;
-      tex.anisotropy = 4;
-      mat.map = tex;
-      mat.color.set(0xffffff);
-      mat.needsUpdate = true;
-    });
-  }
-  return new THREE.Mesh(geo, mat);
+  const [albedo, team, mask] = await Promise.all([loadTex(m.albedo), loadTex(m.team), loadTex(m.mask)]);
+  return new THREE.Mesh(geo, unitMaterial(albedo, team, mask, m.teamColor ?? "#3c78d8"));
 }
 
 /**
  * Vitrine 3D da tela inicial: o modelo gira devagar sobre uma plataforma luminosa; arraste para girar.
  * `model` nulo mostra o robô de reserva.
  */
-export default function Showcase3D({ model, paused }: { model: ShowcaseModel | null; paused?: boolean }) {
+export default function Showcase3D({ model, paused, teamColor }: { model: ShowcaseModel | null; paused?: boolean; teamColor?: string }) {
+  const materialRef = useRef<THREE.MeshStandardMaterial | null>(null);
+  const colorRef = useRef(teamColor);
+  colorRef.current = teamColor;
+  // trocar a cor do time não remonta a cena: só muda o uniform do shader
+  useEffect(() => {
+    const u = materialRef.current?.userData.teamColor as { value: THREE.Color } | undefined;
+    if (u && teamColor) u.value.set(teamColor);
+  }, [teamColor]);
   const host = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
@@ -176,14 +218,26 @@ export default function Showcase3D({ model, paused }: { model: ShowcaseModel | n
 
     // modelo normalizado: ~3 unidades de altura, centrado e apoiado no chão
     const holder = new THREE.Group();
-    const obj: THREE.Object3D = model ? meshFromView(model.mesh, model.albedo) : buildMech();
-    const box = new THREE.Box3().setFromObject(obj);
-    const size = box.getSize(new THREE.Vector3());
-    const scale = 3 / Math.max(size.y, size.x * 0.8, size.z * 0.8, 1e-3);
-    obj.scale.setScalar(scale);
-    const center = box.getCenter(new THREE.Vector3());
-    obj.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
-    holder.add(obj);
+    let disposed = false;
+    const place = (obj: THREE.Object3D) => {
+      const box = new THREE.Box3().setFromObject(obj);
+      const size = box.getSize(new THREE.Vector3());
+      const scale = 3 / Math.max(size.y, size.x * 0.8, size.z * 0.8, 1e-3);
+      obj.scale.setScalar(scale);
+      const center = box.getCenter(new THREE.Vector3());
+      obj.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
+      holder.add(obj);
+    };
+    if (model) {
+      // texturas carregam antes de montar o material (o shader da cor do time precisa delas)
+      void meshFromView(model.mesh, model).then((mesh) => {
+        if (disposed) { mesh.geometry.dispose(); return; }
+        materialRef.current = mesh.material as THREE.MeshStandardMaterial;
+        const u = materialRef.current.userData.teamColor as { value: THREE.Color } | undefined;
+        if (u && colorRef.current) u.value.set(colorRef.current);
+        place(mesh);
+      });
+    } else place(buildMech());
     scene.add(holder);
 
     // plataforma: disco com brilho + anel pulsante + sombra
@@ -219,11 +273,12 @@ export default function Showcase3D({ model, paused }: { model: ShowcaseModel | n
     scene.add(new THREE.HemisphereLight(0xdbe9ff, 0x0d1117, 1.1));
     const key = new THREE.DirectionalLight(0xfff4e6, 2.4);
     key.position.set(4, 6, 5);
-    const fill = new THREE.DirectionalLight(CYAN, 0.8);
+    const fill = new THREE.DirectionalLight(model ? 0xbfd6ff : CYAN, model ? 0.6 : 0.8);
     fill.position.set(-5, 2, 3);
-    const rim = new THREE.DirectionalLight(LIME, 2.6);
+    // modelo do jogo: luz mais neutra para a cor do time aparecer como no jogo
+    const rim = new THREE.DirectionalLight(model ? 0xdfe9ff : LIME, model ? 1.4 : 2.6);
     rim.position.set(-2, 4, -6);
-    const under = new THREE.PointLight(LIME, 6, 6, 2);
+    const under = new THREE.PointLight(LIME, model ? 1.2 : 6, 6, 2);
     under.position.set(0, 0.3, 0);
     scene.add(key, fill, rim, under);
 
@@ -253,7 +308,7 @@ export default function Showcase3D({ model, paused }: { model: ShowcaseModel | n
       holder.scale.setScalar(holder.scale.x + (1 - holder.scale.x) * Math.min(1, dt * 4));
       const t = now / 1000;
       (ring.material as THREE.MeshBasicMaterial).opacity = 0.45 + Math.sin(t * 2) * 0.25;
-      under.intensity = 5 + Math.sin(t * 2) * 1.5;
+      under.intensity = (model ? 1.1 : 5) + Math.sin(t * 2) * (model ? 0.3 : 1.5);
       if (!reduced) {
         for (let i = 0; i < N; i++) {
           pos[i * 3 + 1] += speed[i] * dt;
@@ -273,6 +328,8 @@ export default function Showcase3D({ model, paused }: { model: ShowcaseModel | n
     });
     ro.observe(el);
     return () => {
+      disposed = true;
+      materialRef.current = null;
       cancelAnimationFrame(raf);
       ro.disconnect();
       controls.dispose();

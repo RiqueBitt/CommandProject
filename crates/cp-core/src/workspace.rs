@@ -19,7 +19,18 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// (arquivo .scd, entrada .scm, textura albedo) de uma unidade.
-pub type UnitModel = (PathBuf, String, Option<String>);
+/// Arquivos de um modelo de unidade dentro de um `.scd` do jogo.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitModel {
+    pub src: PathBuf,
+    pub scm: String,
+    /// Cor base (cinza: a cor do time entra pela máscara).
+    pub albedo: Option<String>,
+    /// `_Team`: alfa = onde entra a cor do time.
+    pub team: Option<String>,
+    /// `_Mask`: G = partes que brilham.
+    pub mask: Option<String>,
+}
 
 pub struct Workspace {
     pub data_dir: PathBuf,
@@ -546,14 +557,30 @@ impl Workspace {
                 .filter(|(s, n)| s == src && lower(n).ends_with(".dds"))
                 .filter(|(_, n)| {
                     let l = lower(n);
-                    !l.contains("normal") && !l.contains("spec") && !l.contains("mask") && !l.contains("lod1")
+                    !l.contains("normal") && !l.contains("spec") && !l.contains("mask") && !l.contains("team") && !l.contains("lod1")
                 })
                 .min_by_key(|(_, n)| {
                     let l = lower(n);
                     (!(l.contains("albedo") || l.contains("diffuse")), n.len())
                 })
                 .map(|(_, n)| n.clone());
-            out.insert(id.to_ascii_lowercase(), (src.clone(), scm.clone(), albedo));
+            let by_suffix = |suffix: &str| {
+                list.iter()
+                    .filter(|(s, n)| s == src && lower(n).ends_with(".dds") && !lower(n).contains("lod1"))
+                    .filter(|(_, n)| lower(n).contains(suffix))
+                    .min_by_key(|(_, n)| n.len())
+                    .map(|(_, n)| n.clone())
+            };
+            out.insert(
+                id.to_ascii_lowercase(),
+                UnitModel {
+                    src: src.clone(),
+                    scm: scm.clone(),
+                    albedo,
+                    team: by_suffix("_team"),
+                    mask: by_suffix("_mask"),
+                },
+            );
         }
         Ok(out)
     }
@@ -732,6 +759,8 @@ mod tests {
                 ("units\\UEF\\UUL0001\\UUL0001_LOD0.win.scm", &scm),
                 ("units\\UEF\\UUL0001\\UUL0001_Normal.win.dds", &dds),
                 ("units\\UEF\\UUL0001\\UUL0001_Diffuse.win.dds", &dds),
+                ("units\\UEF\\UUL0001\\UUL0001_Team.win.dds", &dds),
+                ("units\\UEF\\UUL0001\\UUL0001_Mask.win.dds", &dds),
                 ("units\\Cybran\\UCL0103\\UCL0103_LOD0.win.scm", &scm),
                 ("units\\Cybran\\UCL0103\\UCL0103_Diffuse.win.dds", &dds),
                 ("units\\Cybran\\UCL0103\\UCL0103_unit.bp", b"UnitBlueprint {}"),
@@ -743,8 +772,11 @@ mod tests {
         ws.scan_baseline(&mut |_| {}).unwrap();
         let m = ws.unit_models().unwrap();
         assert_eq!(m.keys().cloned().collect::<Vec<_>>(), vec!["ucl0103", "uul0001"]);
-        let (_, scm_name, albedo) = &m["uul0001"];
-        assert_eq!(scm_name, "units/UEF/UUL0001/UUL0001_LOD0.win.scm");
-        assert_eq!(albedo.as_deref(), Some("units/UEF/UUL0001/UUL0001_Diffuse.win.dds"));
+        let u = &m["uul0001"];
+        assert_eq!(u.scm, "units/UEF/UUL0001/UUL0001_LOD0.win.scm");
+        assert_eq!(u.albedo.as_deref(), Some("units/UEF/UUL0001/UUL0001_Diffuse.win.dds"));
+        assert_eq!(u.team.as_deref(), Some("units/UEF/UUL0001/UUL0001_Team.win.dds"));
+        assert_eq!(u.mask.as_deref(), Some("units/UEF/UUL0001/UUL0001_Mask.win.dds"));
+        assert_eq!(m["ucl0103"].team, None);
     }
 }

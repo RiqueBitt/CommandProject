@@ -77,6 +77,17 @@ def costs(n_layers=3, cap=4):
     return bdf(bytes(payload))
 
 
+def mapobjs():
+    """1 árvore em (400, 400), no formato real (cabeçalho de 8 u32 + fixups)."""
+    import math
+    sys.path.insert(0, os.path.join(ROOT, "resources", "maptk"))
+    import cp_mapobjs
+    bp = b"/props/Trees/spruce01/spruce01_prop.bp\x00\x00"
+    rec = struct.pack("<4f3ffIfI", math.cos(0.3), 0, math.sin(0.3), 0, 400.0, 20.0, 400.0, 1.0, 28 + 44, 1.0, 0)
+    payload = struct.pack("<7I", 4, 1, 28, 0, 28 + 44 + len(bp), 0, 28 + 44 + len(bp)) + rec + bp
+    return cp_mapobjs.write_mfdb([0x4244464D, 7, 2, 0, 0, 0, 0, 1], [8, 16, 24, 28 + 32], payload)
+
+
 def minimap():
     hdr = bytearray(128)
     hdr[0:4] = b"DDS "
@@ -107,8 +118,10 @@ def make_game(root):
         z.writestr(base + ".costs.win.bdf", costs())
         z.writestr(base + ".minimap.win.dds", minimap())
         z.writestr(base + ".info.win.bdf", info())
-        for k in ("collision2", "terrain", "mapobjs", "decals"):
+        for k in ("collision2", "decals"):
             z.writestr(f"{base}.{k}.win.bdf", bdf(b"\x00" * 64))
+        z.writestr(f"{base}.terrain.win.bdf", bdf(b"\x00" * 16 + b"/textures/Terrain/MP_901/sc2_mp_901_grass01_d.dds" + b"\x00" * 24))
+        z.writestr(f"{base}.mapobjs.win.bdf", mapobjs())
     with zipfile.ZipFile(os.path.join(gd, "uncompiled_lua.scd"), "w") as z:
         z.writestr("uncompiled/maps/SC2_MP_204/SC2_MP_204_save.lua", save_lua())
     with zipfile.ZipFile(os.path.join(gd, "z_dlc1.scd"), "w") as z:
@@ -190,6 +203,27 @@ def main():
         assert any("sculpted heightfield: 5" in l for l in log3), log3
         assert any("ruggedized" in l for l in log3), log3
         print("escultura + massa manual ok:", res3["mass"], "massa automática +", res3["extraMass"], "manual")
+
+        # terreno 3D traz as decorações; decorações novas/removidas e textura trocada saem no .scd
+        t3 = run("terrain3d", {"terrain": TID, "size": 64}, gd, out)[0]
+        assert t3["propKinds"] == ["/props/Trees/spruce01/spruce01_prop.bp"] and len(t3["props"]) == 1, t3["props"]
+        spec4 = dict(spec, scenario_id="SC2_CPDECOR", name="[2] Decor",
+                     props_add=[["/props/Rocks/Rock02/Rock02_prop.bp", 500, 500, 30, 1.2], ["/props/Trees/oak01/oak01_prop.bp", 520, 510]],
+                     props_remove=[[400, 400, 5]],
+                     reskin={"/textures/Terrain/MP_901/sc2_mp_901_grass01_d.dds": "/textures/Terrain/MP_002/sc2_mp_002_snow01_d.dds"})
+        res4, log4 = run("build", {"spec": spec4}, gd, out)
+        assert res4["propsAdded"] == 2 and res4["propsRemoved"] == 1 and res4["reskinned"] == 1, res4
+        with zipfile.ZipFile(res4["scd"]) as zf:
+            mo = zf.read("maps/SC2_CPDECOR/SC2_CPDECOR.mapobjs.win.bdf")
+            tb = zf.read("maps/SC2_CPDECOR/SC2_CPDECOR.terrain.win.bdf")
+        sys.path.insert(0, os.path.join(ROOT, "resources", "maptk"))
+        import cp_mapobjs
+        got = cp_mapobjs.props(mo)
+        assert len(got) == 3 and got[0][1] == -100.0, got
+        assert got[1][5] == "/props/Rocks/Rock02/Rock02_prop.bp" and abs(got[1][3] - 30) < 0.01 and abs(got[1][4] - 1.2) < 1e-5, got[1]
+        assert abs(got[2][1] - 20.0) < 1.5, "decoração apoiada no chão"
+        assert b"sc2_mp_002_snow01_d" in zlib.decompress(tb[tb.find(b"\x78\x9c"):]), "textura trocada"
+        print("decorações + textura ok:", res4["propsAdded"], "novas,", res4["propsRemoved"], "removida, 1 textura")
 
         bad = dict(spec, scenario_id="meu mapa")
         env = dict(os.environ, SC2_GAMEDATA=gd, SC2_MAP_OUT=out)

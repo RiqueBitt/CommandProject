@@ -18,6 +18,10 @@ export function unitLabel(id: string) {
   return `${faction} · ${kind ? `${kind} ` : ""}${id.toUpperCase()}`;
 }
 
+/** Cor do time padrão de cada facção (como nas partidas). */
+const FACTION_COLOR: Record<string, string> = { u: "#2f6fd6", c: "#c8352b", i: "#d9a227" };
+const TEAM_COLORS = ["#2f6fd6", "#c8352b", "#3fa34d", "#d9a227", "#e67a22", "#8e4fd1", "#2bb5c9", "#d8dde3"];
+
 // a vitrine fica em memória entre visitas à tela inicial
 let cached: { key: string; data: Showcase | null } | null = null;
 
@@ -41,8 +45,16 @@ export function HomeShowcase() {
     }).catch(() => setData(null));
   }, [key, settings?.showcaseUnit]);
 
-  const model = useMemo(() => (data ? { mesh: data.mesh, albedo: data.albedo } : null), [data]);
+  const model = useMemo(() => (data ? { mesh: data.mesh, albedo: data.albedo, team: data.team, mask: data.mask } : null), [data]);
+  const [colors, setColors] = useState(false);
+  const teamColor = settings?.showcaseTeamColor ?? (data ? FACTION_COLOR[data.unit[1]] : undefined) ?? FACTION_COLOR.u;
   if (!settings?.showcase || data === undefined) return null;
+
+  const pickColor = async (c: string | null) => {
+    setColors(false);
+    await run("showcase-color", () => api.saveSettings({ ...settings, showcaseTeamColor: c }));
+    await refresh();
+  };
 
   const choose = async (unit: string | null) => {
     if (!settings) return;
@@ -56,7 +68,7 @@ export function HomeShowcase() {
     <div className="home-stage">
       <div className="stage-glow" />
       <Suspense fallback={null}>
-        <Showcase3D model={model} paused={paused} />
+        <Showcase3D model={model} paused={paused} teamColor={teamColor} />
       </Suspense>
       <div className="showcase-label">
         <div className="col" style={{ gap: 0 }}>
@@ -65,11 +77,23 @@ export function HomeShowcase() {
         </div>
         <button className="btn icon-btn sm-icon" title={paused ? "Girar" : "Pausar"} aria-label={paused ? "Girar" : "Pausar"} onClick={() => setPaused((p) => !p)}><Icon name={paused ? "play_arrow" : "pause"} /></button>
         {data && <button className="btn icon-btn sm-icon" title="Trocar unidade" aria-label="Trocar unidade" onClick={() => setPicker(true)}><Icon name="swap_horiz" /></button>}
+        {data?.team && (
+          <button className="btn icon-btn sm-icon" title="Cor do time" aria-label="Cor do time" aria-expanded={colors} onClick={() => setColors((c) => !c)}>
+            <span className="team-dot" style={{ background: teamColor }} />
+          </button>
+        )}
         <button className="btn icon-btn sm-icon" title="Esconder o modelo" aria-label="Esconder o modelo" onClick={async () => {
           await run("settings", () => api.saveSettings({ ...settings, showcase: false }), "Modelo escondido. Dá para mostrar de novo em Configurações.");
           await refresh();
         }}><Icon name="visibility_off" /></button>
       </div>
+      {colors && (
+        <div className="team-colors" role="group" aria-label="Cor do time">
+          {TEAM_COLORS.map((c) => <button key={c} className="accent-swatch" style={{ background: c }} aria-pressed={teamColor === c} aria-label={`Cor ${c}`} onClick={() => void pickColor(c)} />)}
+          <input type="color" value={teamColor} onChange={(e) => void pickColor(e.target.value)} aria-label="Outra cor" title="Outra cor" />
+          <button className="btn text sm" onClick={() => void pickColor(null)}>Cor da facção</button>
+        </div>
+      )}
       {picker && data && <UnitPicker units={data.units} current={data.unit} onPick={choose} onClose={() => setPicker(false)} />}
     </div>
   );

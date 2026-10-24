@@ -22,6 +22,8 @@ interface State {
   history: Page[];
   palette: boolean;
   appUpdate: AppUpdate | null;
+  /** O jogo travou na última vez que foi aberto (relatório .mdmp novo na pasta bin). */
+  crash: { dump: string; mods: [string, string][] } | null;
   go: (p: Page) => void;
   /** Aba a abrir no Estúdio na próxima visita (ex.: "hd"). */
   studioTab: string | null;
@@ -54,6 +56,7 @@ export const useStore = create<State>((set, get) => ({
   history: [],
   palette: false,
   appUpdate: null,
+  crash: null,
   studioTab: null,
   setStudioTab: (studioTab) => set({ studioTab }),
   settingsSection: null,
