@@ -31,7 +31,7 @@ import {
 } from "./worldgen";
 
 const MapView3D = lazy(() => import("../../components/MapView3D"));
-const WorldGenModal = lazy(() => import("./WorldGen"));
+const WorldGenModal = lazy(() => import("./WorldGenModal"));
 
 type BrushTool = `b-${BrushMode}`;
 type FeatTool = `f-${FeatureKind}`;
