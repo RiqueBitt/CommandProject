@@ -45,7 +45,7 @@ function UseGamepad() return false end
 function LOC(s) return s end
 local armies = {}
 for i = 1, 24 do armies[i] = 'ARMY_' .. i end
-World.scenario = { type = 'skirmish', Configurations = { standard = { teams = { { name = 'FFA', armies = armies } } } } }
+World.scenario = { type = 'cp_bigmatch', Configurations = { standard = { teams = { { name = 'FFA', armies = armies } } } } }
 local modules = {
     ['/lua/user/prefs.lua'] = { GetFromCurrentProfile = function(k) return World.prefs[k] end, SetToCurrentProfile = function(k, v) World.prefs[k] = v end },
     ['/lua/ui/maputil.lua'] = { LoadScenario = function(m) if m == '/maps/nada/nada_scenario.lua' then return nil end World.loaded = m return World.scenario end,
@@ -54,7 +54,7 @@ local modules = {
     ['/lua/common/factions.lua'] = { Factions = { { Key = 'uef' }, { Key = 'cybran' }, { Key = 'illuminate' } } },
     ['/lua/ui/lobby/ainames.lua'] = { ainames = { uef = { 'Hall' }, cybran = { 'Gauge' }, illuminate = { 'Thalia' } } },
     ['/lua/ui/lobby/aitypes.lua'] = { aitypes = { { key = 'Easy', name = 'AI: Easy' }, { key = 'Normal', name = 'AI: Normal' }, { key = 'Hard', name = 'AI: Hard' }, { key = 'Cheat', name = 'AI: Cheating' } } },
-    ['/lua/common/gameColors.lua'] = { GameColors = { PlayerColors = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 } } },
+    ['/lua/common/gameColors.lua'] = { GameColors = { PlayerColors = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 } } },
     ['/lua/ui/lobby/lobbyComm.lua'] = { GetDefaultPlayerOptions = function(name)
         return { Team = 1, PlayerColor = 1, ArmyColor = 1, StartSpot = 1, Faction = 4, PlayerName = name, AIPersonality = '', Human = true, Civilian = false } end },
 }
@@ -101,7 +101,8 @@ def run(source: str, label: str, real: bool):
         return g, g.World.launched
 
     # 12 contra 12: você no time 1 (vaga 1), IAs nos times 1 e 2
-    slots = ["H,2,1,"] + ["A,2,0,Hard"] * 11 + ["A,3,3,Cheat"] * 12
+    # cores por time: time 1 = cor 0, time 2 = cor 1 (o jogo conta a cor a partir de 0)
+    slots = ["H,2,1,,0"] + ["A,2,0,Hard,0"] * 11 + ["A,3,3,Cheat,1"] * 12
     spec = "Victory=domination;UnitCap=1000;FogOfWar=none;GameSpeed=normal;NoRushOption=5;PrebuiltUnits=Off;CivilianAlliance=enemy|" + "|".join(slots)
     g, info = session(spec)
     check(info and not info["normal"], f"{label}: a partida grande assume o começo da partida ({g.World.warn})")
@@ -116,7 +117,8 @@ def run(source: str, label: str, real: bool):
     t3 = [p for p in players if p.Team == 3]
     check(len(t2) == 12 and len(t3) == 12, f"{label}: dois times de 12 ({len(t2)} x {len(t3)})")
     check(all(p.AIPersonality == "Cheat" and p.Faction == 3 for p in t3), f"{label}: IA e facção de cada vaga")
-    check(all(1 <= p.PlayerColor <= 10 for p in players), f"{label}: cores dentro das que o jogo tem")
+    check(all(p.PlayerColor == (0 if p.Team == 2 else 1) for p in players), f"{label}: cor de cada time (a partir de 0, como o jogo lê)")
+    check(info.scenarioInfo.type == "skirmish", f"{label}: mapa grande vira escaramuça normal na partida")
     check(len({p.ArmyName for p in players}) == 24, f"{label}: cada jogador numa base diferente")
     check(teams[-1].Civilian and teams[-1].ArmyName == "ARMY_EXTRA", f"{label}: civis do mapa continuam")
     o = info.scenarioInfo.Options
@@ -150,13 +152,45 @@ def run(source: str, label: str, real: bool):
     check(back is False and g.World.warn and "big match" in g.World.warn, f"{label}: erro vira aviso no log e o jogo segue")
 
 
+COLORS_CODE = (ROOT / "crates/cp-core/src/bigmatch_colors.lua").read_text(encoding="utf-8")
+FAKE_COLORS = """
+GameColors = {
+    PlayerColors = { 'a', 'b' }, SecondaryPlayerColors = { 'c', 'd' }, ArmyColors = { 'a', 'b' },
+    FactionColors = { { { primary = 'a' }, { primary = 'b' } }, { { primary = 'a' }, { primary = 'b' } }, { { primary = 'a' }, { primary = 'b' } } },
+}
+"""
+
+
+def colors(source: str, label: str):
+    for big in (True, False):
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.execute(HARNESS)
+        g = lua.globals()
+        if big:
+            g.World.args = lua.table_from({"/cpmatch": lua.table_from(["x"])})
+        lua.execute(moho_to_lua(source))
+        gc = g.GameColors
+        n = len(list(gc.PlayerColors.values()))
+        per = [len(list(f.values())) for f in gc.FactionColors.values()]
+        base = 10 if "FF152142" in source else 2
+        if big:
+            check(n == base + 14 and all(p == base + 14 for p in per) and len(list(gc.ArmyColors.values())) == base + 14,
+                  f"{label}: 14 cores a mais na partida grande ({n})")
+            last = list(gc.FactionColors.values())[0][base + 14]
+            check(last.ui_flag.endswith(".dds") and last.icon.startswith("FF"), f"{label}: cores novas com bandeira e ícone")
+        else:
+            check(n == base and all(p == base for p in per), f"{label}: lobby do jogo continua com as cores originais")
+
+
 def main() -> int:
     run(patch(FAKE_GAME_FILE), "modelo", real=False)
+    colors(FAKE_COLORS + COLORS_CODE, "cores (modelo)")
     out = os.environ.get("CP_BIG_OUT")
     if out:
         for name in ("SinglePlayerLaunch.lua", "GameSessionManager.lua"):
             text = (Path(out) / "lua" / name).read_bytes().decode("latin1")
             run(text, name, real=True)
+        colors((Path(out) / "lua/common/GameColors.lua").read_bytes().decode("latin1"), "GameColors.lua")
     print("\n" + ("tudo certo" if not fails else f"{len(fails)} falha(s)"))
     return 1 if fails else 0
 

@@ -98,6 +98,8 @@ disponível em Sistema → Visual.
   tiver** — 12 contra 12, três times de 5, todos contra todos. Cada base vira você, uma IA (Fácil,
   Normal, Difícil ou Trapaceira) ou fica vazia, com time e facção à escolha; os times se dividem
   sozinhos pelo lado do mapa ou pela ordem das bases, e clicar numa base da prévia põe você nela.
+  Até um time por base (24 bases, até 24 times) e **24 cores de exército** (as 10 do jogo e mais 14
+  só nas partidas grandes): cor por time, por jogador ou escolhida à mão em cada vaga.
   Regras: tipo de vitória, limite de unidades, névoa, velocidade, tempo sem ataques, civis e base
   montada. O lobby do jogo é em Flash e só tem 8 vagas, então o launcher abre o jogo direto na
   partida (`/map` + `/cpmatch`); o mod que faz isso é montado na hora com o `SinglePlayerLaunch.lua`
@@ -365,8 +367,9 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
 - **Partida grande** (experimental: confirme no jogo): o jogo foi feito para até 8 jogadores e o
   limite do motor com mais exércitos ainda não foi testado. Se o jogo não abrir ou fechar ao carregar,
   tente com menos bases. Cada IA a mais pesa: com muitas, a IA esperta olha o mapa e decide com
-  menos frequência, e o painel dela mostra uma linha por IA. Mapas com mais de 8 bases aparecem no
-  lobby do jogo, mas lá só dá para usar 8.
+  menos frequência, e o painel dela mostra uma linha por IA. O lobby do jogo desenha só 8 posições e
+  **fecha o jogo** com um mapa maior: por isso mapas com mais de 8 bases saem do editor com um tipo
+  próprio, que o lobby não lista (mapas feitos na 0.25.0 precisam ser gerados de novo).
 - **IA que aprende**: a memória entre partidas passa por um comando no `SimCallbacks.lua`, que o
   menu de trapaças também usa; as duas versões levam os mesmos comandos, mas trapaças montadas
   antes da 0.24.0 não têm todos (memória e "esquecer") — atualize as trapaças depois de instalar.

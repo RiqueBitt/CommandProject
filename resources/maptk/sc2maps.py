@@ -518,12 +518,15 @@ def make_scenario(scenario_id, terrain_id, name, spawns, norush=70.0, reverb=Non
     starts = "".join(f"                ['ARMY_{a}'] = {{ {_fmt(spawns[a][0])}, {_fmt(spawns[a][1])}, {_fmt(spawns[a][2])} }},\n"
                      for a in armies)
     alist = ",".join(f"'ARMY_{a}'" for a in armies)
+    # the game's lobby draws 8 start positions and crashes with more: bigger maps get their own
+    # type, which the lobby does not list; the launcher's big match plays them as a skirmish
+    scen_type = "skirmish" if len(armies) <= 8 else "cp_bigmatch"
     return f"""version = 3
 ScenarioInfo = {{
     devname = '{scenario_id}',
     name = '{name}',
     description = '{terrain_id}',
-    type = 'skirmish',
+    type = '{scen_type}',
     starts = true,
     preview = '',
     reverbPreset = '{reverb or terrain_id}',

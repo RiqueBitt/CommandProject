@@ -4,8 +4,11 @@
 -- position of the map, each one human, AI or empty, on any team.
 --   spec = <options>|<slot 1>|<slot 2>|...
 --   options = key=value;key=value   (Victory, UnitCap, FogOfWar, GameSpeed, NoRushOption, ...)
---   slot = kind,team,faction,ai     kind H (you), A (AI) or X (empty); team 1 = alone, 2+ = allies;
---                                   faction 0 = random, 1 UEF, 2 Cybran, 3 Illuminate
+--   slot = kind,team,faction,ai,color   kind H (you), A (AI) or X (empty); team 1 = alone, 2+ = allies;
+--                                   faction 0 = random, 1 UEF, 2 Cybran, 3 Illuminate;
+--                                   color = index in GameColors (0-based, as the engine reads it)
+-- Maps with more than 8 bases are saved with type 'cp_bigmatch' so the game's lobby (8 positions,
+-- it crashes with more) does not list them; here they become a normal skirmish.
 local function CPSplit(s, sep)
     local out = {}
     local start = 1
@@ -25,6 +28,7 @@ function CPBigMatchSession(mapName, spec)
     local scenario = import('/lua/ui/maputil.lua').LoadScenario(mapName)
     if not scenario then error('CommandProject: mapa nao encontrado: ' .. tostring(mapName)) end
     VerifyScenarioConfiguration(scenario)
+    scenario.type = 'skirmish'
     local parts = CPSplit(spec, '|')
 
     local options = table.copy(defaultOptions)
@@ -61,7 +65,9 @@ function CPBigMatchSession(mapName, spec)
             p.Team = math.max(1, tonumber(s[2] or '1') or 1)
             p.ArmyName = name
             p.StartSpot = index
-            p.PlayerColor = math.mod(index - 1, colors) + 1
+            -- the engine reads the color 0-based (FactionColors[faction][color + 1])
+            local color = tonumber(s[5] or '') or (index - 1)
+            p.PlayerColor = math.mod(math.max(0, color), colors)
             p.ArmyColor = p.PlayerColor
             if kind == 'H' and not human then
                 p.Human = true
@@ -113,3 +119,4 @@ function CPBigMatchStart(mapName)
     LaunchSinglePlayerSession(info)
     return true
 end
+

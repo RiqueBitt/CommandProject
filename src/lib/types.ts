@@ -302,7 +302,7 @@ export interface PrefsWriteReport { backup: string | null; changed: number; skip
 
 // ---------------------------------------------------------------- partida grande
 export type SlotKind = "you" | "ai" | "empty";
-export interface MatchSlot { kind: SlotKind; team: number; faction: number; ai: string }
+export interface MatchSlot { kind: SlotKind; team: number; faction: number; ai: string; color: number }
 export interface MatchOptions { victory: string; unitCap: number; fog: string; speed: string; noRush: number; prebuilt: boolean; civilians: string }
 export interface BigMatch { map: string; slots: MatchSlot[]; options: MatchOptions }
-export interface MatchMap { path: string; id: string; name: string; armies: string[]; starts: [number, number][]; size: [number, number]; source: string }
+export interface MatchMap { path: string; id: string; name: string; armies: string[]; starts: [number, number][]; size: [number, number]; source: string; lobbyRisk: boolean }

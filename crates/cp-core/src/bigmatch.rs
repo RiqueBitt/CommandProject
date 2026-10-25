@@ -20,7 +20,15 @@ const ENTRY: &str = "function StartCommandLineSession(mapName, isPerfTest)\n";
 const HOOK: &str = "\tif CPBigMatchStart and CPBigMatchStart(mapName) then return end -- CommandProject big match\n";
 
 /// Versão do código do mod: quando muda, o launcher monta o mod de novo.
-pub const MOD_VERSION: &str = "1.0.0";
+pub const MOD_VERSION: &str = "1.1.0";
+/// Cores de exército na partida grande: as 10 do jogo e mais 14 (o mod acrescenta só com `/cpmatch`).
+pub const COLORS: i32 = 24;
+/// Mapas com mais de 8 bases são gravados com este tipo: o lobby do jogo (8 posições, que trava com
+/// mais) não os mostra; a partida grande os trata como escaramuça.
+pub const BIG_MAP_TYPE: &str = "cp_bigmatch";
+const COLORS_CODE: &str = include_str!("bigmatch_colors.lua");
+const COLORS_FILE: &str = "lua/common/GameColors.lua";
+const COLORS_MARK: &str = "CommandProject big match: 14 more army colors";
 /// Dificuldades da IA do jogo (chaves de `aitypes.lua`).
 pub const AI_LEVELS: &[&str] = &["Easy", "Normal", "Hard", "Cheat"];
 /// Limite de vagas que o launcher aceita (o motor do jogo pode ter um limite menor: veja o README).
@@ -45,11 +53,13 @@ pub struct Slot {
     pub faction: u32,
     /// dificuldade da IA (uma de [`AI_LEVELS`])
     pub ai: String,
+    /// cor do exército (0 a [`COLORS`]-1, na ordem do jogo); -1 = a da base
+    pub color: i32,
 }
 
 impl Default for Slot {
     fn default() -> Self {
-        Slot { kind: SlotKind::Ai, team: 0, faction: 0, ai: "Normal".into() }
+        Slot { kind: SlotKind::Ai, team: 0, faction: 0, ai: "Normal".into(), color: -1 }
     }
 }
 
@@ -104,6 +114,10 @@ fn pick<'a>(value: &'a str, allowed: &[&'a str], what: &str) -> Result<&'a str> 
         .ok_or_else(|| Error::Other(format!("{what} inválido: {value}")))
 }
 
+fn color(c: i32) -> String {
+    if c < 0 { String::new() } else { c.min(COLORS - 1).to_string() }
+}
+
 /// Confere a partida e escreve o texto de `/cpmatch` (sem espaços: vai como um argumento só).
 pub fn encode(m: &BigMatch) -> Result<String> {
     let o = &m.options;
@@ -140,8 +154,8 @@ pub fn encode(m: &BigMatch) -> Result<String> {
         let faction = if s.faction > 3 { 0 } else { s.faction };
         match s.kind {
             SlotKind::Empty => out.push_str("|X"),
-            SlotKind::You => out.push_str(&format!("|H,{team},{faction},")),
-            SlotKind::Ai => out.push_str(&format!("|A,{team},{faction},{}", pick(&s.ai, AI_LEVELS, "dificuldade da IA")?)),
+            SlotKind::You => out.push_str(&format!("|H,{team},{faction},,{}", color(s.color))),
+            SlotKind::Ai => out.push_str(&format!("|A,{team},{faction},{},{}", pick(&s.ai, AI_LEVELS, "dificuldade da IA")?, color(s.color))),
         }
     }
     Ok(out)
@@ -189,9 +203,27 @@ pub fn patch(text: &str) -> Result<String> {
     Ok(out)
 }
 
+/// `GameColors.lua` com as cores a mais no fim (só valem com `/cpmatch`).
+pub fn patch_colors(text: &str) -> Result<String> {
+    if text.contains(COLORS_MARK) {
+        return Err(Error::Other("o GameColors.lua do jogo já tem as cores da partida grande: use o original".into()));
+    }
+    if !text.contains("FactionColors") {
+        return Err(Error::Other("o GameColors.lua do jogo é diferente do esperado".into()));
+    }
+    let mut out = text.to_string();
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(COLORS_CODE);
+    Ok(out)
+}
+
 /// Monta o `.scd` do mod com os arquivos do jogo do usuário.
 pub fn build(sources: &[PathBuf], dest: &Path) -> Result<PathBuf> {
     let mut b = crate::scd::ScdBuilder::create(dest)?;
+    let colors = patch_colors(&game_text(sources, COLORS_FILE)?)?;
+    b.add_bytes(COLORS_FILE, &colors.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect::<Vec<u8>>())?;
     for f in FILES {
         let text = patch(&game_text(sources, f)?)?;
         let bytes: Vec<u8> = text.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect();
@@ -216,6 +248,8 @@ pub struct MatchMap {
     pub size: [u32; 2],
     /// de onde veio: "Jogo" ou o nome do mod
     pub source: String,
+    /// mais de 8 bases e ainda visível no lobby do jogo (que trava com ele): refazer no editor
+    pub lobby_risk: bool,
 }
 
 fn quoted_after<'a>(text: &'a str, key: &str) -> Option<&'a str> {
@@ -309,7 +343,7 @@ pub fn maps_in(archives: &[PathBuf], source: &str, out: &mut Vec<MatchMap>) {
             let Ok(raw) = scd.read(&e.name) else { continue };
             let text: String = raw.iter().map(|&b| b as char).collect();
             let Some((name, kind, size, armies, starts)) = parse_scenario(&text) else { continue };
-            if kind != "skirmish" {
+            if kind != "skirmish" && kind != BIG_MAP_TYPE {
                 continue;
             }
             // o jogo não diferencia maiúsculas nos caminhos
@@ -319,6 +353,7 @@ pub fn maps_in(archives: &[PathBuf], source: &str, out: &mut Vec<MatchMap>) {
                 out.retain(|m| !m.path.eq_ignore_ascii_case(&path));
             }
             let id = path.rsplit('/').next().unwrap_or("").trim_end_matches("_scenario.lua").to_string();
+            let armies_len = armies.len();
             out.push(MatchMap {
                 name: if name.is_empty() { id.clone() } else { name },
                 id,
@@ -327,6 +362,7 @@ pub fn maps_in(archives: &[PathBuf], source: &str, out: &mut Vec<MatchMap>) {
                 starts,
                 size,
                 source: source.to_string(),
+                lobby_risk: kind == "skirmish" && armies_len > 8,
             });
         }
     }
@@ -361,7 +397,7 @@ mod tests {
         };
         let s = encode(&m).unwrap();
         assert!(s.starts_with("Victory=demoralization;UnitCap=500;FogOfWar=explored;GameSpeed=normal;NoRushOption=5;"));
-        assert!(s.ends_with("|H,2,0,|A,2,0,Normal|A,3,0,Normal|X|A,3,0,Normal"), "{s}");
+        assert!(s.ends_with("|H,2,0,,|A,2,0,Normal,|A,3,0,Normal,|X|A,3,0,Normal,"), "{s}");
         assert!(!s.contains(' '));
         let args = launch_args(&m).unwrap();
         assert_eq!(args[..3], ["/map", "/maps/X/X_scenario.lua", "/cpmatch"]);
@@ -389,7 +425,13 @@ mod tests {
         for s in &mut ffa.slots {
             s.team = 0;
         }
-        assert!(encode(&ffa).unwrap().contains("|H,1,0,|A,1,0,Normal"));
+        assert!(encode(&ffa).unwrap().contains("|H,1,0,,|A,1,0,Normal,"));
+        // cor escolhida (0-based, até 23)
+        let mut colored = ffa.clone();
+        colored.slots[1].color = 30;
+        colored.slots[0].color = 3;
+        let e = encode(&colored).unwrap();
+        assert!(e.contains("|H,1,0,,3|A,1,0,Normal,23"), "{e}");
     }
 
     #[test]
@@ -414,6 +456,12 @@ mod tests {
                 std::fs::create_dir_all(p.parent().unwrap()).unwrap();
                 std::fs::write(p, out.chars().map(|c| c as u8).collect::<Vec<u8>>()).unwrap();
             }
+        }
+        let colors = patch_colors(&game_text(&sources, COLORS_FILE).unwrap()).unwrap();
+        if let Some(o) = std::env::var_os("CP_BIG_OUT") {
+            let p = PathBuf::from(o).join(COLORS_FILE);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, colors.chars().map(|c| c as u8).collect::<Vec<u8>>()).unwrap();
         }
         let mut maps = Vec::new();
         maps_in(&sources, "Jogo", &mut maps);
