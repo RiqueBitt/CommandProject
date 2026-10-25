@@ -161,6 +161,29 @@ pub fn encode(m: &BigMatch) -> Result<String> {
     Ok(out)
 }
 
+/// Argumentos extras do usuário sem `/map`, `/cpmatch` e `/cpno…` (com os valores): a partida grande
+/// põe os dela, e um `/map` esquecido antes do dela venceria (o jogo usa o primeiro).
+pub fn clean_user_args(args: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut skip = false;
+    for a in args {
+        if skip {
+            skip = false;
+            continue;
+        }
+        let l = a.to_ascii_lowercase();
+        if l == "/map" || l == "/cpmatch" {
+            skip = true;
+            continue;
+        }
+        if l.starts_with("/cpno") {
+            continue;
+        }
+        out.push(a.clone());
+    }
+    out
+}
+
 /// Argumentos de linha de comando que começam a partida.
 pub fn launch_args(m: &BigMatch) -> Result<Vec<String>> {
     let map = m.map.trim();
@@ -432,6 +455,15 @@ mod tests {
         colored.slots[0].color = 3;
         let e = encode(&colored).unwrap();
         assert!(e.contains("|H,1,0,,3|A,1,0,Normal,23"), "{e}");
+    }
+
+    #[test]
+    fn user_args_cleaned() {
+        let a: Vec<String> = ["/log", "x.log", "/map", "/maps/a/a_scenario.lua", "/cpnocolors", "/CPMATCH", "v", "/windowed"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(clean_user_args(&a), vec!["/log", "x.log", "/windowed"]);
     }
 
     #[test]

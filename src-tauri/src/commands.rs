@@ -473,9 +473,18 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             if !appid.exists() {
                 let _ = std::fs::write(&appid, cp_core::game::STEAM_APP_ID.to_string());
             }
-            let mut args = ws.settings.launch_args.clone();
+            // um /map ou /cpmatch esquecido nos argumentos extras trocaria o mapa e as vagas da partida
+            let mut args = cp_core::bigmatch::clean_user_args(&ws.settings.launch_args);
             args.extend(cp_core::bigmatch::launch_args(b)?);
             plan = Some(cp_core::game::launch_plan(&game, cp_core::game::LaunchMode::Direct, &args)?);
+        }
+        if big.is_none() {
+            // o mod da partida grande só serve para ela: nas partidas comuns (pelo lobby do jogo) fica de fora
+            const ID: &str = "cp-partida-grande";
+            let active = ws.profiles.active().clone();
+            if active.mods.iter().any(|m| m.id == ID && m.enabled) {
+                ws.profiles.set_enabled(&active.id, ID, false)?;
+            }
         }
         let applied = if ws.settings.apply_before_launch || big.is_some() {
             Some(ws.apply_active(&mut |p: Progress| emit_progress(&app2, "apply", p.step, p.total, p.message))?)

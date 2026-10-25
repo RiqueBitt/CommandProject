@@ -103,7 +103,8 @@ disponível em Sistema → Visual.
   Regras: tipo de vitória, limite de unidades, névoa, velocidade, tempo sem ataques, civis e base
   montada. O lobby do jogo é em Flash e só tem 8 vagas, então o launcher abre o jogo direto na
   partida (`/map` + `/cpmatch`); o mod que faz isso é montado na hora com o `SinglePlayerLaunch.lua`
-  e o `GameSessionManager.lua` do seu jogo e não muda nada quando a partida começa pelo lobby.
+  e o `GameSessionManager.lua` do seu jogo; ele só fica ligado nas partidas grandes (o Jogar comum
+  o desliga), então o lobby do jogo continua igual.
 - **Ação rápida** (`Ctrl+K`): jogar, aplicar, trocar de perfil ou abrir qualquer tela pelo teclado.
 
 **Hub de mods**
