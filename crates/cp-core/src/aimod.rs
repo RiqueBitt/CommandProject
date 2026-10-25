@@ -545,6 +545,28 @@ mod tests {
         assert_eq!(s2.len(), 1);
     }
 
+    /// Com `CP_GAMEDATA` apontando para a pasta gamedata do jogo (com o uncompiled_lua.scd), monta a IA com os arquivos de verdade:
+    /// todos os ajustes entram. Com `CP_AI_OUT`, grava os arquivos montados (para conferir a sintaxe).
+    #[test]
+    fn real_game_build() {
+        let Some(dir) = std::env::var_os("CP_GAMEDATA") else { return };
+        let sources = vec![PathBuf::from(dir).join("uncompiled_lua.scd")];
+        let opts = AiOptions { level: 2, naval: true, learn: true, panel: true, ..Default::default() };
+        let dest = std::env::temp_dir().join("cp_ai_real_test.scd");
+        let built = build(&sources, &opts, &dest).unwrap();
+        assert!(built.skipped.is_empty(), "ajustes que não entraram: {:?}", built.skipped);
+        if let Some(out) = std::env::var_os("CP_AI_OUT") {
+            for f in edits(&opts) {
+                let (path, text) = resolve(&sources, f.path).unwrap();
+                let (patched, _) = apply(&text, &f.ops, &mut Vec::new());
+                let target = PathBuf::from(&out).join(path.trim_start_matches('/'));
+                std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+                std::fs::write(target, to_latin1(&patched)).unwrap();
+            }
+        }
+        eprintln!("IA montada com {} ajustes", built.applied);
+    }
+
     #[test]
     fn latin1_round_trip() {
         let bytes = b"-- Copyright \xa9 2009\r\nx = 1\r\n";

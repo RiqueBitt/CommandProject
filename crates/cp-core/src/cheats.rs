@@ -111,6 +111,10 @@ Callbacks.CPAIMemory = function(data)
     local ok, m = pcall(import, '/lua/ai/skirmish/system/skirmishaisystem.lua')
     if ok and m and m.CPAIReceiveMemory then m.CPAIReceiveMemory(data) end
 end
+Callbacks.CPAIForget = function(data)
+    local ok, m = pcall(import, '/lua/ai/skirmish/system/skirmishaisystem.lua')
+    if ok and m and m.CPAIForgetModel then m.CPAIForgetModel() end
+end
 ";
 const UI_HOOK: &str = "\tpcall(CPMenuInit, false) -- CommandProject cheats\n";
 const SYNC_HOOK: &str = "\tif Sync.CPCheats then pcall(import('/lua/ui/game/gamemain_pc.lua').CPMenuInit, false) end -- CommandProject cheats\n";

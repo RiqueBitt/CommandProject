@@ -18,6 +18,10 @@ local Prefs = import('/lua/user/prefs.lua')
 local memory = false      -- what earlier matches taught (loaded at the start)
 local mapKey = 'default'
 local learnedSaves = 0
+local memorySent = false
+local beat = 0
+local seen = {}           -- army -> last beat its AI sent a plan (defeated AIs stop sending)
+local STALE_BEATS = 600   -- about a minute
 
 local C_PANEL = 'E80E161E'
 local C_HEAD = 'FF15212C'
@@ -291,6 +295,8 @@ function CPAIForget()
     pcall(function() Prefs.SetToCurrentProfile('CPAIMemory', nil) end)
     pcall(SavePreferences)
     memory = { games = 0, style = {}, maps = {} }
+    -- the AIs of this match forget too, otherwise the next save would bring everything back
+    pcall(function() SimCallback({ Func = 'CPAIForget', Args = {} }) end)
     pcall(function()
         import('/lua/ui/game/textdisplay.lua').PrintToScreen({ text = 'CommandProject: a IA esqueceu o que tinha aprendido sobre voce',
             size = 14, color = 'ff4fc3f7', duration = 6, location = 'centertop' })
@@ -307,13 +313,31 @@ end
 
 -- every beat: keep the latest plans sent by the simulation
 local function OnBeat()
+    beat = beat + 1
+    -- the memory goes to the simulation once it is running (first beat), not while the screen is built
+    if LEARN and not memorySent then
+        memorySent = true
+        SendMemory()
+    end
     local s = false
     pcall(function() s = Sync.CPAIStatus end)
     if s and SHOW_PANEL then
         status = status or {}
-        for army, entry in s do status[army] = entry end
+        for army, entry in s do
+            status[army] = entry
+            seen[army] = beat
+        end
         dirty = true
         if not tab then pcall(CreateTab) end
+    end
+    if status and math.mod(beat, 50) == 0 then
+        for army, _ in status do
+            if beat - (seen[army] or 0) > STALE_BEATS then
+                status[army] = nil
+                seen[army] = nil
+                dirty = true
+            end
+        end
     end
     if LEARN then
         local m = false
@@ -343,15 +367,18 @@ function CPAIPanelInit()
     if LEARN then
         memory = LoadMemory()
         mapKey = MapKey()
-        SendMemory()
     end
     if SHOW_PANEL then
         BindKey()
+        -- other screens (the key map editor, mods) can replace the key table: bind it again now
+        -- and then
         ForkThread(function()
             WaitSeconds(3)
             BindKey()
-            WaitSeconds(10)
-            BindKey()
+            while true do
+                WaitSeconds(30)
+                BindKey()
+            end
         end)
     end
     pcall(function() import('/lua/ui/game/gamemain.lua').AddBeatFunction(OnBeat) end)

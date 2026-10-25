@@ -20,6 +20,7 @@ SRC = (ROOT / "crates/cp-core/src/aimod_commander.lua").read_text()
 PANEL = (ROOT / "crates/cp-core/src/aimod_panel.lua").read_text()
 
 UI_HARNESS = r"""
+math.mod = math.mod or math.fmod
 table.getn = table.getn or function(t) return #t end
 Sync = {}
 UI = { beats = {}, texts = {} }
@@ -84,7 +85,10 @@ World = { time = 0, units = {}, orders = {}, nextId = 1, factoryQueue = {}, buil
 Sync = {}
 
 function GetGameTimeSeconds() return World.time end
-function VDist2(x1, z1, x2, z2) return math.sqrt((x1 - x2) ^ 2 + (z1 - z2) ^ 2) end
+function VDist2(x1, z1, x2, z2)
+    if World.boom then error('boom (teste)') end
+    return math.sqrt((x1 - x2) ^ 2 + (z1 - z2) ^ 2)
+end
 World.hills = {}
 function GetTerrainHeight(x, z)
     for _, h in ipairs(World.hills) do
@@ -133,6 +137,7 @@ local UnitMT = { __index = {
     IsDead = function(self) return self.dead end,
     IsBeingBuilt = function(self) return self.building end,
     IsUnitState = function(self, s) return s == 'Attached' and self.attached or false end,
+    IsIdleState = function(self) return not self.busy end,
     GetHealth = function(self) return self.hp end,
     GetMaxHealth = function(self) return self.maxhp end,
     GetBlueprint = function(self) return self.bp end,
@@ -187,7 +192,10 @@ local function brainOf(index, kind, start)
     end
     function b:MakePlatoon() return {} end
     function b:PlatoonExists(p) return p ~= nil end
-    function b:AssignUnitsToPlatoon(p, units) end
+    function b:AssignUnitsToPlatoon(p, units)
+        if p and p.name == 'ArmyPool' then World.pooled = (World.pooled or 0) + #units end
+    end
+    function b:GetPlatoonUniquelyNamed(n) return { name = n } end
     function b:CanBuildStructureAt(id, pos) return true end
     b.SkirmishAISystem = { needs = {} }
     function b.SkirmishAISystem:ResearchNeed(n) table.insert(self.needs, n) end
@@ -210,8 +218,18 @@ function IssueAggressiveMove(units, pos) record('attack', units, pos) end
 function IssueAttack(units, target) record('focus', units, nil, target) end
 function IssueGuard(units, target) record('guard', units, nil, target) end
 function IssueBuildFactory(f, id, n) table.insert(World.factoryQueue, { id = id, n = n }) end
-function IssueTransportLoad(units, transport) World.loads = World.loads + 1 end
-function IssueTransportUnload(transports, pos) World.unload = pos end
+function IssueTransportLoad(units, transport)
+    World.loads = World.loads + 1
+    for _, u in ipairs(units) do u.attached = transport end
+end
+function IssueTransportUnload(transports, pos)
+    World.unload = pos
+    for _, u in ipairs(World.units) do
+        for _, tr in ipairs(transports) do
+            if u.attached == tr then u.attached = false; u.x, u.z = pos[1], pos[3]; World.landed = (World.landed or 0) + 1 end
+        end
+    end
+end
 function IssueRepair(units, target) World.repaired = target end
 
 function Last(u)
@@ -253,7 +271,8 @@ class Scenario:
         for a in armies:
             self.lua.execute(f"CO{a} = coroutine.create(function() CPCommanderRun(ArmyBrains[{a}], {{ArmyBrains[{a}].start[1], 0, ArmyBrains[{a}].start[2]}}) end)")
         self.resume = self.lua.eval(
-            "function(a) local co = _G['CO' .. a] local ok, err = coroutine.resume(co) return ok, err end")
+            "function(a) local co = _G['CO' .. a] if coroutine.status(co) == 'dead' then return true, nil end "
+            "local ok, err = coroutine.resume(co) return ok, err end")
         self.armies = armies
         self.step(0)
 
@@ -341,8 +360,9 @@ def micro_pincer_escort():
     s.step(times=4)
     o = s.last(tanks[0])
     check(o.kind == "attack" and abs(o.pos[1] - 300) < 20, "exército ataca (cenário de micro)")
-    weak = new(2, "MOBILE LAND", tanks[0].x + 3, tanks[0].z, 0.5, {"hp": 40})
-    new(2, "MOBILE LAND", tanks[0].x + 5, tanks[0].z, 0.5)
+    # (enemy units below 1 of power, like scouts, are not worth a focus)
+    weak = new(2, "MOBILE LAND", tanks[0].x + 3, tanks[0].z, 1.5, {"hp": 40})
+    new(2, "MOBILE LAND", tanks[0].x + 5, tanks[0].z, 1.5)
     s.step()
     focused = [t for t in tanks if s.first(t) and s.first(t).kind == "focus" and s.first(t).target.id == weak.id]
     check(len(focused) >= 6, f"foco de fogo na unidade mais fraca ({len(focused)} tanques)")
@@ -478,6 +498,9 @@ def panel():
         maps = { ['/maps/test/test_scenario.lua'] = { games = 2, route = { ['2:2'] = 6 }, hit = { ['1:1'] = 4 }, expand = {} } } }""")
     g = lua.globals()
     g.CPAIPanelInit()
+    check(g.UI.callback is None, "memória espera a simulação começar (não vai durante a montagem da tela)")
+    lua.execute("Sync = {}")
+    g.UI.beats[1]()
     cb = g.UI.callback
     check(cb is not None and cb.Func == "CPAIMemory" and cb.Args.games == 2 and cb.Args.route["2:2"] == 6,
           "memória de partidas anteriores volta para a IA no começo (com as rotas deste mapa)")
@@ -505,6 +528,13 @@ def panel():
     check(m.route["3:3"] is not None and m.route["2:2"] is not None, "rotas do mapa guardadas (antigas e novas)")
     g.CPAIForget()
     check(g.UI.prefs.CPAIMemory is None, "botão esquecer apaga a memória")
+    check(g.UI.callback is not None and g.UI.callback.Func == "CPAIForget", "botão esquecer também zera a IA da partida")
+    # an AI that stops sending its plan (defeated) leaves the panel after about a minute
+    lua.execute("Sync = {}")
+    for _ in range(700):
+        g.UI.beats[1]()
+    texts = [t.text for t in g.UI.texts.values() if t.text and not t.hidden]
+    check(not any("Mr. Cow" in t for t in texts), "IA derrotada sai do painel")
 
 
 def player_model():
@@ -614,6 +644,81 @@ def terrain_losses_research():
     check(not s.W.warn, f"sem erros ({s.W.warn})")
 
 
+def review_fixes():
+    # drop: the group boards, flies, lands next to the island and attacks there
+    s = Scenario(micro="false", air="false", build="false", counter="false", adaptive="false")
+    new = s.new
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    new(2, "STRUCTURE MASSEXTRACTION", 650, 120, 0)
+    tr = new(1, "MOBILE AIR TRANSPORTATION", 55, 55, 0)
+    tanks = [new(1, "MOBILE LAND", 60 + i, 60, 3) for i in range(10)]
+    s.step(times=6)
+    landed = [t for t in tanks if t.x > 550]
+    check(s.W.landed and s.W.landed >= 1 and len(landed) >= 1, f"desembarque: tropa embarca, voa e desce na ilha ({len(landed)} no chão)")
+    o = s.last(landed[0]) if landed else None
+    check(o is not None and o.kind == "attack" and o.pos[1] > 600, "desembarque: quem desceu ataca o alvo da ilha")
+    check(not tr.CPBusy, "transporte fica livre depois do desembarque")
+    check(not s.W.warn, f"sem erros ({s.W.warn})")
+
+    # a lone scout near the base does not pull the army home
+    s = Scenario(micro="false", air="false", build="false", counter="false", adaptive="false")
+    new = s.new
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    new(1, "STRUCTURE MASSEXTRACTION", 150, 50, 0)
+    for i in range(6):
+        new(1, "MOBILE LAND", 100 + i, 100, 3)
+    new(2, "MOBILE LAND", 155, 55, 1)
+    s.step(times=3)
+    st = s.g.CPCommanderState(1)
+    check(st != "defend" and st != "home", f"um batedor sozinho não puxa o exército para casa ({st})")
+
+    # a strong attack: the army goes home and stays there (no back and forth)
+    for i in range(12):
+        new(2, "MOBILE LAND", 150 + i, 60, 5)
+    states = []
+    for _ in range(4):
+        s.step()
+        states.append(s.g.CPCommanderState(1))
+    check(all(x == "home" for x in states), f"ataque forte: exército volta e fica em casa ({states})")
+
+    # bombers pick a new target when theirs is gone
+    s = Scenario(micro="false", build="false", counter="false", adaptive="false")
+    new = s.new
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    a = new(2, "STRUCTURE MASSEXTRACTION", 300, 120, 0)
+    bombers = [new(1, "MOBILE AIR BOMBER", 50 + i, 52, 4) for i in range(3)]
+    s.step(times=2)
+    first = s.first(bombers[0])
+    check(first is not None and abs(first.pos[1] - 300) < 20, "bombardeiros vão ao primeiro alvo")
+    a.dead = True
+    new(2, "STRUCTURE MASSEXTRACTION", 200, 330, 0)
+    s.step(times=3)
+    o = s.first(bombers[0])
+    check(o is not None and abs(o.pos[1] - 200) < 20 and abs(o.pos[3] - 330) < 20,
+          "bombardeiros trocam de alvo quando o antigo some")
+
+    # forget: the in-game model is reset too
+    s = Scenario()
+    s.g.CPAIReceiveMemory(s.lua.table_from({"style": s.lua.table_from({"rush": 0.9, "air": 0.8}), "games": 3}))
+    before = s.g.CPAIModelSummary().style
+    s.g.CPAIForgetModel()
+    after = s.g.CPAIModelSummary().style
+    check(before != "ainda aprendendo" and after == "ainda aprendendo", f"esquecer zera o modelo na partida ({before} -> {after})")
+
+    # repeated errors: the units go back to the game's own AI and the commander stops
+    s = Scenario(micro="false", air="false", build="false", counter="false", adaptive="false")
+    new = s.new
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    for i in range(6):
+        new(1, "MOBILE LAND", 100 + i, 100, 3)
+    s.step(times=2)
+    s.W.boom = True
+    s.step(times=8)
+    s.W.boom = False
+    check((s.W.pooled or 0) >= 6, f"erros repetidos: unidades voltam para a IA original ({s.W.pooled})")
+    check("stopped" in (s.W.warn or ""), "erros repetidos: comandante para e avisa no log")
+
+
 def main() -> int:
     panel()
     terrain_losses_research()
@@ -622,6 +727,7 @@ def main() -> int:
     micro_pincer_escort()
     air_acu_counter_bases()
     drop_team_adaptive_status()
+    review_fixes()
     print("\n" + ("tudo certo" if not fails else f"{len(fails)} falha(s)"))
     return 1 if fails else 0
 

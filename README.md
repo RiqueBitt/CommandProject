@@ -56,14 +56,22 @@ disponível em Sistema → Visual.
   - **economia e mini-bases**: mais engenheiros, expansões espalhadas pelo mapa mais cedo e em
     paralelo, mais extratores ao mesmo tempo;
   - **comandante estratégico** (Lua por cima da IA do motor) que assume exército, frota e aviação:
-    - junta o exército numa emboscada no caminho da base e só ataca com vantagem clara, escolhendo
-      extratores, fábricas e artilharia mal defendidos; recua quando perde e manda feridos para casa;
+    - junta o exército numa emboscada no caminho da base (passagens estreitas, alto do morro, áreas
+      de expansão do mapa) e só ataca com vantagem clara, escolhendo extratores, fábricas e
+      artilharia mal defendidos que dá para alcançar; recua para as próprias torres quando perde,
+      manda feridos para casa e evita os lugares onde vive perdendo tropas;
+    - um ataque de verdade (não um batedor sozinho) faz o exército defender; se o inimigo é forte
+      demais, ele volta para casa e fica lá até dar para lutar;
     - **pinça** (metade vem pelo flanco), **distração** (ataque-relâmpago longe do ataque principal),
       **foco de fogo** na unidade mais fraca, **artilharia** atrás da linha, **escolta** de experimentais;
-    - **aviação**: caças pela superioridade aérea e escolta, bombardeiros onde não há antiaéreo,
-      gunships apoiando o ataque;
+    - **aviação**: caças pela superioridade aérea e escolta, bombardeiros onde não há antiaéreo (e
+      um alvo novo quando o antigo cai), gunships apoiando o ataque e caçando experimentais;
     - **comandante (ACU)** que foge ferido e ajuda a defender no começo;
-    - **desembarques** com transportes em ilhas e extratores fora do alcance por terra;
+    - **desembarques** com transportes em ilhas e extratores fora do alcance por terra: a tropa
+      embarca, voa, desce perto do alvo e luta lá;
+    - **pesquisa e reparos** conforme o seu jogo (antiaéreo contra aviões, escudos contra artilharia
+      e bombardeiros, artilharia de longo alcance contra defesas, antimíssil contra nuke) e
+      engenheiros livres consertando prédios depois da luta;
     - **reconhecimento e contra-produção** (antiaéreo contra aviões, artilharia contra torres, navios
       contra frota);
     - **defesa reativa** (torre ou antiaéreo onde uma expansão é atacada), **posto avançado** com
@@ -80,7 +88,11 @@ disponível em Sistema → Visual.
       atacar. Jogando sozinho, o perfil fica guardado no `Game.prefs` do próprio jogo, por mapa, e a
       IA começa a partida seguinte já preparada (botão "Esquecer o que aprendeu" no painel);
     - **painel "o que a IA está pensando"** dentro do jogo (tecla F4 por padrão ou botão "IA"), só
-      jogando sozinho.
+      jogando sozinho;
+    - **leve e seguro**: uma "foto" do mapa a cada ~2,5 s é compartilhada por todas as IAs (em vez de
+      cada uma consultar o mapa centenas de vezes); se o comandante der erro várias vezes seguidas,
+      ele devolve as unidades para a IA original do jogo e para, então a IA nunca fica pior que a
+      do jogo.
   Montado com os arquivos de IA do seu jogo (inclusive as cópias da expansão, que são as que o jogo usa).
 - **Ação rápida** (`Ctrl+K`): jogar, aplicar, trocar de perfil ou abrir qualquer tela pelo teclado.
 
@@ -342,11 +354,13 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
   conflito (veja Conflitos). Ao começar a partida aparece no alto da tela "trapacas ligadas". Os textos do menu ficam sem acento para não depender da fonte do jogo. As unidades criadas viram invencíveis em até 1 s.
 - **IA que aprende**: a memória entre partidas passa por um comando no `SimCallbacks.lua`, que o
   menu de trapaças também usa; as duas versões levam os mesmos comandos, mas trapaças montadas
-  antes da 0.23.0 não têm o da memória — atualize as trapaças depois de instalar.
+  antes da 0.24.0 não têm todos (memória e "esquecer") — atualize as trapaças depois de instalar.
+  A memória só é gravada depois de 5 minutos de partida, para uma partida abandonada no começo não
+  apagar o que a IA aprendeu.
 - **IA mais esperta** (experimental: confirme no jogo): os ataques "neurais" da IA ficam no executável
-  e não dá para editar; o comandante assume o exército de terra e a frota (a aviação continua com a
-  IA do jogo). Ele consulta as unidades inimigas pelo motor do jogo, o que pode incluir algumas fora
-  da visão da IA.
+  e não dá para editar; o comandante tira as unidades desses ataques e comanda exército, frota e
+  aviação ele mesmo. Ele consulta as unidades inimigas pelo motor do jogo, o que pode incluir algumas
+  fora da visão da IA.
 - **Decorações** são visuais: não bloqueiam a passagem das unidades.
 - **Tropas novas, animações criadas e modelos próprios no jogo** são experimentais: veja a tabela
   em [docs/criacao.md](docs/criacao.md#o-que-é-experimental).
