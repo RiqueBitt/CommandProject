@@ -7,7 +7,7 @@ import type { Terrain } from "../../lib/types";
 import type { Pt } from "../studio/mapEdit";
 import { teamOfSpawn, worldTeams } from "./docs";
 import {
-  BIOME_LABEL, FEATURE_COLOR, generateWorld, LINE_FEATURES, newWorld, reliefImage, SYMMETRY_LABEL, symmetriesFor, walkMask, WORLD_PRESETS,
+  baseWallsOn, BIOME_LABEL, FEATURE_COLOR, generateWorld, LINE_FEATURES, newWorld, reliefImage, SYMMETRY_LABEL, symmetriesFor, walkMask, teamWallsOn, WORLD_PRESETS,
   type Grid, type PropCatalog, type WorldGen, type WorldResult,
 } from "./worldgen";
 
@@ -277,6 +277,8 @@ export default function WorldGenModal(props: Props) {
             <label className="check"><input type="checkbox" checked={wg.paths !== false} disabled={plat} onChange={(e) => set("paths", e.target.checked)} /> Caminhos das bases até o centro e as expansões</label>
             <label className="check" title="Partes íngremes das montanhas e paredões ficam fechadas para as tropas por terra (dá para mudar depois com o pincel de passagem)."><input type="checkbox" checked={wg.blockSteep !== false} onChange={(e) => set("blockSteep", e.target.checked)} /> Montanhas íngremes bloqueiam as tropas</label>
             <label className="check"><input type="checkbox" checked={wg.center !== false} disabled={wg.symmetry === "none"} onChange={(e) => set("center", e.target.checked)} /> Centro disputado (área plana com massa no meio)</label>
+            <label className="check" title="Uma serra alta no meio do mapa (no eixo da simetria) separa os times; as tropas passam pelos vãos (um no centro e outros dos lados). Liga sozinha com mais de 8 jogadores."><input type="checkbox" checked={teamWallsOn(wg)} disabled={plat || wg.symmetry === "none"} onChange={(e) => set("teamWalls", e.target.checked)} /> Cordilheira separando os times (com passagens)</label>
+            <label className="check" title="Serras curtas entre as bases vizinhas, com um vão no meio: as bases não ficam coladas num campo aberto. Liga sozinha com mais de 8 jogadores."><input type="checkbox" checked={baseWallsOn(wg)} disabled={plat} onChange={(e) => set("baseWalls", e.target.checked)} /> Serras entre as bases vizinhas</label>
             <label className="check" title="O chão inteiro ganha as texturas do bioma, a luz e as sombras são refeitas para o relevo novo e as decorações do mapa original saem. Sem isso, o desenho do mapa original aparece por baixo do mundo novo."><input type="checkbox" checked={wg.clearDonor} onChange={(e) => set("clearDonor", e.target.checked)} /> Visual limpo: nada do mapa original por cima (texturas, sombras e decorações) — recomendado</label>
           </section>
         </div>

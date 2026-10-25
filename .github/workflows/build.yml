@@ -57,6 +57,8 @@ jobs:
         run: node --experimental-strip-types tools/test_worldgen.ts
       - name: Gerador de texturas
         run: node --experimental-strip-types tools/test_texgen.ts
+      - name: Cores da Partida grande (times nunca com a mesma cor)
+        run: node --experimental-strip-types tools/test_teamcolors.ts
 
   shaders-dx9:
     needs: test

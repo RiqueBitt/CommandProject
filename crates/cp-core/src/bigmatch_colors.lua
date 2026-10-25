@@ -7,21 +7,22 @@
 do
     local flag = '/textures/ui/common/360/hd/skirmish/teamcolors/tc'
     local extra = {
-        -- primary, icon, secondary, flag
-        { 'FF7a1f4d', 'FFff5fb0', 'FFd9d9d9', '04' }, -- pink
-        { 'FF3d5a0f', 'FF9dff1f', 'FF2b3b76', '07' }, -- lime
-        { 'FF0f4a4a', 'FF1fe0d0', 'FFce9d07', '08' }, -- teal
-        { 'FF0a1640', 'FF4060ff', 'FFa0a0a0', '01' }, -- navy
-        { 'FF4a0f1a', 'FFc0304a', 'FFa3a299', '03' }, -- crimson
-        { 'FFb0b0b0', 'FFffffff', 'FF2b3b76', '06' }, -- white
-        { 'FF6a5410', 'FFffc840', 'FF2b3b76', '09' }, -- gold
-        { 'FF1f4a6a', 'FF6fd0ff', 'FF8d0101', '08' }, -- sky
-        { 'FF5a0f5a', 'FFff40ff', 'FFc1b278', '04' }, -- magenta
-        { 'FF1f5a3d', 'FF60ffb0', 'FF5a10a0', '02' }, -- mint
-        { 'FF3a2410', 'FFb07040', 'FFa0a0a0', '10' }, -- brown
-        { 'FF6a2a1f', 'FFff7f60', 'FF2b3b76', '03' }, -- coral
-        { 'FF3d3060', 'FFb8a0ff', 'FFce9d07', '04' }, -- lavender
-        { 'FF0a0a0a', 'FF505050', 'FFff8000', '06' }, -- black
+        -- primary (paint), icon (minimap and strategic icons), secondary, flag; primaries far
+        -- apart from the game's 10 so two teams never look alike
+        { 'FF9a2a6a', 'FFff5fb0', 'FFd9d9d9', '04' }, -- pink
+        { 'FF5a8a10', 'FFb0ff30', 'FF2b3b76', '07' }, -- lime
+        { 'FF0a6a66', 'FF20f0e0', 'FFce9d07', '08' }, -- turquoise
+        { 'FF2a1a7a', 'FF7060ff', 'FFa0a0a0', '01' }, -- indigo
+        { 'FF6a0a3a', 'FFd0306a', 'FFa3a299', '03' }, -- wine
+        { 'FFd8d8d8', 'FFffffff', 'FF2b3b76', '06' }, -- white
+        { 'FF8a6a00', 'FFffd030', 'FF2b3b76', '09' }, -- gold
+        { 'FF2a6a9a', 'FF70d0ff', 'FF8d0101', '08' }, -- sky
+        { 'FF7a1a7a', 'FFff40ff', 'FFc1b278', '04' }, -- magenta
+        { 'FF2a8a5a', 'FF60ffb0', 'FF5a10a0', '02' }, -- mint
+        { 'FF5a3a1a', 'FFc08040', 'FFa0a0a0', '10' }, -- brown
+        { 'FF9a3a2a', 'FFff8060', 'FF2b3b76', '03' }, -- coral
+        { 'FF6a5a9a', 'FFc0b0ff', 'FFce9d07', '04' }, -- lavender
+        { 'FF0c0c0c', 'FF404040', 'FFff8000', '06' }, -- black
     }
     if GameColors and GameColors.FactionColors and not GameColors.CPExtra then
         GameColors.CPExtra = true

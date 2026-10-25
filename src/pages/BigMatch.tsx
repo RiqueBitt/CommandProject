@@ -5,48 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Empty, Field, Icon, Notice, Switch, TaskProgress } from "../components/ui";
 import { api } from "../lib/api";
 import { load, useStore } from "../lib/store";
+import { assignColors, GAME_COLORS, groupOf, type ColorMode } from "../lib/teamColors";
 import type { MatchMap, MatchOptions, MatchSlot, SlotKind } from "../lib/types";
 
-/** As cores de exército na ordem do jogo: as 10 originais e as 14 que a partida grande acrescenta. */
-export const GAME_COLORS: { hex: string; name: string }[] = [
-  { hex: "#146fcd", name: "Azul" }, { hex: "#1bdd1b", name: "Verde" }, { hex: "#ff2a2a", name: "Vermelho" }, { hex: "#b061fa", name: "Roxo" },
-  { hex: "#a26b25", name: "Bege" }, { hex: "#deddd1", name: "Cinza" }, { hex: "#92b220", name: "Oliva" }, { hex: "#00ffcc", name: "Ciano" },
-  { hex: "#ffe600", name: "Amarelo" }, { hex: "#ff8000", name: "Laranja" }, { hex: "#ff5fb0", name: "Rosa" }, { hex: "#9dff1f", name: "Lima" },
-  { hex: "#1fe0d0", name: "Turquesa" }, { hex: "#4060ff", name: "Marinho" }, { hex: "#c0304a", name: "Carmim" }, { hex: "#ffffff", name: "Branco" },
-  { hex: "#ffc840", name: "Dourado" }, { hex: "#6fd0ff", name: "Celeste" }, { hex: "#ff40ff", name: "Magenta" }, { hex: "#60ffb0", name: "Menta" },
-  { hex: "#b07040", name: "Marrom" }, { hex: "#ff7f60", name: "Coral" }, { hex: "#b8a0ff", name: "Lavanda" }, { hex: "#505050", name: "Preto" },
-];
-type ColorMode = "team" | "player";
 let mapCache: MatchMap[] | null = null;
 
-/** Cor de cada vaga: a escolhida à mão; senão a do time (times diferentes, cores diferentes) ou uma por jogador. */
-function slotColors(slots: MatchSlot[], mode: ColorMode): number[] {
-  const n = GAME_COLORS.length;
-  const manual = new Set(slots.filter((s) => s.kind !== "empty" && s.color >= 0).map((s) => s.color));
-  const out: number[] = new Array(slots.length).fill(0);
-  if (mode === "player") {
-    let next = 0;
-    slots.forEach((s, i) => {
-      if (s.color >= 0) { out[i] = s.color % n; return; }
-      while (manual.has(next % n) && next < n * 2) next++;
-      out[i] = next % n;
-      next++;
-    });
-    return out;
-  }
-  // times em ordem: time 1 → primeira cor livre, time 2 → a seguinte...; sozinhos ganham cores depois
-  const teams = [...new Set(slots.filter((s) => s.kind !== "empty" && s.team > 0).map((s) => s.team))].sort((a, b) => a - b);
-  const teamColor = new Map<number, number>();
-  let next = 0;
-  const take = () => { while (manual.has(next % n) && next < n * 2) next++; return next++ % n; };
-  teams.forEach((t) => teamColor.set(t, take()));
-  slots.forEach((s, i) => {
-    if (s.color >= 0) out[i] = s.color % n;
-    else if (s.team > 0 && teamColor.has(s.team)) out[i] = teamColor.get(s.team)!;
-    else out[i] = s.kind === "empty" ? 0 : take();
-  });
-  return out;
-}
 const FACTIONS = ["Aleatória", "UEF", "Cybran", "Illuminate"];
 const AI_LEVELS = [{ key: "Easy", label: "Fácil" }, { key: "Normal", label: "Normal" }, { key: "Hard", label: "Difícil" }, { key: "Cheat", label: "Trapaceira" }];
 const DEFAULT_OPTIONS: MatchOptions = { victory: "demoralization", unitCap: 500, fog: "explored", speed: "normal", noRush: 0, prebuilt: false, civilians: "enemy" };
@@ -152,7 +115,24 @@ export default function BigMatch() {
   const sum = summary(slots);
   // tantos times quantas bases (24 bases: até 24 times)
   const maxTeam = Math.max(2, slots.length);
-  const colors = useMemo(() => slotColors(slots, colorMode), [slots, colorMode]);
+  const colorPlan = useMemo(() => assignColors(slots, colorMode), [slots, colorMode]);
+  const colors = colorPlan.colors;
+  const error = sum.error ?? colorPlan.error;
+  // cor escolhida à mão: vale para o time inteiro (por time) ou só para a vaga (por jogador)
+  const setColor = (i: number, color: number) => setSlots((list) => list.map((x, j) => {
+    const sameTeam = colorMode === "team" && list[i].team > 0 && x.team === list[i].team;
+    return j === i || sameTeam ? { ...x, color } : x;
+  }));
+  /** quem já usa cada cor (para não repetir em outro time) */
+  const colorOwner = (k: number, i: number) => {
+    const me = colorMode === "team" ? groupOf(slots[i], i) : `p${i}`;
+    for (let j = 0; j < slots.length; j++) {
+      if (slots[j].kind === "empty" || colors[j] !== k) continue;
+      const other = colorMode === "team" ? groupOf(slots[j], j) : `p${j}`;
+      if (other !== me && !(colorMode === "player" && slots[j].team > 0 && slots[j].team === slots[i].team)) return slots[j].team > 0 ? `time ${slots[j].team}` : `base ${j + 1}`;
+    }
+    return null;
+  };
   const teamPresets = [2, 3, 4, 6, 8, 12, 24].filter((n) => n <= slots.length);
   const setSlot = (i: number, patch: Partial<MatchSlot>) => setSlots((list) => list.map((s, j) => {
     if (j === i) return { ...s, ...patch };
@@ -170,7 +150,7 @@ export default function BigMatch() {
   const colorOf = (i: number) => GAME_COLORS[colors[i] ?? 0].hex;
 
   const play = async () => {
-    if (!map || sum.error) return;
+    if (!map || error) return;
     const r = await run("launch", () => api.launchBigMatch({ map: map.path, slots: slots.map((x, i) => ({ ...x, color: colors[i] })), options }), `Abrindo o jogo: ${sum.text} em ${map.name}.`);
     if (r) await refresh();
   };
@@ -233,7 +213,7 @@ export default function BigMatch() {
           {map && (
             <div className="col bm-main" style={{ gap: 16 }}>
               <section className="card pad">
-                <div className="card-title"><Icon name="flag" /><h3>{map.name}</h3><span className={`chip ${sum.error ? "warn" : "ok"}`}>{sum.text}</span></div>
+                <div className="card-title"><Icon name="flag" /><h3>{map.name}</h3><span className={`chip ${error ? "warn" : "ok"}`}>{sum.text}</span></div>
                 <div className="bm-setup">
                   {preview}
                   <div className="col" style={{ gap: 12, flex: 1, minWidth: 240 }}>
@@ -254,7 +234,7 @@ export default function BigMatch() {
                         </select>
                       </div>
                     </Field>
-                    <Field label="Cores" hint={colorMode === "team" ? "Cada time com uma cor (até 24 cores diferentes)." : "Cada jogador com uma cor (24 cores; depois repetem)."}>
+                    <Field label="Cores" hint={colorMode === "team" ? "Cada time com uma cor só dele (até 24 times). A cor escolhida numa vaga vale para o time todo." : "Cada jogador com uma cor; dois times nunca dividem uma cor (com mais de 24 jogadores, a cor fica por time)."}>
                       <div className="seg" role="group" aria-label="Cores">
                         <button type="button" className="btn" aria-pressed={colorMode === "team"} onClick={() => setColorMode("team")}>Por time</button>
                         <button type="button" className="btn" aria-pressed={colorMode === "player"} onClick={() => setColorMode("player")}>Por jogador</button>
@@ -296,10 +276,13 @@ export default function BigMatch() {
                       <select className="select dense" value={s.ai} disabled={s.kind !== "ai"} onChange={(e) => setSlot(i, { ai: e.target.value })} aria-label={`Dificuldade da IA da base ${i + 1}`}>
                         {AI_LEVELS.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
                       </select>
-                      <select className="select dense bm-color" value={s.color} disabled={s.kind === "empty"} onChange={(e) => setSlot(i, { color: Number(e.target.value) })}
+                      <select className="select dense bm-color" value={s.color} disabled={s.kind === "empty"} onChange={(e) => setColor(i, Number(e.target.value))}
                         aria-label={`Cor da base ${i + 1}`} style={{ borderLeft: `6px solid ${colorOf(i)}` }}>
                         <option value={-1}>Auto: {GAME_COLORS[colors[i] ?? 0].name}</option>
-                        {GAME_COLORS.map((c, k) => <option key={k} value={k}>{c.name}</option>)}
+                        {GAME_COLORS.map((c, k) => {
+                          const owner = colorOwner(k, i);
+                          return <option key={k} value={k} disabled={!!owner}>{c.name}{owner ? ` (${owner})` : ""}</option>;
+                        })}
                       </select>
                     </div>
                   ))}
@@ -347,7 +330,7 @@ export default function BigMatch() {
               {sum.players > 8 && <Notice kind="info">O jogo foi feito para até 8 jogadores. Com mais, a partida fica mais pesada (cada IA pensa sozinha) e ainda não foi testada com tantos: se o jogo não abrir ou fechar ao carregar, tente com menos bases ou um limite de unidades menor e me conte quantos jogadores deram certo.</Notice>}
               {busy && <TaskProgress task="apply" label="Preparando a partida…" />}
               <div className="row bm-launch">
-                <span className="grow">{sum.error ? <span className="chip warn"><Icon name="error_outline" size={14} /> {sum.error}</span> : <span className="muted">{sum.text} · {map.name}</span>}</span>
+                <span className="grow">{error ? <span className="chip warn"><Icon name="error_outline" size={14} /> {error}</span> : <span className="muted">{sum.text} · {map.name}</span>}</span>
                 {running && (
                   <button className="btn" onClick={async () => {
                     const n = await run("kill", () => api.killGame(), (k) => (k ? "Jogo fechado." : "O jogo já tinha fechado."));
@@ -356,7 +339,7 @@ export default function BigMatch() {
                     <Icon name="close" /> Fechar o jogo travado
                   </button>
                 )}
-                <button className="btn primary" disabled={!!sum.error || busy || !!running} onClick={() => void play()}>
+                <button className="btn primary" disabled={!!error || busy || !!running} onClick={() => void play()}>
                   <Icon name="play_arrow" /> {busy ? "Abrindo…" : running ? "Jogo aberto" : "Jogar partida grande"}
                 </button>
               </div>

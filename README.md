@@ -99,7 +99,9 @@ disponível em Sistema → Visual.
   Normal, Difícil ou Trapaceira) ou fica vazia, com time e facção à escolha; os times se dividem
   sozinhos pelo lado do mapa ou pela ordem das bases, e clicar numa base da prévia põe você nela.
   Até um time por base (24 bases, até 24 times) e **24 cores de exército** (as 10 do jogo e mais 14
-  só nas partidas grandes): cor por time, por jogador ou escolhida à mão em cada vaga.
+  só nas partidas grandes): cor por time, por jogador ou escolhida à mão em cada vaga — **dois times
+  nunca ficam com a mesma cor** (a cor escolhida numa vaga vale para o time todo, e as cores de outros
+  times aparecem bloqueadas).
   Regras: tipo de vitória, limite de unidades, névoa, velocidade, tempo sem ataques, civis e base
   montada. O lobby do jogo é em Flash e só tem 8 vagas, então o launcher abre o jogo direto na
   partida (`/map` + `/cpmatch`); o mod que faz isso é montado na hora com o `SinglePlayerLaunch.lua`
@@ -180,8 +182,11 @@ disponível em Sistema → Visual.
 - Cada projeto abre numa **aba própria** (várias ao mesmo tempo), com salvamento automático,
   recuperação após fechar sem salvar, **versões**, desfazer/refazer e exportação `.cpproj`.
 - **Gerador de mundos por semente**: montanhas, cordilheiras, lagos, rios, ilhas, cânions,
-  crateras, dunas, florestas, ruínas e destroços, com simetria para 2 a 8 jogadores e passagens
-  automáticas entre as bases. **Massa simétrica** (expansões seguras e disputadas, centro disputado),
+  crateras, dunas, florestas, ruínas e destroços, com simetria para 2 a 32 jogadores e passagens
+  automáticas entre as bases. Nas **partidas grandes** (mais de 8 jogadores) as bases se espalham pelo
+  mapa todo, uma **cordilheira no meio separa os times** (com passagens no centro e dos lados),
+  **serras curtas separam as bases vizinhas** e o mapa ganha mais montanhas — as duas opções também
+  podem ser ligadas ou desligadas em qualquer mapa. **Massa simétrica** (expansões seguras e disputadas, centro disputado),
   paredões que criam gargalos e galeria de variações. Depois de gerar, tudo continua editável.
 - **Validação do mapa** com correção automática: bases na água/declive/isoladas, massa inacessível,
   em declive ou sobreposta, decorações em cima de bases e massa, distâncias e massa desiguais.

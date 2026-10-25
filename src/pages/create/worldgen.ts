@@ -555,6 +555,10 @@ export interface WorldGen {
   paths?: boolean;
   /** montanhas íngremes bloqueadas para as tropas (mapa de passagem) */
   blockSteep?: boolean;
+  /** cordilheira no eixo da simetria separando os times, com passagens (ausente = só nas partidas grandes) */
+  teamWalls?: boolean;
+  /** serras curtas entre as bases vizinhas, com um vão no meio (ausente = só nas partidas grandes) */
+  baseWalls?: boolean;
 }
 
 /** Altura do fundo do abismo (estilo plataformas). */
@@ -883,8 +887,29 @@ export function distAt(g: Grid, dist: Int32Array, p: Pt) {
   return best < 0 ? -1 : best * step;
 }
 
-/** Onde ficam as bases: k pontos na região fundamental, repetidos pela simetria. */
-function placeSpawns(players: number, sym: Symmetry, grid: number, r: () => number): Pt[] {
+/** Distância de um ponto até os eixos da simetria (onde fica a cordilheira entre os times). */
+export function axisDist(sym: Symmetry, G: number, [x, z]: Pt) {
+  switch (sym) {
+    case "mirror-x": return Math.abs(x - G / 2);
+    case "mirror-z": case "rot2": return Math.abs(z - G / 2);
+    case "diag": return Math.abs(x - z) / Math.SQRT2;
+    case "rot4": return Math.min(Math.abs(x - G / 2), Math.abs(z - G / 2));
+    default: return Infinity;
+  }
+}
+
+/** Montanhas entre os times e entre as bases: ligadas por padrão nas partidas grandes. */
+export const teamWallsOn = (wg: Pick<WorldGen, "teamWalls" | "players" | "symmetry" | "style">) =>
+  wg.style !== "platforms" && wg.symmetry !== "none" && (wg.teamWalls ?? wg.players > 8);
+export const baseWallsOn = (wg: Pick<WorldGen, "baseWalls" | "players" | "style">) =>
+  wg.style !== "platforms" && (wg.baseWalls ?? wg.players > 8);
+
+/**
+ * Onde ficam as bases: k pontos na região fundamental, repetidos pela simetria. `spread` (muitas
+ * bases): cada base nova é a mais longe possível das outras (entre vários candidatos), em vez da
+ * primeira que serve; `band`: faixa livre dos dois lados do eixo (para a cordilheira entre os times).
+ */
+function placeSpawns(players: number, sym: Symmetry, grid: number, r: () => number, spread = false, band = 0): Pt[] {
   const G = grid;
   const ops = symmetryOps(sym, G);
   const k = Math.max(1, Math.round(players / ops.length));
@@ -892,6 +917,16 @@ function placeSpawns(players: number, sym: Symmetry, grid: number, r: () => numb
   const inRegion = (p: Pt) => {
     const [x, z] = p, m = 110;
     if (x < m || z < m || x > G - m || z > G - m) return false;
+    if (band > 0) {
+      switch (sym) {
+        case "mirror-x": return x < G / 2 - band;
+        case "mirror-z": return z < G / 2 - band;
+        case "diag": return z > x + band * Math.SQRT2;
+        case "rot2": return z > G / 2 + band;
+        case "rot4": return x < G / 2 - band && z < G / 2 - band;
+        default: return true;
+      }
+    }
     switch (sym) {
       case "mirror-x": return x < G / 2 - 90;
       case "mirror-z": return z < G / 2 - 90;
@@ -901,7 +936,14 @@ function placeSpawns(players: number, sym: Symmetry, grid: number, r: () => numb
       default: return true;
     }
   };
-  if (sym === "none") {
+  /** menor distância de p até as outras bases (e as cópias delas, e as próprias cópias de p) */
+  const gapOf = (p: Pt) => {
+    let d = Infinity;
+    for (const c of canon) for (const o of ops) { const q = o.pt(c); d = Math.min(d, Math.hypot(q[0] - p[0], q[1] - p[1])); }
+    for (const o of ops.slice(1)) { const q = o.pt(p); d = Math.min(d, Math.hypot(q[0] - p[0], q[1] - p[1])); }
+    return d;
+  };
+  if (sym === "none" && !spread) {
     // em volta do centro, distribuídas
     const a0 = r() * Math.PI * 2, rad = G * 0.36;
     for (let i = 0; i < players; i++) {
@@ -910,13 +952,28 @@ function placeSpawns(players: number, sym: Symmetry, grid: number, r: () => numb
     }
     return canon;
   }
+  if (spread) {
+    // a melhor de 40 candidatas (amostragem de Mitchell): as bases se espalham pelo mapa inteiro
+    for (let i = 0; i < k; i++) {
+      let best: Pt | null = null, bestGap = -1;
+      for (let c = 0; c < 40; c++) {
+        let p: Pt | null = null;
+        for (let t = 0; t < 200 && !p; t++) {
+          const q: Pt = [Math.round(80 + r() * (G - 160)), Math.round(80 + r() * (G - 160))];
+          if (inRegion(q)) p = q;
+        }
+        if (!p) continue;
+        const gp = gapOf(p);
+        if (gp > bestGap) { bestGap = gp; best = p; }
+      }
+      if (best) canon.push(best);
+    }
+  }
   for (let tries = 0; canon.length < k && tries < 4000; tries++) {
     const p: Pt = [Math.round(80 + r() * (G - 160)), Math.round(80 + r() * (G - 160))];
     if (!inRegion(p)) continue;
     // longe das outras bases (e das cópias delas)
-    const all = canon.flatMap((c) => ops.map((o) => o.pt(c)));
-    const self = ops.map((o) => o.pt(p)).slice(1);
-    const minD = Math.min(...all.map((c) => Math.hypot(c[0] - p[0], c[1] - p[1])), ...self.map((c) => Math.hypot(c[0] - p[0], c[1] - p[1])));
+    const minD = gapOf(p);
     // com muitas bases a distância mínima encolhe (24 bases não cabem a 300 umas das outras)
     const want = Math.min(300, (G * 0.62) / Math.sqrt(players));
     if (minD < (tries < 2500 ? want : want * 0.66)) continue;
@@ -934,8 +991,17 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
   const r = rng(wg.seed * 7919 + 13);
   const ops = symmetryOps(wg.symmetry, G);
   const notes: string[] = [];
-  const spawns = placeSpawns(wg.players, wg.symmetry, G, r);
+  const big = Math.max(0.6, Math.min(1.4, G / 1024));
+  const walls = teamWallsOn(wg), bWalls = baseWallsOn(wg), crowd = wg.players > 8;
+  // largura da cordilheira entre os times (meia largura) e a faixa sem bases em volta dela
+  const wallR = Math.round(58 * big);
+  const spawns = placeSpawns(wg.players, wg.symmetry, G, r, wg.players > 8 || walls, walls ? wallR + 85 : 0);
   const canonSpawns = spawns.slice(0, Math.max(1, Math.round(wg.players / ops.length)));
+  let gapMin = Infinity;
+  for (let a = 0; a < spawns.length; a++) for (let b = a + 1; b < spawns.length; b++) gapMin = Math.min(gapMin, Math.hypot(spawns[a][0] - spawns[b][0], spawns[a][1] - spawns[b][1]));
+  // área plana da base: menor quando as bases ficam apertadas (sobra chão entre elas)
+  const padR = wg.players > 8 && gapMin < 175 ? Math.max(52, Math.round(gapMin * 0.4)) : 70;
+  if (wg.players > 8 && gapMin < 150) notes.push(`As bases ficaram a ~${Math.round(gapMin)} umas das outras: para ${wg.players} jogadores, um terreno base maior dá mais espaço entre elas.`);
   const features: Feature[] = [];
   const centerOn = wg.center !== false && wg.symmetry !== "none";
   const keep: Pt[] = centerOn ? [...spawns, [G / 2, G / 2]] : spawns;
@@ -977,7 +1043,7 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
       b = [Math.max(20, Math.min(G - 20, b[0])), Math.max(20, Math.min(G - 20, b[1]))];
       const wdt = lerp(width[0], width[1], r());
       const pts = meander(a, b, 9, wdt * (kind === "river" ? 2.4 : 1.2), r);
-      const tooClose = ops.some((o) => pts.some((q) => nearSpawn(o.pt(q), 130 + wdt)));
+      const tooClose = ops.some((o) => pts.some((q) => nearSpawn(o.pt(q), (crowd ? padR + 30 : 130) + wdt)));
       if (tooClose) continue;
       const seed = Math.floor(r() * 1e6), hh = Math.round(lerp(h[0], h[1], r()));
       const done: Pt[][] = [];
@@ -992,8 +1058,110 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
     return false;
   };
 
-  const big = Math.max(0.6, Math.min(1.4, G / 1024));
   const per = (n: number) => Math.max(0, Math.round(n / ops.length));
+  const mh = Math.max(45, wg.mountainHeight);
+  /** linha reta de a até b com pontos a cada ~36 */
+  const straight = (a: Pt, b: Pt): Pt[] => {
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.round(L / 36));
+    return [...Array(n + 1)].map((_, i) => [Math.round(lerp(a[0], b[0], i / n)), Math.round(lerp(a[1], b[1], i / n))] as Pt);
+  };
+  /** forma em linha já pronta, com as cópias da simetria (sem repetir a mesma linha) */
+  const pushLine = (kind: FeatureKind, pts: Pt[], wdt: number, hh: number, rough: number, name: string, copies = true) => {
+    const seed = Math.floor(r() * 1e6);
+    const done: Pt[][] = [];
+    for (const o of copies ? ops : ops.slice(0, 1)) {
+      const tp = pts.map((q) => o.pt(q).map((v) => Math.round(v)) as Pt);
+      const same = (d: Pt[]) => d.length === tp.length && (d.every((q, k) => Math.hypot(q[0] - tp[k][0], q[1] - tp[k][1]) < 4)
+        || d.every((q, k) => Math.hypot(q[0] - tp[tp.length - 1 - k][0], q[1] - tp[tp.length - 1 - k][1]) < 4));
+      if (done.some(same) || features.some((f) => f.kind === kind && same(f.pts))) continue;
+      done.push(tp);
+      features.push({ id: fid(), kind, pts: tp, r: Math.round(wdt), h: Math.round(hh), rough, seed, gen: true, name });
+    }
+  };
+  /** cordilheira nos eixos da simetria: trechos de serra com vãos (passagens) no centro e em pares simétricos */
+  function addTeamWalls() {
+    const c: Pt = [G / 2, G / 2];
+    // eixos como semirretas saindo do centro (todas as semirretas recebem os mesmos vãos)
+    const dirs: Pt[] = wg.symmetry === "mirror-x" ? [[0, 1], [0, -1]]
+      : wg.symmetry === "mirror-z" || wg.symmetry === "rot2" ? [[1, 0], [-1, 0]]
+        : wg.symmetry === "diag" ? [[Math.SQRT1_2, Math.SQRT1_2], [-Math.SQRT1_2, -Math.SQRT1_2]]
+          : [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const L = wg.symmetry === "diag" ? G * Math.SQRT1_2 : G / 2;
+    const gw = Math.round(48 * big), cg = centerOn ? Math.max(gw, 62) : gw;
+    // vãos ao longo de cada semirreta, depois do vão do centro: um a cada ~300 (pelo menos um),
+    // com um pouco de sorte na posição
+    const s0 = cg + wallR, pairs = Math.max(1, Math.floor((L - s0) / 300));
+    const gaps: [number, number][] = [[0, cg]];
+    for (let k = 1; k <= pairs; k++) gaps.push([s0 + ((L - s0) * (k + 0.25 * (r() - 0.5))) / (pairs + 1), gw]);
+    gaps.sort((a, b) => a[0] - b[0]);
+    const hh = mh * lerp(1.3, 1.5, r());
+    for (const d of dirs) {
+      const at = (t: number): Pt => [c[0] + d[0] * t, c[1] + d[1] * t];
+      for (let g0 = 0; g0 < gaps.length; g0++) {
+        // o fim arredondado da serra entra ~0,6 da largura no vão: começa um pouco depois
+        const t0 = gaps[g0][0] + gaps[g0][1] + wallR * 0.6, t1 = g0 + 1 < gaps.length ? gaps[g0 + 1][0] - gaps[g0 + 1][1] - wallR * 0.6 : L + 30;
+        if (t1 - t0 < 40) continue;
+        // a serra vai até a borda (cortada no limite do mapa)
+        const clampP = (p: Pt): Pt => [Math.max(0, Math.min(G, p[0])), Math.max(0, Math.min(G, p[1]))];
+        pushLine("ridge", straight(clampP(at(t0)), clampP(at(t1))), wallR, hh, 0.85, "Cordilheira entre os times", false);
+      }
+      // passagens planas atravessando a serra nos vãos (menos no centro: lá fica o centro disputado)
+      for (const [t] of gaps) {
+        if (t === 0 && centerOn) continue;
+        const p = at(t), nx = -d[1], nz = d[0], w2 = wallR + 34;
+        const a: Pt = [Math.round(p[0] + nx * w2), Math.round(p[1] + nz * w2)], b: Pt = [Math.round(p[0] - nx * w2), Math.round(p[1] - nz * w2)];
+        if (t === 0 && features.some((f) => f.kind === "pass" && f.name === "Passagem na cordilheira" && Math.hypot(f.pts[0][0] - b[0], f.pts[0][1] - b[1]) < 4)) continue;
+        features.push({ id: fid(), kind: "pass", pts: [a, b], r: 30, h: 0, rough: 0, seed: 8, gen: true, name: "Passagem na cordilheira" });
+      }
+    }
+    // morros ao pé da serra (dos dois lados, pelas cópias): a cordilheira não fica um muro reto
+    const foot = Math.round(L / 70);
+    for (let i = 0; i < foot; i++) {
+      const d = dirs[Math.floor(r() * dirs.length)], t = lerp(cg + 40, L - 40, r()), side = r() < 0.5 ? 1 : -1;
+      const rr = lerp(28, 46, r()) * big, off = wallR * lerp(0.7, 1.1, r()) * side;
+      if (gaps.some(([gt, gwid]) => Math.abs(gt - t) < gwid + rr)) continue;
+      const p: Pt = [Math.round(G / 2 + d[0] * t - d[1] * off), Math.round(G / 2 + d[1] * t + d[0] * off)];
+      if (p[0] < rr || p[1] < rr || p[0] > G - rr || p[1] > G - rr) continue;
+      const copies = ops.map((o) => o.pt(p));
+      if (copies.some((q) => spawns.some((sp) => Math.hypot(sp[0] - q[0], sp[1] - q[1]) < padR + rr + 20))) continue;
+      const seed = Math.floor(r() * 1e6), h2 = Math.round(mh * lerp(0.5, 0.8, r()));
+      ops.forEach((o, k) => features.push({ id: fid(), kind: "mountain", pts: [copies[k]], r: Math.round(rr), h: h2, rough: 0.8, seed, m: invert(o.m), gen: true, name: "Pé da cordilheira" }));
+    }
+  }
+  /** serras curtas entre bases vizinhas, de lado a lado da reta entre elas, com um vão no meio */
+  function addBaseWalls() {
+    const all = spawns;
+    const done = new Set<string>();
+    const wr = Math.round(38 * big), gapHalf = Math.round(44 * big);
+    for (const a of canonSpawns) {
+      const near = all.filter((b) => b !== a && Math.hypot(b[0] - a[0], b[1] - a[1]) > 1)
+        .sort((p, q) => Math.hypot(p[0] - a[0], p[1] - a[1]) - Math.hypot(q[0] - a[0], q[1] - a[1])).slice(0, 3);
+      for (const b of near) {
+        const D = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (D < padR * 2 + wr * 2 + 30) continue;
+        const key = [a, b].map((p) => p.join(",")).sort().join("|");
+        if (done.has(key)) continue;
+        done.add(key);
+        const mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        // a cordilheira entre os times já separa quem está do outro lado do eixo
+        if (walls && axisDist(wg.symmetry, G, mid) < wallR + wr + 40) continue;
+        const ux = (b[0] - a[0]) / D, uz = (b[1] - a[1]) / D, vx = -uz, vz = ux;
+        const Lw = Math.min(210 * big, D * 0.7);
+        for (const side of [1, -1]) {
+          const pts: Pt[] = [];
+          for (let t = gapHalf + wr * 0.7; t <= Lw; t += 32) {
+            const p: Pt = [Math.round(mid[0] + vx * t * side), Math.round(mid[1] + vz * t * side)];
+            // longe das bases e dentro do mapa; corta a serra onde ficaria em cima de uma base
+            if (p[0] < 30 || p[1] < 30 || p[0] > G - 30 || p[1] > G - 30) break;
+            if (all.some((sp) => Math.hypot(sp[0] - p[0], sp[1] - p[1]) < padR + wr + 25)) break;
+            if (walls && axisDist(wg.symmetry, G, p) < wallR + wr) break;
+            pts.push(p);
+          }
+          if (pts.length >= 2) pushLine("ridge", pts, wr, mh * lerp(0.9, 1.1, r()), 0.8, "Serra entre bases");
+        }
+      }
+    }
+  }
   const plat = wg.style === "platforms";
   const PH = wg.platformHeight ?? 150;
   const floorY = plat ? abyssFloor(wg, water, hasWater, medianOf(donor)) : -Infinity;
@@ -1068,10 +1236,17 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
     }
     notes.push(`${canonPlat.length * ops.length - (centerOn ? ops.length - 1 : 0)} plataformas e ${done.length} pontes sobre o abismo. Mova as plataformas e redesenhe as pontes (Formas → Ponte) à vontade.`);
   }
+  // cordilheira entre os times: no eixo da simetria, com passagens simétricas (uma no centro)
+  if (walls) addTeamWalls();
+  // serras entre as bases vizinhas (com um vão no meio para as tropas passarem)
+  if (bWalls) addBaseWalls();
   // montanhas e elevações
-  if (!plat) for (let i = 0; i < per(wg.mountains); i++) put("mountain", [70 * big, 130 * big], [wg.mountainHeight * 0.7, wg.mountainHeight * 1.15], 0.8, 150, 40);
-  if (!plat) for (let i = 0; i < per(wg.ridges); i++) putLine("ridge", [34, 55], [wg.mountainHeight * 0.45, wg.mountainHeight * 0.75], 0.8, [220, 420], false);
-  if (!plat) for (let i = 0; i < per(wg.hills); i++) put("hill", [45, 95], [8, 22], 0.6, 110, 10);
+  // partidas grandes: mais montanhas (o mapa não fica um campo aberto), menores e mais perto das bases
+  const many = (n: number) => (crowd ? Math.round(n * Math.min(3, wg.players / 8)) : n);
+  const cs = (d: number) => (crowd ? Math.min(d, padR + 45) : d);
+  if (!plat) for (let i = 0; i < per(many(wg.mountains)); i++) put("mountain", crowd ? [45 * big, 90 * big] : [70 * big, 130 * big], [wg.mountainHeight * 0.7, wg.mountainHeight * 1.15], 0.8, cs(150), 40);
+  if (!plat) for (let i = 0; i < per(many(wg.ridges)); i++) putLine("ridge", [34, 55], [wg.mountainHeight * 0.45, wg.mountainHeight * 0.75], 0.8, crowd ? [140, 300] : [220, 420], false);
+  if (!plat) for (let i = 0; i < per(many(wg.hills)); i++) put("hill", [45, 95], [8, 22], 0.6, cs(110), 10);
   if (!plat) for (let i = 0; i < per(wg.plateaus); i++) put("plateau", [60, 100], [12, 24], 0.5, 140, 30);
   if (!plat) for (let i = 0; i < per(wg.dunes); i++) put("dunes", [110, 190], [4, 9], 0.6, 90, 0);
   // cavidades
@@ -1087,7 +1262,7 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
   if (!plat && !hasWater && (wg.lakes || wg.rivers)) notes.push("Este terreno não tem água: lagos e rios viram vales e leitos secos. Para água de verdade escolha um terreno com água (ex.: Open Palms ou Treallach Island).");
 
   // áreas planas das bases (sempre por último)
-  for (const s of spawns) features.push({ id: fid(), kind: "pad", pts: [s], r: 70, h: 0, rough: 0, seed: 1, gen: true, name: "Base" });
+  for (const s of spawns) features.push({ id: fid(), kind: "pad", pts: [s], r: padR, h: 0, rough: 0, seed: 1, gen: true, name: "Base" });
 
   // relevo, depois garante que todas as bases se alcançam (passagens automáticas)
   const base = baseHeights(g, donor, water, hasWater, wg);
@@ -1187,6 +1362,10 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
     else if (nav.power.some((v) => v)) notes.push("As encostas íngremes ficam fechadas para as tropas por terra (em vermelho no modo Passagem). Ajuste com o pincel de passagem.");
     else nav = null;
   }
+  // avisos repetidos (um por base) viram um só, com a contagem
+  const counted = new Map<string, number>();
+  for (const n of notes) counted.set(n, (counted.get(n) ?? 0) + 1);
+  notes.splice(0, notes.length, ...[...counted].map(([n, c]) => (c > 1 ? `${n} (${c}×)` : n)));
   return { features, spawns, props, heights: H, notes, mass, strategic, paint: paint.power.some((v) => v) ? paint : null, life, nav };
 }
 
@@ -1506,6 +1685,8 @@ function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, 
     const center = buildings.pool.length ? pick(buildings) : wrecks.pool.length ? pick(wrecks) : null;
     if (!center) break;
     const cr = meta(center).r;
+    // longe da própria cópia (no eixo da simetria as duas áreas planas se sobreporiam e o chão sairia torto)
+    if (ops.slice(1).some((o) => { const q = o.pt([x, z]); return Math.hypot(q[0] - x, q[1] - z) < 2 * (cr + 45); })) continue;
     if (!emit(center, x, z, Math.round(r() * 4) * 90, lerp(0.9, 1.1, r()))) continue;
     k++;
     const ring = 5 + Math.floor(r() * 6);

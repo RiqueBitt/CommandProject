@@ -70,5 +70,44 @@ for (const [sym, players] of [["rot2", 2], ["rot4", 4], ["none", 3]] as const) {
   check(low > a.heights.length * 0.2, `abismo em volta ${sym}`);
   console.log("plataformas", sym, "formas", a.features.length, "massa", a.mass.length, "abismo", Math.round((low / a.heights.length) * 100) + "%");
 }
+// partidas grandes: bases espalhadas, cordilheira entre os times com passagens, simetria exata
+import { axisDist } from "../src/pages/create/worldgen.ts";
+for (const [sym, players, G] of [["mirror-x", 24, 1024], ["rot2", 24, 2048], ["rot4", 24, 1024], ["diag", 16, 1024], ["none", 12, 1024]] as const) {
+  const gg = { size: 128, grid: G };
+  const wg = newWorld({ seed: 4321, symmetry: sym, players });
+  const a = generateWorld(gg, donor, 0, false, wg, cat);
+  check(a.spawns.length === players, `partida grande ${sym}: ${a.spawns.length} de ${players} bases`);
+  let gap = Infinity;
+  for (let i = 0; i < a.spawns.length; i++) for (let j = i + 1; j < a.spawns.length; j++) gap = Math.min(gap, Math.hypot(a.spawns[i][0] - a.spawns[j][0], a.spawns[i][1] - a.spawns[j][1]));
+  // espalhadas: perto do máximo que cabe (área por base)
+  const ideal = Math.sqrt((G * G) / players);
+  check(gap > ideal * 0.45, `bases espalhadas ${sym}: ${Math.round(gap)} (ideal ~${Math.round(ideal)})`);
+  const m = walkMask(gg, a.heights, 0, false);
+  const d0 = walkDistances(gg, m, a.spawns[0]);
+  check(a.spawns.every((s) => distAt(gg, d0, s) >= 0), `partida grande: bases alcançáveis ${sym}`);
+  const ops = symmetryOps(sym, G), step = G / 128;
+  let maxd = 0;
+  for (const o of ops.slice(1)) for (let j = 0; j <= 128; j++) for (let i = 0; i <= 128; i++) {
+    const [x, z] = o.pt([i * step, j * step]);
+    maxd = Math.max(maxd, Math.abs(a.heights[j * 129 + i] - a.heights[Math.round(z / step) * 129 + Math.round(x / step)]));
+  }
+  check(maxd < 0.01, `partida grande: relevo simétrico ${sym} (dif ${maxd.toFixed(3)})`);
+  if (sym !== "none") {
+    // a cordilheira fica no eixo, longe das bases, e é alta (a média do eixo fora dos vãos)
+    check(a.features.some((f) => f.name === "Cordilheira entre os times"), `cordilheira entre os times ${sym}`);
+    check(a.features.some((f) => f.name === "Passagem na cordilheira") || wg.center !== false, `passagens na cordilheira ${sym}`);
+    check(a.spawns.every((s) => axisDist(sym, G, s) > 100), `nenhuma base em cima da cordilheira ${sym}`);
+    let onAxis = 0, n = 0, off = 0, no = 0;
+    for (let j = 0; j <= 128; j++) for (let i = 0; i <= 128; i++) {
+      const p: [number, number] = [i * step, j * step], d = axisDist(sym, G, p), y = a.heights[j * 129 + i];
+      if (d < 12) { onAxis += y; n++; } else if (d > 140) { off += y; no++; }
+    }
+    check(onAxis / n > off / no + 15, `cordilheira mais alta que o resto ${sym}: ${(onAxis / n).toFixed(0)} contra ${(off / no).toFixed(0)}`);
+  }
+  // com a opção desligada, nada de cordilheira nem serras
+  const plain = generateWorld(gg, donor, 0, false, { ...wg, teamWalls: false, baseWalls: false }, cat);
+  check(!plain.features.some((f) => f.name === "Cordilheira entre os times" || f.name === "Serra entre bases"), `opções desligadas ${sym}`);
+  console.log("grande", sym, players, "distância mínima", Math.round(gap), "formas", a.features.length, "dif simetria", maxd.toFixed(4));
+}
 console.log(fails ? `${fails} falha(s)` : "worldgen: tudo certo");
 process.exit(fails ? 1 : 0);
