@@ -28,7 +28,7 @@ import { migrateMap, newMapDoc, type MapDoc } from "./docs";
 import { analyzeMap, type Analysis } from "./mapAnalysis";
 import { autoFixMap, checkMap, type MapIssue } from "./mapCheck";
 import {
-  baseHeights, BIOME_LABEL, brushDab, resampleGrid, composeWorld, decodeLayer, encodeDelta, encodeLayer, FEATURE_COLOR, FEATURE_ICON, FEATURE_LABEL, fullCuts, invert,
+  baseHeights, BIOME_LABEL, brushDab, massPads, resampleGrid, composeWorld, decodeLayer, encodeDelta, encodeLayer, FEATURE_COLOR, FEATURE_ICON, FEATURE_LABEL, fullCuts, invert,
   LINE_FEATURES, mapYaw, propCatalog, WORLD_PRESETS, reliefImage, simplex, SYMMETRY_LABEL, symmetryOps,
   type BrushMode, type Feature, type FeatureKind, type Symmetry, type WorldGen, type WorldResult,
 } from "./worldgen";
@@ -255,12 +255,14 @@ export default function MapStudio({ id }: { id: string }) {
   }, [relief3d, doc.sculpt, doc.sculptSize]);
   const layer = liveSculpt ?? sculptLayer;
   const composed = useMemo(() => {
-    if (!featured) return null;
-    if (!layer || hidden.has("grp:sculpt")) return featured;
+    if (!featured || !relief3d) return null;
+    const sculpted = !!layer && !hidden.has("grp:sculpt");
+    if (!sculpted && !edits.mass.length) return featured;
     const out = featured.slice();
-    for (let k = 0; k < out.length; k++) out[k] = Math.max(0, Math.min(511, out[k] + layer[k]));
-    return out;
-  }, [featured, layer, hidden]);
+    if (sculpted) for (let k = 0; k < out.length; k++) out[k] = Math.max(0, Math.min(511, out[k] + layer![k]));
+    // chão plano embaixo da massa (no editor e no jogo: vai junto na camada de relevo)
+    return massPads(relief3d, out, edits.mass, water, hasWater);
+  }, [featured, layer, hidden, edits.mass, relief3d, water, hasWater]);
   const heights = useMemo(() => (relief3d && composed ? applyRelief(relief3d, composed, edits.relief, doc.rugged, water) : null), [relief3d, composed, edits.relief, doc.rugged, water]);
 
   // ------------------------------------------------------------ edição
@@ -749,7 +751,7 @@ export default function MapStudio({ id }: { id: string }) {
     return activeFeatures.filter((f) => LINE_FEATURES.includes(f.kind) && f.pts.length > 1 && (selF.has(f.id) || f.kind === "pass")).map((f) => ({ pts: f.pts, color: selF.has(f.id) ? "#ffd166" : FEATURE_COLOR[f.kind] }));
   }, [activeFeatures, sel]);
 
-  const usesWorld = !!doc.world || activeFeatures.length > 0 || !!doc.sculpt;
+  const usesWorld = !!doc.world || activeFeatures.length > 0 || !!doc.sculpt || edits.mass.length > 0;
   const editsTerrain = edits.relief.length > 0 || doc.rugged || edits.bridges.length > 0 || usesWorld;
   const usePatch = doc.patch || editsTerrain || blank || doc.clean;
   const lobbyName = `[${edits.spawns.length}] ${doc.lobbyName.trim()}`;
@@ -787,7 +789,11 @@ export default function MapStudio({ id }: { id: string }) {
     }
     if (blank && hasWater) s.water_level = water;
     if (usePatch) s.strip_props = doc.strip === "none" ? false : doc.strip;
-    if (props.length) s.props_add = props.map((q) => [q.bp, q.x, q.z, q.yaw, q.scale]);
+    // decorações que ficaram debaixo d'água (relevo mudou depois de colocar) não vão para o jogo
+    const WATER_PROP = /kelp|barge|buoy|water|coral/i;
+    const dry = hasWater && heights && relief3d ? props.filter((q) => WATER_PROP.test(q.bp) || heightAt(relief3d, heights, q.x, q.z) >= water + 0.3) : props;
+    if (dry.length < props.length) s._notes = [`${props.length - dry.length} decoração(ões) debaixo d'água ficaram de fora do mapa (o chão delas está abaixo do nível da água).`];
+    if (dry.length) s.props_add = dry.map((q) => [q.bp, q.x, q.z, q.yaw, q.scale]);
     if (allCuts.length && !doc.clean) s.props_remove = allCuts;
     if (waterNew) s.water_rewrite = true;
     const swaps = Object.entries(reskin).reduce<Record<string, string>>((acc, [oldD, neo]) => {
@@ -805,7 +811,7 @@ export default function MapStudio({ id }: { id: string }) {
     }
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, edits, usePatch, grid, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands, chain, hasWater, water, id]);
+  }, [doc, edits, usePatch, grid, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands, chain, hasWater, water, id, heights, relief3d]);
 
   // ------------------------------------------------------------ ações
   const saveNow = useCallback(async () => {
@@ -878,6 +884,9 @@ export default function MapStudio({ id }: { id: string }) {
     if (genMass && edits.mass.length) {
       replaceMass = await confirmDialog(`O mapa já tem ${edits.mass.length} ponto(s) de massa. Trocar pelos ${res.mass.length} pontos simétricos do gerador?\n\n(Cancelar mantém os seus e soma os novos.)`, "Trocar", "Manter os meus");
     }
+    // escultura feita no mundo anterior: num mundo novo ela cai em lugares aleatórios (afunda
+    // decorações e entorta o chão da massa)
+    const dropSculpt = !!doc.sculpt && await confirmDialog("O relevo do mundo anterior foi esculpido com o pincel. Num mundo novo essas mudanças caem em lugares aleatórios e podem deixar árvores dentro d'água e massa em chão torto.\n\nApagar a escultura antiga?", "Apagar escultura", "Manter");
     p.commit((d) => {
       const props = [...d.edits.props.filter((q) => !q.gen), ...res.props].slice(0, MAX_PROPS);
       const eco = wg.economy === "poor" ? { baseMass: 3, sites: 5, perSite: 2 } : wg.economy === "rich" ? { baseMass: 6, sites: 12, perSite: 4 } : { baseMass: 4, sites: 8, perSite: 3 };
@@ -890,6 +899,7 @@ export default function MapStudio({ id }: { id: string }) {
       const worldPaint = res.paint ? encodePaint(resamplePaint(res.paint, paintSize)) : null;
       return {
         ...d, world: wg, features: [...d.features.filter((f) => !f.gen), ...res.features], economy, minimap, patch: true, paintSize, worldPaint,
+        ...(dropSculpt ? { sculpt: null, sculptSize: 0 } : {}),
         clean: d.base === "blank" || wg.clearDonor !== false, groundBiome: wg.biome, groundTex: wg.biome === d.groundBiome ? d.groundTex : null,
         teams: wg.players % 2 === 0 && wg.symmetry !== "none" ? "2" : "ffa", rugged: wg.edge === "rugged",
         edits: { ...d.edits, spawns: res.spawns, props, mass },

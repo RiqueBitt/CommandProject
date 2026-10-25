@@ -480,13 +480,15 @@ def _hooks(sm, spec, state):
         if spec.get("water_level") is not None:
             # máscara de água do zero (o terreno base pode não ter): define onde é água para o jogo
             import cp_world
-            wd = sm.write_waterdepth_dds_mips(self, spec["water_level"], header=cp_world.dds_header(512, 512, 10))
+            wd = cp_world.waterdepth_dds(self.y, spec["water_level"], self.HW - 1, cp_world.dds_header(512, 512, 10))
             self.raw["waterDepth.dds"] = wd
             self._wd = wd[128:]
             state["water_mask"] = True
         elif spec.get("water_rewrite") and self.raw.get("waterDepth.dds"):
             # a máscara de água acompanha o relevo novo (lagos e rios novos, terra nova)
-            wd = sm.write_waterdepth_dds_mips(self, sm._water_level(self))
+            import cp_world
+            hd = self.raw["waterDepth.dds"][:128]
+            wd = cp_world.waterdepth_dds(self.y, sm._water_level(self), self.HW - 1, hd)
             self.raw["waterDepth.dds"] = wd
             self._wd = wd[128:]
             state["water_mask"] = True

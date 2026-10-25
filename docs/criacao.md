@@ -107,7 +107,13 @@ formas e decorações e a % caminhável. O gerador:
 
 - deixa a área de cada base plana;
 - confere se todas as bases se alcançam a pé e, se alguma ficar isolada, abre passagens;
-- não coloca decorações em cima da massa nem uma em cima da outra.
+- não coloca decorações em cima da massa nem uma em cima da outra;
+- deixa um chão plano embaixo de cada ponto de massa (também na massa colocada à mão), para o
+  extrator não ficar torto nem meio enterrado.
+
+Ao gerar o mapa, decorações que ficaram debaixo d'água (o relevo mudou depois de colocá-las) ficam
+de fora e o aviso diz quantas. A margem da água no jogo segue o relevo ponto a ponto (antes
+aparecia em degraus quadrados).
 
 **Validar** (faixa Jogo) confere o mapa inteiro e roda também antes de gerar (erros graves pedem
 confirmação):

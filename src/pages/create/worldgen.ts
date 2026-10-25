@@ -1305,6 +1305,34 @@ export function decodeLayer(b64: string | null | undefined, n: number): Float32A
   return out;
 }
 
+/**
+ * Chão plano embaixo de cada ponto de massa (o extrator do jogo fica torto e meio enterrado em
+ * chão irregular): disco plano de raio `r` na altura média, com borda suave até `r + fade`.
+ */
+export function massPads(g: Grid, H: Float32Array, mass: Pt[], water: number, hasWater: boolean, r = 6, fade = 6) {
+  if (!mass.length) return H;
+  const s = g.size, w = s + 1, step = g.grid / s;
+  for (const [mx, mz] of mass) {
+    const R = r + fade;
+    const i0 = Math.max(0, Math.floor((mx - R) / step)), i1 = Math.min(s, Math.ceil((mx + R) / step));
+    const j0 = Math.max(0, Math.floor((mz - R) / step)), j1 = Math.min(s, Math.ceil((mz + R) / step));
+    let acc = 0, n = 0;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      if (Math.hypot(i * step - mx, j * step - mz) <= r) { acc += H[j * w + i]; n++; }
+    }
+    if (!n) continue;
+    let y = acc / n;
+    if (hasWater) y = Math.max(y, water + 2);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const d = Math.hypot(i * step - mx, j * step - mz);
+      if (d >= R) continue;
+      const k = j * w + i;
+      H[k] = lerp(H[k], y, smooth(R, r, d));
+    }
+  }
+  return H;
+}
+
 /** Reamostra uma grade (n+1)² para (m+1)² (bilinear): camadas salvas em outra resolução. */
 export function resampleGrid(src: Float32Array, n: number, m: number): Float32Array {
   if (n === m) return src;

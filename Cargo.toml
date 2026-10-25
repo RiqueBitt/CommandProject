@@ -4,7 +4,7 @@ members = ["crates/cp-core", "crates/cp-cli", "crates/cp-server"]
 exclude = ["src-tauri"]
 
 [workspace.package]
-version = "0.15.0"
+version = "0.15.1"
 edition = "2021"
 license = "MIT"
 authors = ["RiqueBitt"]

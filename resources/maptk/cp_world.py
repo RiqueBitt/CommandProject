@@ -198,3 +198,50 @@ def dds_header(w, h, mips):
     hd[84:88] = b"DXT5"
     struct.pack_into("<I", hd, 108, 0x401008)
     return bytes(hd)
+
+
+def waterdepth_dds(height, water, ext, header, size=None):
+    """Máscara de profundidade da água (DXT5, alfa = profundidade) texel a texel, com todos os
+    níveis de mip. A versão do toolkit gravava um valor por bloco de 4×4 texels (8 unidades num
+    mapa 1024), e a margem da água aparecia em degraus quadrados no jogo."""
+    import struct
+
+    def depth_alpha(y):
+        if y >= water:
+            return 0
+        return max(33, min(255, int((water - y) * 40) + 80))
+
+    hw = struct.unpack_from("<I", header, 16)[0] if len(header) >= 128 else 0
+    if size is None:
+        size = hw if hw in (64, 128, 256, 512, 1024, 2048) else 512
+    header = bytearray(header[:128])
+    struct.pack_into("<I", header, 12, size)
+    struct.pack_into("<I", header, 16, size)
+    struct.pack_into("<I", header, 28, size.bit_length())  # níveis de mip até 1×1
+    # nível 0 (size²), amostrado no centro de cada texel
+    A = [depth_alpha(height((i + 0.5) * ext / size, (j + 0.5) * ext / size)) for j in range(size) for i in range(size)]
+    levels = [(size, A)]
+    P = size
+    while P > 1:
+        Q = P // 2
+        prev = levels[-1][1]
+        levels.append((Q, [(prev[(2 * j) * P + 2 * i] + prev[(2 * j) * P + 2 * i + 1] + prev[(2 * j + 1) * P + 2 * i]
+                            + prev[(2 * j + 1) * P + 2 * i + 1] + 2) // 4 for j in range(Q) for i in range(Q)]))
+        P = Q
+    out = bytearray(header[:128])
+    color = struct.pack("<HHI", 0, 0, 0)
+    for P, L in levels:
+        B = max(1, P // 4)
+        for by in range(B):
+            for bx in range(B):
+                vals = [L[min(P - 1, by * 4 + ty) * P + min(P - 1, bx * 4 + tx)] for ty in range(4) for tx in range(4)]
+                a0, a1 = max(vals), min(vals)
+                if a0 == a1:
+                    out += bytes((a0, a1, 0, 0, 0, 0, 0, 0)) + color
+                    continue
+                bits, span = 0, a0 - a1
+                for k, v in enumerate(vals):
+                    q = int(round((a0 - v) * 7 / span))
+                    bits |= (0 if q <= 0 else 1 if q >= 7 else q + 1) << (3 * k)
+                out += bytes((a0, a1)) + bits.to_bytes(6, "little") + color
+    return bytes(out)
