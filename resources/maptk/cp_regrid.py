@@ -397,9 +397,11 @@ def rebuild_terrain(data, height, grid, *, step=4.0, mask_path, margin=0.0, ring
     new_fix = []
     vcum = icum = 0
     blocks = []
+    max_rec = 0
     for r in range(nrec):
         P, V, T = recs[r][0], recs[r][1], recs[r][2]
         vorder, ntris, nodes = build_bvh(P, T)
+        max_rec = max(max_rec, len(vorder))
         base = bvh0 + sum(len(b) for b in blocks)
         nb, nf = _pack_nodes(nodes, base)
         blocks.append(nb)
@@ -481,7 +483,7 @@ def rebuild_terrain(data, height, grid, *, step=4.0, mask_path, margin=0.0, ring
     out += tail
     new_fix += [new_blob + 8, new_blob + 16]
     info = dict(hosts=hosts, host=hosts[0], zones=len(zones), old_mask=old_mask, removed=removed, grid_tris=len(gt),
-                verts=NV, tris=NI // 3, uv_scale=uv_scale, water=water_rec is not None and water_y is not None,
+                verts=NV, tris=NI // 3, max_rec=max_rec, uv_scale=uv_scale, water=water_rec is not None and water_y is not None,
                 ext0=-margin, ext=grid + 2 * margin)
     if log:
         log(f"malha do chão refeita: {len(gt)} triângulos, {max(1, len(zones))} material(is) de chão"
@@ -591,3 +593,24 @@ def regrid_collision(data, height, grid, step=8.0):
             new_fix.append(q)
     new_fix += nf
     return write_bdf(head, sorted(new_fix), [0] * len(sec), out)
+
+
+def mesh_height(height, step):
+    """Altura na superfície da malha nova (a mesma triangulação de `world_mesh`): decorações
+    assentam exatamente no chão que aparece, mesmo onde a malha é mais grossa que o relevo."""
+    def h(x, z):
+        i, j = int(x // step), int(z // step)
+        x0, z0 = i * step, j * step
+        u, w = (x - x0) / step, (z - z0) / step
+        ya, yb = height(x0, z0), height(x0 + step, z0)
+        yc, yd = height(x0, z0 + step), height(x0 + step, z0 + step)
+        if (i + j) % 2:
+            # diagonal b–c
+            if u + w < 1:
+                return ya + (yb - ya) * u + (yc - ya) * w
+            return yd + (yc - yd) * (1 - u) + (yb - yd) * (1 - w)
+        # diagonal a–d
+        if w > u:
+            return ya + (yd - yc) * u + (yc - ya) * w
+        return ya + (yb - ya) * u + (yd - yb) * w
+    return h

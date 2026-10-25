@@ -107,7 +107,7 @@ export function mapYaw(yaw: number, m: [number, number, number, number]) {
 // ------------------------------------------------------------------ formas do terreno
 
 export type FeatureKind = "mountain" | "hill" | "ridge" | "plateau" | "crater" | "lake" | "river" | "canyon" | "dunes" | "island" | "pad" | "pass"
-  | "platform" | "span" | "chasm" | "rift";
+  | "platform" | "span" | "chasm" | "rift" | "trail";
 
 export interface Feature {
   id: string;
@@ -131,19 +131,19 @@ export interface Feature {
 export const FEATURE_LABEL: Record<FeatureKind, string> = {
   mountain: "Montanha", hill: "Colina", ridge: "Cordilheira", plateau: "Planalto", crater: "Cratera", lake: "Lago", river: "Rio",
   canyon: "Cânion", dunes: "Dunas", island: "Ilha", pad: "Área plana", pass: "Passagem",
-  platform: "Plataforma", span: "Ponte", chasm: "Abismo", rift: "Fenda",
+  platform: "Plataforma", span: "Ponte", chasm: "Abismo", rift: "Fenda", trail: "Caminho",
 };
 export const FEATURE_ICON: Record<FeatureKind, string> = {
   mountain: "landscape", hill: "filter_hdr", ridge: "terrain", plateau: "view_agenda", crater: "radio_button_unchecked", lake: "water",
   river: "waves", canyon: "vertical_align_bottom", dunes: "texture", island: "beach_access", pad: "crop_square", pass: "add_road",
-  platform: "layers", span: "straighten", chasm: "blur_circular", rift: "bolt",
+  platform: "layers", span: "straighten", chasm: "blur_circular", rift: "bolt", trail: "hiking",
 };
 export const FEATURE_COLOR: Record<FeatureKind, string> = {
   mountain: "#b08a62", hill: "#e3a857", ridge: "#9c7a5b", plateau: "#d97757", crater: "#a07e6b", lake: "#4fa3e0", river: "#5ab8f0",
   canyon: "#c26b4a", dunes: "#e8c27a", island: "#7bd88f", pad: "#c9d1d9", pass: "#f2b33d",
-  platform: "#8fa3b8", span: "#d9a441", chasm: "#5b4a6b", rift: "#7a5c8f",
+  platform: "#8fa3b8", span: "#d9a441", chasm: "#5b4a6b", rift: "#7a5c8f", trail: "#c8a46a",
 };
-export const LINE_FEATURES: FeatureKind[] = ["ridge", "river", "canyon", "pass", "span", "rift"];
+export const LINE_FEATURES: FeatureKind[] = ["ridge", "river", "canyon", "pass", "span", "rift", "trail"];
 
 /** Largura (horizontal) do paredão de uma plataforma: mais alta = parede mais larga e com mais degraus. */
 export const wallWidth = (f: Pick<Feature, "h">) => 9 + Math.max(0, f.h) * 0.065;
@@ -206,15 +206,21 @@ function minAround(g: Grid, H: Float32Array, cx: number, cz: number, rad: number
 }
 
 const KIND_ORDER: Record<FeatureKind, number> = {
-  dunes: 0, hill: 1, mountain: 2, ridge: 2, island: 2, plateau: 3, platform: 3, crater: 4, canyon: 5, chasm: 5, rift: 5, lake: 6, river: 6, pass: 8, span: 8, pad: 9,
+  dunes: 0, hill: 1, mountain: 2, ridge: 2, island: 2, plateau: 3, platform: 3, crater: 4, canyon: 5, chasm: 5, rift: 5, lake: 6, river: 6, trail: 7, pass: 8, span: 8, pad: 9,
 };
 
 /** Aplica as formas (em ordem: elevações, cavidades, água, passagens e áreas planas). */
 export function applyFeatures(g: Grid, H: Float32Array, features: Feature[], water: number, hasWater: boolean) {
   const s = g.size, w = s + 1, step = g.grid / s;
   const list = [...features].sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
+  let trailsDone = false;
   for (const f of list) {
     if (!f.pts.length || f.r <= 0) continue;
+    if (f.kind === "trail") {
+      // todos os caminhos juntos (o resultado não depende da ordem: simetria exata)
+      if (!trailsDone) { applyTrails(g, H, list.filter((x) => x.kind === "trail"), water, hasWater); trailsDone = true; }
+      continue;
+    }
     const n = simplex(f.seed);
     const [bx0, bx1, bz0, bz1] = featureBox(f);
     const i0 = Math.max(0, Math.ceil(bx0 / step)), i1 = Math.min(s, Math.floor(bx1 / step));
@@ -388,6 +394,101 @@ export function applyFeatures(g: Grid, H: Float32Array, features: Feature[], wat
   return H;
 }
 
+/**
+ * Caminhos: o chão acompanha uma linha suave ao longo do trajeto (aplaina de lado a lado e tira os
+ * solavancos), sem cortar morros inteiros. Feito por trecho (rápido mesmo com trajetos longos).
+ */
+function applyTrails(g: Grid, H: Float32Array, trails: Feature[], water: number, hasWater: boolean) {
+  const s = g.size, w = s + 1, step = g.grid / s;
+  const sumW = new Map<number, [number, number, number]>(); // célula → [Σw, Σw·y, max w]
+  for (const f of trails) {
+    if (f.pts.length < 2 || f.r <= 0) continue;
+    const R = f.r * 1.8;
+    // altura alvo em cada ponto do trajeto: média em volta, suavizada ao longo do caminho
+    let ys = f.pts.map((p) => meanAround(g, H, p[0], p[1], Math.max(step * 1.5, f.r * 1.5)));
+    for (let it = 0; it < 3; it++) ys = ys.map((y, k) => (ys[Math.max(0, k - 1)] + 2 * y + ys[Math.min(ys.length - 1, k + 1)]) / 4);
+    if (hasWater) ys = ys.map((y) => Math.max(y, water + 1.2));
+    // menor distância ao trajeto por célula (só nas células perto de cada trecho)
+    const best = new Map<number, [number, number]>(); // célula → [distância, y alvo]
+    for (let k = 0; k < f.pts.length - 1; k++) {
+      const [ax, az] = f.pts[k], [bx, bz] = f.pts[k + 1];
+      const vx = bx - ax, vz = bz - az, len2 = vx * vx + vz * vz || 1;
+      const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - R) / step)), i1 = Math.min(s, Math.ceil((Math.max(ax, bx) + R) / step));
+      const j0 = Math.max(0, Math.floor((Math.min(az, bz) - R) / step)), j1 = Math.min(s, Math.ceil((Math.max(az, bz) + R) / step));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const x = i * step, z = j * step, idx = j * w + i;
+        const t = Math.max(0, Math.min(1, ((x - ax) * vx + (z - az) * vz) / len2));
+        const d = Math.hypot(x - ax - vx * t, z - az - vz * t);
+        if (d >= R) continue;
+        const cur = best.get(idx);
+        if (!cur || d < cur[0] - 1e-9) best.set(idx, [d, lerp(ys[k], ys[k + 1], t)]);
+      }
+    }
+    for (const [idx, [d, y]] of best) {
+      const wgt = 0.85 * (1 - smooth(f.r, R, d));
+      if (wgt <= 0) continue;
+      const acc = sumW.get(idx) ?? [0, 0, 0];
+      acc[0] += wgt; acc[1] += wgt * y; acc[2] = Math.max(acc[2], wgt);
+      sumW.set(idx, acc);
+    }
+  }
+  for (const [idx, [sw, swy, mw]] of sumW) H[idx] = lerp(H[idx], swy / sw, mw);
+}
+
+/** Limpa a beira da água: poças e ilhotas de poucos metros somem e a margem fica suave. */
+export function cleanShores(g: Grid, H: Float32Array, water: number) {
+  const s = g.size, w = s + 1, step = g.grid / s;
+  const minCells = Math.max(6, Math.round(180 / (step * step)));
+  const seen = new Uint8Array(w * w), stack: number[] = [], comp: number[] = [];
+  for (const wet of [true, false]) {
+    seen.fill(0);
+    for (let k0 = 0; k0 < H.length; k0++) {
+      if (seen[k0] || (H[k0] < water) !== wet) continue;
+      comp.length = 0; stack.push(k0); seen[k0] = 1;
+      let edge = false;
+      while (stack.length) {
+        const k = stack.pop()!, i = k % w, j = (k - i) / w;
+        comp.push(k);
+        if (i === 0 || j === 0 || i === s || j === s) edge = true;
+        for (const q of [i > 0 ? k - 1 : -1, i < s ? k + 1 : -1, j > 0 ? k - w : -1, j < s ? k + w : -1]) {
+          if (q >= 0 && !seen[q] && (H[q] < water) === wet) { seen[q] = 1; stack.push(q); }
+        }
+        if (comp.length > minCells) break;
+      }
+      // continua marcando o resto do componente grande sem mexer nele
+      while (stack.length) { const k = stack.pop()!, i = k % w, j = (k - i) / w; for (const q of [i > 0 ? k - 1 : -1, i < s ? k + 1 : -1, j > 0 ? k - w : -1, j < s ? k + w : -1]) if (q >= 0 && !seen[q] && (H[q] < water) === wet) { seen[q] = 1; stack.push(q); } }
+      if (comp.length <= minCells && !edge) for (const k of comp) H[k] = wet ? water + 0.7 : water - 0.7;
+    }
+  }
+  // margem: média com os vizinhos só na faixa rente à água (tira os dentes da linha d'água)
+  for (let it = 0; it < 2; it++) {
+    const out = H.slice();
+    for (let j = 1; j < s; j++) for (let i = 1; i < s; i++) {
+      const k = j * w + i;
+      if (Math.abs(H[k] - water) > 2.5) continue;
+      out[k] = (H[k] * 4 + H[k - 1] + H[k + 1] + H[k - w] + H[k + w]) / 8;
+    }
+    H.set(out);
+  }
+  return H;
+}
+
+/** Suaviza o relevo (montanhas e morros sem pontas), mais nas partes íngremes. */
+export function softenRelief(g: Grid, H: Float32Array, amount: number) {
+  const s = g.size, w = s + 1;
+  const passes = Math.round(amount * 4);
+  for (let it = 0; it < passes; it++) {
+    const out = H.slice();
+    for (let j = 1; j < s; j++) for (let i = 1; i < s; i++) {
+      const k = j * w + i;
+      const avg = (H[k - 1] + H[k + 1] + H[k - w] + H[k + w]) / 4;
+      out[k] = lerp(H[k], avg, 0.5 * amount + 0.15);
+    }
+    H.set(out);
+  }
+  return H;
+}
+
 // ------------------------------------------------------------------ parâmetros do mundo
 
 export interface WorldGen {
@@ -448,6 +549,12 @@ export interface WorldGen {
   abyss?: "deep" | "water";
   /** céu de outro mapa do jogo (id do mapa); null = o do terreno base; ausente = não mexe */
   sky?: string | null;
+  /** suavidade do relevo (0 a 1): montanhas e margens sem pontas */
+  smooth?: number;
+  /** caminhos de terra ligando as bases às expansões e ao centro */
+  paths?: boolean;
+  /** montanhas íngremes bloqueadas para as tropas (mapa de passagem) */
+  blockSteep?: boolean;
 }
 
 /** Altura do fundo do abismo (estilo plataformas). */
@@ -478,7 +585,7 @@ export const newWorld = (over: Partial<WorldGen> = {}): WorldGen => ({
   blend: 1, elevation: 22, hilliness: 9, scale: 260, mountains: 2, mountainHeight: 55, ridges: 1, hills: 6, plateaus: 1, craters: 0,
   canyons: 0, lakes: 2, rivers: 1, dunes: 0, islands: 0, edge: "mountains", forests: 0.75, rocks: 0.35, structures: 2, wrecks: 0.2,
   clearDonor: true, economy: "normal", biome: "temperate", resources: "generated", expansions: 2, center: true, obstacles: 0,
-  settlements: 3, roads: true, farms: 0.75, detail: 0.6, ...over,
+  settlements: 3, roads: true, farms: 0.75, detail: 0.6, smooth: 0.5, paths: true, blockSteep: true, ...over,
 });
 
 /** simetrias possíveis para um número de jogadores */
@@ -560,6 +667,28 @@ export interface WorldResult {
   paint?: PaintLayer | null;
   /** vilas, estradas e plantações (para a prévia) */
   life?: Life;
+  /** mapa de passagem do gerador (encostas íngremes bloqueadas) */
+  nav?: PaintLayer | null;
+}
+
+/** resolução do mapa de passagem (pontos por lado) */
+export const NAV_N = 256;
+
+/** Bloqueia as encostas mais íngremes que `slope` (altura por unidade), longe do que precisa de caminho. */
+function steepNav(g: Grid, H: Float32Array, features: Feature[], spawns: Pt[], mass: Pt[], slope: number): PaintLayer {
+  const P = newPaint(NAV_N), n = P.n, cs = g.grid / n, hAt = heightReader(g, H);
+  const keep = (x: number, z: number) =>
+    spawns.some((p) => Math.hypot(p[0] - x, p[1] - z) < 90) || mass.some((p) => Math.hypot(p[0] - x, p[1] - z) < 24)
+    || features.some((f) => (f.kind === "pass" || f.kind === "span" || f.kind === "trail") && f.pts.length > 1 && lineDist(f.pts, x, z)[0] < f.r * 2 + 6)
+    || features.some((f) => f.kind === "pad" && Math.hypot(f.pts[0][0] - x, f.pts[0][1] - z) < f.r * 1.3);
+  for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
+    const x = i * cs, z = j * cs, e = cs;
+    const sl = Math.max(Math.abs(hAt(x + e, z) - hAt(x - e, z)), Math.abs(hAt(x, z + e) - hAt(x, z - e))) / (2 * e);
+    if (sl < slope || keep(x, z)) continue;
+    const k = j * (n + 1) + i;
+    P.role[k] = 1; P.power[k] = 255;
+  }
+  return P;
 }
 
 let idSeq = 0;
@@ -577,9 +706,15 @@ export function composeWorld(g: Grid, donor: Float32Array, water: number, hasWat
       rainErode(g, H, wg.seed, water, hasWater);
       symmetrize(g, H, wg.symmetry);
       erode(g, H, 10, 1.6);
+      // versões novas: suavidade e beira da água limpa (mundos antigos continuam iguais)
+      if (wg.smooth !== undefined) {
+        softenRelief(g, H, wg.smooth);
+        if (hasWater) cleanShores(g, H, water);
+        symmetrize(g, H, wg.symmetry);
+      }
     } else symmetrize(g, H, wg.symmetry);
     // bases, passagens, pontes e áreas planas continuam planas depois da erosão
-    const flat = features.filter((f) => f.kind === "pad" || f.kind === "pass" || f.kind === "span");
+    const flat = features.filter((f) => f.kind === "pad" || f.kind === "pass" || f.kind === "span" || f.kind === "trail");
     if (flat.length) applyFeatures(g, H, flat, water, hasWater);
   }
   for (let k = 0; k < H.length; k++) H[k] = Math.max(0, Math.min(511, H[k]));
@@ -678,15 +813,30 @@ export function erode(g: Grid, H: Float32Array, iters: number, talus: number) {
   return H;
 }
 
-/** Caminhável: acima da água e sem paredão (mesma regra do toolkit, na resolução da prévia). */
-export function walkMask(g: Grid, H: Float32Array, water: number, hasWater: boolean, maxSlope = 6, margin = 2) {
+/** Mapa de passagem pintado (papel 1 = bloqueado, 2 = liberado) usado por padrão em `walkMask`. */
+let WALK_NAV: PaintLayer | null = null;
+export function setWalkNav(nav: PaintLayer | null) { WALK_NAV = nav; }
+
+/** papel de passagem pintado no ponto: 0 automático, 1 bloqueado, 2 liberado */
+export function navAt(nav: PaintLayer | null, grid: number, x: number, z: number) {
+  if (!nav) return 0;
+  const i = Math.min(nav.n, Math.max(0, Math.round((x / grid) * nav.n))), j = Math.min(nav.n, Math.max(0, Math.round((z / grid) * nav.n)));
+  const k = j * (nav.n + 1) + i;
+  return nav.power[k] >= 128 ? nav.role[k] : 0;
+}
+
+/** Caminhável: acima da água e sem paredão (mesma regra do toolkit, na resolução da prévia), com o
+ * mapa de passagem pintado por cima (bloqueado/liberado). */
+export function walkMask(g: Grid, H: Float32Array, water: number, hasWater: boolean, maxSlope = 6, margin = 2, nav: PaintLayer | null = WALK_NAV) {
   const s = g.size, w = s + 1, step = g.grid / s;
   const m = new Uint8Array(w * w);
   for (let j = 1; j < s; j++) for (let i = 1; i < s; i++) {
     const k = j * w + i, y = H[k];
     if (hasWater && y <= water + margin) continue;
+    const role = navAt(nav, g.grid, i * step, j * step);
+    if (role === 1) continue;
     const sl = Math.max(Math.abs(H[k + 1] - y), Math.abs(H[k - 1] - y), Math.abs(H[k + w] - y), Math.abs(H[k - w] - y)) / step;
-    if (sl < maxSlope * 0.5) m[k] = 1;
+    if (sl < maxSlope * 0.5 || role === 2) m[k] = 1;
   }
   return m;
 }
@@ -941,7 +1091,7 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
   const base = baseHeights(g, donor, water, hasWater, wg);
   let H = composeWorld(g, donor, water, hasWater, wg, features, base);
   for (let round = 0; round < 6; round++) {
-    const mask = walkMask(g, H, water, hasWater);
+    const mask = walkMask(g, H, water, hasWater, 6, 2, null);
     const d0 = walkDistances(g, mask, spawns[0]);
     const lost = spawns.findIndex((s) => distAt(g, d0, s) < 0);
     if (lost < 0) break;
@@ -972,6 +1122,46 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
   }
   const vAll = villages.flatMap((v) => ops.map((o) => ({ ...v, p: o.pt(v.p) })));
   const roads = wg.roads !== false && villages.length ? planRoads(g, H, water, hasWater, villages, vAll, spawns, r) : [];
+  // caminhos: cada base liga no centro e nas expansões dela (trilhas de terra que seguem o terreno)
+  if (wg.paths !== false && !plat) {
+    const targets: Pt[] = [];
+    if (centerOn) targets.push([G / 2, G / 2]);
+    for (const q of strategic) if (q.kind !== "center") targets.push(q.pos);
+    for (const sp of canonSpawns) {
+      const mine = targets.filter((t) => {
+        const near = spawns.reduce((a, b) => (Math.hypot(b[0] - t[0], b[1] - t[1]) < Math.hypot(a[0] - t[0], a[1] - t[1]) ? b : a), spawns[0]);
+        return (near[0] === sp[0] && near[1] === sp[1]) || (t[0] === G / 2 && t[1] === G / 2);
+      });
+      for (const t of mine.slice(0, 4)) {
+        if (Math.hypot(t[0] - sp[0], t[1] - sp[1]) < 60) continue;
+        const path = roadPath(g, H, water, hasWater, sp, t);
+        if (path) roads.push(path);
+      }
+    }
+  }
+  // estradas e caminhos viram formas "Caminho" (editáveis; o chão delas é pintado de terra)
+  if (roads.length) {
+    const seen: Pt[][] = [];
+    for (const path of roads) for (const o of ops) {
+      // arredonda antes de espelhar/girar (as cópias caem exatamente nos mesmos inteiros)
+      const canon: Pt[] = [];
+      for (const q of path) { const l = canon[canon.length - 1]; if (!l || Math.hypot(q[0] - l[0], q[1] - l[1]) >= 10) canon.push([Math.round(q[0]), Math.round(q[1])]); }
+      const end = path[path.length - 1];
+      canon.push([Math.round(end[0]), Math.round(end[1])]);
+      const tp: Pt[] = canon.map((q) => o.pt(q));
+      if (tp.length < 2) continue;
+      // a mesma estrada (nos dois sentidos), conferida ponto a ponto: duas estradas espelhadas
+      // entre os mesmos lugares ficam as duas (senão a simetria quebra)
+      const mid = (a: Pt[]) => a[Math.floor(a.length / 2)];
+      const same = (a: Pt[]) => a.length === tp.length && Math.hypot(mid(a)[0] - mid(tp)[0], mid(a)[1] - mid(tp)[1]) < 3
+        && ((Math.hypot(a[0][0] - tp[0][0], a[0][1] - tp[0][1]) < 3 && Math.hypot(a[a.length - 1][0] - tp[tp.length - 1][0], a[a.length - 1][1] - tp[tp.length - 1][1]) < 3)
+          || (Math.hypot(a[0][0] - tp[tp.length - 1][0], a[0][1] - tp[tp.length - 1][1]) < 3 && Math.hypot(a[a.length - 1][0] - tp[0][0], a[a.length - 1][1] - tp[0][1]) < 3));
+      if (seen.some(same)) continue;
+      seen.push(tp);
+      features.push({ id: fid(), kind: "trail", pts: tp, r: 5, h: 0, rough: 0, seed: 11, gen: true });
+    }
+    H = composeWorld(g, donor, water, hasWater, wg, features, base);
+  }
   const fields = planFields(g, H, water, hasWater, wg, villages, vAll, spawns, mass, features, ops, r);
   const life = expandLife(G, villages, fields, roads, ops);
   const paint = paintLife(G, life, wg.seed);
@@ -984,7 +1174,18 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
     for (const st of sites) features.push({ id: fid(), kind: "pad", pts: [[Math.round(st.p[0]), Math.round(st.p[1])]], r: Math.round(Math.min(90, st.r)), h: 0, rough: 0, seed: 3, gen: true, name: "Estrutura" });
     H = composeWorld(g, donor, water, hasWater, wg, features, base);
   }
-  return { features, spawns, props, heights: H, notes, mass, strategic, paint: paint.power.some((v) => v) ? paint : null, life };
+  // passagem: partes íngremes fechadas para as tropas (menos perto de bases, massa, passagens,
+  // pontes e caminhos); se isso separar alguma base, fica tudo liberado
+  let nav: PaintLayer | null = null;
+  if (wg.blockSteep !== false && wg.smooth !== undefined) {
+    nav = steepNav(g, H, features, spawns, mass, plat ? 0.9 : 1.15);
+    const m = walkMask(g, H, water, hasWater, 6, 2, nav);
+    const d0 = walkDistances(g, m, spawns[0]);
+    if (spawns.some((sp) => distAt(g, d0, sp) < 0)) { nav = null; notes.push("Algumas montanhas ficariam separando bases: o mapa de passagem ficou todo liberado."); }
+    else if (nav.power.some((v) => v)) notes.push("As encostas íngremes ficam fechadas para as tropas por terra (em vermelho no modo Passagem). Ajuste com o pincel de passagem.");
+    else nav = null;
+  }
+  return { features, spawns, props, heights: H, notes, mass, strategic, paint: paint.power.some((v) => v) ? paint : null, life, nav };
 }
 
 /** Massa simétrica: expansões seguras e disputadas por jogador e o centro, em chão plano, seco e alcançável. */
@@ -992,7 +1193,7 @@ function placeMass(g: Grid, H: Float32Array, water: number, hasWater: boolean, w
   r: () => number, centerOn: boolean, strategic: Strategic[], notes: string[]): Pt[] {
   const G = g.grid, s = g.size, w = s + 1, step = G / s;
   const hAt = (x: number, z: number) => H[Math.max(0, Math.min(s, Math.round(z / step))) * w + Math.max(0, Math.min(s, Math.round(x / step)))];
-  const mask = walkMask(g, H, water, hasWater);
+  const mask = walkMask(g, H, water, hasWater, 6, 2, null);
   const d0 = walkDistances(g, mask, spawns[0]);
   const flat = (p: Pt, rad = 12) => {
     if (p[0] < 30 || p[1] < 30 || p[0] > G - 30 || p[1] > G - 30) return false;
@@ -1862,7 +2063,7 @@ function paintLife(G: number, life: Life, seed: number): PaintLayer {
       put(i, j, role, pw * (d <= core + wob ? 1 : 1 - (d - core - wob) / edge));
     }
   };
-  for (const path of life.roads) for (let k = 0; k < path.length - 1; k++) stroke(path[k], path[k + 1], 3.2, 3, 2, 225);
+  // (estradas e caminhos: formas "Caminho", pintadas no editor a partir da própria forma)
   for (const v of life.villages) {
     // chão batido da vila (manchas) e praça no centro
     const R = v.r;

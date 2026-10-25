@@ -429,6 +429,21 @@ def _clean_spec(spec):
     if (spec.get("clean") or spec.get("flat_base") is not None) and not spec.get("patch"):
         first = next(iter(spec["anchors"].values()))
         spec["patch"] = dict(max_slope=6.0, water_margin=4.0, seed=first, causeways=[])
+    # passagem das tropas pintada no editor (papel 1 = bloqueado, 2 = liberado)
+    nv = spec.get("nav")
+    if nv:
+        import base64
+        n = int(nv["size"])
+        raw = base64.b64decode(nv["data"])
+        if not 16 <= n <= 1024 or len(raw) != (n + 1) ** 2 * 2:
+            raise ValueError("mapa de passagem inválido")
+        m = (n + 1) ** 2
+        spec["nav"] = (n, raw[:m], raw[m:])
+        if not spec.get("patch"):
+            first = next(iter(spec["anchors"].values()))
+            spec["patch"] = dict(max_slope=6.0, water_margin=4.0, seed=first, causeways=[])
+    else:
+        spec.pop("nav", None)
     # céu de outro mapa do jogo (caixa do céu, reflexo e correção de cor)
     sky = spec.get("sky")
     if sky:
@@ -453,6 +468,37 @@ def _hooks(sm, spec, state):
     * malha visual acompanha o relevo esculpido (em mapas de campanha a superfície é uma malha pronta);
     * pontos de massa colocados à mão entram nos marcadores, no chão plano e seco mais próximo."""
     orig_init, orig_set, orig_save = sm.Terrain.__init__, sm.Terrain.set_hfield, sm.make_save
+    orig_mask = sm.dry_gentle_mask
+
+    def dry_gentle_mask(terrain, *a, **k):
+        """navegação: a regra do toolkit (seco e não íngreme) com o que foi pintado por cima"""
+        m = orig_mask(terrain, *a, **k)
+        nav = spec.get("nav")
+        if not nav:
+            return m
+        n, roles, power = nav
+        G = sm.GRID
+        scale = terrain.grid / G
+        wl = spec.get("water_level")
+        wl = wl if wl is not None else sm._water_level(terrain)
+        dry_raw = int((wl + 0.5) * 128)
+        blocked = allowed = 0
+        for z in range(1, G - 1):
+            pj = min(n, round(z * scale / terrain.grid * n)) * (n + 1)
+            for x in range(1, G - 1):
+                k2 = pj + min(n, round(x * scale / terrain.grid * n))
+                if power[k2] < 128:
+                    continue
+                i = z * G + x
+                if roles[k2] == 1:
+                    if m[i]:
+                        m[i] = 0
+                        blocked += 1
+                elif roles[k2] == 2 and not m[i] and terrain.H[z * terrain.HW + x] > dry_raw:
+                    m[i] = 1
+                    allowed += 1
+        emit("progress", message=f"passagem pintada: {blocked} células bloqueadas, {allowed} liberadas")
+        return m
 
     def init(self, *a, **k):
         orig_init(self, *a, **k)
@@ -548,8 +594,14 @@ def _hooks(sm, spec, state):
         if (spec.get("props_add") or spec.get("props_remove") or clear) and terrain.raw.get("mapobjs.win.bdf"):
             import cp_mapobjs
             grid = terrain.grid
-            def height(x, z):
+            def ground(x, z):
                 return terrain.y(min(grid, max(0, x)), min(grid, max(0, z)))
+            # com a malha nova, a altura é a da superfície que aparece (malha mais grossa que o relevo):
+            # nada flutua nem afunda em encostas e bordas
+            height = ground
+            if clean and clean.get("relight") and terrain.raw.get("terrain.win.bdf"):
+                import cp_regrid
+                height = cp_regrid.mesh_height(ground, _mesh_step(grid))
             data, na, nr = cp_mapobjs.edit(terrain.raw["mapobjs.win.bdf"], spec.get("props_add") or [],
                                            spec.get("props_remove") or [], height, clear=clear)
             terrain.raw["mapobjs.win.bdf"] = data
@@ -580,6 +632,7 @@ def _hooks(sm, spec, state):
 
     sm.Terrain.__init__, sm.Terrain.set_hfield, sm.make_save = init, set_hfield, make_save
     sm.package_patched = package_patched
+    sm.dry_gentle_mask = dry_gentle_mask
     # minimapa "natural" (cores do relevo com sombra): entra no lugar da paleta "dark" do toolkit
     orig_dark = getattr(sm, "dark_palette", None)
     if spec.get("minimap") == "natural":
@@ -589,6 +642,7 @@ def _hooks(sm, spec, state):
     def restore():
         sm.Terrain.__init__, sm.Terrain.set_hfield, sm.make_save = orig_init, orig_set, orig_save
         sm.package_patched = orig_pack
+        sm.dry_gentle_mask = orig_mask
         if orig_dark is not None:
             sm.dark_palette = orig_dark
     return restore
@@ -632,6 +686,16 @@ def _existing_textures(sm, grounds):
     return out
 
 
+def _mesh_step(grid):
+    """passo da malha nova do chão: 1 vértice a cada 2 unidades até mapas 1024 (o mesmo detalhe do
+    relevo do editor), 4 nos de 2048"""
+    import os as _os
+    v = _os.environ.get("CP_MESH_STEP")
+    if v:
+        return float(v)
+    return 2.0 if grid <= 512 else 4.0 if grid <= 1024 else 8.0
+
+
 def _clean_visual(sm, spec, state, terrain, new_id):
     """Chão com um conjunto só de texturas e luz refeita para o relevo novo (cp_lighting)."""
     import cp_lighting
@@ -654,7 +718,7 @@ def _clean_visual(sm, spec, state, terrain, new_id):
             import cp_regrid
             import cp_world
             g = terrain.grid
-            step = 2.0 if g <= 512 else 4.0 if g <= 1024 else 8.0
+            step = _mesh_step(g)
             margin = (256.0 if g <= 1024 else 384.0) if clean.get("ring") else 0.0
             inner = lambda x, z: terrain.y(min(g, max(0, x)), min(g, max(0, z)))  # noqa: E731
             height = cp_world.ring_height(inner, g, rise=clean.get("ring_rise", 95.0)) if margin else inner
@@ -680,9 +744,20 @@ def _clean_visual(sm, spec, state, terrain, new_id):
                     state["warnings"].append("a textura das pontes não foi achada no jogo: as pontes usam o chão do bioma")
             path = f"/maps/{new_id}/lighting/cpgrid.dds"
             wpath = f"/maps/{new_id}/{new_id}.waterDepth.dds" if water and terrain.raw.get("waterDepth.dds") else None
-            tb2, info = cp_regrid.rebuild_terrain(tb, height, g, step=step, mask_path=path, margin=margin, ring_step=16.0,
-                                                  zones=zones, zone_t=zone_t,
-                                                  water_y=wl, water_mask_path=wpath, log=lambda m: emit("progress", message=m))
+            ring_step = 16.0
+            for _try in range(3):
+                tb2, info = cp_regrid.rebuild_terrain(tb, height, g, step=step, mask_path=path, margin=margin, ring_step=ring_step,
+                                                      zones=zones, zone_t=zone_t,
+                                                      water_y=wl, water_mask_path=wpath, log=lambda m: emit("progress", message=m))
+                # os mapas do jogo nunca passam de ~61 mil vértices num material: fica abaixo de 65 mil
+                if info.get("max_rec", 0) <= 65000:
+                    break
+                if ring_step < 32:
+                    ring_step = 32.0
+                else:
+                    step *= 2
+                emit("progress", message=f"malha grande demais num material ({info['max_rec']} vértices): refazendo mais leve")
+            state["mesh_step"] = step
             if zones and info["zones"] < len(zones):
                 state["warnings"].append(f"o terreno base só tem {info['zones']} material(is) de mistura: o chão usa {info['zones'] + 1} texturas")
             stem = info["old_mask"].replace("\\", "/").rsplit("/", 1)[-1][:-4] if info["old_mask"] else ""

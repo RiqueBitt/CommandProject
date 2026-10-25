@@ -43,6 +43,7 @@ const SLIDERS: { group: string; icon: string; items: { key: keyof WorldGen; labe
     { key: "hilliness", label: "Ondulação", min: 0, max: 30 },
     { key: "scale", label: "Largura das ondas", min: 100, max: 500, step: 10 },
     { key: "detail", label: "Detalhe fino do chão", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: "smooth", label: "Suavidade (montanhas e margens)", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
   ] },
   { group: "Montanhas", icon: "landscape", items: [
     { key: "mountains", label: "Montanhas", min: 0, max: 10 },
@@ -272,6 +273,8 @@ export default function WorldGenModal(props: Props) {
               </label>
             </div>
             <label className="check"><input type="checkbox" checked={wg.roads !== false} disabled={!(wg.settlements ?? 0)} onChange={(e) => set("roads", e.target.checked)} /> Estradas de terra ligando as vilas às bases</label>
+            <label className="check"><input type="checkbox" checked={wg.paths !== false} disabled={plat} onChange={(e) => set("paths", e.target.checked)} /> Caminhos das bases até o centro e as expansões</label>
+            <label className="check" title="Partes íngremes das montanhas e paredões ficam fechadas para as tropas por terra (dá para mudar depois com o pincel de passagem)."><input type="checkbox" checked={wg.blockSteep !== false} onChange={(e) => set("blockSteep", e.target.checked)} /> Montanhas íngremes bloqueiam as tropas</label>
             <label className="check"><input type="checkbox" checked={wg.center !== false} disabled={wg.symmetry === "none"} onChange={(e) => set("center", e.target.checked)} /> Centro disputado (área plana com massa no meio)</label>
             <label className="check" title="O chão inteiro ganha as texturas do bioma, a luz e as sombras são refeitas para o relevo novo e as decorações do mapa original saem. Sem isso, o desenho do mapa original aparece por baixo do mundo novo."><input type="checkbox" checked={wg.clearDonor} onChange={(e) => set("clearDonor", e.target.checked)} /> Visual limpo: nada do mapa original por cima (texturas, sombras e decorações) — recomendado</label>
           </section>

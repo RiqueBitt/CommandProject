@@ -222,3 +222,27 @@ export function deckLayer(layers: LayerSet[], chosen: string | null | undefined)
   if (chosen) { const hit = layers.find((l) => l.d.toLowerCase() === chosen.toLowerCase()); if (hit) return hit; }
   return layers.filter(isDeckLayer).sort((a, b) => Number(/floor|plate/.test(b.d.toLowerCase())) - Number(/floor|plate/.test(a.d.toLowerCase())) || a.d.length - b.d.length)[0] ?? null;
 }
+
+/** Pintura de terra batida ao longo dos caminhos (formas "Caminho"), na resolução `n`. */
+export function trailPaint(n: number, grid: number, trails: { pts: [number, number][]; r: number }[]): PaintLayer | null {
+  if (!trails.length) return null;
+  const p = newPaint(n), w = n + 1, cs = grid / n;
+  for (const t of trails) {
+    const R = t.r * 1.2;
+    for (let k = 0; k < t.pts.length - 1; k++) {
+      const [ax, az] = t.pts[k], [bx, bz] = t.pts[k + 1];
+      const vx = bx - ax, vz = bz - az, L2 = vx * vx + vz * vz || 1;
+      const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - R) / cs)), i1 = Math.min(n, Math.ceil((Math.max(ax, bx) + R) / cs));
+      const j0 = Math.max(0, Math.floor((Math.min(az, bz) - R) / cs)), j1 = Math.min(n, Math.ceil((Math.max(az, bz) + R) / cs));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const x = i * cs, z = j * cs, q = Math.max(0, Math.min(1, ((x - ax) * vx + (z - az) * vz) / L2));
+        const d = Math.hypot(x - ax - vx * q, z - az - vz * q);
+        if (d >= R) continue;
+        const v = Math.round(225 * (1 - smooth(Math.max(0, Math.min(1, (d - t.r * 0.6) / (R - t.r * 0.6))))));
+        const kk = j * w + i;
+        if (v > p.power[kk]) { p.power[kk] = v; p.role[kk] = 2; }
+      }
+    }
+  }
+  return p;
+}

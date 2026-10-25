@@ -18,7 +18,7 @@ import { useTabs } from "../../lib/tabs";
 import type { CreationMeta, MapAssets, MapBuildResult, MaptkStatus, SkyInfo, Terrain, TerrainPreview } from "../../lib/types";
 import { useProject } from "../../lib/useProject";
 import { GroundPaint, GroundTextures, PropPicker } from "../studio/MapDecor";
-import { biomeChain, combinePaint, deckLayer, decodePaint, encodePaint, groundBaseT, paintDab, paintT, resamplePaint, type PaintLayer } from "../studio/biome";
+import { biomeChain, combinePaint, deckLayer, decodePaint, encodePaint, groundBaseT, paintDab, paintT, resamplePaint, trailPaint, type PaintLayer } from "../studio/biome";
 import { customLayers, customStem, importTexture, isCustomPath, registerCustomTextures, texUrl } from "../studio/customTex";
 import {
   applyRelief, BLANK_BASES, BLANK_LABEL, BLANK_WATER, BLANK_Y, blankSizeOf, cutTester, decodeHeights, decorKind, groundCandidates, groundSpec, heightAt, meanInDisc,
@@ -28,7 +28,7 @@ import { migrateMap, newMapDoc, type MapDoc } from "./docs";
 import { analyzeMap, type Analysis } from "./mapAnalysis";
 import { autoFixMap, checkMap, type MapIssue } from "./mapCheck";
 import {
-  baseHeights, BIOME_LABEL, brushDab, massPads, resampleGrid, composeWorld, decodeLayer, encodeDelta, encodeLayer, FEATURE_COLOR, FEATURE_ICON, FEATURE_LABEL, fullCuts, invert,
+  baseHeights, BIOME_LABEL, brushDab, massPads, NAV_N, navAt, resampleGrid, setWalkNav, composeWorld, decodeLayer, encodeDelta, encodeLayer, FEATURE_COLOR, FEATURE_ICON, FEATURE_LABEL, fullCuts, invert,
   LINE_FEATURES, mapYaw, propCatalog, WORLD_PRESETS, reliefImage, simplex, SYMMETRY_LABEL, symmetryOps,
   type BrushMode, type Feature, type FeatureKind, type Symmetry, type WorldGen, type WorldResult,
 } from "./worldgen";
@@ -38,7 +38,9 @@ const WorldGenModal = lazy(() => import("./WorldGenModal"));
 
 type BrushTool = `b-${BrushMode}`;
 type FeatTool = `f-${FeatureKind}`;
-type Tool = "select" | "orbit" | "spawn" | "mass" | ReliefKind | "bridge" | "decor" | "uncut" | "seed" | "erase" | "paint" | BrushTool | FeatTool;
+type NavTool = "nav-block" | "nav-allow" | "nav-erase";
+type Tool = "select" | "orbit" | "spawn" | "mass" | ReliefKind | "bridge" | "decor" | "uncut" | "seed" | "erase" | "paint" | NavTool | BrushTool | FeatTool;
+const isNav = (t: Tool): t is NavTool => t.startsWith("nav-");
 type M = [number, number, number, number];
 const TEAM_COLORS = ["#5aa9e6", "#e5534b", "#7bd88f", "#c78bff", "#f2b33d", "#ff8fab", "#9be7ff", "#eeeeee"];
 const RELIEF_COLOR: Record<ReliefKind, string> = { hill: "#e3a857", valley: "#4fa3e0", plateau: "#d97757", flatten: "#c9d1d9", ramp: "#f2b33d" };
@@ -62,7 +64,10 @@ type DonorProp = [number, number, number, number, number, number];
 
 const HINT: Record<string, string> = {
   paint: "Pinte o chão com a textura escolhida na aba Chão (praia, grama, terra, rocha, topo). A borracha volta ao automático.",
-  select: "Clique para selecionar (Shift soma à seleção). Arraste um objeto selecionado para movê-lo. Del apaga, Ctrl+D duplica.",
+  "nav-block": "Pinte onde as tropas por terra NÃO passam (vermelho): encostas, montanhas, bordas. Aéreas e navais não mudam.",
+  "nav-allow": "Pinte onde as tropas PASSAM mesmo sendo íngreme (verde): rampas, atalhos.",
+  "nav-erase": "Volta a passagem ao automático (pela inclinação e pela água).",
+  select: "Clique para selecionar (Shift soma; arraste no vazio para selecionar por caixa). Arraste para mover, girar ou mudar o tamanho (W, Q, T). Clique numa decoração do mapa original para editá-la. Del apaga, Ctrl+D duplica.",
   orbit: "Arraste para girar a câmera. Botão do meio move, roda dá zoom.",
   spawn: "Clique para colocar a base inicial de cada jogador (até 8).",
   mass: "Clique para colocar pontos de extração de massa.",
@@ -287,7 +292,21 @@ export default function MapStudio({ id }: { id: string }) {
   const ctxRef = useRef({ tool, radius, strength, heights, composed, relief3d, edits, drag, propBp, density, sizeVar, sel, layer, avoidWater, avoidSteep, doc });
   ctxRef.current = { tool, radius, strength, heights, composed, relief3d, edits, drag, propBp, density, sizeVar, sel, layer, avoidWater, avoidSteep, doc };
   const stroke = useRef<Pt | null>(null);
-  const moving = useRef<{ from: Pt; ids: Sel[]; started: boolean } | null>(null);
+  const moving = useRef<{ from: Pt; ids: Sel[]; started: boolean; center?: Pt; a0?: number; d0?: number } | null>(null);
+  /** modo de transformar a seleção ao arrastar */
+  const [xform, setXform] = useState<"move" | "rotate" | "scale">("move");
+  const xformRef = useRef(xform);
+  xformRef.current = xform;
+  /** seleção por caixa (arrastar no vazio) */
+  const boxing = useRef(false);
+  const shiftDown = useRef(false);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { shiftDown.current = e.shiftKey; };
+    window.addEventListener("keydown", h); window.addEventListener("keyup", h);
+    return () => { window.removeEventListener("keydown", h); window.removeEventListener("keyup", h); };
+  }, []);
+  /** decorações do mapa original que ainda estão no mapa (para adotar com um clique) */
+  const keptRef = useRef<DecorPoint[]>([]);
   const brushState = useRef<{ layer: Float32Array; target: number } | null>(null);
 
   const hAt = (q: Pt) => {
@@ -399,6 +418,87 @@ export default function MapStudio({ id }: { id: string }) {
     };
   };
 
+  /** posição de um item selecionado (para o centro do giro/escala) */
+  const posOf = (d: MapDoc, sId: Sel): Pt | null => {
+    const [k, iS] = sId.split(":");
+    const i = Number(iS), e = d.edits;
+    if (k === "spawn") return e.spawns[i] ?? null;
+    if (k === "mass") return e.mass[i] ?? null;
+    if (k === "prop") return e.props[i] ? [e.props[i].x, e.props[i].z] : null;
+    if (k === "cut") return e.cuts[i] ? [e.cuts[i][0], e.cuts[i][1]] : null;
+    if (k === "feat") {
+      const f = d.features.find((x) => x.id === sId.slice(5));
+      if (!f) return null;
+      const n = f.pts.length;
+      return [f.pts.reduce((a, q) => a + q[0], 0) / n, f.pts.reduce((a, q) => a + q[1], 0) / n];
+    }
+    return null;
+  };
+  const centerOf = (d: MapDoc, ids: Sel[]): Pt => {
+    const pts = ids.map((x) => posOf(d, x)).filter((q): q is Pt => !!q);
+    if (!pts.length) return [grid / 2, grid / 2];
+    return [pts.reduce((a, q) => a + q[0], 0) / pts.length, pts.reduce((a, q) => a + q[1], 0) / pts.length];
+  };
+  /** gira a seleção `deg` graus em volta de `c` (decorações também giram no lugar) */
+  const rotateAll = (d: MapDoc, ids: Sel[], c: Pt, deg: number): MapDoc => {
+    const a = (deg * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
+    const clamp = (v: number) => Math.max(0, Math.min(grid, Math.round(v * 10) / 10));
+    const rot = (q: Pt): Pt => [clamp(c[0] + (q[0] - c[0]) * ca - (q[1] - c[1]) * sa), clamp(c[1] + (q[0] - c[0]) * sa + (q[1] - c[1]) * ca)];
+    const e = d.edits, n = { ...e, spawns: [...e.spawns], mass: [...e.mass], props: [...e.props], cuts: [...e.cuts] };
+    const fids = new Set<string>();
+    for (const sId of ids) {
+      const [k, iS] = sId.split(":");
+      const i = Number(iS);
+      if (k === "spawn" && n.spawns[i]) n.spawns[i] = rot(n.spawns[i]);
+      else if (k === "mass" && n.mass[i]) n.mass[i] = rot(n.mass[i]);
+      else if (k === "prop" && n.props[i]) { const q = n.props[i]; const [x, z] = rot([q.x, q.z]); n.props[i] = { ...q, x, z, yaw: Math.round((((q.yaw + deg) % 360) + 360) % 360), gen: false }; }
+      else if (k === "cut" && n.cuts[i]) { const [x, z, r] = n.cuts[i]; const [nx, nz] = rot([x, z]); n.cuts[i] = [nx, nz, r]; }
+      else if (k === "feat") fids.add(sId.slice(5));
+    }
+    const features = fids.size ? d.features.map((f) => {
+      if (!fids.has(f.id)) return f;
+      const m = f.m ?? [1, 0, 0, 1];
+      // a forma gira junto: matriz do mundo para a forma ganha o giro inverso
+      const m2: [number, number, number, number] = [m[0] * ca - m[1] * sa, m[0] * sa + m[1] * ca, m[2] * ca - m[3] * sa, m[2] * sa + m[3] * ca];
+      return { ...f, pts: f.pts.map((q) => rot(q).map((v) => Math.round(v)) as Pt), m: m2, gen: false };
+    }) : d.features;
+    return { ...d, edits: n, features };
+  };
+  /** muda o tamanho da seleção (decorações: escala; formas: raio); grupos também se espalham */
+  const scaleAll = (d: MapDoc, ids: Sel[], c: Pt, k: number): MapDoc => {
+    const clamp = (v: number) => Math.max(0, Math.min(grid, Math.round(v * 10) / 10));
+    const spread = ids.length > 1;
+    const sp = (q: Pt): Pt => (spread ? [clamp(c[0] + (q[0] - c[0]) * k), clamp(c[1] + (q[1] - c[1]) * k)] : q);
+    const e = d.edits, n = { ...e, spawns: [...e.spawns], mass: [...e.mass], props: [...e.props], cuts: [...e.cuts] };
+    const fids = new Set<string>();
+    for (const sId of ids) {
+      const [kk, iS] = sId.split(":");
+      const i = Number(iS);
+      if (kk === "spawn" && n.spawns[i]) n.spawns[i] = sp(n.spawns[i]);
+      else if (kk === "mass" && n.mass[i]) n.mass[i] = sp(n.mass[i]);
+      else if (kk === "prop" && n.props[i]) { const q = n.props[i]; const [x, z] = sp([q.x, q.z]); n.props[i] = { ...q, x, z, scale: Math.round(Math.max(0.2, Math.min(5, q.scale * k)) * 100) / 100, gen: false }; }
+      else if (kk === "cut" && n.cuts[i]) { const [x, z, r] = n.cuts[i]; const [nx, nz] = sp([x, z]); n.cuts[i] = [nx, nz, Math.max(2, Math.min(300, Math.round(r * k)))]; }
+      else if (kk === "feat") fids.add(sId.slice(5));
+    }
+    const features = fids.size ? d.features.map((f) => (fids.has(f.id)
+      ? { ...f, pts: f.pts.map((q) => sp(q).map((v) => Math.round(v)) as Pt), r: Math.max(4, Math.min(600, Math.round(f.r * k))), gen: false } : f)) : d.features;
+    return { ...d, edits: n, features };
+  };
+  /** itens dentro do retângulo (seleção por caixa) */
+  const inRect = (d: MapDoc, a: Pt, b: Pt): Sel[] => {
+    const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), z0 = Math.min(a[1], b[1]), z1 = Math.max(a[1], b[1]);
+    const inside = (q: Pt) => q[0] >= x0 && q[0] <= x1 && q[1] >= z0 && q[1] <= z1;
+    const hid = new Set(d.layers.hidden), lk = new Set(d.layers.locked);
+    const ok = (sId: Sel) => !lk.has(sId) && !lk.has(groupOf(sId)) && !hid.has(groupOf(sId)) && !hid.has(sId);
+    const out: Sel[] = [];
+    d.edits.spawns.forEach((q, i) => inside(q) && ok(`spawn:${i}`) && out.push(`spawn:${i}`));
+    d.edits.mass.forEach((q, i) => inside(q) && ok(`mass:${i}`) && out.push(`mass:${i}`));
+    d.edits.props.forEach((q, i) => inside([q.x, q.z]) && ok(`prop:${i}`) && out.push(`prop:${i}`));
+    d.edits.cuts.forEach((q, i) => inside([q[0], q[1]]) && ok(`cut:${i}`) && out.push(`cut:${i}`));
+    for (const f of d.features) { const c = posOf(d, `feat:${f.id}`); if (c && inside(c) && ok(`feat:${f.id}`)) out.push(`feat:${f.id}`); }
+    return out;
+  };
+
   const removeSel = (e: Edits, ids: Sel[]): Edits => {
     const drop = (k: string) => new Set(ids.filter((s) => s.startsWith(k + ":")).map((s) => Number(s.split(":")[1])));
     const ds = drop("spawn"), dm = drop("mass"), dp = drop("prop"), db = drop("bridge"), dr = drop("relief"), dc = drop("cut");
@@ -463,9 +563,9 @@ export default function MapStudio({ id }: { id: string }) {
   const newFeatures = (kind: FeatureKind, pts: Pt[]): Feature[] => {
     const { radius: rad, strength: s } = ctxRef.current;
     const seed = Math.floor(Math.random() * 1e6);
-    const h = kind === "lake" || kind === "river" ? Math.max(3, Math.round(s / 3)) : kind === "pass" || kind === "pad" || kind === "span" ? 0 : kind === "dunes" ? Math.max(2, Math.round(s / 3))
+    const h = kind === "lake" || kind === "river" ? Math.max(3, Math.round(s / 3)) : kind === "pass" || kind === "pad" || kind === "span" || kind === "trail" ? 0 : kind === "dunes" ? Math.max(2, Math.round(s / 3))
       : kind === "platform" || kind === "chasm" ? Math.max(40, s * 2) : kind === "rift" ? Math.max(30, Math.round(s * 1.5)) : s;
-    const r = kind === "river" ? Math.max(10, Math.round(rad / 3)) : kind === "pass" ? Math.max(20, Math.round(rad / 2)) : kind === "span" ? Math.max(10, Math.round(rad / 4))
+    const r = kind === "river" ? Math.max(10, Math.round(rad / 3)) : kind === "pass" ? Math.max(20, Math.round(rad / 2)) : kind === "span" ? Math.max(10, Math.round(rad / 4)) : kind === "trail" ? Math.max(4, Math.round(rad / 6))
       : kind === "ridge" || kind === "canyon" || kind === "rift" ? Math.max(18, Math.round(rad / 2)) : rad;
     const out: Feature[] = [];
     for (const o of symOps) {
@@ -503,20 +603,96 @@ export default function MapStudio({ id }: { id: string }) {
     if (t === "select") {
       if (type === "down" && q) {
         const s = ctxRef.current.sel;
-        const hit = pick(q, dc);
-        if (!hit) { setSel(new Set(["map"])); moving.current = null; return; }
+        let hit = pick(q, dc);
+        if (!hit) {
+          // decoração do mapa original: vira uma decoração editável (sai a original, entra a cópia)
+          const kd = keptRef.current.reduce<[number, DecorPoint | null]>((best, k) => { const dd = Math.hypot(k.x - q[0], k.z - q[1]); return dd < best[0] ? [dd, k] : best; }, [10, null])[1];
+          if (kd?.bp && !dc.clean) {
+            const idx = dc.edits.props.length;
+            if (idx < MAX_PROPS) {
+              p.commit((d0) => ({ ...d0, edits: { ...d0.edits, cuts: [...d0.edits.cuts, [round1(kd.x), round1(kd.z), 1.2] as [number, number, number]],
+                props: [...d0.edits.props, { bp: kd.bp!, x: round1(kd.x), z: round1(kd.z), yaw: Math.round(kd.yaw), scale: Math.round(kd.scale * 100) / 100 }] } }));
+              hit = `prop:${idx}`;
+              setSel(new Set([hit]));
+              toast("info", "Decoração do mapa original agora é editável (mover, girar, escala). Ctrl+Z desfaz.");
+              moving.current = { from: q, ids: [hit], started: true };
+              return;
+            }
+          }
+          // vazio: seleção por caixa
+          if (!shiftDown.current) setSel(new Set(["map"]));
+          moving.current = null;
+          boxing.current = true;
+          setDrag({ a: q, b: q });
+          return;
+        }
         const lk = new Set(dc.layers.locked);
-        const ids = s.has(hit) ? [...s].filter((x) => x !== "map" && !lk.has(x) && !lk.has(groupOf(x))) : [hit];
-        if (!s.has(hit)) setSel(new Set([hit]));
-        moving.current = { from: q, ids, started: false };
+        let ids = s.has(hit) ? [...s].filter((x) => x !== "map" && !lk.has(x) && !lk.has(groupOf(x))) : [hit];
+        if (shiftDown.current && !s.has(hit)) { ids = [...[...s].filter((x) => x !== "map"), hit]; setSel(new Set(ids)); }
+        else if (!s.has(hit)) setSel(new Set([hit]));
+        const center = centerOf(dc, ids);
+        moving.current = { from: q, ids, started: false, center, a0: Math.atan2(q[1] - center[1], q[0] - center[0]), d0: Math.max(4, Math.hypot(q[0] - center[0], q[1] - center[1])) };
+      } else if (type === "move" && q && boxing.current && d) {
+        setDrag({ ...d, b: q });
       } else if (type === "move" && q && moving.current) {
         const m = moving.current;
-        const dx = q[0] - m.from[0], dz = q[1] - m.from[1];
-        if (Math.hypot(dx, dz) < 1) return;
-        // o primeiro passo do arrasto entra no histórico; o resto continua o mesmo passo
-        moving.current = { ...m, from: q, started: true };
-        (m.started ? p.amend : p.commit)((doc0) => moveAll(doc0, m.ids, dx, dz));
-      } else if (type === "up") moving.current = null;
+        const mode = xformRef.current;
+        if (mode === "move") {
+          const dx = q[0] - m.from[0], dz = q[1] - m.from[1];
+          if (Math.hypot(dx, dz) < 1) return;
+          // o primeiro passo do arrasto entra no histórico; o resto continua o mesmo passo
+          moving.current = { ...m, from: q, started: true };
+          (m.started ? p.amend : p.commit)((doc0) => moveAll(doc0, m.ids, dx, dz));
+        } else if (mode === "rotate" && m.center && m.a0 !== undefined) {
+          const a = Math.atan2(q[1] - m.center[1], q[0] - m.center[0]);
+          let deg = ((a - m.a0) * 180) / Math.PI;
+          if (Math.abs(deg) < 2) return;
+          if (shiftDown.current) deg = Math.round(deg / 15) * 15;
+          if (!deg) return;
+          moving.current = { ...m, a0: m.a0 + (deg * Math.PI) / 180, started: true };
+          (m.started ? p.amend : p.commit)((doc0) => rotateAll(doc0, m.ids, m.center!, deg));
+        } else if (mode === "scale" && m.center && m.d0) {
+          const dd = Math.max(2, Math.hypot(q[0] - m.center[0], q[1] - m.center[1]));
+          const k = dd / m.d0;
+          if (Math.abs(k - 1) < 0.03) return;
+          moving.current = { ...m, d0: dd, started: true };
+          (m.started ? p.amend : p.commit)((doc0) => scaleAll(doc0, m.ids, m.center!, k));
+        }
+      } else if (type === "up") {
+        if (boxing.current && d) {
+          const found = Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]) > 4 ? inRect(dc, d.a, d.b) : [];
+          const prev = shiftDown.current ? [...ctxRef.current.sel].filter((x) => x !== "map") : [];
+          const all = [...new Set([...prev, ...found])];
+          setSel(new Set(all.length ? all : ["map"]));
+          setDrag(null);
+        }
+        boxing.current = false;
+        moving.current = null;
+      }
+      return;
+    }
+    // pincel de passagem das tropas
+    if (isNav(t)) {
+      const r = ctxRef.current.relief3d;
+      if (!r) return;
+      if (type === "up" || !q) {
+        if (liveNav.current) {
+          const enc = encodePaint(liveNav.current);
+          liveNav.current = null;
+          p.commit((d0) => ({ ...d0, nav: enc }));
+        }
+        stroke.current = null;
+        return;
+      }
+      if (type === "down") { liveNav.current = decodePaint(ctxRef.current.doc.nav, NAV_N); stroke.current = null; }
+      const ln = liveNav.current;
+      if (!ln) return;
+      if (stroke.current && Math.hypot(q[0] - stroke.current[0], q[1] - stroke.current[1]) < rad * 0.25) return;
+      stroke.current = q;
+      let ch = false;
+      const role = t === "nav-block" ? 1 : t === "nav-allow" ? 2 : -1;
+      for (const mq of mirrors(q)) ch = paintDab(ln, r.grid, mq.p[0], mq.p[1], rad, role, 1) || ch;
+      if (ch) setNavRev((v) => v + 1);
       return;
     }
     // pincel de textura
@@ -699,7 +875,40 @@ export default function MapStudio({ id }: { id: string }) {
   const livePaint = useRef<PaintLayer | null>(null);
   const [paintRev, setPaintRev] = useState(0);
   const paintNow = livePaint.current ?? paintSaved;
-  const worldPaint = useMemo(() => (doc.worldPaint ? decodePaint(doc.worldPaint, doc.paintSize || 256) : null), [doc.worldPaint, doc.paintSize]);
+  // passagem das tropas: a do gerador por baixo, a pintada à mão por cima
+  const [showPass, setShowPass] = useState(false);
+  const liveNav = useRef<PaintLayer | null>(null);
+  const [navRev, setNavRev] = useState(0);
+  const navUser = useMemo(() => decodePaint(doc.nav, NAV_N), [doc.nav]);
+  const navWorld = useMemo(() => (doc.worldNav ? decodePaint(doc.worldNav, NAV_N) : null), [doc.worldNav]);
+  const navNow = useMemo(() => {
+    const c = combinePaint(navWorld, liveNav.current ?? navUser);
+    return c.power.some((v) => v) ? c : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navWorld, navUser, navRev]);
+  // validação, análise e prévia do gerador passam a respeitar o que foi pintado
+  setWalkNav(navNow);
+  const passCodes = useMemo(() => {
+    if (!(showPass || isNav(tool)) || !relief3d || !heights) return null;
+    const s = relief3d.size, w = s + 1, st = relief3d.grid / s, out = new Uint8Array(w * w);
+    for (let j = 0; j <= s; j++) for (let i = 0; i <= s; i++) {
+      const k = j * w + i, y = heights[k];
+      const role = navAt(navNow, relief3d.grid, i * st, j * st);
+      if (role === 1) { out[k] = 2; continue; }
+      if (role === 2) { out[k] = 3; continue; }
+      const sl = Math.max(Math.abs(heights[j * w + Math.min(s, i + 1)] - y), Math.abs(heights[j * w + Math.max(0, i - 1)] - y), Math.abs(heights[Math.min(s, j + 1) * w + i] - y), Math.abs(heights[Math.max(0, j - 1) * w + i] - y)) / st;
+      if ((hasWater && y <= water + doc.waterMargin) || sl >= doc.maxSlope * 0.5) out[k] = 1;
+    }
+    return out;
+  }, [showPass, tool, relief3d, heights, navNow, hasWater, water, doc.waterMargin, doc.maxSlope]);
+  // pintura de baixo: a do gerador + a terra batida dos caminhos (segue as formas "Caminho")
+  const trails = useMemo(() => activeFeatures.filter((f) => f.kind === "trail" && f.pts.length > 1), [activeFeatures]);
+  const worldPaint = useMemo(() => {
+    const n = doc.paintSize || 256;
+    const wp = doc.worldPaint ? decodePaint(doc.worldPaint, n) : null;
+    const tp = trailPaint(n, grid, trails.map((f) => ({ pts: f.pts, r: f.r })));
+    return tp ? combinePaint(wp, tp) : wp;
+  }, [doc.worldPaint, doc.paintSize, trails, grid]);
   // t automático (caro: ruído em cada ponto) só muda com o relevo; o pincel vai por cima a cada pincelada
   const baseT = useMemo(() => (doc.clean && relief3d && heights ? groundBaseT(relief3d.size, relief3d.grid, heights, hasWater ? water : null, 1337, doc.peaks !== false) : null),
     [doc.clean, relief3d, heights, hasWater, water, doc.peaks]);
@@ -752,6 +961,7 @@ export default function MapStudio({ id }: { id: string }) {
     }
     return [out, removed] as const;
   }, [donor, allCuts, doc.clean]);
+  keptRef.current = showDecor && !hidden.has("grp:prop") ? kept : [];
   const decor = useMemo(() => (showDecor && !hidden.has("grp:prop") ? kept.concat(edits.props.map((q) => ({ x: q.x, z: q.z, yaw: q.yaw, scale: q.scale, kind: decorKind(q.bp), bp: q.bp, added: true }))) : []), [kept, edits.props, showDecor, hidden]);
 
   const teamOf = useCallback((i: number) => (doc.teams === "ffa" ? i : i < Math.ceil(edits.spawns.length / 2) ? 0 : 1), [doc.teams, edits.spawns.length]);
@@ -810,7 +1020,7 @@ export default function MapStudio({ id }: { id: string }) {
       const ch = chain.map((l) => (l ? { d: l.d, ...(l.n ? { n: l.n } : {}), ...(l.s ? { s: l.s } : {}) } : null));
       const full = ch.every(Boolean) ? (ch as { d: string }[]) : null;
       const n = doc.paintSize || 256;
-      const enc = encodePaint(combinePaint(doc.worldPaint ? decodePaint(doc.worldPaint, n) : null, decodePaint(doc.paint, n)));
+      const enc = encodePaint(combinePaint(worldPaint, decodePaint(doc.paint, n)));
       s.clean = {
         ground: full ? [full[1], ...groundSpec(cleanCands)] : groundSpec(cleanCands), relight: true, clear_props: true,
         ...(full ? { chain: full } : {}), ring: doc.ring !== false, ring_rise: doc.ringRise ?? 95, peaks: doc.peaks !== false,
@@ -820,6 +1030,7 @@ export default function MapStudio({ id }: { id: string }) {
     }
     if (blank && hasWater) s.water_level = water;
     if (skyNow) s.sky = { env: skyNow.env, sky: skyNow.sky, sight: skyNow.sight, fog: skyNow.fog };
+    if (navNow) s.nav = { size: NAV_N, data: encodePaint(navNow) };
     if (usePatch) s.strip_props = doc.strip === "none" ? false : doc.strip;
     // decorações que ficaram debaixo d'água (relevo mudou depois de colocar) não vão para o jogo
     const WATER_PROP = /kelp|barge|buoy|water|coral/i;
@@ -843,7 +1054,7 @@ export default function MapStudio({ id }: { id: string }) {
     }
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, edits, usePatch, grid, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands, chain, hasWater, water, id, heights, relief3d, skyNow, deck, deckSegs]);
+  }, [doc, edits, usePatch, grid, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands, chain, hasWater, water, id, heights, relief3d, skyNow, deck, deckSegs, worldPaint, navNow]);
 
   // ------------------------------------------------------------ ações
   const saveNow = useCallback(async () => {
@@ -933,7 +1144,7 @@ export default function MapStudio({ id }: { id: string }) {
         ...d, world: wg, features: [...d.features.filter((f) => !f.gen), ...res.features], economy, minimap, patch: true, paintSize, worldPaint,
         ...(dropSculpt ? { sculpt: null, sculptSize: 0 } : {}),
         clean: d.base === "blank" || wg.clearDonor !== false, groundBiome: wg.biome, peaks: wg.style !== "platforms",
-        ringRise: wg.style === "platforms" ? 0 : 95,
+        ringRise: wg.style === "platforms" ? 0 : 95, worldNav: res.nav ? encodePaint(res.nav) : null,
         sky: wg.sky !== undefined ? wg.sky : d.sky, groundTex: wg.biome === d.groundBiome ? d.groundTex : null,
         teams: wg.players % 2 === 0 && wg.symmetry !== "none" ? "2" : "ffa", rugged: wg.edge === "rugged",
         edits: { ...d.edits, spawns: res.spawns, props, mass },
@@ -980,6 +1191,12 @@ export default function MapStudio({ id }: { id: string }) {
     return { ...d, layers: { ...d.layers, [key]: [...cur] } };
   });
 
+  /** transforma a seleção pelo teclado */
+  const xformKey = (mode: "move" | "rotate" | "scale", a: number, b = 0) => {
+    const ids = selIds.filter((x) => !isLocked(x));
+    if (!ids.length) return;
+    p.commit((d) => (mode === "move" ? moveAll(d, ids, a, b) : mode === "rotate" ? rotateAll(d, ids, centerOf(d, ids), a) : scaleAll(d, ids, centerOf(d, ids), a)));
+  };
   useHotkeys(active, {
     "ctrl+s": () => void saveNow(),
     "ctrl+z": p.undo,
@@ -988,6 +1205,24 @@ export default function MapStudio({ id }: { id: string }) {
     delete: doDelete,
     backspace: doDelete,
     "ctrl+d": doDuplicate,
+    "ctrl+a": () => setSel(new Set(inRect(doc, [0, 0], [grid, grid]))),
+    ",": () => xformKey("rotate", -15),
+    ".": () => xformKey("rotate", 15),
+    "-": () => xformKey("scale", 1 / 1.1),
+    "=": () => xformKey("scale", 1.1),
+    "+": () => xformKey("scale", 1.1),
+    "shift++": () => xformKey("scale", 1.1),
+    arrowleft: () => xformKey("move", -2, 0),
+    arrowright: () => xformKey("move", 2, 0),
+    arrowup: () => xformKey("move", 0, -2),
+    arrowdown: () => xformKey("move", 0, 2),
+    "shift+arrowleft": () => xformKey("move", -10, 0),
+    "shift+arrowright": () => xformKey("move", 10, 0),
+    "shift+arrowup": () => xformKey("move", 0, -10),
+    "shift+arrowdown": () => xformKey("move", 0, 10),
+    w: () => { setTool("select"); setXform("move"); },
+    q: () => { setTool("select"); setXform("rotate"); },
+    t: () => { setTool("select"); setXform("scale"); },
     escape: () => { setSel(new Set(["map"])); setTool("select"); },
     v: () => setTool("select"),
     c: () => setTool("orbit"),
@@ -1258,8 +1493,8 @@ export default function MapStudio({ id }: { id: string }) {
   if (p.status === "error") return <div className="studio-root"><Empty icon="error" title="Não deu para abrir o projeto">{p.error}</Empty></div>;
 
   const brushTool = isBrush(tool);
-  const circleBrush = (isRelief(tool) && tool !== "ramp") || tool === "uncut" || tool === "paint" || (tool === "decor" && density > 1) || brushTool || (isFeat(tool) && POINT_FEATS.includes(featOf(tool)));
-  const brushColor = tool === "paint" ? (paintRole < 0 ? "#e5534b" : ["#e8d39a", "#7bd88f", "#c08a52", "#9aa7b4", "#f2f6fa"][paintRole]) : isRelief(tool) ? RELIEF_COLOR[tool] : brushTool ? BRUSH[tool.slice(2) as BrushMode].color : isFeat(tool) ? FEATURE_COLOR[featOf(tool)] : tool === "erase" || tool === "uncut" ? "#e5534b" : tool === "select" ? "#ffd166" : "#a3e635";
+  const circleBrush = (isRelief(tool) && tool !== "ramp") || tool === "uncut" || tool === "paint" || isNav(tool) || (tool === "decor" && density > 1) || brushTool || (isFeat(tool) && POINT_FEATS.includes(featOf(tool)));
+  const brushColor = isNav(tool) ? (tool === "nav-block" ? "#e5534b" : tool === "nav-allow" ? "#7bd88f" : "#c9d1d9") : tool === "paint" ? (paintRole < 0 ? "#e5534b" : ["#e8d39a", "#7bd88f", "#c08a52", "#9aa7b4", "#f2f6fa"][paintRole]) : isRelief(tool) ? RELIEF_COLOR[tool] : brushTool ? BRUSH[tool.slice(2) as BrushMode].color : isFeat(tool) ? FEATURE_COLOR[featOf(tool)] : tool === "erase" || tool === "uncut" ? "#e5534b" : tool === "select" ? "#ffd166" : "#a3e635";
   const brush = tool === "orbit" ? null : circleBrush ? { shape: "circle" as const, radius, color: brushColor } : { shape: "point" as const, color: brushColor };
   const toolBtn = (t: Tool, icon: string, label: string, color?: string) => (
     <RibbonButton key={t} icon={icon} label={label} active={tool === t} onClick={() => setTool(t)} hint={hintOf(t)} color={color} />
@@ -1298,6 +1533,11 @@ export default function MapStudio({ id }: { id: string }) {
               {toolBtn("erase", "layers_clear", "Apagar", "#e5534b")}
             </RibbonGroup>
             <RibbonGroup label="Mundo">{genBtn}</RibbonGroup>
+            <RibbonGroup label="Transformar">
+              <RibbonButton icon="open_with" label="Mover" active={tool === "select" && xform === "move"} onClick={() => { setTool("select"); setXform("move"); }} hint="Arraste a seleção para mover. Setas: 2 unidades (Shift: 10)." />
+              <RibbonButton icon="rotate_right" label="Girar" active={tool === "select" && xform === "rotate"} onClick={() => { setTool("select"); setXform("rotate"); }} hint="Arraste em volta da seleção para girar (Shift: de 15 em 15°). Teclas , e . giram 15°." />
+              <RibbonButton icon="open_in_full" label="Escala" active={tool === "select" && xform === "scale"} onClick={() => { setTool("select"); setXform("scale"); }} hint="Arraste para longe/perto do centro para aumentar/diminuir. Teclas - e + mudam 10%." />
+            </RibbonGroup>
             <RibbonGroup label="Editar">
               <RibbonButton icon="content_copy" label="Duplicar" onClick={doDuplicate} disabled={!selIds.length} hint="Ctrl+D" />
               <RibbonButton icon="delete" label="Excluir" onClick={doDelete} disabled={!selIds.length} hint="Del" />
@@ -1325,6 +1565,12 @@ export default function MapStudio({ id }: { id: string }) {
                 hint={doc.clean ? hintOf("paint") : "Ligue o visual limpo (Propriedades → Chão e visual) para pintar o chão"}
                 onClick={() => { setTool("paint"); setLeft("ground"); }} />
             </RibbonGroup>
+            <RibbonGroup label="Passagem das tropas">
+              {toolBtn("nav-block", "block", "Bloquear", "#e5534b")}
+              {toolBtn("nav-allow", "directions_walk", "Liberar", "#7bd88f")}
+              {toolBtn("nav-erase", "auto_fix_high", "Automático", "#c9d1d9")}
+              <RibbonButton icon="layers" label="Mostrar" active={showPass || isNav(tool)} onClick={() => setShowPass((v) => !v)} hint="Vermelho: as tropas por terra não passam (íngreme, água ou bloqueado à mão). Verde: liberado à mão." />
+            </RibbonGroup>
             <RibbonGroup label="Tamanho">{sizeSliders}</RibbonGroup>
             <RibbonGroup label="Simetria">{symSelect}</RibbonGroup>
             <RibbonGroup label="Mapa inteiro">
@@ -1342,8 +1588,8 @@ export default function MapStudio({ id }: { id: string }) {
               {(["mountain", "hill", "ridge", "plateau", "dunes", "island"] as FeatureKind[]).filter((k) => k !== "island" || hasWater)
                 .map((k) => toolBtn(`f-${k}`, FEATURE_ICON[k], FEATURE_LABEL[k], FEATURE_COLOR[k]))}
             </RibbonGroup>
-            <RibbonGroup label="Água e cavidades">
-              {(["lake", "river", "canyon", "crater", "pass"] as FeatureKind[]).map((k) => toolBtn(`f-${k}`, FEATURE_ICON[k], FEATURE_LABEL[k], FEATURE_COLOR[k]))}
+            <RibbonGroup label="Água, cavidades e caminhos">
+              {(["lake", "river", "canyon", "crater", "pass", "trail"] as FeatureKind[]).map((k) => toolBtn(`f-${k}`, FEATURE_ICON[k], FEATURE_LABEL[k], FEATURE_COLOR[k]))}
             </RibbonGroup>
             <RibbonGroup label="Plataformas e abismo">
               {(["platform", "span", "chasm", "rift"] as FeatureKind[]).map((k) => toolBtn(`f-${k}`, FEATURE_ICON[k], FEATURE_LABEL[k], FEATURE_COLOR[k]))}
@@ -1500,7 +1746,7 @@ export default function MapStudio({ id }: { id: string }) {
               </div>
             ) : view === "3d" && relief3d && heights ? (
               <Suspense fallback={<div className="bar indeterminate" style={{ margin: 20 }}><i /></div>}>
-                <MapView3D sky={skyNow?.color ?? null} size={relief3d.size} grid={relief3d.grid} heights={heights} waterLevel={water}
+                <MapView3D sky={skyNow?.color ?? null} pass={passCodes} size={relief3d.size} grid={relief3d.grid} heights={heights} waterLevel={water}
                   texture={texture3d} palette={skin === "relief" ? (doc.world?.biome ?? "temperate") : null} exaggeration={exag} ground={skin === "relief" ? groundView : null}
                   spawns={markers} mass={hidden.has("grp:mass") ? [] : edits.mass} bridges={edits.bridges} seed={edits.seed}
                   decor={decor} cuts={edits.cuts} highlights={highlights} lines={lines} snapshotRef={snapshot}

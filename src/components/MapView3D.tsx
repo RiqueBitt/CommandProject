@@ -43,6 +43,8 @@ interface Props {
   ground?: GroundTextures | null;
   /** cor do céu escolhido (fundo e névoa da prévia); null = a cor padrão */
   sky?: [number, number, number] | null;
+  /** passagem das tropas por vértice: 0 livre, 1 íngreme/água, 2 bloqueado à mão, 3 liberado à mão */
+  pass?: Uint8Array | null;
   onPointer: (type: "down" | "move" | "up", p: Pt | null) => void;
 }
 
@@ -256,7 +258,7 @@ if (uGround > 0.5) {
     // água
     const water = new THREE.Mesh(
       new THREE.PlaneGeometry(grid, grid),
-      new THREE.MeshStandardMaterial({ color: 0x2b6c9e, transparent: true, opacity: 0.66, roughness: 0.38, metalness: 0.05, depthWrite: false }),
+      new THREE.MeshStandardMaterial({ color: 0x2b6c9e, transparent: true, opacity: 0.7, roughness: 0.62, metalness: 0, depthWrite: false }),
     );
     water.rotation.x = -Math.PI / 2;
     water.position.set(grid / 2, 0, grid / 2);
@@ -395,6 +397,10 @@ if (uGround > 0.5) {
           // (chão de uma textura só, o "visual limpo": sem tinta — fica como no jogo)
           if (textured) { if (live.current.ground?.uniform || live.current.ground?.t) c.setRGB(1, 1, 1); else c.setRGB(0.8 + c.r * 0.3, 0.8 + c.g * 0.3, 0.8 + c.b * 0.3); }
         } else colorFor(heights[k], waterLevel, lo, hi, c);
+        const pc = live.current.pass?.[k];
+        if (pc === 1) c.setRGB(c.r * 1.0 + 0.25, c.g * 0.55, c.b * 0.55);
+        else if (pc === 2) c.setRGB(c.r * 0.6 + 0.55, c.g * 0.3, c.b * 0.3);
+        else if (pc === 3) c.setRGB(c.r * 0.45, c.g * 0.6 + 0.45, c.b * 0.45);
         col.set([c.r, c.g, c.b], k * 3);
       }
       geo.attributes.splat.needsUpdate = true;
@@ -803,7 +809,7 @@ if (uGround > 0.5) {
     };
   }, [props.size, props.grid]);
 
-  useEffect(() => { api.current?.setHeights(); }, [props.heights, props.waterLevel, props.exaggeration, props.palette]);
+  useEffect(() => { api.current?.setHeights(); }, [props.heights, props.waterLevel, props.exaggeration, props.palette, props.pass]);
   useEffect(() => { api.current?.setTexture(props.texture); }, [props.texture]);
   useEffect(() => { api.current?.setGround(); }, [props.ground]);
   useEffect(() => { api.current?.setSky(); }, [props.sky]);

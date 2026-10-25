@@ -100,6 +100,11 @@ pacote do mapa. As importadas aparecem em **Minhas texturas** (o × tira da list
   vizinha, com árvores, pedras e postes na beira; e **plantações** em faixas em volta das vilas (no
   bioma temperado). O chão de ruas, estradas, praça e plantações vem pintado pelo gerador numa camada
   própria, por baixo da sua pintura. No bioma vulcânico as vilas viram ruínas.
+- **Caminhos**: trilhas de terra das bases até o centro e as expansões (e as estradas das vilas)
+  que seguem o terreno; viram formas **Caminho** editáveis (o chão é aplainado de leve e pintado de
+  terra; dá para desenhar caminhos novos em Formas).
+- **Suavidade**: montanhas e morros sem pontas e margens de rios e lagos limpas (somem as poças e
+  ilhotas de poucos metros e a linha d'água fica suave).
 - **Detalhe fino do chão**: ondulações pequenas, sulcos e lombadas em todo o terreno. O relevo do
   editor e do mapa usa um ponto a cada 2 unidades num mapa 1024 (quatro vezes mais pontos que antes).
 - **Estratégia**: expansões de massa por jogador (a primeira **segura**, bem mais perto da própria
@@ -166,6 +171,28 @@ problema (bases e relevo não mudam; Ctrl+Z desfaz).
 - **Relevo simples**: morro, vale, platô, área plana, rampa e vau sobre a água.
 - **Simetria ao colocar**: com uma simetria ligada, bases, massa, decorações, formas, relevo e
   pinceladas são repetidos nos outros lados do mapa.
+
+### Selecionar, mover, girar e mudar o tamanho
+
+- **Clique** seleciona (bases, massa, decorações, formas, cortes); **Shift** soma à seleção;
+  **arrastar no vazio** seleciona por caixa; **Ctrl+A** seleciona tudo.
+- **Transformar** (faixa Início): **Mover** (W), **Girar** (Q) e **Escala** (T). Arraste a seleção:
+  girar gira em volta do centro (Shift: de 15 em 15°); escala aumenta/diminui (decorações mudam de
+  tamanho, formas mudam de raio, grupos se espalham ou juntam).
+- Teclado: setas movem 2 unidades (Shift: 10), **,** e **.** giram 15°, **-** e **+** mudam 10%.
+- **Decorações do mapa original** (mapas feitos sobre um mapa do jogo, sem o visual limpo): um clique
+  numa delas a transforma numa decoração editável (a original sai e entra a cópia no mesmo lugar).
+- No jogo, cada decoração fica na altura exata do chão que aparece (malha do chão), sem flutuar nem
+  afundar em encostas e bordas.
+
+### Passagem das tropas
+
+Faixa **Terreno → Passagem das tropas**: **Bloquear** pinta onde as tropas por terra não passam
+(vermelho), **Liberar** onde passam mesmo sendo íngreme (verde) e **Automático** volta à regra do
+jogo (inclinação e água). **Mostrar** colore o mapa: vermelho claro é o que já é intransponível pela
+inclinação ou pela água. O gerador de mundo já fecha as encostas íngremes das montanhas (opção
+"Montanhas íngremes bloqueiam as tropas"), sem nunca separar as bases; a validação e a análise usam o
+mesmo mapa de passagem. No jogo, isso entra na navegação do mapa (unidades aéreas e navais não mudam).
 
 ### Organizar, analisar e exportar
 
