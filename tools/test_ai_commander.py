@@ -541,6 +541,14 @@ def panel():
     g.CPAIPanelPoll()
     texts = [t.text for t in g.UI.texts.values() if t.text and not t.hidden]
     check(not any("Mr. Cow" in t for t in texts), "IA derrotada sai do painel")
+    # partida grande: com muitas IAs, uma linha por IA
+    lua.execute("""UI.time = 130 local st = {}
+        for i = 2, 24 do st[i] = { name = 'IA ' .. i, personality = 'Naval', plan = 'atacando', adaptive = 'normal', minUnits = 9,
+            acu = 'na base', intel = { air = 0, land = 0, naval = 0 }, main = { n = i, power = 1, state = 'atacando' }, time = 125 } end
+        Sync = { CPAIStatus = st }""")
+    g.CPAIPanelPoll()
+    texts = [t.text for t in g.UI.texts.values() if t.text and not t.hidden and t.text.startswith("IA ")]
+    check(len(texts) >= 23 and "IA 24  -  atacando   (exercito 24)" in texts, f"partida grande: uma linha por IA no painel ({len(texts)})")
 
 
 def player_model():

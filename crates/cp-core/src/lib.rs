@@ -3,6 +3,7 @@
 //! Este crate não depende de interface gráfica: é usado pelo app Tauri e pela CLI `cp`.
 
 pub mod aimod;
+pub mod bigmatch;
 pub mod anim;
 pub mod blueprint;
 pub mod cheats;

@@ -347,6 +347,17 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       deployed = enabledIds();
       return r({ plan: { kind: "url", url: "steam://rungameid/40100" }, applied: p, watching: settings.restoreOnExit });
     }
+    case "big_match_maps": {
+      const ring = (n: number, size: number) => Array.from({ length: n }, (_, i) => [Math.round(size / 2 + Math.cos((i / n) * Math.PI * 2) * size * 0.4), Math.round(size / 2 + Math.sin((i / n) * Math.PI * 2) * size * 0.4)] as [number, number]);
+      const map = (id: string, name: string, n: number, size: number, source = "Jogo"): T.MatchMap => ({ path: `/maps/${id.toLowerCase()}/${id.toLowerCase()}_scenario.lua`, id, name, armies: Array.from({ length: n }, (_, i) => `ARMY_${i + 1}`), starts: ring(n, size), size: [size, size], source });
+      return r([map("CP_GUERRA24", "[24] Guerra total", 24, 2048, "Mapa Guerra total"), map("SC2_MP_801", "[8] Cerberus", 8, 1024), map("SC2_MP_402", "[4] Finn's Revenge", 4, 1024), map("SC2_MP_101", "[2] Duel", 2, 512)]);
+    }
+    case "launch_big_match": {
+      const p = plan();
+      await progress("apply", ["Montando a partida grande", "Instalando arquivos", "Pronto"]);
+      deployed = enabledIds();
+      return r({ plan: { kind: "exe", exe: "SupremeCommander2.exe", args: ["/map", (a.spec as T.BigMatch).map], cwd: "bin" }, applied: p, watching: settings.restoreOnExit });
+    }
     case "file_status": return r([
       { name: "_4v4_mappack_by_kael.scd", size: 41_220_118, origin: "managed", modId: "kael-maps", state: "ok" },
       { name: "_osmosPack.scd", size: 8_120_000, origin: "unmanaged", modId: null, state: "ok" },

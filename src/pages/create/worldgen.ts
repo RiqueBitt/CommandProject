@@ -917,7 +917,9 @@ function placeSpawns(players: number, sym: Symmetry, grid: number, r: () => numb
     const all = canon.flatMap((c) => ops.map((o) => o.pt(c)));
     const self = ops.map((o) => o.pt(p)).slice(1);
     const minD = Math.min(...all.map((c) => Math.hypot(c[0] - p[0], c[1] - p[1])), ...self.map((c) => Math.hypot(c[0] - p[0], c[1] - p[1])));
-    if (minD < (tries < 2500 ? 300 : 200)) continue;
+    // com muitas bases a distância mínima encolhe (24 bases não cabem a 300 umas das outras)
+    const want = Math.min(300, (G * 0.62) / Math.sqrt(players));
+    if (minD < (tries < 2500 ? want : want * 0.66)) continue;
     canon.push(p);
   }
   // ordem: a cópia i de todas as bases forma o "time" i

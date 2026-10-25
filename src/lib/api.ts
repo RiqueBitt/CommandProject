@@ -129,6 +129,8 @@ export const api = {
   adoptUnmanaged: (name: string) => call<T.Manifest>("adopt_unmanaged", { name }),
   conflicts: () => call<T.ConflictReport>("conflicts"),
   launchGame: () => call<{ plan: unknown; applied?: T.Plan | null; watching: boolean }>("launch_game"),
+  bigMatchMaps: () => call<T.MatchMap[]>("big_match_maps"),
+  launchBigMatch: (spec: T.BigMatch) => call<{ plan: unknown; applied?: T.Plan | null; watching: boolean }>("launch_big_match", { spec }),
 
   fingerprint: () => call<T.Fingerprint>("fingerprint"),
   exportSyncCode: (profile?: string) => call<string>("export_sync_code", { profile: profile ?? null }),

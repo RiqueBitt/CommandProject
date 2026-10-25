@@ -6,11 +6,41 @@ import type { TexGenDoc } from "./texgen";
 
 // ------------------------------------------------------------------ mapa
 
+/** Quantas bases um mapa pode ter (o lobby do jogo mostra 8; mais que isso joga pela Partida grande). */
+export const MAX_SPAWNS = 64;
+export type MapTeams = "ffa" | "2" | "3" | "4" | "5" | "6" | "8";
+export const TEAM_OPTIONS: { value: MapTeams; label: string }[] = [
+  { value: "2", label: "Dois times" }, { value: "3", label: "Três times" }, { value: "4", label: "Quatro times" },
+  { value: "5", label: "Cinco times" }, { value: "6", label: "Seis times" }, { value: "8", label: "Oito times" },
+  { value: "ffa", label: "Todos contra todos" },
+];
+/** Time de cada base: as bases vão em sequência (com 24 bases e 2 times, 1 a 12 contra 13 a 24). */
+export function teamOfSpawn(teams: MapTeams, i: number, count: number): number {
+  if (teams === "ffa") return i;
+  const n = Math.max(1, Math.min(Number(teams) || 2, count));
+  return Math.floor((i * n) / Math.max(1, count));
+}
+/** Times de um mundo gerado: as cópias da simetria formam os times (bases em sequência). */
+export function worldTeams(players: number, symmetry: Symmetry): MapTeams {
+  if (symmetry === "none" || players % 2 !== 0) return "ffa";
+  return symmetry === "rot4" && players % 4 === 0 ? "4" : "2";
+}
+/** Lista de times (índices de base a partir de 1) para o gerador de mapas. */
+export function teamLists(teams: MapTeams, count: number): number[][] {
+  const out = new Map<number, number[]>();
+  for (let i = 0; i < count; i++) {
+    const t = teamOfSpawn(teams, i, count);
+    out.set(t, [...(out.get(t) ?? []), i + 1]);
+  }
+  return [...out.values()];
+}
+
 export interface MapDoc {
   schema: 1;
   terrain: string | null;
   lobbyName: string;
-  teams: "2" | "ffa";
+  /** times para conferir o mapa (no jogo os times são escolhidos na hora de jogar): "ffa" ou o número de times */
+  teams: MapTeams;
   economy: { baseMass: number; sites: number; perSite: number };
   norush: number;
   patch: boolean;

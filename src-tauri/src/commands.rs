@@ -372,6 +372,40 @@ pub struct LaunchResult {
 
 #[tauri::command]
 pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<LaunchResult> {
+    launch_inner(app, state, None).await
+}
+
+/// Mapas de escaramuça para a partida grande: os do jogo e os dos mods de mapa ligados no perfil.
+#[tauri::command]
+pub async fn big_match_maps(state: State<'_, AppState>) -> R<Vec<cp_core::bigmatch::MatchMap>> {
+    with_ws(&state.ws, |ws| {
+        let mut out = Vec::new();
+        cp_core::bigmatch::maps_in(&ws.stock_sources()?, "Jogo", &mut out);
+        let active = ws.profiles.active().clone();
+        for m in ws.mods()? {
+            if !active.mods.iter().any(|x| x.id == m.manifest.id && x.enabled) {
+                continue;
+            }
+            let files: Vec<std::path::PathBuf> = m.manifest.files.iter().map(|f| m.file_path(&f.name)).collect();
+            cp_core::bigmatch::maps_in(&files, &m.manifest.name, &mut out);
+        }
+        out.sort_by(|a, b| b.armies.len().cmp(&a.armies.len()).then_with(|| a.name.cmp(&b.name)));
+        Ok(out)
+    })
+    .await
+}
+
+/// Começa uma partida grande: monta o mod (uma vez), aplica o perfil e abre o jogo direto com as vagas.
+#[tauri::command]
+pub async fn launch_big_match(app: AppHandle, state: State<'_, AppState>, spec: cp_core::bigmatch::BigMatch) -> R<LaunchResult> {
+    launch_inner(app, state, Some(spec)).await
+}
+
+async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp_core::bigmatch::BigMatch>) -> R<LaunchResult> {
+    if let Some(b) = &big {
+        // confere antes de mexer em qualquer coisa
+        cp_core::bigmatch::launch_args(b).map_err(err)?;
+    }
     let app2 = app.clone();
     // relatórios de travamento que já existiam antes de abrir (para notar um novo)
     let crash_watch = with_ws(&state.ws, |ws| {
@@ -396,12 +430,57 @@ pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<Launch
         if let Ok(sh) = ws.shaders() {
             let _ = sh.quiet_overlay();
         }
-        let applied = if ws.settings.apply_before_launch {
+        let mut plan = None;
+        if let Some(b) = &big {
+            // o mod da partida grande, montado com os arquivos do jogo do usuário
+            const ID: &str = "cp-partida-grande";
+            let installed = ws
+                .mods()?
+                .iter()
+                .any(|m| m.manifest.id == ID && m.manifest.version == cp_core::bigmatch::MOD_VERSION);
+            if !installed {
+                let dir = ws.data_dir.join("cache").join("bigmatch");
+                std::fs::create_dir_all(&dir).map_err(|e| cp_core::Error::io(&dir, e))?;
+                let archive = cp_core::bigmatch::build(&ws.stock_sources()?, &dir.join("zz_cp_partida_grande.scd"))?;
+                let import = ImportOptions {
+                    id: Some(ID.into()),
+                    name: Some("Partida grande (mais de 8 jogadores)".into()),
+                    version: Some(cp_core::bigmatch::MOD_VERSION.into()),
+                    category: Some(Category::Gameplay),
+                    description: Some(
+                        "Deixa o launcher começar escaramuças com todas as bases do mapa (12 contra 12, vários times...). Sem a Partida grande do launcher o jogo segue como sempre."
+                            .into(),
+                    ),
+                    replace: true,
+                    move_source: true,
+                    ..Default::default()
+                };
+                ws.import_mod(&archive, &import, true)?;
+                let _ = std::fs::remove_file(&archive);
+            } else {
+                let active = ws.profiles.active().id.clone();
+                ws.profiles.set_enabled(&active, ID, true)?;
+            }
+            let game = ws.game()?.clone();
+            // sem o steam_appid.txt o jogo aberto direto reabre pela Steam e perde os argumentos
+            let appid = game.bin_dir().join("steam_appid.txt");
+            if !appid.exists() {
+                let _ = std::fs::write(&appid, cp_core::game::STEAM_APP_ID.to_string());
+            }
+            let mut args = ws.settings.launch_args.clone();
+            args.extend(cp_core::bigmatch::launch_args(b)?);
+            plan = Some(cp_core::game::launch_plan(&game, cp_core::game::LaunchMode::Direct, &args)?);
+        }
+        let applied = if ws.settings.apply_before_launch || big.is_some() {
             Some(ws.apply_active(&mut |p: Progress| emit_progress(&app2, "apply", p.step, p.total, p.message))?)
         } else {
             None
         };
-        Ok((ws.launch_plan()?, applied, ws.settings.restore_on_exit, ws.settings.memory_mb(), ws.settings.game_priority.clone()))
+        let plan = match plan {
+            Some(p) => p,
+            None => ws.launch_plan()?,
+        };
+        Ok((plan, applied, ws.settings.restore_on_exit, ws.settings.memory_mb(), ws.settings.game_priority.clone()))
     })
     .await?;
     match &plan {

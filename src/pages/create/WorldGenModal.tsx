@@ -5,6 +5,7 @@ import { Icon, Modal, Notice } from "../../components/ui";
 import { BLANK_BASES, BLANK_LABEL, blankSizeOf, type BlankSize } from "../studio/mapEdit";
 import type { Terrain } from "../../lib/types";
 import type { Pt } from "../studio/mapEdit";
+import { teamOfSpawn, worldTeams } from "./docs";
 import {
   BIOME_LABEL, FEATURE_COLOR, generateWorld, LINE_FEATURES, newWorld, reliefImage, SYMMETRY_LABEL, symmetriesFor, walkMask, WORLD_PRESETS,
   type Grid, type PropCatalog, type WorldGen, type WorldResult,
@@ -175,7 +176,7 @@ export default function WorldGenModal(props: Props) {
                 const n = Number(e.target.value);
                 setWg((w) => ({ ...w, players: n, symmetry: symmetriesFor(n).includes(w.symmetry) ? w.symmetry : symmetriesFor(n)[symmetriesFor(n).length > 1 ? 1 : 0] }));
               }}>
-                {[2, 3, 4, 5, 6, 8].map((n) => <option key={n} value={n}>{n} jogadores</option>)}
+                {[2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32].map((n) => <option key={n} value={n}>{n} jogadores{n > 8 ? " (Partida grande)" : ""}</option>)}
               </select>
             </label>
             <label className="field"><span className="label">Simetria</span>
@@ -301,7 +302,7 @@ export default function WorldGenModal(props: Props) {
                 {res.strategic.filter((q) => q.kind !== "safe").map((q, i) => { const [x, y] = svgPt(q.pos); return <circle key={`s${i}`} cx={x} cy={y} r={3.6} fill="none" stroke={q.kind === "center" ? "#ffd166" : "#ff9f43"} strokeWidth={0.4} strokeDasharray="1 0.8" />; })}
                 {res.spawns.map((p, i) => {
                   const [x, y] = svgPt(p);
-                  const team = wg.players % 2 === 0 && wg.symmetry !== "none" ? (i < res.spawns.length / 2 ? 0 : 1) : i;
+                  const team = teamOfSpawn(worldTeams(wg.players, wg.symmetry), i, res.spawns.length);
                   return <g key={i}><circle cx={x} cy={y} r={2.6} fill={["#5aa9e6", "#e5534b", "#7bd88f", "#c78bff", "#f2b33d", "#ff8fab", "#9be7ff", "#eee"][team % 8]} stroke="#0d1b26" strokeWidth={0.6} /><text x={x} y={y + 1.1} fontSize={3} textAnchor="middle" fontWeight={700} fill="#0d1b26">{i + 1}</text></g>;
                 })}
               </svg>

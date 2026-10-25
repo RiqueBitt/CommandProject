@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, onProgress } from "./api";
 import type * as T from "./types";
 
-export type Page = "me" | "home" | "library" | "hub" | "multiplayer" | "studio" | "create" | "performance" | "settings" | "files" | "icons";
+export type Page = "me" | "home" | "library" | "hub" | "multiplayer" | "studio" | "create" | "performance" | "settings" | "files" | "icons" | "bigmatch";
 
 export type AppUpdate = T.AppUpdate;
 

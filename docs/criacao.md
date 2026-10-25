@@ -89,7 +89,8 @@ pacote do mapa. As importadas aparecem em **Minhas texturas** (o × tira da list
 - **Estilos prontos**: vales verdes, montanhas, terra dos lagos, arquipélago, deserto, terra
   arrasada, gelo e campo aberto. Cada estilo só preenche os controles; tudo pode ser ajustado.
 - **Semente**: o mesmo número gera sempre o mesmo mundo (o dado sorteia outra).
-- **Jogadores e simetria**: 2 a 8 bases. As simetrias são espelho (esquerda/direita, cima/baixo,
+- **Jogadores e simetria**: 2 a 32 bases (mais de 8 joga pela **Partida grande**, porque o lobby
+  do jogo só tem 8 vagas). As simetrias são espelho (esquerda/direita, cima/baixo,
   diagonal), giro de 180° ou giro de 90°. Relevo, formas e decorações saem iguais para todos os lados.
 - **Relevo**: quanto do terreno base é substituído, altura da terra, ondulação e largura das ondas.
 - **Montanhas** (com picos irregulares), cordilheiras, colinas e planaltos.

@@ -66,6 +66,22 @@ local function Rows()
         table.insert(rows, { '  Primeiro ataque: ' .. learned.firstAttack .. '   Ataques: ' .. learned.attacks .. '   Saques: ' .. learned.raids
             .. '   Partidas lembradas: ' .. learned.games, C_FAINT })
     end
+    -- many AIs (big match): one line each
+    local count = 0
+    for _, _ in status do count = count + 1 end
+    if count > 4 then
+        local armies = {}
+        for army, _ in status do table.insert(armies, army) end
+        table.sort(armies)
+        for _, army in ipairs(armies) do
+            local ai = status[army]
+            local n = ai.main and ai.main.n or 0
+            local color = C_TEXT
+            if ai.error then color = C_WARN end
+            table.insert(rows, { ai.name .. '  -  ' .. ai.plan .. '   (exercito ' .. n .. ')' .. (ai.error and ('   erro: ' .. ai.error) or ''), color })
+        end
+        return rows
+    end
     for army, ai in status do
         table.insert(rows, { ai.name .. '  -  ' .. ai.personality .. '  -  ' .. ai.adaptive, C_ACCENT })
         table.insert(rows, { '  Plano: ' .. ai.plan .. '   (ataca com ' .. ai.minUnits .. '+ unidades)', C_TEXT })

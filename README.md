@@ -94,6 +94,14 @@ disponível em Sistema → Visual.
       ele devolve as unidades para a IA original do jogo e para, então a IA nunca fica pior que a
       do jogo.
   Montado com os arquivos de IA do seu jogo (inclusive as cópias da expansão, que são as que o jogo usa).
+- **Partida grande** (barra lateral → Partida grande): escaramuça com **quantos jogadores o mapa
+  tiver** — 12 contra 12, três times de 5, todos contra todos. Cada base vira você, uma IA (Fácil,
+  Normal, Difícil ou Trapaceira) ou fica vazia, com time e facção à escolha; os times se dividem
+  sozinhos pelo lado do mapa ou pela ordem das bases, e clicar numa base da prévia põe você nela.
+  Regras: tipo de vitória, limite de unidades, névoa, velocidade, tempo sem ataques, civis e base
+  montada. O lobby do jogo é em Flash e só tem 8 vagas, então o launcher abre o jogo direto na
+  partida (`/map` + `/cpmatch`); o mod que faz isso é montado na hora com o `SinglePlayerLaunch.lua`
+  e o `GameSessionManager.lua` do seu jogo e não muda nada quando a partida começa pelo lobby.
 - **Ação rápida** (`Ctrl+K`): jogar, aplicar, trocar de perfil ou abrir qualquer tela pelo teclado.
 
 **Hub de mods**
@@ -175,6 +183,8 @@ disponível em Sistema → Visual.
 - **Validação do mapa** com correção automática: bases na água/declive/isoladas, massa inacessível,
   em declive ou sobreposta, decorações em cima de bases e massa, distâncias e massa desiguais.
 - **Editor de mapas** no estilo de um editor de jogo:
+  - **quantas bases quiser** (até 64) e conferência com 2, 3, 4, 5, 6 ou 8 times ou todos contra
+    todos; mapas com mais de 8 bases jogam pela Partida grande;
   - abre direto num **mapa em branco** (chão liso de grama, 512 ou 1024), sem escolher terreno;
   - **visual limpo**: a malha do chão (e a colisão) é refeita para o relevo novo, a luz e as
     sombras também, e as decorações originais saem — nada do mapa original aparece por cima;
@@ -352,6 +362,11 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
   `SimCallbacks.lua` do seu jogo e, com o menu, também do `gamemain.lua` e do `UserSync.lua` (o
   código vai dentro desses arquivos, que o jogo já conhece); outro mod que mexa neles entra em
   conflito (veja Conflitos). Ao começar a partida aparece no alto da tela "trapacas ligadas". Os textos do menu ficam sem acento para não depender da fonte do jogo. As unidades criadas viram invencíveis em até 1 s.
+- **Partida grande** (experimental: confirme no jogo): o jogo foi feito para até 8 jogadores e o
+  limite do motor com mais exércitos ainda não foi testado. Se o jogo não abrir ou fechar ao carregar,
+  tente com menos bases. Cada IA a mais pesa: com muitas, a IA esperta olha o mapa e decide com
+  menos frequência, e o painel dela mostra uma linha por IA. Mapas com mais de 8 bases aparecem no
+  lobby do jogo, mas lá só dá para usar 8.
 - **IA que aprende**: a memória entre partidas passa por um comando no `SimCallbacks.lua`, que o
   menu de trapaças também usa; as duas versões levam os mesmos comandos, mas trapaças montadas
   antes da 0.24.0 não têm todos (memória e "esquecer") — atualize as trapaças depois de instalar.

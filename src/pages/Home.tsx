@@ -252,6 +252,7 @@ export default function Home() {
           <MenuItem icon="published_with_changes" onClick={apply} disabled={working || !changes || d.gameRunning}>Aplicar sem jogar</MenuItem>
           <MenuItem icon="restore" onClick={purge} disabled={working || d.gameRunning}>Voltar ao original</MenuItem>
           <hr />
+          <MenuItem icon="groups" onClick={() => go("bigmatch")}>Partida grande (mais de 8 jogadores)</MenuItem>
           <MenuItem icon="extension" onClick={() => go("library")}>Mods do perfil</MenuItem>
           <MenuItem icon="share" onClick={share}>Copiar código do perfil</MenuItem>
           <MenuItem icon="tune" onClick={() => go("settings")}>Opções de jogo</MenuItem>

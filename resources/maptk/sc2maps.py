@@ -471,13 +471,29 @@ def mass_marker(name, x, z, y):
              "                    ['resource'] = BOOLEAN( true ),\n")
     return marker(name, "Mass", x, z, y, color="ff008000", extra=extra)
 
+def _army_block_start(text, i):
+    """Start of the 3 comment lines that head the army block containing index i."""
+    start = text.rfind("\n", 0, i) + 1
+    for _ in range(3):
+        start = text.rfind("\n", 0, start - 1) + 1
+    return start
+
 def armies_tail(n_armies):
     """The Chains + Armies Lua blocks for n_armies (+ARMY_EXTRA), lifted from a stock
-    skirmish save (MP_204 for <=4 armies, MP_206 for 5-6, MP_304 for 7-8)."""
+    skirmish save (MP_204 for <=4 armies, MP_206 for 5-6, MP_304 for 7-8). Past 8 armies (played
+    through the launcher's big match: the game's lobby has 8 slots) the stock ARMY_1 block is
+    repeated for every army; all stock army blocks are identical apart from the name."""
     src = ("SC2_MP_304_save.lua" if n_armies > 6 else
            "SC2_MP_206_save.lua" if n_armies > 4 else "SC2_MP_204_save.lua")
     txt = read_entry(UNCOMPILED_SCD, src).decode("utf8", "ignore")
     tail = txt[txt.index("    Chains = {"):]
+    if n_armies > 8:
+        a1 = _army_block_start(tail, tail.index("['ARMY_1']"))
+        a2 = _army_block_start(tail, tail.index("['ARMY_2']"))
+        ax = _army_block_start(tail, tail.index("['ARMY_EXTRA']"))
+        block = tail[a1:a2]
+        assert block.count("['ARMY_1']") == 1, "unexpected army block layout"
+        tail = tail[:a1] + "".join(block.replace("['ARMY_1']", f"['ARMY_{a}']") for a in range(1, n_armies + 1)) + tail[ax:]
     for a in list(range(1, n_armies+1)) + ["EXTRA"]:
         assert f"['ARMY_{a}']" in tail, f"ARMY_{a} missing in {src}"
     return tail

@@ -24,7 +24,7 @@ import {
   applyRelief, BLANK_BASES, BLANK_LABEL, BLANK_WATER, BLANK_Y, blankSizeOf, cutTester, decodeHeights, decorKind, groundCandidates, groundSpec, heightAt, meanInDisc,
   RELIEF_LABEL, reliefShape, reskinPaths, round1, type BlankSize, type Edits, type GroundBiome, type GroundLayer, type PlacedProp, type Pt, type Relief, type Relief3D, type ReliefKind,
 } from "../studio/mapEdit";
-import { migrateMap, newMapDoc, type MapDoc } from "./docs";
+import { MAX_SPAWNS, migrateMap, newMapDoc, TEAM_OPTIONS, teamLists, teamOfSpawn, worldTeams, type MapDoc } from "./docs";
 import { analyzeMap, type Analysis } from "./mapAnalysis";
 import { autoFixMap, checkMap, type MapIssue } from "./mapCheck";
 import {
@@ -69,7 +69,7 @@ const HINT: Record<string, string> = {
   "nav-erase": "Volta a passagem ao automático (pela inclinação e pela água).",
   select: "Clique para selecionar (Shift soma; arraste no vazio para selecionar por caixa). Arraste para mover, girar ou mudar o tamanho (W, Q, T). Clique numa decoração do mapa original para editá-la. Del apaga, Ctrl+D duplica.",
   orbit: "Arraste para girar a câmera. Botão do meio move, roda dá zoom.",
-  spawn: "Clique para colocar a base inicial de cada jogador (até 8).",
+  spawn: "Clique para colocar a base inicial de cada jogador (quantas quiser; mais de 8 joga pela Partida grande).",
   mass: "Clique para colocar pontos de extração de massa.",
   hill: "Clique ou arraste para subir o terreno em rampa suave.",
   valley: "Clique ou arraste para cavar.",
@@ -523,7 +523,7 @@ export default function MapStudio({ id }: { id: string }) {
     for (const s of ids) {
       const [k, iS] = s.split(":");
       const i = Number(iS);
-      if (k === "spawn" && n.spawns.length < 8) { n.spawns.push([e.spawns[i][0] + off, e.spawns[i][1] + off]); out.push(`spawn:${n.spawns.length - 1}`); }
+      if (k === "spawn" && n.spawns.length < MAX_SPAWNS) { n.spawns.push([e.spawns[i][0] + off, e.spawns[i][1] + off]); out.push(`spawn:${n.spawns.length - 1}`); }
       else if (k === "mass" && n.mass.length < MAX_MASS) { n.mass.push([e.mass[i][0] + off, e.mass[i][1] + off]); out.push(`mass:${n.mass.length - 1}`); }
       else if (k === "prop" && n.props.length < MAX_PROPS) { const q = e.props[i]; n.props.push({ ...q, x: q.x + off, z: q.z + off, gen: false }); out.push(`prop:${n.props.length - 1}`); }
       else if (k === "cut") { const [x, z, r] = e.cuts[i]; n.cuts.push([x + off, z + off, r]); out.push(`cut:${n.cuts.length - 1}`); }
@@ -782,7 +782,7 @@ export default function MapStudio({ id }: { id: string }) {
       return;
     }
     const pts = mirrors(q).map((m) => m.p);
-    if (t === "spawn" && type === "down") setEdits((ed) => (ed.spawns.length >= 8 ? ed : { ...ed, spawns: [...ed.spawns, ...pts].slice(0, 8) }));
+    if (t === "spawn" && type === "down") setEdits((ed) => (ed.spawns.length >= MAX_SPAWNS ? ed : { ...ed, spawns: [...ed.spawns, ...pts].slice(0, MAX_SPAWNS) }));
     else if (t === "mass" && type === "down") setEdits((ed) => (ed.mass.length >= MAX_MASS ? ed : { ...ed, mass: [...ed.mass, ...pts].slice(0, MAX_MASS) }));
     else if (t === "seed" && type === "down") setEdits((ed) => ({ ...ed, seed: q }));
     else if (t === "erase" && type === "down") { const hit = pick(q, dc); if (hit) p.commit((doc0) => removeAll(doc0, [hit])); }
@@ -966,7 +966,7 @@ export default function MapStudio({ id }: { id: string }) {
   keptRef.current = showDecor && !hidden.has("grp:prop") ? kept : [];
   const decor = useMemo(() => (showDecor && !hidden.has("grp:prop") ? kept.concat(edits.props.map((q) => ({ x: q.x, z: q.z, yaw: q.yaw, scale: q.scale, kind: decorKind(q.bp), bp: q.bp, added: true }))) : []), [kept, edits.props, showDecor, hidden]);
 
-  const teamOf = useCallback((i: number) => (doc.teams === "ffa" ? i : i < Math.ceil(edits.spawns.length / 2) ? 0 : 1), [doc.teams, edits.spawns.length]);
+  const teamOf = useCallback((i: number) => teamOfSpawn(doc.teams, i, edits.spawns.length), [doc.teams, edits.spawns.length]);
   const markers: Marker[] = useMemo(() => (hidden.has("grp:spawn") ? [] : edits.spawns.map((q, i) => ({ p: q, color: TEAM_COLORS[teamOf(i) % 8], label: String(i + 1) }))), [edits.spawns, teamOf, hidden]);
   const highlights = useMemo(() => {
     const out: [number, number, number][] = [];
@@ -1006,7 +1006,7 @@ export default function MapStudio({ id }: { id: string }) {
     if (!doc.terrain) return null;
     const { spawns, mass, bridges, seed, relief, props, reskin } = edits;
     const ids = spawns.map((_, i) => i + 1);
-    const teamList = doc.teams === "ffa" ? ids.map((i) => [i]) : [ids.filter((_, i) => teamOf(i) === 0), ids.filter((_, i) => teamOf(i) === 1)];
+    const teamList = teamLists(doc.teams, ids.length);
     const s: Record<string, unknown> = {
       terrain: doc.terrain, scenario_id: scenarioId, name: lobbyName, anchors: Object.fromEntries(spawns.map((q, i) => [String(i + 1), q])), teams: teamList,
       economy: { base_mass: doc.economy.baseMass, sites: doc.economy.sites, per_site: doc.economy.perSite }, norush: doc.norush,
@@ -1152,7 +1152,7 @@ export default function MapStudio({ id }: { id: string }) {
         clean: d.base === "blank" || wg.clearDonor !== false, groundBiome: wg.biome, peaks: wg.style !== "platforms",
         ringRise: wg.style === "platforms" ? 0 : 95, worldNav: res.nav ? encodePaint(res.nav) : null,
         sky: wg.sky !== undefined ? wg.sky : d.sky, groundTex: wg.biome === d.groundBiome ? d.groundTex : null,
-        teams: wg.players % 2 === 0 && wg.symmetry !== "none" ? "2" : "ffa", rugged: wg.edge === "rugged",
+        teams: worldTeams(wg.players, wg.symmetry), rugged: wg.edge === "rugged",
         edits: { ...d.edits, spawns: res.spawns, props, mass },
       };
     });
@@ -1301,7 +1301,7 @@ export default function MapStudio({ id }: { id: string }) {
         blank
           ? { kind: "select", label: "Tamanho", value: String(blankSizeOf(doc.terrain) ?? 1024), onChange: (v) => void changeBlankSize(Number(v) as BlankSize), options: (Object.keys(BLANK_BASES) as unknown as BlankSize[]).map((k) => ({ value: String(k), label: BLANK_LABEL[k] })), hint: "Mapas de 2048 só a partir de um mapa do jogo." }
           : { kind: "select", label: "Terreno base", value: doc.terrain ?? "", onChange: (v) => setDoc((d) => ({ ...d, terrain: v || null })), options: [{ value: "", label: "— escolha —" }, ...(terrains ?? []).map((t) => ({ value: t.id, label: `${t.name ?? t.id}${t.kind === "campaign" ? " (campanha)" : ""}${t.waterY ? " · água" : ""}` }))] },
-        { kind: "select", label: "Times", value: doc.teams, onChange: (v) => setDoc((d) => ({ ...d, teams: v as MapDoc["teams"] })), options: [{ value: "2", label: "Dois times" }, { value: "ffa", label: "Todos contra todos" }] },
+        { kind: "select", label: "Times", value: doc.teams, onChange: (v) => setDoc((d) => ({ ...d, teams: v as MapDoc["teams"] })), options: TEAM_OPTIONS, hint: "Só para conferir o equilíbrio do mapa: na hora de jogar você escolhe os times." },
         { kind: "select", label: "Simetria ao colocar", value: doc.symmetry, onChange: (v) => setDoc((d) => ({ ...d, symmetry: v as Symmetry })), options: (Object.keys(SYMMETRY_LABEL) as Symmetry[]).map((k) => ({ value: k, label: SYMMETRY_LABEL[k] })), hint: "Bases, massa, decorações, formas e pinceladas são repetidas nos outros lados." },
         { kind: "number", label: "Raio sem ataque inicial", value: doc.norush, min: 0, max: 200, onChange: (v) => setDoc((d) => ({ ...d, norush: v })) },
         { kind: "select", label: "Minimapa do lobby", value: doc.minimap, onChange: (v) => setDoc((d) => ({ ...d, minimap: v as MapDoc["minimap"] })), options: [{ value: "donor", label: "Original do terreno" }, { value: "natural", label: "Gerar: cores do relevo" }, { value: "desert", label: "Gerar: deserto" }, { value: "snow", label: "Gerar: neve" }, { value: "dark", label: "Gerar: rocha escura" }] },
@@ -1358,7 +1358,7 @@ export default function MapStudio({ id }: { id: string }) {
       if (k === "spawn" && edits.spawns[i]) sections.push({ title: `Base ${i + 1}`, props: [
         { kind: "number", label: "X", value: edits.spawns[i][0], min: 0, max: grid, onChange: (v) => setPt("spawns", i, [v, edits.spawns[i][1]]) },
         { kind: "number", label: "Z", value: edits.spawns[i][1], min: 0, max: grid, onChange: (v) => setPt("spawns", i, [edits.spawns[i][0], v]) },
-        { kind: "info", label: "Time", value: doc.teams === "ffa" ? "sozinho" : `time ${teamOf(i) + 1}` },
+        { kind: "info", label: "Time", value: doc.teams === "ffa" ? "sozinho" : `time ${teamOf(i) + 1} (na conferência)` },
         { kind: "info", label: "Altura do chão", value: round1(hAt(edits.spawns[i])) },
       ] });
       if (k === "mass" && edits.mass[i]) sections.push({ title: `Massa ${i + 1}`, props: [
@@ -1879,7 +1879,7 @@ export default function MapStudio({ id }: { id: string }) {
             </div>
             <div className="col" style={{ gap: 4 }}>
               <b>{lobbyName}</b>
-              <span className="faint small">{edits.spawns.length} jogadores · {doc.teams === "ffa" ? "todos contra todos" : "dois times"} · minimapa: {doc.minimap === "donor" ? "original do terreno" : doc.minimap === "natural" ? "cores do relevo" : doc.minimap}</span>
+              <span className="faint small">{edits.spawns.length} jogadores · {TEAM_OPTIONS.find((t) => t.value === doc.teams)?.label.toLowerCase() ?? "times"} · minimapa: {doc.minimap === "donor" ? "original do terreno" : doc.minimap === "natural" ? "cores do relevo" : doc.minimap}</span>
               {doc.minimap === "donor" && usesWorld && <Notice kind="warn">O minimapa original mostra o relevo antigo do terreno. Para um mundo gerado use "Gerar: cores do relevo".</Notice>}
             </div>
           </div>

@@ -9,11 +9,12 @@ import {
   type Edits, type GroundLayer, type PlacedProp, type Pt, type Relief, type Relief3D, type ReliefKind,
 } from "./mapEdit";
 import { GroundTextures, PropPicker } from "./MapDecor";
+import { MAX_SPAWNS, TEAM_OPTIONS, teamLists, teamOfSpawn, type MapTeams } from "../create/docs";
 
 const MapView3D = lazy(() => import("../../components/MapView3D"));
 
 type Tool = "orbit" | "spawn" | "mass" | ReliefKind | "bridge" | "decor" | "uncut" | "seed" | "erase";
-const TEAM_COLORS = ["#5aa9e6", "#e5534b", "#7bd88f", "#c78bff"];
+const TEAM_COLORS = ["#5aa9e6", "#e5534b", "#7bd88f", "#c78bff", "#f2b33d", "#ff8fab", "#9be7ff", "#eeeeee"];
 const RELIEF_COLOR: Record<ReliefKind, string> = { hill: "#e3a857", valley: "#4fa3e0", plateau: "#d97757", flatten: "#c9d1d9", ramp: "#f2b33d" };
 const RELIEF_ICON: Record<ReliefKind, string> = { hill: "filter_hdr", valley: "water", plateau: "landscape", flatten: "straighten", ramp: "stairs" };
 const isRelief = (t: Tool): t is ReliefKind => t in RELIEF_LABEL;
@@ -24,7 +25,7 @@ type DonorProp = [number, number, number, number, number, number];
 
 const TOOLS: { id: Tool; icon: string; label: string; hint: string }[] = [
   { id: "orbit", icon: "3d_rotation", label: "Câmera", hint: "Arraste para girar. Botão do meio move, roda dá zoom. Nas outras ferramentas o botão direito também gira." },
-  { id: "spawn", icon: "flag", label: "Bases", hint: "Clique para colocar a base inicial de cada jogador (até 8)." },
+  { id: "spawn", icon: "flag", label: "Bases", hint: "Clique para colocar a base inicial de cada jogador (quantas quiser; mais de 8 joga pela Partida grande)." },
   { id: "mass", icon: "diamond", label: "Massa", hint: "Clique para colocar pontos de extração de massa. Pontos em chão inclinado ou na água vão para o chão plano mais próximo." },
   { id: "hill", icon: RELIEF_ICON.hill, label: "Morro", hint: "Clique ou arraste para subir o terreno em rampa suave: dá para andar até o topo." },
   { id: "valley", icon: RELIEF_ICON.valley, label: "Vale", hint: "Clique ou arraste para cavar. Abaixo do nível da água vira lago ou rio." },
@@ -63,7 +64,7 @@ export default function Maps() {
   const [drag, setDrag] = useState<{ a: Pt; b: Pt } | null>(null);
   const [cursor2d, setCursor2d] = useState<Pt | null>(null);
   const [name, setName] = useState("Meu mapa");
-  const [teams, setTeams] = useState<"2" | "ffa">("2");
+  const [teams, setTeams] = useState<MapTeams>("2");
   const [baseMass, setBaseMass] = useState(4);
   const [sites, setSites] = useState(8);
   const [perSite, setPerSite] = useState(3);
@@ -243,7 +244,7 @@ export default function Maps() {
     }
     if (!p) { if (type === "up") stroke.current = null; return; }
     if (type === "up") { stroke.current = null; return; }
-    if (t === "spawn" && type === "down") commit((e) => (e.spawns.length >= 8 ? e : { ...e, spawns: [...e.spawns, p] }));
+    if (t === "spawn" && type === "down") commit((e) => (e.spawns.length >= MAX_SPAWNS ? e : { ...e, spawns: [...e.spawns, p] }));
     else if (t === "mass" && type === "down") commit((e) => (e.mass.length >= MAX_MASS ? e : { ...e, mass: [...e.mass, p] }));
     else if (t === "seed" && type === "down") commit((e) => ({ ...e, seed: p }));
     else if (t === "erase" && type === "down") commit((e) => eraseAt(p, e));
@@ -277,7 +278,7 @@ export default function Maps() {
   };
   const down2d = useRef(false);
 
-  const team = (i: number) => (teams === "ffa" ? i : i < Math.ceil(edits.spawns.length / 2) ? 0 : 1);
+  const team = (i: number) => teamOfSpawn(teams, i, edits.spawns.length);
   const lobbyName = `[${edits.spawns.length}] ${name.trim()}`;
   const editsTerrain = edits.relief.length > 0 || rugged || edits.bridges.length > 0;
   const usePatch = patch || editsTerrain;
@@ -316,7 +317,7 @@ export default function Maps() {
     const { spawns, mass, bridges, seed, relief, props, cuts, reskin } = edits;
     const anchors = Object.fromEntries(spawns.map((p, i) => [String(i + 1), p]));
     const ids = spawns.map((_, i) => i + 1);
-    const teamList = teams === "ffa" ? ids.map((i) => [i]) : [ids.filter((_, i) => team(i) === 0), ids.filter((_, i) => team(i) === 1)];
+    const teamList = teamLists(teams, ids.length);
     const s: Record<string, unknown> = {
       terrain: terrain.id, scenario_id: slugId(name), name: lobbyName, anchors, teams: teamList,
       economy: { base_mass: baseMass, sites, per_site: perSite }, norush,
@@ -351,7 +352,7 @@ export default function Maps() {
   };
 
   const markers: Marker[] = useMemo(
-    () => edits.spawns.map((p, i) => ({ p, color: TEAM_COLORS[team(i) % 4], label: String(i + 1) })),
+    () => edits.spawns.map((p, i) => ({ p, color: TEAM_COLORS[team(i) % TEAM_COLORS.length], label: String(i + 1) })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [edits.spawns, teams],
   );
@@ -409,7 +410,7 @@ export default function Maps() {
                   <button key={t.id} className="map-tool" aria-pressed={tool === t.id} title={t.hint} onClick={() => setTool(t.id)}
                     style={isRelief(t.id) ? { ["--tc" as string]: RELIEF_COLOR[t.id] } : undefined}>
                     <Icon name={t.icon} size={19} />
-                    <span>{t.label}{t.id === "spawn" ? ` ${edits.spawns.length}/8` : t.id === "mass" && edits.mass.length ? ` ${edits.mass.length}` : ""}</span>
+                    <span>{t.label}{t.id === "spawn" ? ` ${edits.spawns.length}` : t.id === "mass" && edits.mass.length ? ` ${edits.mass.length}` : ""}</span>
                   </button>
                 ))}
                 <span className="map-tools-sep" />
@@ -500,7 +501,7 @@ export default function Maps() {
                       {edits.mass.map((p, i) => <path key={i} d={`M${p[0]} ${p[1] - 13}L${p[0] + 9} ${p[1]}L${p[0]} ${p[1] + 13}L${p[0] - 9} ${p[1]}Z`} fill="#7bd88f" stroke="#0d1b26" strokeWidth={3} />)}
                       {edits.spawns.map((p, i) => (
                         <g key={i}>
-                          <circle cx={p[0]} cy={p[1]} r={26} fill={TEAM_COLORS[team(i) % 4]} stroke="#0d1b26" strokeWidth={5} />
+                          <circle cx={p[0]} cy={p[1]} r={26} fill={TEAM_COLORS[team(i) % TEAM_COLORS.length]} stroke="#0d1b26" strokeWidth={5} />
                           <text x={p[0]} y={p[1] + 10} textAnchor="middle" fontSize={30} fontWeight={700} fill="#0d1b26" fontFamily="Chakra Petch">{i + 1}</text>
                         </g>
                       ))}
@@ -589,9 +590,8 @@ export default function Maps() {
                 <input className="input" value={name} maxLength={48} onChange={(e) => setName(e.target.value)} />
               </Field>
               <Field label="Times">
-                <select className="select" value={teams} onChange={(e) => setTeams(e.target.value as "2" | "ffa")}>
-                  <option value="2">Dois times (metade das bases cada)</option>
-                  <option value="ffa">Todos contra todos</option>
+                <select className="select" value={teams} onChange={(e) => setTeams(e.target.value as MapTeams)}>
+                  {TEAM_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
               </Field>
 

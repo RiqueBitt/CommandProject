@@ -300,10 +300,22 @@ local function SnapKey(x, z)
     return math.floor(x / SNAP_CELL) .. ':' .. math.floor(z / SNAP_CELL)
 end
 
+-- players in the match (without civilians): big matches (more than 8) look at the map less often
+local function ArmyCount()
+    if CPAI.armyCount then return CPAI.armyCount end
+    local n = 0
+    for _, b in ArmyBrains do
+        local ok, idx = pcall(b.GetArmyIndex, b)
+        if ok and not Civilian(idx) then n = n + 1 end
+    end
+    CPAI.armyCount = math.max(1, n)
+    return CPAI.armyCount
+end
+
 local function Snapshot()
     local t = Now()
     local S = CPAI.snap
-    if S and t - S.t < 2.5 then return S end
+    if S and t - S.t < 2.5 * math.max(1, ArmyCount() / 8) then return S end
     local c = Categories()
     S = { t = t, armies = {} }
     for _, b in ArmyBrains do
@@ -2260,7 +2272,9 @@ function Commander.Run(self)
     local period = 4
     if CFG.level >= 2 then period = 3 end
     if self.difficulty <= 1 then period = period + 2 end
-    WaitSeconds(10)
+    -- many AIs: each one thinks a little less often, and not all on the same tick
+    period = period + math.floor(ArmyCount() / 8)
+    WaitSeconds(10 + math.mod(self.army, period))
     while not Defeated(self.brain) do
         local ok, err = pcall(Commander.Step, self)
         if ok then

@@ -18,6 +18,7 @@ const Create = lazy(() => import("./pages/create/Create"));
 const ProjectHost = lazy(() => import("./pages/create/ProjectHost"));
 const Performance = lazy(() => import("./pages/Performance"));
 const Icons = lazy(() => import("./pages/Icons"));
+const BigMatch = lazy(() => import("./pages/BigMatch"));
 
 export default function App() {
   const page = useStore((s) => s.page);
@@ -105,6 +106,11 @@ export default function App() {
         {page === "performance" && (
           <Suspense fallback={<div className="page muted">Carregando…</div>}>
             <Performance />
+          </Suspense>
+        )}
+        {page === "bigmatch" && (
+          <Suspense fallback={<div className="page muted">Carregando…</div>}>
+            <BigMatch />
           </Suspense>
         )}
         {page === "settings" && <SettingsPage />}

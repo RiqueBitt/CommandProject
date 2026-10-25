@@ -158,6 +158,7 @@ export function Rail() {
       </div>
       <div className="rail-areas">
         <AreaItem label="Início" icon="sports_esports" active={page === "home"} onClick={() => go("home")} />
+        <AreaItem label="Partida grande" icon="groups" active={page === "bigmatch"} onClick={() => go("bigmatch")} />
         <AreaItem label="Arquivos" icon="folder_open" active={page === "files"} onClick={() => go("files")} />
         <AreaItem label="Mapas" icon="map" active={area("map")} onClick={() => goCreate("map")} />
         {UNITS_ENABLED && <AreaItem label="Tropas" icon="smart_toy" active={area("unit")} onClick={() => goCreate("unit")} />}
@@ -256,6 +257,7 @@ export function CommandPalette() {
       nav("home", "Perfil ativo", "sports_esports"),
       nav("library", "Mods do perfil", "extension"),
       nav("hub", "Hub de mods", "store"),
+      nav("bigmatch", "Partida grande: mais de 8 jogadores, times à vontade", "groups"),
       nav("multiplayer", "Multiplayer: salas e chat", "hub"),
       nav("create", "Criar: mapas, tropas e modelos 3D", "add_box"),
       nav("files", "Arquivos: espaço, cópias de segurança e lixeira", "folder_open"),

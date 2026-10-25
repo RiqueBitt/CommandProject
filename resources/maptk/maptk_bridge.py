@@ -260,8 +260,9 @@ def _clean_spec(spec):
         raise ValueError("dê um nome ao mapa")
     spec["name"] = name[:60]
     spec["anchors"] = {int(k): (float(v[0]), float(v[1])) for k, v in spec["anchors"].items()}
-    if not 1 <= len(spec["anchors"]) <= 8:
-        raise ValueError("o mapa precisa de 1 a 8 posições iniciais")
+    # o lobby do jogo mostra até 8; com mais, o mapa joga pela Partida grande do launcher
+    if not 1 <= len(spec["anchors"]) <= 64:
+        raise ValueError("o mapa precisa de 1 a 64 posições iniciais")
     slug = re.sub(r"[^a-z0-9]+", "_", sid.lower().replace("sc2_", "")).strip("_") or "mapa"
     spec["out"] = f"_cp_{slug}.scd"
     if spec.get("teams"):

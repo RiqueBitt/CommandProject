@@ -126,6 +126,8 @@ pub fn run() {
             commands::adopt_unmanaged,
             commands::conflicts,
             commands::launch_game,
+            commands::big_match_maps,
+            commands::launch_big_match,
             commands::fingerprint,
             commands::export_sync_code,
             commands::inspect_sync_code,
