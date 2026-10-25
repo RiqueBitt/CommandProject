@@ -63,7 +63,8 @@ export function InstallLinkModal({ onClose }: { onClose: () => void }) {
 // ------------------------------------------------------------------ trapaças
 
 const CHEATS_KEY = "cp-cheats";
-const CHEATS_DEFAULT: CheatOptions = { mass: true, energy: true, research: true, unlockAll: false, god: true, buildSpeed: 1, aiToo: false };
+const CHEATS_DEFAULT: CheatOptions = { mass: true, energy: true, research: true, unlockAll: false, god: true, buildSpeed: 1, aiToo: false, menu: true, key: "F3", tab: true };
+const MENU_KEYS = ["F3", "F4", "F8", "F11", "Insert", "Home"];
 const CHEAT_ROWS: { key: "mass" | "energy" | "research" | "unlockAll" | "god" | "aiToo"; icon: string; label: string; hint: string }[] = [
   { key: "mass", icon: "diamond", label: "Massa infinita", hint: "O estoque de massa fica sempre cheio." },
   { key: "energy", icon: "bolt", label: "Energia infinita", hint: "O estoque de energia fica sempre cheio." },
@@ -88,7 +89,7 @@ export function CheatsModal({ installed, onClose }: { installed: boolean; onClos
   const busy = useStore((s) => s.busy.cheats);
   const [o, setO] = useState<CheatOptions>(loadCheats);
   const set = (patch: Partial<CheatOptions>) => setO((v) => ({ ...v, ...patch }));
-  const any = CHEAT_ROWS.some((r) => r.key !== "aiToo" && o[r.key]) || o.buildSpeed > 1;
+  const any = o.menu || CHEAT_ROWS.some((r) => r.key !== "aiToo" && o[r.key]) || o.buildSpeed > 1;
   return (
     <Modal title="Trapaças para jogar sozinho" icon="auto_fix_high" onClose={onClose}>
       <form className="col" style={{ gap: 14 }} onSubmit={async (e) => {
@@ -117,6 +118,26 @@ export function CheatsModal({ installed, onClose }: { installed: boolean; onClos
             {SPEEDS.map((s) => <button type="button" key={s} className="btn" aria-pressed={o.buildSpeed === s} onClick={() => set({ buildSpeed: s })}>{s === 1 ? "Normal" : `${s}×`}</button>)}
           </div>
         </Field>
+        <div className="row" style={{ gap: 12 }}>
+          <Icon name="menu_open" size={20} />
+          <div className="grow">
+            <div>Menu dentro do jogo</div>
+            <div className="small faint">Uma tecla abre um menu na partida para ligar e desligar cada trapaça quando quiser. As opções acima viram o estado inicial.</div>
+          </div>
+          <Switch label="Menu dentro do jogo" checked={o.menu} onChange={(v) => set({ menu: v })} />
+        </div>
+        {o.menu && (
+          <div className="row wrap" style={{ gap: 16 }}>
+            <Field label="Tecla do menu">
+              <div className="seg" role="group" aria-label="Tecla do menu">
+                {MENU_KEYS.map((k) => <button type="button" key={k} className="btn" aria-pressed={o.key === k} onClick={() => set({ key: k })}>{k}</button>)}
+              </div>
+            </Field>
+            <label className="row" style={{ gap: 8 }}>
+              <Switch label="Botão CP na tela" checked={o.tab} onChange={(v) => set({ tab: v })} /> Botão "CP" na borda da tela
+            </label>
+          </div>
+        )}
         <Notice kind="info">O mod é montado agora com os arquivos do seu jogo e só vale em partidas com um único jogador humano (escaramuça contra a IA). Em multiplayer ele se desliga sozinho. Desligue o mod na lista quando quiser jogar normal.</Notice>
         {busy && <TaskProgress task="cheats" label="Montando o mod…" />}
         <footer>

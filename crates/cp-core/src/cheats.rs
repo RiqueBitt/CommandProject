@@ -1,15 +1,23 @@
-//! Mod de trapaças para jogar sozinho: massa, energia e pesquisa infinitas, tudo pesquisado desde
-//! o começo, unidades invencíveis e construção mais rápida.
+//! Mod de trapaças para jogar sozinho: massa, energia e pesquisa infinitas, tudo pesquisado,
+//! unidades invencíveis e construção mais rápida, com um **menu dentro do jogo** (uma tecla abre e
+//! fecha) para ligar e desligar cada uma a qualquer momento da partida.
 //!
-//! O mod é montado na hora com os arquivos do próprio jogo do usuário: o `simInit.lua` (texto, de
-//! `uncompiled_lua.scd`) ganha uma linha que inicia `/lua/sim/cp_cheats.lua`, um arquivo novo nosso.
-//! Nada do jogo é distribuído. As trapaças só valem para jogadores humanos e se desligam sozinhas
-//! quando há mais de um humano na partida (multiplayer).
+//! O mod é montado na hora com os arquivos do próprio jogo do usuário (texto, de
+//! `uncompiled_lua.scd`); nada do jogo é distribuído:
+//! - `simInit.lua` ganha uma linha que inicia `/lua/sim/cp_cheats.lua` (nosso);
+//! - `SimCallbacks.lua` ganha o comando `CPCheats`, que o menu usa para avisar a simulação;
+//! - `gamemain.lua` (interface) abre `/lua/ui/game/cp_cheatmenu.lua` (nosso) quando a partida começa.
+//!
+//! As trapaças só valem com um único jogador humano: em multiplayer a simulação ignora tudo e o
+//! menu nem aparece.
 
 use crate::error::{Error, Result};
 use crate::mapassets::read_game_file;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+/// Teclas livres no mapa padrão do jogo que o menu pode usar.
+pub const MENU_KEYS: &[&str] = &["F3", "F4", "F8", "F11", "Insert", "Home"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -28,6 +36,12 @@ pub struct CheatOptions {
     pub build_speed: f32,
     /// a IA também ganha as trapaças (desafio: IA "trapaceira")
     pub ai_too: bool,
+    /// menu dentro do jogo para ligar e desligar durante a partida
+    pub menu: bool,
+    /// tecla que abre o menu (uma de [`MENU_KEYS`])
+    pub key: String,
+    /// botão "CP" na borda esquerda da tela que também abre o menu
+    pub tab: bool,
 }
 
 impl Default for CheatOptions {
@@ -40,126 +54,52 @@ impl Default for CheatOptions {
             god: true,
             build_speed: 1.0,
             ai_too: false,
+            menu: true,
+            key: "F3".into(),
+            tab: true,
         }
     }
 }
 
-/// O script das trapaças (Lua do jogo: `for k, v in tabela do`, `table.getn`).
-pub fn cheats_lua(o: &CheatOptions) -> String {
-    let b = |v: bool| if v { "true" } else { "false" };
-    let speed = o.build_speed.clamp(1.0, 50.0);
-    format!(
-        r#"-- CommandProject: trapacas para jogar sozinho (gerado pelo launcher).
--- Valem para os jogadores humanos (e para a IA, se escolhido). Com mais de um humano na partida
--- (multiplayer) nada e ativado.
-local OPT = {{
-    Mass = {mass},
-    Energy = {energy},
-    Research = {research},
-    UnlockAll = {unlock},
-    God = {god},
-    BuildSpeed = {speed},
-    AiToo = {ai},
-}}
-
-local function Targets()
-    local humans, out = 0, {{}}
-    for _, brain in ArmyBrains do
-        local civ = false
-        pcall(function() civ = ArmyIsCivilian(brain:GetArmyIndex()) end)
-        if not civ then
-            if brain.BrainType == 'Human' then
-                humans = humans + 1
-                table.insert(out, brain)
-            elseif OPT.AiToo then
-                table.insert(out, brain)
-            end
-        end
-    end
-    return out, humans
-end
-
-local function Fill(brain, kind, target)
-    -- abre espaco no estoque antes de encher (o jogo limita massa e energia ao armazem)
-    pcall(function() brain:SetMaxStorage(kind, target + 1000) end)
-    local stored = 0
-    pcall(function() stored = brain:GetEconomyStored(kind) end)
-    if stored < target then
-        pcall(function() brain:GiveResource(kind, target - stored) end)
-    end
-end
-
-local function Units(brain)
-    local list = {{}}
-    pcall(function() list = brain:GetListOfUnits(categories.ALLUNITS, false) end)
-    return list
-end
-
-function Run()
-    WaitSeconds(1)
-    local brains, humans = Targets()
-    if humans > 1 then
-        LOG('*CommandProject: trapacas desligadas (mais de um jogador humano)')
-        return
-    end
-    LOG('*CommandProject: trapacas ligadas')
-    if OPT.UnlockAll then
-        for _, brain in brains do
-            local idx = brain:GetArmyIndex()
-            if not pcall(function() UnlockAllResearch(idx) end) then
-                pcall(function() brain:AddAllResearch() end)
-            end
-        end
-    end
-    local tick = 0
-    while true do
-        tick = tick + 1
-        for _, brain in brains do
-            if not brain:IsDefeated() then
-                if OPT.Mass then Fill(brain, 'MASS', 100000) end
-                if OPT.Energy then Fill(brain, 'ENERGY', 100000) end
-                if OPT.Research then
-                    -- partidas com limite de pesquisa travam o estoque a cada tecnologia
-                    brain.ResearchCapped = false
-                    Fill(brain, 'RESEARCH', 99999)
-                end
-                if OPT.God or OPT.BuildSpeed > 1 then
-                    for _, unit in Units(brain) do
-                        if unit and not unit:IsDead() then
-                            if OPT.God and not unit.CPGod then
-                                pcall(function() unit:SetCanTakeDamage(false) end)
-                                pcall(function() unit:SetCanBeKilled(false) end)
-                                unit.CPGod = true
-                            end
-                            -- as pesquisas mudam a velocidade de construcao: reaplica de tempos em tempos
-                            if OPT.BuildSpeed > 1 and (not unit.CPBuild or math.mod(tick, 10) == 0) then
-                                local bp = unit:GetBlueprint()
-                                local rate = bp and bp.Economy and bp.Economy.BuildRate
-                                if rate and rate > 0 then
-                                    pcall(function() unit:SetBuildRate(rate * OPT.BuildSpeed) end)
-                                end
-                                unit.CPBuild = true
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        WaitSeconds(1)
-    end
-end
-"#,
-        mass = b(o.mass),
-        energy = b(o.energy),
-        research = b(o.research),
-        unlock = b(o.unlock_all),
-        god = b(o.god),
-        speed = speed,
-        ai = b(o.ai_too),
-    )
+impl CheatOptions {
+    fn menu_key(&self) -> &str {
+        MENU_KEYS.iter().copied().find(|k| k.eq_ignore_ascii_case(&self.key)).unwrap_or("F3")
+    }
 }
 
-const HOOK: &str = "\tForkThread(import('/lua/sim/cp_cheats.lua').Run) -- CommandProject cheats\n";
+const SIM_LUA: &str = include_str!("cheats_sim.lua");
+const UI_LUA: &str = include_str!("cheats_ui.lua");
+
+fn fill(template: &str, o: &CheatOptions) -> String {
+    let b = |v: bool| if v { "true" } else { "false" };
+    let speed = o.build_speed.clamp(1.0, 50.0);
+    template
+        .replace("@MASS@", b(o.mass))
+        .replace("@ENERGY@", b(o.energy))
+        .replace("@RESEARCH@", b(o.research))
+        .replace("@GOD@", b(o.god))
+        .replace("@SPEED@", &format!("{speed}"))
+        .replace("@AI@", b(o.ai_too))
+        .replace("@UNLOCK@", b(o.unlock_all))
+        .replace("@KEY@", o.menu_key())
+        .replace("@TAB@", b(o.tab))
+}
+
+/// O script da simulação (Lua do jogo: `for k, v in tabela do`, `table.getn`).
+pub fn cheats_lua(o: &CheatOptions) -> String {
+    fill(SIM_LUA, o)
+}
+
+/// O script do menu dentro do jogo.
+pub fn menu_lua(o: &CheatOptions) -> String {
+    fill(UI_LUA, o)
+}
+
+const SIM_HOOK: &str = "\tForkThread(import('/lua/sim/cp_cheats.lua').Run) -- CommandProject cheats\n";
+const CALLBACK_HOOK: &str =
+    "\n-- CommandProject cheats: in-game menu\nCallbacks.CPCheats = function(data) import('/lua/sim/cp_cheats.lua').Set(data) end\n";
+const UI_HOOK: &str =
+    "\tpcall(function() import('/lua/ui/game/cp_cheatmenu.lua').Init(isReplay) end) -- CommandProject cheats\n";
 
 /// `simInit.lua` do jogo com a linha que inicia as trapaças no começo da partida.
 pub fn patch_sim_init(text: &str) -> Result<String> {
@@ -174,36 +114,73 @@ pub fn patch_sim_init(text: &str) -> Result<String> {
     for a in anchors {
         if let Some(p) = text.find(a) {
             let line = text[..p].rfind('\n').map(|i| i + 1).unwrap_or(0);
-            return Ok(format!("{}{HOOK}{}", &text[..line], &text[line..]));
+            return Ok(format!("{}{SIM_HOOK}{}", &text[..line], &text[line..]));
         }
     }
     // plano B: primeira linha de BeginSession
     if let Some(p) = text.find("function BeginSession()") {
         let end = text[p..].find('\n').map(|i| p + i + 1).unwrap_or(text.len());
-        return Ok(format!("{}{HOOK}{}", &text[..end], &text[end..]));
+        return Ok(format!("{}{SIM_HOOK}{}", &text[..end], &text[end..]));
     }
-    Err(Error::Other(
-        "o simInit.lua do jogo não tem BeginSession: não deu para ligar as trapaças".into(),
-    ))
+    Err(Error::Other("o simInit.lua do jogo não tem BeginSession: não deu para ligar as trapaças".into()))
+}
+
+/// `SimCallbacks.lua` com o comando que o menu usa.
+pub fn patch_sim_callbacks(text: &str) -> Result<String> {
+    if text.contains("Callbacks.CPCheats") {
+        return Ok(text.to_string());
+    }
+    if !text.contains("local Callbacks = {}") {
+        return Err(Error::Other("o SimCallbacks.lua do jogo é diferente do esperado: não deu para ligar o menu".into()));
+    }
+    let mut out = text.to_string();
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(CALLBACK_HOOK);
+    Ok(out)
+}
+
+/// `gamemain.lua` abrindo o menu quando a interface da partida é montada.
+pub fn patch_game_main(text: &str) -> Result<String> {
+    if text.contains("cp_cheatmenu.lua") {
+        return Ok(text.to_string());
+    }
+    let missing = || Error::Other("o gamemain.lua do jogo é diferente do esperado: não deu para ligar o menu".into());
+    let p = text.find("function CreateUI(isReplay)").ok_or_else(missing)?;
+    // o `end` que fecha a função fica sozinho no começo da linha
+    let close = text[p..].find("\nend").map(|i| p + i + 1).ok_or_else(missing)?;
+    Ok(format!("{}{UI_HOOK}{}", &text[..close], &text[close..]))
+}
+
+fn game_text(sources: &[PathBuf], path: &str) -> Result<String> {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let raw = read_game_file(sources, &format!("/uncompiled{path}")).map_err(|_| {
+        Error::Other(format!("o jogo não tem o {name} em texto (uncompiled_lua.scd): não dá para montar as trapaças"))
+    })?;
+    if crate::lua::inspect(&raw).compiled {
+        return Err(Error::Other(format!("o {name} do jogo está compilado: não dá para montar as trapaças")));
+    }
+    Ok(String::from_utf8_lossy(&raw).replace("\r\n", "\n"))
 }
 
 /// Monta o `.scd` do mod em `dest` com os arquivos do jogo do usuário (`sources`).
 pub fn build(sources: &[PathBuf], opts: &CheatOptions, dest: &Path) -> Result<PathBuf> {
-    let raw = read_game_file(sources, "/uncompiled/lua/simInit.lua").map_err(|_| {
-        Error::Other(
-            "o jogo não tem o simInit.lua em texto (uncompiled_lua.scd): não dá para montar as trapaças".into(),
-        )
-    })?;
-    if crate::lua::inspect(&raw).compiled {
-        return Err(Error::Other(
-            "o simInit.lua do jogo está compilado: não dá para montar as trapaças".into(),
+    let sim_init = patch_sim_init(&game_text(sources, "/lua/simInit.lua")?)?;
+    let mut files: Vec<(&str, String)> =
+        vec![("lua/simInit.lua", sim_init), ("lua/sim/cp_cheats.lua", cheats_lua(opts))];
+    if opts.menu {
+        files.push((
+            "lua/sim/SimCallbacks.lua",
+            patch_sim_callbacks(&game_text(sources, "/lua/sim/SimCallbacks.lua")?)?,
         ));
+        files.push(("lua/ui/game/gamemain.lua", patch_game_main(&game_text(sources, "/lua/ui/game/gamemain.lua")?)?));
+        files.push(("lua/ui/game/cp_cheatmenu.lua", menu_lua(opts)));
     }
-    let text = String::from_utf8_lossy(&raw).replace("\r\n", "\n");
-    let patched = patch_sim_init(&text)?;
     let mut b = crate::scd::ScdBuilder::create(dest)?;
-    b.add_bytes("lua/simInit.lua", patched.as_bytes())?;
-    b.add_bytes("lua/sim/cp_cheats.lua", cheats_lua(opts).as_bytes())?;
+    for (path, text) in &files {
+        b.add_bytes(path, text.as_bytes())?;
+    }
     b.finish()
 }
 
@@ -229,28 +206,64 @@ mod tests {
     }
 
     #[test]
-    fn options_in_script() {
-        let s = cheats_lua(&CheatOptions {
-            god: false,
-            build_speed: 3.0,
-            ..Default::default()
-        });
-        assert!(s.contains("God = false") && s.contains("BuildSpeed = 3") && s.contains("Mass = true"));
-        assert!(!s.contains('#'), "Lua do jogo não usa #");
+    fn menu_hooks() {
+        let cb = patch_sim_callbacks("local Callbacks = {}\nfunction DoCallback() end").unwrap();
+        assert!(cb.ends_with("Callbacks.CPCheats = function(data) import('/lua/sim/cp_cheats.lua').Set(data) end\n"));
+        assert_eq!(patch_sim_callbacks(&cb).unwrap(), cb);
+        assert!(patch_sim_callbacks("x = 1").is_err());
+
+        let gm = "function CreateUI(isReplay)\n    if a then\n\t\tb()\n\tend\nend\n\nfunction X()\nend\n";
+        let out = patch_game_main(gm).unwrap();
+        assert!(out.contains("\tend\n\tpcall(function() import('/lua/ui/game/cp_cheatmenu.lua').Init(isReplay) end)"));
+        assert!(out.find("cp_cheatmenu").unwrap() < out.find("function X").unwrap());
+        assert_eq!(patch_game_main(&out).unwrap(), out);
+    }
+
+    #[test]
+    fn options_in_scripts() {
+        let o = CheatOptions { god: false, build_speed: 3.0, key: "insert".into(), ..Default::default() };
+        let s = cheats_lua(&o);
+        assert!(s.contains("God = false") && s.contains("BuildSpeed = 3,") && s.contains("Mass = true"));
+        let m = menu_lua(&o);
+        assert!(m.contains("local KEY = 'Insert'") && m.contains("local SHOW_TAB = true"));
+        for t in [&s, &m] {
+            assert!(!t.contains('@'), "marcador sem trocar");
+            assert!(!t.contains('#'), "Lua do jogo não usa #");
+            assert!(t.is_ascii(), "o jogo lê os scripts como bytes");
+        }
+        // tecla fora da lista volta para F3
+        assert!(menu_lua(&CheatOptions { key: "Ctrl-A".into(), ..Default::default() }).contains("local KEY = 'F3'"));
     }
 
     #[test]
     fn builds_scd_from_game_files() {
         let tmp = tempfile::tempdir().unwrap();
         let src = tmp.path().join("uncompiled_lua.scd");
-        crate::library::tests::make_scd(&src, &[("uncompiled\\lua\\simInit.lua", b"function BeginSession()\r\n\tForkThread(import('/lua/sim/aibrain.lua').CollectCurrentScores)\r\nend\r\n")]);
+        crate::library::tests::make_scd(
+            &src,
+            &[
+                (
+                    "uncompiled\\lua\\simInit.lua",
+                    b"function BeginSession()\r\n\tForkThread(import('/lua/sim/aibrain.lua').CollectCurrentScores)\r\nend\r\n",
+                ),
+                ("uncompiled\\lua\\sim\\SimCallbacks.lua", b"local Callbacks = {}\r\n"),
+                ("uncompiled\\lua\\ui\\game\\gamemain.lua", b"function CreateUI(isReplay)\r\n\tx()\r\nend\r\n"),
+            ],
+        );
         let dest = tmp.path().join("out.scd");
-        build(&[src], &CheatOptions::default(), &dest).unwrap();
+        build(std::slice::from_ref(&src), &CheatOptions::default(), &dest).unwrap();
         let mut s = crate::scd::Scd::open(&dest).unwrap();
-        let init = String::from_utf8(s.read("lua/simInit.lua").unwrap()).unwrap();
-        assert!(init.contains("cp_cheats.lua"));
-        assert!(String::from_utf8(s.read("lua/sim/cp_cheats.lua").unwrap())
-            .unwrap()
-            .contains("function Run()"));
+        let read = |s: &mut crate::scd::Scd, p: &str| String::from_utf8(s.read(p).unwrap()).unwrap();
+        assert!(read(&mut s, "lua/simInit.lua").contains("cp_cheats.lua"));
+        assert!(read(&mut s, "lua/sim/cp_cheats.lua").contains("function Set(data)"));
+        assert!(read(&mut s, "lua/sim/SimCallbacks.lua").contains("Callbacks.CPCheats"));
+        assert!(read(&mut s, "lua/ui/game/gamemain.lua").contains("cp_cheatmenu.lua"));
+        assert!(read(&mut s, "lua/ui/game/cp_cheatmenu.lua").contains("function Toggle()"));
+
+        // sem o menu, só a simulação
+        let dest2 = tmp.path().join("out2.scd");
+        build(&[src], &CheatOptions { menu: false, ..Default::default() }, &dest2).unwrap();
+        let mut s2 = crate::scd::Scd::open(&dest2).unwrap();
+        assert!(s2.read("lua/ui/game/cp_cheatmenu.lua").is_err());
     }
 }

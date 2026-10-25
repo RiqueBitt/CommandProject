@@ -1209,6 +1209,9 @@ pub async fn build_cheats(state: State<'_, AppState>, opts: cp_core::cheats::Che
         if opts.build_speed > 1.0 {
             list.push(format!("construção {}× mais rápida", opts.build_speed));
         }
+        if opts.menu {
+            list.push(format!("menu na partida pela tecla {}", opts.key));
+        }
         let import = ImportOptions {
             id: Some("cp-trapacas".into()),
             name: Some("Trapaças (jogar sozinho)".into()),

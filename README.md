@@ -45,8 +45,10 @@ disponível em Sistema → Visual.
 - Detecta mods instalados à mão e os transforma em mods gerenciados.
 - **Trapaças para jogar sozinho** (Mods → Trapaças): massa, energia e pesquisa infinitas, toda a
   pesquisa liberada, modo deus (suas unidades não tomam dano nem morrem), construção até 25× mais
-  rápida e, para um desafio, as mesmas trapaças para a IA. O mod é montado na hora com o `simInit.lua`
-  do seu próprio jogo e só liga em partidas com um único jogador humano; em multiplayer se desliga sozinho.
+  rápida e, para um desafio, as mesmas trapaças para a IA. Com o **menu dentro do jogo**, uma tecla
+  (F3 por padrão, ou o botão "CP" na borda da tela) abre um painel na partida para ligar e desligar
+  cada trapaça quando quiser. O mod é montado na hora com os arquivos do seu próprio jogo e só liga
+  em partidas com um único jogador humano; em multiplayer se desliga sozinho.
 - **Ação rápida** (`Ctrl+K`): jogar, aplicar, trocar de perfil ou abrir qualquer tela pelo teclado.
 
 **Hub de mods**
@@ -301,8 +303,9 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
   misturadas pelo relevo e pelo pincel (experimental: confirme no jogo); o jogo só mistura texturas
   vizinhas na cadeia (praia → chão → terra → rocha → topo), então pintar "topo" no meio da grama
   passa por terra e rocha na borda da pincelada.
-- **Trapaças** (experimental: confirme no jogo): o mod substitui o `simInit.lua`; outro mod que também
-  mexa nesse arquivo entra em conflito (veja Conflitos). As unidades criadas viram invencíveis em até 1 s.
+- **Trapaças** (experimental: confirme no jogo): o mod substitui o `simInit.lua` e, com o menu,
+  também o `SimCallbacks.lua` e o `gamemain.lua`; outro mod que mexa nesses arquivos entra em
+  conflito (veja Conflitos). Os textos do menu ficam sem acento para não depender da fonte do jogo. As unidades criadas viram invencíveis em até 1 s.
 - **Decorações** são visuais: não bloqueiam a passagem das unidades.
 - **Tropas novas, animações criadas e modelos próprios no jogo** são experimentais: veja a tabela
   em [docs/criacao.md](docs/criacao.md#o-que-é-experimental).
