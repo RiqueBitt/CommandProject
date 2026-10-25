@@ -150,7 +150,12 @@ export interface ProjectFile { path: string; size: number; kind: "lua" | "textur
 /** Mod de trapaças para jogar sozinho (montado com os arquivos do jogo). */
 export interface CheatOptions { mass: boolean; energy: boolean; research: boolean; unlockAll: boolean; god: boolean; buildSpeed: number; aiToo: boolean; menu: boolean; key: string; tab: boolean }
 /** Mod "IA mais esperta". */
-export interface AiOptions { level: number; naval: boolean; economy: boolean; commander: boolean; raids: boolean }
+export type AiPersonality = "mixed" | "balanced" | "aggressive" | "defensive" | "raider" | "naval" | "airborne";
+export interface AiOptions {
+  level: number; naval: boolean; economy: boolean; commander: boolean; raids: boolean;
+  personality: AiPersonality; air: boolean; micro: boolean; build: boolean; counter: boolean;
+  team: boolean; adaptive: boolean; panel: boolean; panelKey: string;
+}
 export interface AiInstall { manifest: Manifest; applied: number; skipped: string[] }
 export interface UiSkinOptions { name: string; adjust: ColorAdjust; prefixes: string[]; exclude: string[]; quality: "fast" | "normal" | "best" }
 

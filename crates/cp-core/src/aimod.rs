@@ -36,11 +36,47 @@ pub struct AiOptions {
     pub commander: bool,
     /// ataques-relâmpago com unidades rápidas
     pub raids: bool,
+    /// personalidade: `mixed` (cada IA sorteia), `balanced`, `aggressive`, `defensive`, `raider`, `naval`, `airborne`
+    pub personality: String,
+    /// aviação estratégica (caças, bombardeiros, gunships)
+    pub air: bool,
+    /// microgestão: foco de fogo e artilharia atrás da linha
+    pub micro: bool,
+    /// defesa reativa e mini-bases com função (posto avançado, base econômica protegida)
+    pub build: bool,
+    /// reconhecimento e contra-produção
+    pub counter: bool,
+    /// coordenação entre IAs aliadas
+    pub team: bool,
+    /// dificuldade adaptativa
+    pub adaptive: bool,
+    /// painel "o que a IA está pensando" dentro do jogo
+    pub panel: bool,
+    /// tecla do painel (uma de [`crate::cheats::MENU_KEYS`])
+    pub panel_key: String,
 }
+
+/// Personalidades aceitas (a primeira é o padrão).
+pub const PERSONALITIES: &[&str] = &["mixed", "balanced", "aggressive", "defensive", "raider", "naval", "airborne"];
 
 impl Default for AiOptions {
     fn default() -> Self {
-        AiOptions { level: 1, naval: true, economy: true, commander: true, raids: true }
+        AiOptions {
+            level: 1,
+            naval: true,
+            economy: true,
+            commander: true,
+            raids: true,
+            personality: "mixed".into(),
+            air: true,
+            micro: true,
+            build: true,
+            counter: true,
+            team: true,
+            adaptive: true,
+            panel: true,
+            panel_key: "F4".into(),
+        }
     }
 }
 
@@ -55,6 +91,37 @@ pub struct AiBuild {
 }
 
 const COMMANDER_LUA: &str = include_str!("aimod_commander.lua");
+const PANEL_LUA: &str = include_str!("aimod_panel.lua");
+
+impl AiOptions {
+    fn personality_key(&self) -> &str {
+        PERSONALITIES.iter().copied().find(|p| *p == self.personality).unwrap_or("mixed")
+    }
+    fn panel_key(&self) -> &str {
+        crate::cheats::MENU_KEYS.iter().copied().find(|k| k.eq_ignore_ascii_case(&self.panel_key)).unwrap_or("F4")
+    }
+}
+
+/// O script do comandante com as opções escolhidas.
+pub fn commander_lua(o: &AiOptions) -> String {
+    let b = |v: bool| if v { "true" } else { "false" };
+    COMMANDER_LUA
+        .replace("@LEVEL@", if o.level >= 2 { "2" } else { "1" })
+        .replace("@RAIDS@", b(o.raids))
+        .replace("@PERSONALITY@", o.personality_key())
+        .replace("@AIR@", b(o.air))
+        .replace("@MICRO@", b(o.micro))
+        .replace("@BUILD@", b(o.build))
+        .replace("@COUNTER@", b(o.counter))
+        .replace("@TEAM@", b(o.team))
+        .replace("@ADAPTIVE@", b(o.adaptive))
+        .replace("@STATUS@", b(o.panel))
+}
+
+/// O script do painel da IA.
+pub fn panel_lua(o: &AiOptions) -> String {
+    PANEL_LUA.replace("@KEY@", o.panel_key())
+}
 const SHADOW: &str = "mods/DLC1/shadow/";
 
 enum Op {
@@ -62,6 +129,8 @@ enum Op {
     Replace { find: String, with: String, all: bool },
     /// acrescenta no fim do arquivo
     Append(String),
+    /// insere `line` antes do `end` (no começo da linha) que fecha a função que começa em `function`
+    InsertBeforeEnd { function: String, line: String },
 }
 
 struct FileEdit {
@@ -307,9 +376,7 @@ fn edits(o: &AiOptions) -> Vec<FileEdit> {
                 "BlueprintId = 'LandAttackTiny',\n    GlobalSquads = {\n        { Category = 'MOBILE LAND -EXPERIMENTAL -ROGUENANITE -ENGINEER', UnitMin = 8,",
             )],
         );
-        let code = COMMANDER_LUA
-            .replace("@LEVEL@", if brutal { "2" } else { "1" })
-            .replace("@RAIDS@", if o.raids { "true" } else { "false" });
+        let code = commander_lua(o);
         add(
             "lua/AI/skirmish/system/SkirmishAISystem.lua",
             vec![
@@ -321,6 +388,21 @@ fn edits(o: &AiOptions) -> Vec<FileEdit> {
                 ("código do comandante".into(), Op::Append(code)),
             ],
         );
+        if o.panel {
+            add(
+                "lua/ui/game/consoleecho.lua",
+                vec![
+                    (
+                        "painel da IA na tela da partida".into(),
+                        Op::InsertBeforeEnd {
+                            function: "function CreateConsoleEcho(parent)".into(),
+                            line: "\tpcall(CPAIPanelInit) -- CommandProject AI\n".into(),
+                        },
+                    ),
+                    ("código do painel".into(), Op::Append(panel_lua(o))),
+                ],
+            );
+        }
     }
     files
 }
@@ -363,6 +445,16 @@ fn apply(text: &str, ops: &[(String, Op)], skipped: &mut Vec<String>) -> (String
                     applied += 1;
                 }
             }
+            Op::InsertBeforeEnd { function, line } => {
+                let close = out.find(function.as_str()).and_then(|p| out[p..].find("\nend").map(|i| p + i + 1));
+                match close {
+                    Some(at) => {
+                        out.insert_str(at, line);
+                        applied += 1;
+                    }
+                    None => skipped.push(what.clone()),
+                }
+            }
             Op::Append(code) => {
                 if !out.ends_with('\n') {
                     out.push('\n');
@@ -390,6 +482,9 @@ pub fn build(sources: &[PathBuf], opts: &AiOptions, dest: &Path) -> Result<AiBui
         // o comandante só entra se o gancho que o inicia entrou
         if f.path.ends_with("SkirmishAISystem.lua") && patched.contains("CPCommanderRun") && !patched.contains("ForkThread(CPCommanderRun") {
             return Err(Error::Other("o SkirmishAISystem.lua do jogo é diferente do esperado: não deu para ligar o comandante".into()));
+        }
+        if f.path.ends_with("consoleecho.lua") && patched.contains("function CPAIPanelInit") && !patched.contains("pcall(CPAIPanelInit)") {
+            continue;
         }
         if n > 0 {
             applied += n;
@@ -442,11 +537,30 @@ mod tests {
             .iter()
             .find_map(|(_, op)| if let Op::Append(c) = op { Some(c.clone()) } else { None })
             .unwrap();
-        assert!(code.contains("local CP_LEVEL = 2") && code.contains("local CP_RAIDS = false"));
+        assert!(code.contains("level = 2,") && code.contains("raids = false,") && code.contains("personality = 'mixed',"));
         assert!(!code.contains('@') && !code.contains('#') && code.is_ascii());
         // sem comandante e sem navios, o arquivo não é tocado
         let none = edits(&AiOptions { naval: false, commander: false, ..Default::default() });
         assert!(none.iter().all(|f| !f.path.ends_with("SkirmishAISystem.lua")));
+    }
+
+    #[test]
+    fn panel_hook_and_script() {
+        let mut skipped = Vec::new();
+        let ops = vec![(
+            "gancho".to_string(),
+            Op::InsertBeforeEnd { function: "function CreateConsoleEcho(parent)".into(), line: "\tpcall(CPAIPanelInit)\n".into() },
+        )];
+        let (out, n) = apply("function CreateConsoleEcho(parent)\n    if a then\n    end\nend\nfunction X()\nend\n", &ops, &mut skipped);
+        assert_eq!(n, 1);
+        assert!(out.starts_with("function CreateConsoleEcho(parent)\n    if a then\n    end\n\tpcall(CPAIPanelInit)\nend\n"));
+        let p = panel_lua(&AiOptions { panel_key: "home".into(), ..Default::default() });
+        assert!(p.contains("local KEY = 'Home'") && !p.contains('@') && !p.contains('#') && p.is_ascii());
+        let c = commander_lua(&AiOptions { personality: "inventada".into(), ..Default::default() });
+        assert!(c.contains("personality = 'mixed',") && !c.contains('@'));
+        // sem painel, o consoleecho.lua não é tocado
+        let none = edits(&AiOptions { panel: false, ..Default::default() });
+        assert!(none.iter().all(|f| !f.path.ends_with("consoleecho.lua")));
     }
 
     #[test]

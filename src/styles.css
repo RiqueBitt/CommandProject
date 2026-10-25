@@ -189,6 +189,7 @@ p { margin: 0; }
 .seg { display: inline-flex; background: var(--surface); border-radius: var(--radius); overflow: hidden; }
 .seg .btn { border-radius: 0; background: transparent; height: 32px; padding: 0 12px; color: var(--muted); }
 .seg .btn[aria-pressed="true"] { background: var(--surface-bright); color: var(--text); }
+.seg.wrap { flex-wrap: wrap; }
 
 /* botão Jogar em pílula, com o play embutido à esquerda e o menu à direita */
 .launch-wrap { position: absolute; right: 28px; bottom: 26px; z-index: 5; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }

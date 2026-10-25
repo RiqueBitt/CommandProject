@@ -49,16 +49,31 @@ disponível em Sistema → Visual.
   (F3 por padrão, ou o botão "CP" na borda da tela) abre um painel na partida para ligar e desligar
   cada trapaça quando quiser. O mod é montado na hora com os arquivos do seu próprio jogo e só liga
   em partidas com um único jogador humano; em multiplayer se desliga sozinho.
-- **IA mais esperta** (Mods → IA esperta), para todas as dificuldades da escaramuça:
+- **IA mais esperta** (Mods → IA esperta), para todas as dificuldades da escaramuça, nível Esperta ou Brutal:
   - **navios em mapas com água**: corrige os construtores de navios (usavam uma chave de prioridade
     que o jogo não lê), todo tipo de IA constrói estaleiro quando há mar perto e a IA naval ganha
     quando a água separa os jogadores;
   - **economia e mini-bases**: mais engenheiros, expansões espalhadas pelo mapa mais cedo e em
     paralelo, mais extratores ao mesmo tempo;
-  - **comandante estratégico** (Lua por cima da IA do motor): junta o exército antes de atacar, só
-    ataca com vantagem clara, escolhe pontos estratégicos (extratores, fábricas), defende as
-    expansões, recua quando perde, manda feridos para casa, embosca no caminho da base, faz
-    ataques-relâmpago em extratores sem defesa, e a frota caça o que alcança. Nível Esperta ou Brutal.
+  - **comandante estratégico** (Lua por cima da IA do motor) que assume exército, frota e aviação:
+    - junta o exército numa emboscada no caminho da base e só ataca com vantagem clara, escolhendo
+      extratores, fábricas e artilharia mal defendidos; recua quando perde e manda feridos para casa;
+    - **pinça** (metade vem pelo flanco), **distração** (ataque-relâmpago longe do ataque principal),
+      **foco de fogo** na unidade mais fraca, **artilharia** atrás da linha, **escolta** de experimentais;
+    - **aviação**: caças pela superioridade aérea e escolta, bombardeiros onde não há antiaéreo,
+      gunships apoiando o ataque;
+    - **comandante (ACU)** que foge ferido e ajuda a defender no começo;
+    - **desembarques** com transportes em ilhas e extratores fora do alcance por terra;
+    - **reconhecimento e contra-produção** (antiaéreo contra aviões, artilharia contra torres, navios
+      contra frota);
+    - **defesa reativa** (torre ou antiaéreo onde uma expansão é atacada), **posto avançado** com
+      fábrica perto da frente e **escudo** sobre a base econômica;
+    - **IAs aliadas em equipe** (mesmo alvo, ajuda ao aliado atacado);
+    - **personalidades**: Misturadas, Equilibrada, Agressiva, Defensiva, Saqueadora, Naval, Aérea;
+    - **dificuldade adaptativa** (pressiona mais quando você está ganhando fácil, segura quando você
+      está perdendo feio);
+    - **painel "o que a IA está pensando"** dentro do jogo (tecla F4 por padrão ou botão "IA"), só
+      jogando sozinho.
   Montado com os arquivos de IA do seu jogo (inclusive as cópias da expansão, que são as que o jogo usa).
 - **Ação rápida** (`Ctrl+K`): jogar, aplicar, trocar de perfil ou abrir qualquer tela pelo teclado.
 

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
-import type { AiOptions, CheatOptions, ConflictReport } from "../lib/types";
+import type { AiOptions, AiPersonality, CheatOptions, ConflictReport } from "../lib/types";
 import { Field, Icon, Modal, Notice, Switch, TaskProgress } from "./ui";
 
 export function ConflictsModal({ report, onClose }: { report: ConflictReport; onClose: () => void }) {
@@ -151,12 +151,32 @@ export function CheatsModal({ installed, onClose }: { installed: boolean; onClos
 
 // ------------------------------------------------------------------ IA mais esperta
 
-const AI_DEFAULT: AiOptions = { level: 1, naval: true, economy: true, commander: true, raids: true };
-const AI_ROWS: { key: "naval" | "economy" | "commander" | "raids"; icon: string; label: string; hint: string }[] = [
+const AI_DEFAULT: AiOptions = {
+  level: 1, naval: true, economy: true, commander: true, raids: true, personality: "mixed",
+  air: true, micro: true, build: true, counter: true, team: true, adaptive: true, panel: true, panelKey: "F4",
+};
+type AiToggle = "naval" | "economy" | "commander" | "raids" | "air" | "micro" | "build" | "counter" | "team" | "adaptive" | "panel";
+const AI_ROWS: { key: AiToggle; icon: string; label: string; hint: string; needsCommander?: boolean }[] = [
   { key: "commander", icon: "military_tech", label: "Comandante estratégico", hint: "Junta o exército antes de atacar, só ataca com vantagem, escolhe extratores e fábricas, defende as expansões, recua quando perde, manda feridos para casa e embosca no caminho da base." },
+  { key: "air", icon: "flight", label: "Aviação estratégica", hint: "Caças pela superioridade aérea e escoltando o exército, bombardeiros em alvos sem antiaéreo, gunships apoiando o ataque.", needsCommander: true },
+  { key: "micro", icon: "my_location", label: "Microgestão", hint: "Foco de fogo na unidade inimiga mais fraca, artilharia atrás da linha de frente, ataque em pinça, escolta de experimentais.", needsCommander: true },
+  { key: "counter", icon: "radar", label: "Reconhecimento e contra-ataque", hint: "Batedores olham o que você constrói e as fábricas respondem: antiaéreo contra aviões, artilharia contra torres, navios contra frota.", needsCommander: true },
+  { key: "build", icon: "domain", label: "Defesa reativa e mini-bases", hint: "Torres e antiaéreo onde uma expansão é atacada, posto avançado com fábrica perto da frente, escudo sobre a base econômica.", needsCommander: true },
+  { key: "raids", icon: "bolt", label: "Ataques-relâmpago e distração", hint: "Unidades rápidas atacam extratores sem defesa e, durante o ataque principal, um ponto longe dele.", needsCommander: true },
+  { key: "team", icon: "groups", label: "IAs aliadas em equipe", hint: "Em 2v2 ou mais, atacam o mesmo alvo juntas e ajudam o aliado atacado.", needsCommander: true },
+  { key: "adaptive", icon: "tune", label: "Dificuldade adaptativa", hint: "Se você estiver ganhando fácil, a IA pressiona mais e recebe um reforço pequeno; se estiver perdendo feio, ela segura um pouco.", needsCommander: true },
+  { key: "panel", icon: "monitoring", label: "Painel \"o que a IA está pensando\"", hint: "Mostra no jogo o plano de cada IA: personalidade, alvo, exército, aviação e comandante. Só aparece jogando sozinho.", needsCommander: true },
   { key: "naval", icon: "sailing", label: "Navios em mapas com água", hint: "Todo tipo de IA constrói estaleiro quando há mar perto; a IA naval ganha quando a água separa os jogadores; corrige os navios que nunca eram produzidos." },
   { key: "economy", icon: "factory", label: "Economia e mini-bases", hint: "Mais engenheiros, expansões espalhadas pelo mapa mais cedo e em paralelo, mais extratores ao mesmo tempo, pesquisa sem atraso." },
-  { key: "raids", icon: "bolt", label: "Ataques-relâmpago", hint: "Unidades rápidas atacam extratores sem defesa enquanto o exército principal se prepara." },
+];
+const AI_PERSONALITIES: { key: AiPersonality; label: string; hint: string }[] = [
+  { key: "mixed", label: "Misturadas", hint: "cada IA da partida sorteia um estilo" },
+  { key: "balanced", label: "Equilibrada", hint: "paciente e versátil" },
+  { key: "aggressive", label: "Agressiva", hint: "ataca cedo e com menos vantagem" },
+  { key: "defensive", label: "Defensiva", hint: "muitas torres, exército grande antes de sair" },
+  { key: "raider", label: "Saqueadora", hint: "muitos ataques-relâmpago em extratores" },
+  { key: "naval", label: "Naval", hint: "frota sai mais cedo (Illuminate vira equilibrada)" },
+  { key: "airborne", label: "Aérea", hint: "aviação mais agressiva" },
 ];
 
 function loadAi(): AiOptions {
@@ -192,18 +212,33 @@ export function AiModal({ installed, onClose }: { installed: boolean; onClose: (
             <button type="button" className="btn" aria-pressed={o.level === 2} onClick={() => set({ level: 2 })}>Brutal</button>
           </div>
         </Field>
+        <Field label="Personalidade" hint={AI_PERSONALITIES.find((p) => p.key === o.personality)?.hint}>
+          <div className="seg wrap" role="group" aria-label="Personalidade da IA">
+            {AI_PERSONALITIES.map((p) => <button type="button" key={p.key} className="btn" aria-pressed={o.personality === p.key} disabled={!o.commander} onClick={() => set({ personality: p.key })}>{p.label}</button>)}
+          </div>
+        </Field>
         <div className="col" style={{ gap: 10 }}>
-          {AI_ROWS.map((r) => (
-            <div key={r.key} className="row" style={{ gap: 12, opacity: r.key === "raids" && !o.commander ? 0.5 : 1 }}>
-              <Icon name={r.icon} size={20} />
-              <div className="grow">
-                <div>{r.label}</div>
-                <div className="small faint">{r.hint}</div>
+          {AI_ROWS.map((r) => {
+            const off = !!r.needsCommander && !o.commander;
+            return (
+              <div key={r.key} className="row" style={{ gap: 12, opacity: off ? 0.5 : 1 }}>
+                <Icon name={r.icon} size={20} />
+                <div className="grow">
+                  <div>{r.label}</div>
+                  <div className="small faint">{r.hint}</div>
+                </div>
+                <Switch label={r.label} checked={o[r.key]} disabled={off} onChange={(v) => set({ [r.key]: v } as Partial<AiOptions>)} />
               </div>
-              <Switch label={r.label} checked={o[r.key]} disabled={r.key === "raids" && !o.commander} onChange={(v) => set({ [r.key]: v } as Partial<AiOptions>)} />
-            </div>
-          ))}
+            );
+          })}
         </div>
+        {o.commander && o.panel && (
+          <Field label="Tecla do painel" hint='Também abre pelo botão "IA" na borda esquerda da tela. Use uma tecla diferente da do menu de trapaças.'>
+            <div className="seg" role="group" aria-label="Tecla do painel">
+              {MENU_KEYS.map((k) => <button type="button" key={k} className="btn" aria-pressed={o.panelKey === k} onClick={() => set({ panelKey: k })}>{k}</button>)}
+            </div>
+          </Field>
+        )}
         <Notice kind="info">O mod é montado agora com os arquivos de IA do seu jogo (incluindo os da expansão). Mexe no comportamento da IA, então todos numa partida multiplayer precisam ter o mesmo mod. Desligue na lista para voltar à IA original.</Notice>
         {busy && <TaskProgress task="ai" label="Montando a IA…" />}
         <footer>

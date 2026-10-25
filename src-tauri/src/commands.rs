@@ -1251,12 +1251,36 @@ pub async fn build_ai(state: State<'_, AppState>, opts: cp_core::aimod::AiOption
         if opts.commander && opts.raids {
             list.push("ataques-relâmpago em extratores");
         }
+        if opts.commander {
+            for (on, what) in [
+                (opts.air, "aviação estratégica"),
+                (opts.micro, "microgestão e pinça"),
+                (opts.counter, "reconhecimento e contra-ataque"),
+                (opts.build, "defesa reativa e postos avançados"),
+                (opts.team, "IAs aliadas em equipe"),
+                (opts.adaptive, "dificuldade adaptativa"),
+            ] {
+                if on {
+                    list.push(what);
+                }
+            }
+        }
+        let personality = match opts.personality.as_str() {
+            "balanced" => "equilibrada",
+            "aggressive" => "agressiva",
+            "defensive" => "defensiva",
+            "raider" => "saqueadora",
+            "naval" => "naval",
+            "airborne" => "aérea",
+            _ => "personalidades misturadas",
+        };
+        let panel = if opts.commander && opts.panel { format!(" Painel no jogo: tecla {}.", opts.panel_key) } else { String::new() };
         let import = ImportOptions {
             id: Some("cp-ia-esperta".into()),
             name: Some(if opts.level >= 2 { "IA mais esperta (brutal)".into() } else { "IA mais esperta".into() }),
             category: Some(Category::Gameplay),
             description: Some(format!(
-                "{}. Vale para todas as dificuldades da IA em escaramuça. {} ajustes aplicados.",
+                "{}; {personality}. Vale para todas as dificuldades da IA em escaramuça.{panel} {} ajustes aplicados.",
                 list.join(", "),
                 res.applied
             )),
