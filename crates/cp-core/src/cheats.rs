@@ -4,9 +4,14 @@
 //!
 //! O mod é montado na hora com os arquivos do próprio jogo do usuário (texto, de
 //! `uncompiled_lua.scd`); nada do jogo é distribuído:
-//! - `simInit.lua` ganha uma linha que inicia `/lua/sim/cp_cheats.lua` (nosso);
+//! - `simInit.lua` leva o código das trapaças no fim e `BeginSession` inicia `CPCheatsRun`;
 //! - `SimCallbacks.lua` ganha o comando `CPCheats`, que o menu usa para avisar a simulação;
-//! - `gamemain.lua` (interface) abre `/lua/ui/game/cp_cheatmenu.lua` (nosso) quando a partida começa.
+//! - `gamemain_pc.lua` (a tela da partida no PC) leva o código do menu no fim e `OnFirstUpdate`
+//!   chama `CPMenuInit` (o `gamemain.lua` não serve: o jogo monta a tela direto pelo `_pc`);
+//! - `UserSync.lua` também chama `CPMenuInit` quando a simulação avisa que as trapaças ligaram.
+//!
+//! O código vai **dentro** desses arquivos (e não em arquivos novos) porque o jogo só entrega os
+//! caminhos que estão no índice dele (`toc.win.bdf`): um `import` de um arquivo novo não é achado.
 //!
 //! As trapaças só valem com um único jogador humano: em multiplayer a simulação ignora tudo e o
 //! menu nem aparece.
@@ -95,16 +100,27 @@ pub fn menu_lua(o: &CheatOptions) -> String {
     fill(UI_LUA, o)
 }
 
-const SIM_HOOK: &str = "\tForkThread(import('/lua/sim/cp_cheats.lua').Run) -- CommandProject cheats\n";
+const MARK: &str = "CommandProject cheats";
+const SIM_HOOK: &str = "\tForkThread(CPCheatsRun) -- CommandProject cheats\n";
 const CALLBACK_HOOK: &str =
-    "\n-- CommandProject cheats: in-game menu\nCallbacks.CPCheats = function(data) import('/lua/sim/cp_cheats.lua').Set(data) end\n";
-const UI_HOOK: &str =
-    "\tpcall(function() import('/lua/ui/game/cp_cheatmenu.lua').Init(isReplay) end) -- CommandProject cheats\n";
+    "\n-- CommandProject cheats: in-game menu\nCallbacks.CPCheats = function(data) CPCheatsSet(data) end\n";
+const UI_HOOK: &str = "\tpcall(CPMenuInit, false) -- CommandProject cheats\n";
+const SYNC_HOOK: &str = "\tif Sync.CPCheats then pcall(import('/lua/ui/game/gamemain_pc.lua').CPMenuInit, false) end -- CommandProject cheats\n";
 
-/// `simInit.lua` do jogo com a linha que inicia as trapaças no começo da partida.
-pub fn patch_sim_init(text: &str) -> Result<String> {
-    if text.contains("cp_cheats.lua") {
-        return Ok(text.to_string());
+fn append(text: &str, code: &str) -> String {
+    let mut out = text.to_string();
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push('\n');
+    out.push_str(code);
+    out
+}
+
+/// `simInit.lua` do jogo com o código das trapaças (`sim`) no fim e a linha que o inicia.
+pub fn patch_sim_init(text: &str, sim: &str) -> Result<String> {
+    if text.contains(MARK) {
+        return Err(Error::Other("o simInit.lua do jogo já tem as trapaças: use o original do jogo".into()));
     }
     // depois de tudo montado: logo antes do placar começar a contar
     let anchors = [
@@ -114,13 +130,13 @@ pub fn patch_sim_init(text: &str) -> Result<String> {
     for a in anchors {
         if let Some(p) = text.find(a) {
             let line = text[..p].rfind('\n').map(|i| i + 1).unwrap_or(0);
-            return Ok(format!("{}{SIM_HOOK}{}", &text[..line], &text[line..]));
+            return Ok(append(&format!("{}{SIM_HOOK}{}", &text[..line], &text[line..]), sim));
         }
     }
     // plano B: primeira linha de BeginSession
     if let Some(p) = text.find("function BeginSession()") {
         let end = text[p..].find('\n').map(|i| p + i + 1).unwrap_or(text.len());
-        return Ok(format!("{}{SIM_HOOK}{}", &text[..end], &text[end..]));
+        return Ok(append(&format!("{}{SIM_HOOK}{}", &text[..end], &text[end..]), sim));
     }
     Err(Error::Other("o simInit.lua do jogo não tem BeginSession: não deu para ligar as trapaças".into()))
 }
@@ -141,16 +157,29 @@ pub fn patch_sim_callbacks(text: &str) -> Result<String> {
     Ok(out)
 }
 
-/// `gamemain.lua` abrindo o menu quando a interface da partida é montada.
-pub fn patch_game_main(text: &str) -> Result<String> {
-    if text.contains("cp_cheatmenu.lua") {
-        return Ok(text.to_string());
+/// `gamemain_pc.lua` (a tela da partida no PC) com o código do menu (`ui`) no fim, aberto quando
+/// a partida aparece na tela (`OnFirstUpdate`).
+pub fn patch_game_main(text: &str, ui: &str) -> Result<String> {
+    if text.contains(MARK) {
+        return Err(Error::Other("o gamemain_pc.lua do jogo já tem o menu: use o original do jogo".into()));
     }
-    let missing = || Error::Other("o gamemain.lua do jogo é diferente do esperado: não deu para ligar o menu".into());
-    let p = text.find("function CreateUI(isReplay)").ok_or_else(missing)?;
+    let missing = || Error::Other("o gamemain_pc.lua do jogo é diferente do esperado: não deu para ligar o menu".into());
+    let p = text.find("function OnFirstUpdate()").ok_or_else(missing)?;
     // o `end` que fecha a função fica sozinho no começo da linha
     let close = text[p..].find("\nend").map(|i| p + i + 1).ok_or_else(missing)?;
-    Ok(format!("{}{UI_HOOK}{}", &text[..close], &text[close..]))
+    Ok(append(&format!("{}{UI_HOOK}{}", &text[..close], &text[close..]), ui))
+}
+
+/// `UserSync.lua` abrindo o menu quando a simulação avisa que as trapaças ligaram (garante o menu
+/// mesmo se a montagem da tela não passar pelo gancho de `gamemain_pc.lua`).
+pub fn patch_user_sync(text: &str) -> Result<String> {
+    if text.contains(MARK) {
+        return Err(Error::Other("o UserSync.lua do jogo já tem o menu: use o original do jogo".into()));
+    }
+    let missing = || Error::Other("o UserSync.lua do jogo é diferente do esperado: não deu para ligar o menu".into());
+    let p = text.find("function OnSync()").ok_or_else(missing)?;
+    let close = text[p..].find("\nend").map(|i| p + i + 1).ok_or_else(missing)?;
+    Ok(format!("{}{SYNC_HOOK}{}", &text[..close], &text[close..]))
 }
 
 fn game_text(sources: &[PathBuf], path: &str) -> Result<String> {
@@ -166,16 +195,14 @@ fn game_text(sources: &[PathBuf], path: &str) -> Result<String> {
 
 /// Monta o `.scd` do mod em `dest` com os arquivos do jogo do usuário (`sources`).
 pub fn build(sources: &[PathBuf], opts: &CheatOptions, dest: &Path) -> Result<PathBuf> {
-    let sim_init = patch_sim_init(&game_text(sources, "/lua/simInit.lua")?)?;
-    let mut files: Vec<(&str, String)> =
-        vec![("lua/simInit.lua", sim_init), ("lua/sim/cp_cheats.lua", cheats_lua(opts))];
+    let mut files: Vec<(&str, String)> = vec![
+        ("lua/simInit.lua", patch_sim_init(&game_text(sources, "/lua/simInit.lua")?, &cheats_lua(opts))?),
+        ("lua/sim/SimCallbacks.lua", patch_sim_callbacks(&game_text(sources, "/lua/sim/SimCallbacks.lua")?)?),
+    ];
     if opts.menu {
-        files.push((
-            "lua/sim/SimCallbacks.lua",
-            patch_sim_callbacks(&game_text(sources, "/lua/sim/SimCallbacks.lua")?)?,
-        ));
-        files.push(("lua/ui/game/gamemain.lua", patch_game_main(&game_text(sources, "/lua/ui/game/gamemain.lua")?)?));
-        files.push(("lua/ui/game/cp_cheatmenu.lua", menu_lua(opts)));
+        let main = game_text(sources, "/lua/ui/game/gamemain_pc.lua")?;
+        files.push(("lua/ui/game/gamemain_pc.lua", patch_game_main(&main, &menu_lua(opts))?));
+        files.push(("lua/UserSync.lua", patch_user_sync(&game_text(sources, "/lua/UserSync.lua")?)?));
     }
     let mut b = crate::scd::ScdBuilder::create(dest)?;
     for (path, text) in &files {
@@ -191,32 +218,31 @@ mod tests {
     #[test]
     fn hook_goes_before_scores() {
         let src = "function BeginSession()\n\tlocal a = 1\n\t--start\n\tForkThread(import('/lua/sim/aibrain.lua').CollectCurrentScores)\nend\n";
-        let out = patch_sim_init(src).unwrap();
-        let hook = out.find("cp_cheats.lua").unwrap();
-        assert!(hook < out.find("CollectCurrentScores").unwrap());
-        assert!(out.starts_with(
-            "function BeginSession()\n\tlocal a = 1\n\t--start\n\tForkThread(import('/lua/sim/cp_cheats.lua')"
-        ));
-        // de novo não duplica
-        assert_eq!(patch_sim_init(&out).unwrap(), out);
+        let out = patch_sim_init(src, "do\nfunction CPCheatsRun() end\nend\n").unwrap();
+        assert!(out.find("ForkThread(CPCheatsRun)").unwrap() < out.find("CollectCurrentScores").unwrap());
+        assert!(out.starts_with("function BeginSession()\n\tlocal a = 1\n\t--start\n\tForkThread(CPCheatsRun)"));
+        assert!(out.ends_with("\n\ndo\nfunction CPCheatsRun() end\nend\n"));
+        // já montado: recusa (precisa do original)
+        assert!(patch_sim_init(&out, "x").is_err());
         // sem âncora: entra no começo de BeginSession
-        let o2 = patch_sim_init("x = 1\nfunction BeginSession()\nend\n").unwrap();
-        assert!(o2.contains("function BeginSession()\n\tForkThread(import('/lua/sim/cp_cheats.lua')"));
-        assert!(patch_sim_init("nada aqui").is_err());
+        let o2 = patch_sim_init("x = 1\nfunction BeginSession()\nend\n", "").unwrap();
+        assert!(o2.contains("function BeginSession()\n\tForkThread(CPCheatsRun)"));
+        assert!(patch_sim_init("nada aqui", "").is_err());
     }
 
     #[test]
     fn menu_hooks() {
         let cb = patch_sim_callbacks("local Callbacks = {}\nfunction DoCallback() end").unwrap();
-        assert!(cb.ends_with("Callbacks.CPCheats = function(data) import('/lua/sim/cp_cheats.lua').Set(data) end\n"));
+        assert!(cb.ends_with("Callbacks.CPCheats = function(data) CPCheatsSet(data) end\n"));
         assert_eq!(patch_sim_callbacks(&cb).unwrap(), cb);
         assert!(patch_sim_callbacks("x = 1").is_err());
 
-        let gm = "function CreateUI(isReplay)\n    if a then\n\t\tb()\n\tend\nend\n\nfunction X()\nend\n";
-        let out = patch_game_main(gm).unwrap();
-        assert!(out.contains("\tend\n\tpcall(function() import('/lua/ui/game/cp_cheatmenu.lua').Init(isReplay) end)"));
-        assert!(out.find("cp_cheatmenu").unwrap() < out.find("function X").unwrap());
-        assert_eq!(patch_game_main(&out).unwrap(), out);
+        let gm = "function OnFirstUpdate()\n    if a then\n\t\tb()\n\tend\nend\n\nfunction X()\nend\n";
+        let out = patch_game_main(gm, "do\nfunction CPMenuInit() end\nend\n").unwrap();
+        assert!(out.contains("\tend\n\tpcall(CPMenuInit, false) -- CommandProject cheats\nend\n"));
+        assert!(out.find("CPMenuInit, false").unwrap() < out.find("function X").unwrap());
+        assert!(out.ends_with("function CPMenuInit() end\nend\n"));
+        assert!(patch_game_main(&out, "").is_err());
     }
 
     #[test]
@@ -247,23 +273,27 @@ mod tests {
                     b"function BeginSession()\r\n\tForkThread(import('/lua/sim/aibrain.lua').CollectCurrentScores)\r\nend\r\n",
                 ),
                 ("uncompiled\\lua\\sim\\SimCallbacks.lua", b"local Callbacks = {}\r\n"),
-                ("uncompiled\\lua\\ui\\game\\gamemain.lua", b"function CreateUI(isReplay)\r\n\tx()\r\nend\r\n"),
+                ("uncompiled\\lua\\ui\\game\\gamemain_pc.lua", b"function OnFirstUpdate()\r\n\tx()\r\nend\r\n"),
+                ("uncompiled\\lua\\UserSync.lua", b"Sync = {}\r\nfunction OnSync()\r\n    if a then\r\n    end\r\nend\r\n"),
             ],
         );
         let dest = tmp.path().join("out.scd");
         build(std::slice::from_ref(&src), &CheatOptions::default(), &dest).unwrap();
         let mut s = crate::scd::Scd::open(&dest).unwrap();
         let read = |s: &mut crate::scd::Scd, p: &str| String::from_utf8(s.read(p).unwrap()).unwrap();
-        assert!(read(&mut s, "lua/simInit.lua").contains("cp_cheats.lua"));
-        assert!(read(&mut s, "lua/sim/cp_cheats.lua").contains("function Set(data)"));
+        let init = read(&mut s, "lua/simInit.lua");
+        assert!(init.contains("ForkThread(CPCheatsRun)") && init.contains("function CPCheatsSet(data)"));
         assert!(read(&mut s, "lua/sim/SimCallbacks.lua").contains("Callbacks.CPCheats"));
-        assert!(read(&mut s, "lua/ui/game/gamemain.lua").contains("cp_cheatmenu.lua"));
-        assert!(read(&mut s, "lua/ui/game/cp_cheatmenu.lua").contains("function Toggle()"));
+        let main = read(&mut s, "lua/ui/game/gamemain_pc.lua");
+        assert!(main.contains("pcall(CPMenuInit, false)") && main.contains("function CPMenuToggle()"));
+        // só arquivos que o jogo já tem no índice
+        assert!(read(&mut s, "lua/UserSync.lua").contains("    end\n\tif Sync.CPCheats then pcall("));
+        assert_eq!(s.entries().unwrap().len(), 4);
 
         // sem o menu, só a simulação
         let dest2 = tmp.path().join("out2.scd");
         build(&[src], &CheatOptions { menu: false, ..Default::default() }, &dest2).unwrap();
         let mut s2 = crate::scd::Scd::open(&dest2).unwrap();
-        assert!(s2.read("lua/ui/game/cp_cheatmenu.lua").is_err());
+        assert!(s2.read("lua/ui/game/gamemain_pc.lua").is_err());
     }
 }

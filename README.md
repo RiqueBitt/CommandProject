@@ -303,9 +303,10 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
   misturadas pelo relevo e pelo pincel (experimental: confirme no jogo); o jogo só mistura texturas
   vizinhas na cadeia (praia → chão → terra → rocha → topo), então pintar "topo" no meio da grama
   passa por terra e rocha na borda da pincelada.
-- **Trapaças** (experimental: confirme no jogo): o mod substitui o `simInit.lua` e, com o menu,
-  também o `SimCallbacks.lua` e o `gamemain.lua`; outro mod que mexa nesses arquivos entra em
-  conflito (veja Conflitos). Os textos do menu ficam sem acento para não depender da fonte do jogo. As unidades criadas viram invencíveis em até 1 s.
+- **Trapaças** (experimental: confirme no jogo): o mod leva versões do `simInit.lua` e do
+  `SimCallbacks.lua` do seu jogo e, com o menu, também do `gamemain.lua` e do `UserSync.lua` (o
+  código vai dentro desses arquivos, que o jogo já conhece); outro mod que mexa neles entra em
+  conflito (veja Conflitos). Ao começar a partida aparece no alto da tela "trapacas ligadas". Os textos do menu ficam sem acento para não depender da fonte do jogo. As unidades criadas viram invencíveis em até 1 s.
 - **Decorações** são visuais: não bloqueiam a passagem das unidades.
 - **Tropas novas, animações criadas e modelos próprios no jogo** são experimentais: veja a tabela
   em [docs/criacao.md](docs/criacao.md#o-que-é-experimental).
