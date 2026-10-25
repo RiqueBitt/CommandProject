@@ -35,6 +35,13 @@ function CPBigMatchSession(mapName, spec)
     options.Victory = 'demoralization'
     options.CheatsEnabled = 'false'
     options.TeamLock = 'locked'
+    -- the same options the game's skirmish screen sets
+    options.NoNIS = false
+    options.TeamSpawn = 'fixed'
+    options.AllowObservers = false
+    options.Ranked = false
+    options.PreBuiltUnits = 'Off'
+    options.RestrictedCategories = {}
     for _, kv in CPSplit(parts[1] or '', ';') do
         local eq = string.find(kv, '=', 1, true)
         if eq and eq > 1 then options[string.sub(kv, 1, eq - 1)] = string.sub(kv, eq + 1) end
@@ -46,7 +53,15 @@ function CPBigMatchSession(mapName, spec)
     sessionInfo.createReplay = false
     sessionInfo.scenarioInfo = scenario
     sessionInfo.teamInfo = {}
-    sessionInfo.scenarioMods = import('/lua/system/mods.lua').GetCampaignMods(scenario)
+    -- the game's own skirmish screen plays with the official expansion mod (its units, AI and
+    -- research); without it the match stops loading
+    local Mods = import('/lua/system/mods.lua')
+    local okDlc, dlc = pcall(function() return Mods.GetOfficialDLCModForSession() end)
+    if okDlc and type(dlc) == 'table' and table.getn(dlc) > 0 then
+        sessionInfo.scenarioMods = dlc
+    else
+        sessionInfo.scenarioMods = Mods.GetCampaignMods(scenario)
+    end
 
     local armies = scenario.Configurations.standard.teams[1].armies
     local factions = table.getn(import('/lua/common/factions.lua').Factions)

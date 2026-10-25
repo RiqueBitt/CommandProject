@@ -50,7 +50,7 @@ local modules = {
     ['/lua/user/prefs.lua'] = { GetFromCurrentProfile = function(k) return World.prefs[k] end, SetToCurrentProfile = function(k, v) World.prefs[k] = v end },
     ['/lua/ui/maputil.lua'] = { LoadScenario = function(m) if m == '/maps/nada/nada_scenario.lua' then return nil end World.loaded = m return World.scenario end,
                                GetExtraArmies = function() return { 'ARMY_EXTRA' } end },
-    ['/lua/system/mods.lua'] = { GetCampaignMods = function() return {} end },
+    ['/lua/system/mods.lua'] = { GetCampaignMods = function() return {} end, GetOfficialDLCModForSession = function() return { { uid = 'dlc' } } end },
     ['/lua/common/factions.lua'] = { Factions = { { Key = 'uef' }, { Key = 'cybran' }, { Key = 'illuminate' } } },
     ['/lua/ui/lobby/ainames.lua'] = { ainames = { uef = { 'Hall' }, cybran = { 'Gauge' }, illuminate = { 'Thalia' } } },
     ['/lua/ui/lobby/aitypes.lua'] = { aitypes = { { key = 'Easy', name = 'AI: Easy' }, { key = 'Normal', name = 'AI: Normal' }, { key = 'Hard', name = 'AI: Hard' }, { key = 'Cheat', name = 'AI: Cheating' } } },
@@ -103,7 +103,7 @@ def run(source: str, label: str, real: bool):
     # 12 contra 12: você no time 1 (vaga 1), IAs nos times 1 e 2
     # cores por time: time 1 = cor 0, time 2 = cor 1 (o jogo conta a cor a partir de 0)
     slots = ["H,2,1,,0"] + ["A,2,0,Hard,0"] * 11 + ["A,3,3,Cheat,1"] * 12
-    spec = "Victory=domination;UnitCap=1000;FogOfWar=none;GameSpeed=normal;NoRushOption=5;PrebuiltUnits=Off;CivilianAlliance=enemy|" + "|".join(slots)
+    spec = "Victory=domination;UnitCap=1000;FogOfWar=none;GameSpeed=normal;NoRushOption=5;PreBuiltUnits=Off;CivilianAlliance=enemy|" + "|".join(slots)
     g, info = session(spec)
     check(info and not info["normal"], f"{label}: a partida grande assume o começo da partida ({g.World.warn})")
     if not info:
@@ -125,6 +125,8 @@ def run(source: str, label: str, real: bool):
     check(o.Victory == "domination" and o.UnitCap == "1000" and o.FogOfWar == "none" and o.NoRushOption == "5"
           and o.CheatsEnabled == "false" and o.TeamLock == "locked", f"{label}: opções da partida")
     check(g.World.prefs.LoadingFaction == 1, f"{label}: tela de carregamento com a sua facção")
+    check(len(list(info.scenarioMods.values())) == 1 and list(info.scenarioMods.values())[0].uid == "dlc", f"{label}: partida com o mod oficial da expansão, como o lobby do jogo")
+    check(o.PreBuiltUnits == "Off" and o.TeamSpawn == "fixed" and o.AllowObservers is False, f"{label}: opções iguais às do lobby do jogo")
 
     # vagas vazias e você no meio
     g, info = session("Victory=demoralization|A,1,0,Easy|X|H,1,2,|X|A,1,0,Normal" + "|X" * 19)

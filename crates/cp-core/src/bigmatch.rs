@@ -20,7 +20,7 @@ const ENTRY: &str = "function StartCommandLineSession(mapName, isPerfTest)\n";
 const HOOK: &str = "\tif CPBigMatchStart and CPBigMatchStart(mapName) then return end -- CommandProject big match\n";
 
 /// Versão do código do mod: quando muda, o launcher monta o mod de novo.
-pub const MOD_VERSION: &str = "1.1.0";
+pub const MOD_VERSION: &str = "1.2.0";
 /// Cores de exército na partida grande: as 10 do jogo e mais 14 (o mod acrescenta só com `/cpmatch`).
 pub const COLORS: i32 = 24;
 /// Mapas com mais de 8 bases são gravados com este tipo: o lobby do jogo (8 posições, que trava com
@@ -139,7 +139,7 @@ pub fn encode(m: &BigMatch) -> Result<String> {
         return Err(Error::Other("todos estão no mesmo time: separe em pelo menos dois".into()));
     }
     let mut out = format!(
-        "Victory={};UnitCap={};FogOfWar={};GameSpeed={};NoRushOption={};PrebuiltUnits={};CivilianAlliance={}",
+        "Victory={};UnitCap={};FogOfWar={};GameSpeed={};NoRushOption={};PreBuiltUnits={};CivilianAlliance={}",
         pick(&o.victory, &["demoralization", "domination", "sandbox"], "tipo de vitória")?,
         o.unit_cap.clamp(50, 5000),
         pick(&o.fog, &["explored", "unexplored", "none"], "névoa")?,
