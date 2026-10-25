@@ -21,6 +21,8 @@ interface Props {
   blank: boolean;
   initial: WorldGen | null;
   catalog: PropCatalog;
+  /** céus dos mapas do jogo (id do mapa, nome) */
+  skies: { value: string; label: string }[];
   onTerrain: (id: string) => void;
   onClose: () => void;
   onApply: (wg: WorldGen, res: WorldResult) => void;
@@ -85,6 +87,7 @@ export default function WorldGenModal(props: Props) {
   const timer = useRef<number | null>(null);
   const [small, smallDonor] = useMemo(() => downsample(grid, donor, 128), [grid, donor]);
   const set = <K extends keyof WorldGen>(k: K, v: WorldGen[K]) => setWg((w) => ({ ...w, [k]: v }));
+  const plat = wg.style === "platforms";
 
   // prévia: gera numa grade menor alguns instantes depois da última mudança
   useEffect(() => {
@@ -181,7 +184,41 @@ export default function WorldGenModal(props: Props) {
             </label>
           </div>
 
-          {SLIDERS.map((g) => (
+          <div className="wg-row">
+            <label className="field"><span className="label">Estilo do terreno</span>
+              <select className="select" value={wg.style ?? "natural"} onChange={(e) => set("style", e.target.value as WorldGen["style"])}>
+                <option value="natural">Natural (morros, montanhas, água)</option>
+                <option value="platforms">Plataformas sobre um abismo, com pontes</option>
+              </select>
+            </label>
+          </div>
+          {plat && (
+            <section className="wg-group">
+              <h4><Icon name="layers" size={17} /> Plataformas e abismo</h4>
+              {([
+                { key: "platformHeight", label: "Altura das plataformas", min: 40, max: 180, step: 5 },
+                { key: "plateaus", label: "Plataformas de expansão", min: 0, max: 12 },
+                { key: "mountains", label: "Torres de pedra (sem ponte)", min: 0, max: 12 },
+              ] as { key: keyof WorldGen; label: string; min: number; max: number; step?: number }[]).map((it) => {
+                const v = (wg[it.key] as number | undefined) ?? (it.key === "platformHeight" ? 95 : 0);
+                return (
+                  <label key={it.key} className="range">
+                    <span>{it.label}</span>
+                    <input type="range" min={it.min} max={it.max} step={it.step ?? 1} value={v} onChange={(e) => set(it.key, Number(e.target.value) as never)} />
+                    <output>{v}</output>
+                  </label>
+                );
+              })}
+              <label className="field"><span className="label">Fundo do abismo</span>
+                <select className="select" value={wg.abyss ?? "deep"} onChange={(e) => set("abyss", e.target.value as WorldGen["abyss"])}>
+                  <option value="deep">Seco (rocha lá embaixo)</option>
+                  <option value="water" disabled={!hasWater}>Mar lá embaixo{hasWater ? "" : " (precisa de água)"}</option>
+                </select>
+              </label>
+              <p className="faint small">As bases, o centro e as expansões ficam em plataformas altas ligadas por pontes; o resto é abismo. Depois de gerar, mova as plataformas e desenhe pontes novas em Formas → Plataformas e abismo.</p>
+            </section>
+          )}
+          {SLIDERS.filter((g) => !plat || !["Montanhas", "Água", "Cavidades"].includes(g.group)).map((g) => (
             <section key={g.group} className="wg-group">
               <h4><Icon name={g.icon} size={17} /> {g.group}</h4>
               {g.items.map((it) => {
@@ -220,6 +257,12 @@ export default function WorldGenModal(props: Props) {
                   <option value="poor">Pouca massa</option>
                   <option value="normal">Normal</option>
                   <option value="rich">Muita massa</option>
+                </select>
+              </label>
+              <label className="field"><span className="label">Céu</span>
+                <select className="select" value={wg.sky ?? ""} onChange={(e) => set("sky", e.target.value || null)}>
+                  <option value="">O do terreno base</option>
+                  {props.skies.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
                 </select>
               </label>
               <label className="field"><span className="label">Bioma (chão, prévia e minimapa)</span>

@@ -276,6 +276,7 @@ def main():
         print("base lisa ok: heightfield plano e decorações originais retiradas")
         test_lighting()
         test_rebuild()
+        test_sky_and_water()
 
         bad = dict(spec, scenario_id="meu mapa")
         env = dict(os.environ, SC2_GAMEDATA=gd, SC2_MAP_OUT=out)
@@ -458,6 +459,37 @@ def test_rebuild():
             v = struct.unpack_from("<I", pl3, p)[0]
             assert v == 0xFFFFFFFF or v < sec3[1], f"ponteiro fora do lugar em {p}"
     print(f"malha nova ok: {ni3 // 3} triângulos, anel em volta, água e texturas por bioma")
+
+
+def test_sky_and_water():
+    """céu trocado no info.win.bdf e máscara de água texel a texel"""
+    import cp_regrid
+    import cp_world
+    pl = bytearray(260)
+    struct.pack_into("<f", pl, 216, 40.0)
+    for k in range(5):
+        struct.pack_into("<I", pl, 240 + 4 * k, 260)
+    pl += b"/textures/environment/u01_env.dds\0/textures/environment/u01_sky.dds\0"
+    struct.pack_into("<I", pl, 244, 260 + len("/textures/environment/u01_env.dds") + 1)
+    info = cp_regrid.write_bdf([0x4244464D, 7, 2, 0, 0, 0, 5, 1], [240, 244, 248, 252, 256], [0], pl)
+    new = cp_world.set_info_sky(info, {"env": "/textures/environment/u05_env.dds", "sky": "/textures/environment/u05_sky.dds",
+                                       "sight": "/textures/ColorCorrection/a.ccc.dds", "fog": ""})
+    _, fix, _, p2 = cp_regrid.read_bdf(new)
+    assert fix == [240, 244, 248, 252, 256]
+    txt = [bytes(p2[q:p2.index(b"\0", q)]).decode() for q in struct.unpack_from("<5I", p2, 240)]
+    assert txt[1] == "/textures/environment/u05_sky.dds" and txt[3].endswith("a.ccc.dds") and txt[4] == "", txt
+    assert abs(struct.unpack_from("<f", p2, 216)[0] - 40) < 1e-6
+    # água: rampa de x = 0 (y 30) a x = 1024 (y 50) → margem em x = 512, sem degrau de bloco
+    wd = cp_world.waterdepth_dds(lambda x, z: 30 + x / 1024 * 20, 40.0, 1024, cp_world.dds_header(512, 512, 10))
+    assert len(wd) == 349680
+    def alpha(i, j):
+        o = 128 + ((j // 4) * 128 + i // 4) * 16
+        a0, a1 = wd[o], wd[o + 1]
+        code = (int.from_bytes(wd[o + 2:o + 8], "little") >> (3 * ((j % 4) * 4 + i % 4))) & 7
+        pal = [a0, a1] + [((7 - n) * a0 + n * a1) // 7 for n in range(1, 7)]
+        return pal[code]
+    assert alpha(254, 7) > 0 and alpha(256, 7) == 0 and alpha(250, 7) > alpha(254, 7)
+    print("céu e água ok: caminhos novos no info.win.bdf, margem da água texel a texel")
 
 
 if __name__ == "__main__":

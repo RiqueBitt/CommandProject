@@ -153,6 +153,79 @@ pub fn prop_sizes(sources: &[PathBuf], bps: &[String]) -> std::collections::Hash
     map
 }
 
+/// Céu de um mapa do jogo (do `info.win.bdf`): caixa do céu, reflexo do ambiente e correção de cor.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkyInfo {
+    pub map: String,
+    pub env: String,
+    pub sky: String,
+    pub sight: String,
+    pub fog: String,
+    /// cor média do céu (para a prévia do editor)
+    pub color: [u8; 3],
+}
+
+static SKIES: Mutex<Option<(Vec<PathBuf>, Vec<SkyInfo>)>> = Mutex::new(None);
+
+/// Os campos de texto do `info.win.bdf` (ponteiros nos bytes 240..260 do conteúdo).
+pub fn info_sky_fields(payload: &[u8]) -> Option<[String; 5]> {
+    let mut out: [String; 5] = Default::default();
+    for (k, slot) in out.iter_mut().enumerate() {
+        let p = u32::from_le_bytes(payload.get(240 + k * 4..244 + k * 4)?.try_into().ok()?) as usize;
+        if p >= payload.len() {
+            return None;
+        }
+        let end = payload[p..].iter().position(|&b| b == 0).map(|e| p + e).unwrap_or(payload.len());
+        *slot = String::from_utf8_lossy(&payload[p..end]).into_owned();
+    }
+    Some(out)
+}
+
+/// Céus de todos os mapas do jogo (sem repetir o mesmo céu).
+pub fn map_skies(sources: &[PathBuf]) -> Result<Vec<SkyInfo>> {
+    if let Some((src, cached)) = SKIES.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+        if src == sources {
+            return Ok(cached.clone());
+        }
+    }
+    let mut out: Vec<SkyInfo> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for src in sources.iter().rev() {
+        let Ok(mut scd) = Scd::open(src) else { continue };
+        let entries = scd.entries()?;
+        for (i, e) in entries.iter().enumerate() {
+            if e.is_dir || !e.key.starts_with("/maps/") || !e.key.ends_with(".info.win.bdf") {
+                continue;
+            }
+            let map = e.name.replace('\\', "/").split('/').nth(1).unwrap_or_default().to_string();
+            let Ok(payload) = scd.read_at(i).and_then(|d| mfdb_payload(&d)) else { continue };
+            let Some([env, sky, _, sight, fog]) = info_sky_fields(&payload) else { continue };
+            if sky.is_empty() || !seen.insert(format!("{sky}|{sight}|{fog}").to_ascii_lowercase()) {
+                continue;
+            }
+            let color = read_game_file(sources, &sky)
+                .ok()
+                .and_then(|d| crate::dds::decode_max(&d, 16).ok())
+                .map(|img| {
+                    let n = (img.pixels.len() / 4).max(1) as u64;
+                    let mut acc = [0u64; 3];
+                    for px in img.pixels.chunks(4) {
+                        for (a, v) in acc.iter_mut().zip(px) {
+                            *a += *v as u64;
+                        }
+                    }
+                    acc.map(|v| (v / n) as u8)
+                })
+                .unwrap_or([40, 60, 80]);
+            out.push(SkyInfo { map, env, sky, sight, fog, color });
+        }
+    }
+    out.sort_by(|a, b| a.map.cmp(&b.map));
+    *SKIES.lock().unwrap_or_else(|p| p.into_inner()) = Some((sources.to_vec(), out.clone()));
+    Ok(out)
+}
+
 static LAYERS: Mutex<Option<(Vec<PathBuf>, Vec<LayerSet>)>> = Mutex::new(None);
 
 /// Camadas de textura do chão de todos os mapas do jogo (lidas dos `terrain.win.bdf`).

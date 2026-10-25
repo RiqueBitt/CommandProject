@@ -41,6 +41,8 @@ interface Props {
   lines?: { pts: Pt[]; color: string }[];
   /** texturas reais do chão (do terreno base) misturadas pela altura e inclinação, com a paleta */
   ground?: GroundTextures | null;
+  /** cor do céu escolhido (fundo e névoa da prévia); null = a cor padrão */
+  sky?: [number, number, number] | null;
   onPointer: (type: "down" | "move" | "up", p: Pt | null) => void;
 }
 
@@ -74,6 +76,7 @@ export default function MapView3D(props: Props) {
     setExaggeration: () => void;
     redrawBrush: () => void;
     setGround: () => void;
+    setSky: () => void;
   } | null>(null);
 
   // cena: criada uma vez por terreno
@@ -744,11 +747,22 @@ if (uGround > 0.5) {
     }
     // toda mudança na cena pede um quadro novo
     const dirtying = <A extends unknown[]>(f: (...a: A) => void) => (...a: A) => { f(...a); invalidate(); };
+    // céu: fundo em degradê suave a partir da cor média do céu escolhido (horizonte mais claro)
+    const setSky = () => {
+      const c = live.current.sky;
+      const base = c ? new THREE.Color(c[0] / 255, c[1] / 255, c[2] / 255) : new THREE.Color(SKY);
+      // a prévia é escura: o céu entra mais apagado para não ofuscar o mapa
+      const bg = c ? base.clone().lerp(new THREE.Color(SKY), 0.35) : base;
+      (scene.background as THREE.Color).copy(bg);
+      (scene.fog as THREE.Fog).color.copy(bg);
+    };
     api.current = {
+      setSky: dirtying(setSky),
       setHeights: dirtying(setHeights), setTexture: dirtying(setTexture), setMarkers: dirtying(setMarkers), setDecor: dirtying(setDecor), setHighlights: dirtying(setHighlights),
       setOrbit: dirtying(setOrbit), setExaggeration: dirtying(setHeights), redrawBrush: dirtying(redrawBrush), setGround: dirtying(setGround),
     };
     setGround();
+    setSky();
     setHeights();
     try { if (localStorage.getItem("cpFixture") === "1") (window as unknown as { __map3d: unknown }).__map3d = { mat, groundU, splat, col, renderer, scene, live }; } catch { /* sem depuração */ }
     setTexture(live.current.texture);
@@ -783,6 +797,7 @@ if (uGround > 0.5) {
   useEffect(() => { api.current?.setHeights(); }, [props.heights, props.waterLevel, props.exaggeration, props.palette]);
   useEffect(() => { api.current?.setTexture(props.texture); }, [props.texture]);
   useEffect(() => { api.current?.setGround(); }, [props.ground]);
+  useEffect(() => { api.current?.setSky(); }, [props.sky]);
   useEffect(() => { api.current?.setMarkers(); }, [props.spawns, props.mass, props.autoMass, props.bridges, props.seed, props.lines]);
   useEffect(() => { api.current?.setDecor(); }, [props.decor, props.cuts]);
   useEffect(() => { api.current?.setHighlights(); }, [props.highlights]);

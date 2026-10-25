@@ -399,7 +399,7 @@ def _clean_spec(spec):
             m = (n + 1) ** 2
             paint = (n, raw[:m], raw[m:])
         spec["clean"] = dict(paint=paint, ground=ground, chain=chain if len(chain) >= 2 else None, relight=bool(clean.get("relight", True)),
-                             clear_props=bool(clean.get("clear_props", True)), ring=bool(clean.get("ring", True)),
+                             clear_props=bool(clean.get("clear_props", True)), ring=bool(clean.get("ring", True)), peaks=bool(clean.get("peaks", True)),
                              ring_rise=max(0.0, min(250.0, float(clean.get("ring_rise", 95)))))
     else:
         spec.pop("clean", None)
@@ -418,6 +418,20 @@ def _clean_spec(spec):
     if (spec.get("clean") or spec.get("flat_base") is not None) and not spec.get("patch"):
         first = next(iter(spec["anchors"].values()))
         spec["patch"] = dict(max_slope=6.0, water_margin=4.0, seed=first, causeways=[])
+    # céu de outro mapa do jogo (caixa do céu, reflexo e correção de cor)
+    sky = spec.get("sky")
+    if sky:
+        clean_sky = {}
+        for k in ("env", "sky", "sight", "fog"):
+            v = str(sky.get(k) or "")
+            if v and not re.match(r"^/textures/[\w/.-]+\.dds$", v, re.I):
+                raise ValueError(f"céu inválido: {v}")
+            clean_sky[k] = v
+        if not clean_sky["sky"]:
+            raise ValueError("céu sem textura")
+        spec["sky"] = clean_sky
+    else:
+        spec.pop("sky", None)
     if spec.get("minimap") not in (None, "donor", "desert", "snow", "dark", "natural"):
         raise ValueError("minimapa inválido")
     return spec
@@ -457,6 +471,13 @@ def _hooks(sm, spec, state):
             if len(ipl) >= 220:
                 _st.pack_into("<f", ipl, 216, spec["water_level"])
                 self.raw["info.win.bdf"] = sm.rebuild_bdf(self.raw["info.win.bdf"], bytes(ipl))
+        if spec.get("sky") and self.raw.get("info.win.bdf"):
+            try:
+                import cp_world
+                self.raw["info.win.bdf"] = cp_world.set_info_sky(self.raw["info.win.bdf"], spec["sky"])
+                emit("progress", message=f"céu trocado: {spec['sky']['sky']}")
+            except Exception as e:  # noqa: BLE001 — sem a troca, fica o céu do terreno base
+                state["warnings"].append(f"o céu não foi trocado ({e})")
         if fb is not None or hd:
             self.set_hfield(hf)
             if fb is not None:
@@ -630,7 +651,7 @@ def _clean_visual(sm, spec, state, terrain, new_id):
             water = wl if wl is not None else (sm._water_level(terrain) or None)
             chain = _existing_textures(sm, clean.get("chain") or []) if clean.get("chain") else []
             zones = cp_world.chain_zones(chain) if len(chain) >= 2 else None
-            biome = cp_world.Biome(height, g, water, paint=clean.get("paint")).prepare(-margin, g + 2 * margin) if zones else None
+            biome = cp_world.Biome(height, g, water, paint=clean.get("paint"), peaks=clean.get("peaks", True)).prepare(-margin, g + 2 * margin) if zones else None
             path = f"/maps/{new_id}/lighting/cpgrid.dds"
             wpath = f"/maps/{new_id}/{new_id}.waterDepth.dds" if water and terrain.raw.get("waterDepth.dds") else None
             tb2, info = cp_regrid.rebuild_terrain(tb, height, g, step=step, mask_path=path, margin=margin, ring_step=16.0,

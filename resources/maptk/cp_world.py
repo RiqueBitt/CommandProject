@@ -93,10 +93,11 @@ def chain_zones(chain):
 class Biome:
     """t e mistura de cada ponto do mapa (e da paisagem em volta) a partir do heightfield."""
 
-    def __init__(self, height, grid, water=None, seed=1337, paint=None):
+    def __init__(self, height, grid, water=None, seed=1337, paint=None, peaks=True):
         """paint = (n, papéis, força): camada do pincel em (n+1)² pontos sobre o mapa; papel 0..4
         (praia, chão, terra, rocha, topo) e força 0..255 (0 = automático)"""
         self.paint = paint
+        self.peaks = peaks
         self.height = height
         self.grid = grid
         self.water = water
@@ -140,7 +141,7 @@ class Biome:
         h = self.height(x, z)
         dx = (self.height(x + e, z) - self.height(x - e, z)) / (2 * e)
         dz = (self.height(x, z + e) - self.height(x, z - e)) / (2 * e)
-        rel = (h - self.lo) / (self.hi - self.lo)
+        rel = (h - self.lo) / (self.hi - self.lo) if self.peaks else 0.0
         nz = fbm(x / 90.0, z / 90.0, self.seed)
         t = zone_t(h, math.hypot(dx, dz), rel, self.water, nz)
         if self.paint and 0 <= x <= self.grid and 0 <= z <= self.grid:
@@ -245,3 +246,27 @@ def waterdepth_dds(height, water, ext, header, size=None):
                     bits |= (0 if q <= 0 else 1 if q >= 7 else q + 1) << (3 * k)
                 out += bytes((a0, a1)) + bits.to_bytes(6, "little") + color
     return bytes(out)
+
+
+SKY_FIELDS = ("env", "sky", "unused", "sight", "fog")
+
+
+def set_info_sky(info_bytes, sky):
+    """Troca o céu no info.win.bdf: os ponteiros nos bytes 240..260 do conteúdo apontam para os
+    caminhos da caixa do céu (sky), do reflexo do ambiente (env) e da correção de cor (sight, fog).
+    Os textos novos entram no fim do conteúdo; os ponteiros já são correções (fixups) do arquivo."""
+    import struct
+    import cp_regrid
+    head, fix, sec, pl = cp_regrid.read_bdf(info_bytes)
+    if len(pl) < 260 or not all(240 + 4 * k in fix for k in (0, 1, 3, 4)):
+        raise ValueError("info.win.bdf em formato desconhecido")
+    for k, name in enumerate(SKY_FIELDS):
+        if name not in sky or name == "unused":
+            continue
+        while len(pl) % 4:
+            pl += b"\x00"
+        struct.pack_into("<I", pl, 240 + 4 * k, len(pl))
+        pl += str(sky[name] or "").encode("ascii") + b"\x00"
+    while len(pl) % 4:
+        pl += b"\x00"
+    return cp_regrid.write_bdf(head, fix, sec, pl)

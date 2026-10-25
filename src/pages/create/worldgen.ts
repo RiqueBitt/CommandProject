@@ -106,7 +106,8 @@ export function mapYaw(yaw: number, m: [number, number, number, number]) {
 
 // ------------------------------------------------------------------ formas do terreno
 
-export type FeatureKind = "mountain" | "hill" | "ridge" | "plateau" | "crater" | "lake" | "river" | "canyon" | "dunes" | "island" | "pad" | "pass";
+export type FeatureKind = "mountain" | "hill" | "ridge" | "plateau" | "crater" | "lake" | "river" | "canyon" | "dunes" | "island" | "pad" | "pass"
+  | "platform" | "span" | "chasm" | "rift";
 
 export interface Feature {
   id: string;
@@ -130,20 +131,23 @@ export interface Feature {
 export const FEATURE_LABEL: Record<FeatureKind, string> = {
   mountain: "Montanha", hill: "Colina", ridge: "Cordilheira", plateau: "Planalto", crater: "Cratera", lake: "Lago", river: "Rio",
   canyon: "Cânion", dunes: "Dunas", island: "Ilha", pad: "Área plana", pass: "Passagem",
+  platform: "Plataforma", span: "Ponte", chasm: "Abismo", rift: "Fenda",
 };
 export const FEATURE_ICON: Record<FeatureKind, string> = {
   mountain: "landscape", hill: "filter_hdr", ridge: "terrain", plateau: "view_agenda", crater: "radio_button_unchecked", lake: "water",
   river: "waves", canyon: "vertical_align_bottom", dunes: "texture", island: "beach_access", pad: "crop_square", pass: "add_road",
+  platform: "layers", span: "straighten", chasm: "blur_circular", rift: "bolt",
 };
 export const FEATURE_COLOR: Record<FeatureKind, string> = {
   mountain: "#b08a62", hill: "#e3a857", ridge: "#9c7a5b", plateau: "#d97757", crater: "#a07e6b", lake: "#4fa3e0", river: "#5ab8f0",
   canyon: "#c26b4a", dunes: "#e8c27a", island: "#7bd88f", pad: "#c9d1d9", pass: "#f2b33d",
+  platform: "#8fa3b8", span: "#d9a441", chasm: "#5b4a6b", rift: "#7a5c8f",
 };
-export const LINE_FEATURES: FeatureKind[] = ["ridge", "river", "canyon", "pass"];
+export const LINE_FEATURES: FeatureKind[] = ["ridge", "river", "canyon", "pass", "span", "rift"];
 
 /** Caixa que a forma afeta (para não percorrer o mapa inteiro). */
 function featureBox(f: Feature): [number, number, number, number] {
-  const ext = f.r * (f.kind === "lake" || f.kind === "river" ? 2.3 : f.kind === "pass" ? 2.1 : f.kind === "pad" ? 1.6 : f.kind === "crater" ? 1.4 : 1.25) + 4;
+  const ext = f.r * (f.kind === "lake" || f.kind === "river" ? 2.3 : f.kind === "pass" ? 2.1 : f.kind === "pad" ? 1.6 : f.kind === "crater" ? 1.4 : f.kind === "span" ? 1.4 : 1.25) + 4;
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (const [x, z] of f.pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
   return [x0 - ext, x1 + ext, z0 - ext, z1 + ext];
@@ -178,8 +182,18 @@ function meanAround(g: Grid, H: Float32Array, cx: number, cz: number, rad: numbe
   return n ? sum / n : 0;
 }
 
+/** a altura mais baixa em volta (plataformas: medidas a partir do fundo, sem empilhar) */
+function minAround(g: Grid, H: Float32Array, cx: number, cz: number, rad: number) {
+  const s = g.size, w = s + 1, step = g.grid / s;
+  let lo = Infinity;
+  const i0 = Math.max(0, Math.ceil((cx - rad) / step)), i1 = Math.min(s, Math.floor((cx + rad) / step));
+  const j0 = Math.max(0, Math.ceil((cz - rad) / step)), j1 = Math.min(s, Math.floor((cz + rad) / step));
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (Math.hypot(i * step - cx, j * step - cz) <= rad) lo = Math.min(lo, H[j * w + i]);
+  return Number.isFinite(lo) ? lo : 0;
+}
+
 const KIND_ORDER: Record<FeatureKind, number> = {
-  dunes: 0, hill: 1, mountain: 2, ridge: 2, island: 2, plateau: 3, crater: 4, canyon: 5, lake: 6, river: 6, pass: 8, pad: 9,
+  dunes: 0, hill: 1, mountain: 2, ridge: 2, island: 2, plateau: 3, platform: 3, crater: 4, canyon: 5, chasm: 5, rift: 5, lake: 6, river: 6, pass: 8, span: 8, pad: 9,
 };
 
 /** Aplica as formas (em ordem: elevações, cavidades, água, passagens e áreas planas). */
@@ -196,12 +210,14 @@ export function applyFeatures(g: Grid, H: Float32Array, features: Feature[], wat
     const m = f.m ?? [1, 0, 0, 1];
     const line = LINE_FEATURES.includes(f.kind) && f.pts.length > 1;
     // alturas de referência medidas antes desta forma
-    const local = f.kind === "plateau" || f.kind === "pad" || f.kind === "crater" || (f.kind === "lake" && !hasWater)
-      ? meanAround(g, H, cx, cz, f.r * (f.kind === "pad" ? 1 : 0.6)) : 0;
+    const local = f.kind === "platform" ? minAround(g, H, cx, cz, f.r * 1.1)
+      : f.kind === "plateau" || f.kind === "pad" || f.kind === "crater" || f.kind === "chasm" || (f.kind === "lake" && !hasWater)
+        ? meanAround(g, H, cx, cz, f.r * (f.kind === "pad" ? 1 : 0.6)) : 0;
     let passA = 0, passB = 0;
-    if (f.kind === "pass") {
+    if (f.kind === "pass" || f.kind === "span") {
       const a = f.pts[0], b = f.pts[f.pts.length - 1];
-      passA = meanAround(g, H, a[0], a[1], 24); passB = meanAround(g, H, b[0], b[1], 24);
+      const mr = f.kind === "span" ? 10 : 24;
+      passA = meanAround(g, H, a[0], a[1], mr); passB = meanAround(g, H, b[0], b[1], mr);
       if (hasWater) { passA = Math.max(passA, water + 3); passB = Math.max(passB, water + 3); }
     }
     let total = 0;
@@ -231,6 +247,18 @@ export function applyFeatures(g: Grid, H: Float32Array, features: Feature[], wat
           if (t >= 2) continue;
           const y = lerp(passA, passB, total ? along / total : 0) + 0.5;
           H[idx] = lerp(y, cur, smooth(0.6, 2, t) ** 0.8);
+        } else if (f.kind === "span") {
+          // ponte: tabuleiro plano entre as duas pontas, laterais a pique (sobre o abismo)
+          const tt = d0 / f.r;
+          if (tt >= 1.18) continue;
+          const y = lerp(passA, passB, total ? along / total : 0);
+          const deck = y + (1 - Math.min(1, tt)) * 0.4;
+          H[idx] = tt < 1 ? deck : lerp(deck, cur, smooth(1, 1.18, tt));
+        } else if (f.kind === "rift") {
+          // fenda: paredes verticais e fundo irregular
+          if (t >= 1.12) continue;
+          const bottom = cur - f.h * (0.9 + 0.1 * n(along / 30, d0 / 30));
+          H[idx] = t < 1 ? Math.min(cur, bottom) : lerp(Math.min(cur, bottom), cur, smooth(1, 1.12, t));
         }
         continue;
       }
@@ -305,6 +333,22 @@ export function applyFeatures(g: Grid, H: Float32Array, features: Feature[], wat
           H[idx] = cur + f.h * fade * (0.5 + 0.5 * wave);
           break;
         }
+        case "platform": {
+          // plataforma: topo plano (com pouco relevo), borda a pique; contorno irregular
+          if (t >= 1.06) break;
+          const top = local + f.h + f.rough * 1.6 * n(u / 34, v / 34);
+          const y = Math.max(cur, top);
+          H[idx] = t < 1 ? y : lerp(y, cur, smooth(1, 1.06, t));
+          break;
+        }
+        case "chasm": {
+          // abismo: buraco fundo de paredes verticais
+          if (t >= 1.08) break;
+          const bottom = Math.max(1, local - f.h) + f.rough * 3 * n(u / 26, v / 26);
+          const y = Math.min(cur, bottom);
+          H[idx] = t < 1 ? y : lerp(y, cur, smooth(1, 1.08, t));
+          break;
+        }
         case "pad": {
           if (t >= 1.6) break;
           const y = hasWater ? Math.max(local, water + 3) : local;
@@ -369,20 +413,37 @@ export interface WorldGen {
   farms?: number;
   /** detalhe fino do relevo (0 a 1) */
   detail?: number;
+  /** "platforms": plataformas altas ligadas por pontes sobre um abismo (estilo Shiva Prime) */
+  style?: "natural" | "platforms";
+  /** altura das plataformas acima do fundo do abismo */
+  platformHeight?: number;
+  /** fundo do abismo: seco (rocha) ou mar (precisa de água no terreno) */
+  abyss?: "deep" | "water";
+  /** céu de outro mapa do jogo (id do mapa); null = o do terreno base; ausente = não mexe */
+  sky?: string | null;
 }
+
+/** Altura do fundo do abismo (estilo plataformas). */
+export function abyssFloor(wg: WorldGen, water: number, hasWater: boolean, donorMedian: number) {
+  if (hasWater) return wg.abyss === "water" ? water - 18 : water + 3;
+  return Math.max(4, donorMedian - 40);
+}
+const medianOf = (a: Float32Array) => { const sorted = Float32Array.from(a).sort(); return sorted[sorted.length >> 1]; };
 
 /** Áreas estratégicas marcadas pelo gerador (aparecem na prévia e na análise). */
 export interface Strategic { kind: "center" | "safe" | "contested" | "choke"; pos: Pt; label: string }
 
 export const WORLD_PRESETS: { id: string; label: string; icon: string; desc: string; over: Partial<WorldGen> }[] = [
-  { id: "valleys", label: "Vales verdes", icon: "forest", desc: "Morros suaves, rios e muita floresta.", over: { blend: 1, hilliness: 9, scale: 260, mountains: 2, mountainHeight: 55, ridges: 1, hills: 6, plateaus: 1, craters: 0, canyons: 0, lakes: 2, rivers: 1, dunes: 0, islands: 0, edge: "mountains", forests: 0.75, rocks: 0.35, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 3, farms: 0.75, roads: true, detail: 0.6 } },
-  { id: "highlands", label: "Montanhas", icon: "landscape", desc: "Cordilheiras altas, passagens e planaltos.", over: { blend: 1, hilliness: 14, scale: 220, mountains: 5, mountainHeight: 85, ridges: 3, hills: 4, plateaus: 3, craters: 0, canyons: 1, lakes: 1, rivers: 0, dunes: 0, islands: 0, edge: "mountains", forests: 0.45, rocks: 0.75, structures: 2, wrecks: 0.25, biome: "temperate", settlements: 2, farms: 0.3, roads: true, detail: 0.8 } },
-  { id: "lakes", label: "Terra dos lagos", icon: "water", desc: "Muitos lagos e rios entre as bases.", over: { blend: 1, hilliness: 7, scale: 240, mountains: 1, mountainHeight: 45, ridges: 0, hills: 5, plateaus: 0, craters: 0, canyons: 0, lakes: 6, rivers: 2, dunes: 0, islands: 1, edge: "none", forests: 0.6, rocks: 0.3, structures: 2, wrecks: 0.15, biome: "temperate", settlements: 3, farms: 0.6, roads: true, detail: 0.55 } },
-  { id: "archipelago", label: "Arquipélago", icon: "beach_access", desc: "Ilhas ligadas por passagens rasas.", over: { blend: 1, hilliness: 6, scale: 200, mountains: 2, mountainHeight: 40, ridges: 0, hills: 3, plateaus: 0, craters: 0, canyons: 0, lakes: 3, rivers: 2, dunes: 0, islands: 4, edge: "water", forests: 0.5, rocks: 0.3, structures: 1, wrecks: 0.2, biome: "temperate", settlements: 2, farms: 0.3, roads: true, detail: 0.5 } },
-  { id: "desert", label: "Deserto", icon: "wb_sunny", desc: "Dunas, cânions e ruínas.", over: { blend: 1, hilliness: 5, scale: 300, mountains: 1, mountainHeight: 45, ridges: 1, hills: 2, plateaus: 3, craters: 1, canyons: 2, lakes: 0, rivers: 0, dunes: 4, islands: 0, edge: "rugged", forests: 0.05, rocks: 0.55, structures: 4, wrecks: 0.6, biome: "desert", settlements: 2, farms: 0, roads: true, detail: 0.7 } },
-  { id: "wasteland", label: "Terra arrasada", icon: "local_fire_department", desc: "Crateras, destroços e bases em ruínas.", over: { blend: 1, hilliness: 8, scale: 180, mountains: 1, mountainHeight: 40, ridges: 1, hills: 3, plateaus: 1, craters: 6, canyons: 1, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "rugged", forests: 0.1, rocks: 0.6, structures: 5, wrecks: 1, biome: "volcanic", settlements: 2, farms: 0, roads: true, detail: 0.8 } },
-  { id: "frozen", label: "Gelo", icon: "ac_unit", desc: "Planaltos gelados e lagos.", over: { blend: 1, hilliness: 10, scale: 240, mountains: 3, mountainHeight: 70, ridges: 2, hills: 3, plateaus: 2, craters: 1, canyons: 1, lakes: 3, rivers: 0, dunes: 0, islands: 0, edge: "mountains", forests: 0.3, rocks: 0.6, structures: 2, wrecks: 0.3, biome: "snow", settlements: 1, farms: 0, roads: true, detail: 0.6 } },
-  { id: "open", label: "Campo aberto", icon: "grass", desc: "Plano e rápido, poucos obstáculos.", over: { blend: 1, hilliness: 4, scale: 320, mountains: 0, mountainHeight: 40, ridges: 0, hills: 4, plateaus: 1, craters: 0, canyons: 0, lakes: 1, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.35, rocks: 0.2, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 4, farms: 0.85, roads: true, detail: 0.45 } },
+  { id: "valleys", label: "Vales verdes", icon: "forest", desc: "Morros suaves, rios e muita floresta.", over: { blend: 1, style: "natural", hilliness: 9, scale: 260, mountains: 2, mountainHeight: 55, ridges: 1, hills: 6, plateaus: 1, craters: 0, canyons: 0, lakes: 2, rivers: 1, dunes: 0, islands: 0, edge: "mountains", forests: 0.75, rocks: 0.35, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 3, farms: 0.75, roads: true, detail: 0.6 } },
+  { id: "highlands", label: "Montanhas", icon: "landscape", desc: "Cordilheiras altas, passagens e planaltos.", over: { blend: 1, style: "natural", hilliness: 14, scale: 220, mountains: 5, mountainHeight: 85, ridges: 3, hills: 4, plateaus: 3, craters: 0, canyons: 1, lakes: 1, rivers: 0, dunes: 0, islands: 0, edge: "mountains", forests: 0.45, rocks: 0.75, structures: 2, wrecks: 0.25, biome: "temperate", settlements: 2, farms: 0.3, roads: true, detail: 0.8 } },
+  { id: "lakes", label: "Terra dos lagos", icon: "water", desc: "Muitos lagos e rios entre as bases.", over: { blend: 1, style: "natural", hilliness: 7, scale: 240, mountains: 1, mountainHeight: 45, ridges: 0, hills: 5, plateaus: 0, craters: 0, canyons: 0, lakes: 6, rivers: 2, dunes: 0, islands: 1, edge: "none", forests: 0.6, rocks: 0.3, structures: 2, wrecks: 0.15, biome: "temperate", settlements: 3, farms: 0.6, roads: true, detail: 0.55 } },
+  { id: "archipelago", label: "Arquipélago", icon: "beach_access", desc: "Ilhas ligadas por passagens rasas.", over: { blend: 1, style: "natural", hilliness: 6, scale: 200, mountains: 2, mountainHeight: 40, ridges: 0, hills: 3, plateaus: 0, craters: 0, canyons: 0, lakes: 3, rivers: 2, dunes: 0, islands: 4, edge: "water", forests: 0.5, rocks: 0.3, structures: 1, wrecks: 0.2, biome: "temperate", settlements: 2, farms: 0.3, roads: true, detail: 0.5 } },
+  { id: "desert", label: "Deserto", icon: "wb_sunny", desc: "Dunas, cânions e ruínas.", over: { blend: 1, style: "natural", hilliness: 5, scale: 300, mountains: 1, mountainHeight: 45, ridges: 1, hills: 2, plateaus: 3, craters: 1, canyons: 2, lakes: 0, rivers: 0, dunes: 4, islands: 0, edge: "rugged", forests: 0.05, rocks: 0.55, structures: 4, wrecks: 0.6, biome: "desert", settlements: 2, farms: 0, roads: true, detail: 0.7 } },
+  { id: "wasteland", label: "Terra arrasada", icon: "local_fire_department", desc: "Crateras, destroços e bases em ruínas.", over: { blend: 1, style: "natural", hilliness: 8, scale: 180, mountains: 1, mountainHeight: 40, ridges: 1, hills: 3, plateaus: 1, craters: 6, canyons: 1, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "rugged", forests: 0.1, rocks: 0.6, structures: 5, wrecks: 1, biome: "volcanic", settlements: 2, farms: 0, roads: true, detail: 0.8 } },
+  { id: "frozen", label: "Gelo", icon: "ac_unit", desc: "Planaltos gelados e lagos.", over: { blend: 1, style: "natural", hilliness: 10, scale: 240, mountains: 3, mountainHeight: 70, ridges: 2, hills: 3, plateaus: 2, craters: 1, canyons: 1, lakes: 3, rivers: 0, dunes: 0, islands: 0, edge: "mountains", forests: 0.3, rocks: 0.6, structures: 2, wrecks: 0.3, biome: "snow", settlements: 1, farms: 0, roads: true, detail: 0.6 } },
+  { id: "abyss", label: "Plataformas no abismo", icon: "layers", desc: "Plataformas altas e pontes sobre um abismo (como Shiva Prime).", over: { blend: 1, style: "platforms", platformHeight: 100, abyss: "deep", hilliness: 4, scale: 220, mountains: 4, mountainHeight: 60, ridges: 0, hills: 0, plateaus: 6, craters: 0, canyons: 0, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.25, rocks: 0.5, structures: 4, wrecks: 0.5, biome: "volcanic", settlements: 0, farms: 0, roads: false, detail: 0.5 } },
+  { id: "skyforts", label: "Fortalezas suspensas", icon: "fort", desc: "Plataformas verdes com vilas, ligadas por pontes (como Sinorok Rift).", over: { blend: 1, style: "platforms", platformHeight: 85, abyss: "deep", hilliness: 4, scale: 220, mountains: 6, mountainHeight: 60, ridges: 0, hills: 0, plateaus: 8, craters: 0, canyons: 0, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.45, rocks: 0.35, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 2, farms: 0.3, roads: true, detail: 0.5 } },
+  { id: "open", label: "Campo aberto", icon: "grass", desc: "Plano e rápido, poucos obstáculos.", over: { blend: 1, style: "natural", hilliness: 4, scale: 320, mountains: 0, mountainHeight: 40, ridges: 0, hills: 4, plateaus: 1, craters: 0, canyons: 0, lakes: 1, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.35, rocks: 0.2, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 4, farms: 0.85, roads: true, detail: 0.45 } },
 ];
 
 export const newWorld = (over: Partial<WorldGen> = {}): WorldGen => ({
@@ -415,8 +476,21 @@ export function baseHeights(g: Grid, donor: Float32Array, water: number, hasWate
   if (!hasWater) { const sorted = Float32Array.from(donor).sort(); ref = sorted[sorted.length >> 1] - wg.elevation * 0.5; }
   const out = new Float32Array(w * w);
   const amp = Math.sqrt(ops.length);
+  const plat = wg.style === "platforms", floorY = plat ? abyssFloor(wg, water, hasWater, medianOf(donor)) : 0;
   for (let j = 0; j <= s; j++) for (let i = 0; i <= s; i++) {
     const x = i * step, z = j * step;
+    if (plat) {
+      // plataformas: o chão base é o fundo do abismo (pedras e sulcos); as plataformas sobem dele
+      let v = 0, dv = 0;
+      for (const o of ops) {
+        const [px, pz] = o.pt([x, z]);
+        v += ridged(n2, px / 160, pz / 160, 3);
+        dv += fbm(n3, px / 30, pz / 30, 2);
+      }
+      v /= ops.length; dv /= ops.length;
+      out[j * w + i] = Math.max(0, lerp(donor[j * w + i], floorY + 9 * (v - 0.4) + 2.5 * dv, wg.blend));
+      continue;
+    }
     const e = Math.min(x, z, G - x, G - z);
     const edgy = (wg.edge === "mountains" && e < 160) || (wg.edge === "water" && hasWater && e < 220);
     let v = 0, rv = 0, er = 0, en = 0, dv = 0;
@@ -470,11 +544,14 @@ export function composeWorld(g: Grid, donor: Float32Array, water: number, hasWat
   if (wg) {
     // mundo gerado: a chuva cava ravinas e leva terra para os vales; depois a erosão térmica tira
     // agulhas e paredões de um ponto só. A simetria é refeita no fim (média das cópias).
-    rainErode(g, H, wg.seed, water, hasWater);
-    symmetrize(g, H, wg.symmetry);
-    erode(g, H, 10, 1.6);
-    // bases, passagens e áreas planas continuam planas depois da erosão
-    const flat = features.filter((f) => f.kind === "pad" || f.kind === "pass");
+    // Plataformas: sem erosão (as bordas a pique e as pontes são o desenho do mapa).
+    if (wg.style !== "platforms") {
+      rainErode(g, H, wg.seed, water, hasWater);
+      symmetrize(g, H, wg.symmetry);
+      erode(g, H, 10, 1.6);
+    } else symmetrize(g, H, wg.symmetry);
+    // bases, passagens, pontes e áreas planas continuam planas depois da erosão
+    const flat = features.filter((f) => f.kind === "pad" || f.kind === "pass" || f.kind === "span");
     if (flat.length) applyFeatures(g, H, flat, water, hasWater);
   }
   for (let k = 0; k < H.length; k++) H[k] = Math.max(0, Math.min(511, H[k]));
@@ -737,23 +814,67 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
 
   const big = Math.max(0.6, Math.min(1.4, G / 1024));
   const per = (n: number) => Math.max(0, Math.round(n / ops.length));
+  const plat = wg.style === "platforms";
+  const PH = wg.platformHeight ?? 95;
+  const floorY = plat ? abyssFloor(wg, water, hasWater, medianOf(donor)) : -Infinity;
+  /** abaixo disso é abismo (sem árvores, vilas nem massa) */
+  const minLand = plat ? floorY + PH * 0.5 : -Infinity;
+  if (plat) {
+    // plataformas das bases, do centro e de expansão; torres sem ponte; pontes ligando tudo
+    const canonPlat: { p: Pt; r: number }[] = [];
+    const pr = Math.round(125 * big);
+    for (const sp of spawns) features.push({ id: fid(), kind: "platform", pts: [sp], r: pr, h: PH, rough: 0.6, seed: Math.floor(r() * 1e6), gen: true, name: "Plataforma da base" });
+    for (const c of canonSpawns) canonPlat.push({ p: c, r: pr });
+    if (centerOn) {
+      const cr = Math.round(105 * big);
+      features.push({ id: fid(), kind: "platform", pts: [[G / 2, G / 2]], r: cr, h: PH, rough: 0.6, seed: Math.floor(r() * 1e6), gen: true, name: "Plataforma central" });
+      canonPlat.push({ p: [G / 2, G / 2], r: cr });
+    }
+    for (let i = 0; i < per(wg.plateaus || 4); i++) {
+      const before = features.length;
+      if (put("platform", [58 * big, 95 * big], [PH * 0.9, PH * 1.08], 0.6, 175, 95)) canonPlat.push({ p: features[before].pts[0], r: features[before].r });
+    }
+    for (let i = 0; i < per(wg.mountains); i++) put("platform", [14, 28], [PH * 1.15, PH * 1.6], 0.4, 175, 150);
+    // pontes: cada plataforma liga nas duas mais perto (borda a borda)
+    const allPlat = canonPlat.flatMap((q) => ops.map((o) => ({ p: o.pt(q.p), r: q.r })));
+    const done: Pt[][] = [];
+    for (const a of canonPlat) {
+      const near = allPlat.filter((b) => Math.hypot(b.p[0] - a.p[0], b.p[1] - a.p[1]) > 5)
+        .map((b) => ({ b, gap: Math.hypot(b.p[0] - a.p[0], b.p[1] - a.p[1]) - a.r - b.r }))
+        .filter((x) => x.gap < 430).sort((x, y) => x.gap - y.gap).slice(0, 2);
+      for (const { b } of near) {
+        const L = Math.hypot(b.p[0] - a.p[0], b.p[1] - a.p[1]), dx = (b.p[0] - a.p[0]) / L, dz = (b.p[1] - a.p[1]) / L;
+        const p0: Pt = [a.p[0] + dx * (a.r - 16), a.p[1] + dz * (a.r - 16)], p1: Pt = [b.p[0] - dx * (b.r - 16), b.p[1] - dz * (b.r - 16)];
+        if (Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) < 12) continue;
+        for (const o of ops) {
+          const tp = [o.pt(p0), o.pt(p1)].map((q) => q.map((v) => Math.round(v)) as Pt);
+          const same = (q: Pt[]) => (Math.hypot(q[0][0] - tp[0][0], q[0][1] - tp[0][1]) < 6 && Math.hypot(q[1][0] - tp[1][0], q[1][1] - tp[1][1]) < 6)
+            || (Math.hypot(q[0][0] - tp[1][0], q[0][1] - tp[1][1]) < 6 && Math.hypot(q[1][0] - tp[0][0], q[1][1] - tp[0][1]) < 6);
+          if (done.some(same)) continue;
+          done.push(tp);
+          features.push({ id: fid(), kind: "span", pts: tp, r: 15, h: 0, rough: 0, seed: 9, gen: true });
+        }
+      }
+    }
+    notes.push(`${canonPlat.length * ops.length - (centerOn ? ops.length - 1 : 0)} plataformas e ${done.length} pontes sobre o abismo. Mova as plataformas e redesenhe as pontes (Formas → Ponte) à vontade.`);
+  }
   // montanhas e elevações
-  for (let i = 0; i < per(wg.mountains); i++) put("mountain", [70 * big, 130 * big], [wg.mountainHeight * 0.7, wg.mountainHeight * 1.15], 0.8, 150, 40);
-  for (let i = 0; i < per(wg.ridges); i++) putLine("ridge", [34, 55], [wg.mountainHeight * 0.45, wg.mountainHeight * 0.75], 0.8, [220, 420], false);
-  for (let i = 0; i < per(wg.hills); i++) put("hill", [45, 95], [8, 22], 0.6, 110, 10);
-  for (let i = 0; i < per(wg.plateaus); i++) put("plateau", [60, 100], [12, 24], 0.5, 140, 30);
-  for (let i = 0; i < per(wg.dunes); i++) put("dunes", [110, 190], [4, 9], 0.6, 90, 0);
+  if (!plat) for (let i = 0; i < per(wg.mountains); i++) put("mountain", [70 * big, 130 * big], [wg.mountainHeight * 0.7, wg.mountainHeight * 1.15], 0.8, 150, 40);
+  if (!plat) for (let i = 0; i < per(wg.ridges); i++) putLine("ridge", [34, 55], [wg.mountainHeight * 0.45, wg.mountainHeight * 0.75], 0.8, [220, 420], false);
+  if (!plat) for (let i = 0; i < per(wg.hills); i++) put("hill", [45, 95], [8, 22], 0.6, 110, 10);
+  if (!plat) for (let i = 0; i < per(wg.plateaus); i++) put("plateau", [60, 100], [12, 24], 0.5, 140, 30);
+  if (!plat) for (let i = 0; i < per(wg.dunes); i++) put("dunes", [110, 190], [4, 9], 0.6, 90, 0);
   // cavidades
-  for (let i = 0; i < per(wg.craters); i++) put("crater", [35, 80], [10, 22], 0.6, 140, 20);
-  for (let i = 0; i < per(wg.canyons); i++) putLine("canyon", [26, 40], [18, 32], 0.6, [260, 480], true);
+  if (!plat) for (let i = 0; i < per(wg.craters); i++) put("crater", [35, 80], [10, 22], 0.6, 140, 20);
+  if (!plat) for (let i = 0; i < per(wg.canyons); i++) putLine("canyon", [26, 40], [18, 32], 0.6, [260, 480], true);
   // água
-  for (let i = 0; i < per(wg.lakes); i++) put("lake", [45, 95], [6, 12], 0.75, 140, 30);
-  for (let i = 0; i < per(wg.rivers); i++) putLine("river", [16, 28], [5, 9], 0.6, [380, 700], true);
-  if (hasWater) for (let i = 0; i < per(wg.islands); i++) put("island", [70, 120], [14, 26], 0.7, 130, 40);
+  if (!plat) for (let i = 0; i < per(wg.lakes); i++) put("lake", [45, 95], [6, 12], 0.75, 140, 30);
+  if (!plat) for (let i = 0; i < per(wg.rivers); i++) putLine("river", [16, 28], [5, 9], 0.6, [380, 700], true);
+  if (hasWater && !plat) for (let i = 0; i < per(wg.islands); i++) put("island", [70, 120], [14, 26], 0.7, 130, 40);
   // obstáculos: paredões curtos e íngremes entre as bases (criam gargalos; o passe de conexão garante caminho)
-  for (let i = 0; i < per(wg.obstacles ?? 0); i++) putLine("ridge", [16, 24], [26, 40], 0.9, [110, 200], false);
+  if (!plat) for (let i = 0; i < per(wg.obstacles ?? 0); i++) putLine("ridge", [16, 24], [26, 40], 0.9, [110, 200], false);
   if (centerOn) features.push({ id: fid(), kind: "pad", pts: [[G / 2, G / 2]], r: 46, h: 0, rough: 0, seed: 2, gen: true, name: "Centro" });
-  if (!hasWater && (wg.lakes || wg.rivers)) notes.push("Este terreno não tem água: lagos e rios viram vales e leitos secos. Para água de verdade escolha um terreno com água (ex.: Open Palms ou Treallach Island).");
+  if (!plat && !hasWater && (wg.lakes || wg.rivers)) notes.push("Este terreno não tem água: lagos e rios viram vales e leitos secos. Para água de verdade escolha um terreno com água (ex.: Open Palms ou Treallach Island).");
 
   // áreas planas das bases (sempre por último)
   for (const s of spawns) features.push({ id: fid(), kind: "pad", pts: [s], r: 70, h: 0, rough: 0, seed: 1, gen: true, name: "Base" });
@@ -773,17 +894,17 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
       const a = o.pt(from), b = o.pt(spawns[lost]);
       const same = (p: Pt, q: Pt) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 5;
       // a mesma passagem (em qualquer sentido) só uma vez
-      if (features.some((f) => f.kind === "pass" && ((same(f.pts[0], a) && same(f.pts[1], b)) || (same(f.pts[0], b) && same(f.pts[1], a))))) continue;
-      features.push({ id: fid(), kind: "pass", pts: [a, b], r: 34, h: 0, rough: 0.2, seed: 7, gen: true });
+      if (features.some((f) => (f.kind === "pass" || f.kind === "span") && ((same(f.pts[0], a) && same(f.pts[1], b)) || (same(f.pts[0], b) && same(f.pts[1], a))))) continue;
+      features.push(plat ? { id: fid(), kind: "span", pts: [a, b], r: 15, h: 0, rough: 0, seed: 9, gen: true } : { id: fid(), kind: "pass", pts: [a, b], r: 34, h: 0, rough: 0.2, seed: 7, gen: true });
     }
     H = composeWorld(g, donor, water, hasWater, wg, features, base);
-    if (round === 0) notes.push("Algumas bases ficaram isoladas: o gerador abriu passagens entre elas.");
+    if (round === 0) notes.push(plat ? "Algumas bases ficaram isoladas: o gerador pôs pontes entre elas." : "Algumas bases ficaram isoladas: o gerador abriu passagens entre elas.");
   }
 
   const strategic: Strategic[] = [];
   const mass = (wg.resources ?? "generated") === "generated" ? placeMass(g, H, water, hasWater, wg, spawns, canonSpawns, ops, r, centerOn, strategic, notes) : [];
   // vida humana: vilas (chão plano), estradas ligando vilas e bases, plantações em volta
-  const villages = planVillages(g, H, water, hasWater, wg, spawns, ops, r, mass, features, centerOn);
+  const villages = planVillages(g, H, water, hasWater, wg, spawns, ops, r, mass, features, centerOn, minLand);
   if (villages.length) {
     for (const v of villages) for (const o of ops) {
       const q = o.pt(v.p);
@@ -796,8 +917,9 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
   const fields = planFields(g, H, water, hasWater, wg, villages, vAll, spawns, mass, features, ops, r);
   const life = expandLife(G, villages, fields, roads, ops);
   const paint = paintLife(G, life, wg.seed);
+  if (plat) paintAbyss(g, H, paint, features, minLand);
   const sites: { p: Pt; r: number }[] = [];
-  const props = placeProps(g, H, water, hasWater, wg, cat, spawns, features, r, ops, mass, sites, life, { villages, roads }, paint);
+  const props = placeProps(g, H, water, hasWater, wg, cat, spawns, features, r, ops, mass, sites, life, { villages, roads }, paint, minLand);
   if (villages.length) notes.push(`${life.villages.length} vila(s), ${life.roads.length} estrada(s) e ${life.fields.length} plantação(ões): o chão delas vem pintado (pincel de textura) e dá para repintar.`);
   if (sites.length) {
     // áreas planas sob as ruínas e postos: as estruturas assentam no chão
@@ -907,7 +1029,8 @@ function biomesOf(bp: string): Biome[] {
 /** Vilas, florestas, pedras, estruturas e destroços (na região fundamental, repetidos pela simetria). */
 function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, wg: WorldGen, cat: PropCatalog, spawns: Pt[], features: Feature[], r: () => number,
   ops: ReturnType<typeof symmetryOps>, mass: Pt[] = [], sites: { p: Pt; r: number }[] = [],
-  life: Life | null = null, canon: { villages: Village[]; roads: Pt[][] } = { villages: [], roads: [] }, paint: PaintLayer | null = null): PlacedProp[] {
+  life: Life | null = null, canon: { villages: Village[]; roads: Pt[][] } = { villages: [], roads: [] }, paint: PaintLayer | null = null,
+  minLand = -Infinity): PlacedProp[] {
   const G = g.grid, s = g.size, w = s + 1, step = G / s;
   const out: PlacedProp[] = [];
   const MAX = 4800;
@@ -930,8 +1053,10 @@ function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, 
   const slope = (x: number, z: number) => Math.max(Math.abs(hAt(x + step, z) - hAt(x - step, z)), Math.abs(hAt(x, z + step) - hAt(x, z - step))) / (2 * step);
   const wet = (x: number, z: number) => hasWater && hAt(x, z) < water + 2.5;
   const nearSpawn = (x: number, z: number, d: number) => spawns.some((p) => Math.hypot(p[0] - x, p[1] - z) < d);
-  const onLine = (x: number, z: number) => features.some((f) => (f.kind === "pass" || f.kind === "river") && f.pts.length > 1 && lineDist(f.pts, x, z)[0] < f.r * 1.2);
+  const onLine = (x: number, z: number) => features.some((f) => (f.kind === "pass" || f.kind === "river" || f.kind === "span") && f.pts.length > 1 && lineDist(f.pts, x, z)[0] < f.r * 1.2);
   const human = (x: number, z: number) => lifeAt(life, x, z);
+  /** fundo do abismo (estilo plataformas): sem árvores, vilas e ruínas */
+  const deep = (x: number, z: number) => hAt(x, z) < minLand;
   const inRegion = (x: number, z: number) => inFundamental(wg.symmetry, G, x, z);
   const meta = (bp: string): PropMeta => cat.meta?.[bp.toLowerCase()] ?? { bp, r: 1.5, h: 2, group: false, biomes: biomesOf(bp), local: false };
   /** coloca a decoração e as cópias da simetria; devolve false se não coube */
@@ -1077,7 +1202,7 @@ function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, 
   const nSites = Math.max(0, Math.round(wg.structures / ops.length));
   for (let k = 0, tries = 0; k < nSites && tries < 400; tries++) {
     const x = 90 + r() * (G - 180), z = 90 + r() * (G - 180);
-    if (!inRegion(x, z) || wet(x, z) || slope(x, z) > 0.45 || nearSpawn(x, z, 160) || onLine(x, z) || human(x, z)) continue;
+    if (!inRegion(x, z) || wet(x, z) || slope(x, z) > 0.45 || nearSpawn(x, z, 160) || onLine(x, z) || human(x, z) || deep(x, z)) continue;
     if (life?.villages.some((v) => Math.hypot(v.p[0] - x, v.p[1] - z) < v.r + 70)) continue;
     const center = buildings.pool.length ? pick(buildings) : wrecks.pool.length ? pick(wrecks) : null;
     if (!center) break;
@@ -1116,7 +1241,7 @@ function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, 
     const inForest = (x: number, z: number) => {
       if (!inRegion(x, z) || x < 8 || z < 8 || x > G - 8 || z > G - 8) return -1;
       const f = forestDepth(x, z);
-      if (f < 0 || wet(x, z) || slope(x, z) > 1.0 || nearSpawn(x, z, 95) || onLine(x, z) || human(x, z)) return -1;
+      if (f < 0 || wet(x, z) || slope(x, z) > 1.0 || nearSpawn(x, z, 95) || onLine(x, z) || human(x, z) || deep(x, z)) return -1;
       return f;
     };
     // área de floresta (amostrada) para caber no orçamento de decorações
@@ -1151,7 +1276,7 @@ function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, 
     let placed = 0;
     for (let z = 10; z < G && placed < maxN; z += 12) for (let x = 10; x < G && placed < maxN; x += 12) {
       const jx = x + (r() - 0.5) * 10, jz = z + (r() - 0.5) * 10;
-      if (!inRegion(jx, jz) || jx < 10 || jz < 10 || jx > G - 10 || jz > G - 10 || human(jx, jz) || nearSpawn(jx, jz, 100) || onLine(jx, jz)) continue;
+      if (!inRegion(jx, jz) || jx < 10 || jz < 10 || jx > G - 10 || jz > G - 10 || human(jx, jz) || nearSpawn(jx, jz, 100) || onLine(jx, jz) || deep(jx, jz)) continue;
       const h = hAt(jx, jz), sl = slope(jx, jz);
       if (sl > 0.6) continue;
       const shore = hasWater ? h > water + 1.2 && h < water + 5.5
@@ -1385,7 +1510,7 @@ function heightReader(g: Grid, H: Float32Array) {
 
 /** Lugares para as vilas (só na região fundamental; as cópias vêm da simetria). */
 function planVillages(g: Grid, H: Float32Array, water: number, hasWater: boolean, wg: WorldGen, spawns: Pt[], ops: ReturnType<typeof symmetryOps>,
-  r: () => number, mass: Pt[], features: Feature[], centerOn: boolean): Village[] {
+  r: () => number, mass: Pt[], features: Feature[], centerOn: boolean, minLand = -Infinity): Village[] {
   const want = wg.settlements ?? 0;
   if (want <= 0) return [];
   const G = g.grid, hAt = heightReader(g, H), big = Math.max(0.7, Math.min(1.3, G / 1024));
@@ -1411,7 +1536,7 @@ function planVillages(g: Grid, H: Float32Array, water: number, hasWater: boolean
     if (blocked) continue;
     // chão quase plano e seco
     const h0 = hAt(x, z);
-    let ok = !(hasWater && h0 < water + 4);
+    let ok = !(hasWater && h0 < water + 4) && h0 > minLand;
     for (let a = 0; ok && a < 12; a++) for (const d of [R * 0.5, R]) {
       const px = x + Math.cos((a / 12) * Math.PI * 2) * d, pz = z + Math.sin((a / 12) * Math.PI * 2) * d;
       const h = hAt(px, pz);
@@ -1593,6 +1718,29 @@ export function lifeAt(life: Life | null | undefined, x: number, z: number) {
   const i = Math.round(x / life.cell), j = Math.round(z / life.cell);
   if (i < 0 || j < 0 || i >= n || j >= n) return 0;
   return life.mask[j * n + i];
+}
+
+/** Plataformas: paredes e fundo do abismo em rocha; tabuleiro das pontes em terra batida. */
+function paintAbyss(g: Grid, H: Float32Array, P: PaintLayer, features: Feature[], minLand: number) {
+  const G = g.grid, n = P.n, w = n + 1, cs = G / n, hAt = heightReader(g, H);
+  for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
+    const y = hAt(i * cs, j * cs);
+    if (y >= minLand) continue;
+    const k = j * w + i, v = Math.round(150 + 90 * Math.min(1, (minLand - y) / 30));
+    if (v > P.power[k]) { P.power[k] = v; P.role[k] = 3; }
+  }
+  for (const f of features) {
+    if (f.kind !== "span" || f.pts.length < 2) continue;
+    const [a, b] = [f.pts[0], f.pts[f.pts.length - 1]];
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, dx = (b[0] - a[0]) / L, dz = (b[1] - a[1]) / L;
+    for (let t = 0; t <= L; t += cs) for (let q = -f.r * 0.7; q <= f.r * 0.7; q += cs) {
+      const x = a[0] + dx * t - dz * q, z = a[1] + dz * t + dx * q;
+      const i = Math.round(x / cs), j = Math.round(z / cs);
+      if (i < 0 || j < 0 || i > n || j > n) continue;
+      const k = j * w + i;
+      P.power[k] = 200; P.role[k] = 2;
+    }
+  }
 }
 
 /** Pintura do chão do que é humano: estradas e ruas de terra, praça, chão batido e faixas das plantações. */

@@ -54,5 +54,21 @@ for (const [sym, players] of [["rot2", 2], ["mirror-x", 4], ["rot4", 4], ["diag"
     console.log(sym, "água", water, "massa", a.mass.length, "avisos", issues.filter((x) => x.level === "warn").length, "formas", a.features.length, "decorações", a.props.length, "dif simetria", maxd.toFixed(4));
   }
 }
+// plataformas sobre o abismo: bases no alto, ligadas por pontes, simetria exata
+import { WORLD_PRESETS } from "../src/pages/create/worldgen.ts";
+for (const [sym, players] of [["rot2", 2], ["rot4", 4], ["none", 3]] as const) {
+  const wg = newWorld({ ...WORLD_PRESETS.find((p) => p.id === "abyss")!.over, seed: 99, symmetry: sym, players });
+  const a = generateWorld(g, donor, 0, false, wg, cat);
+  const m = walkMask(g, a.heights, 0, false);
+  const d0 = walkDistances(g, m, a.spawns[0]);
+  check(a.spawns.every((s) => distAt(g, d0, s) >= 0), `plataformas: bases ligadas por pontes ${sym}`);
+  check(a.features.some((f) => f.kind === "span") && a.features.filter((f) => f.kind === "platform").length >= players, `plataformas e pontes ${sym}`);
+  const yAt = (p: [number, number]) => a.heights[Math.round(p[1] / 8) * 129 + Math.round(p[0] / 8)];
+  let lo = Infinity; for (const v of a.heights) lo = Math.min(lo, v);
+  check(a.spawns.every((s) => yAt(s) > lo + 60), `bases no alto ${sym}`);
+  let low = 0; for (const v of a.heights) if (v < lo + 30) low++;
+  check(low > a.heights.length * 0.2, `abismo em volta ${sym}`);
+  console.log("plataformas", sym, "formas", a.features.length, "massa", a.mass.length, "abismo", Math.round((low / a.heights.length) * 100) + "%");
+}
 console.log(fails ? `${fails} falha(s)` : "worldgen: tudo certo");
 process.exit(fails ? 1 : 0);

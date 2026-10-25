@@ -109,7 +109,7 @@ export function groundT(size: number, grid: number, H: Float32Array, water: numb
 }
 
 /** t automático (sem o pincel): só muda quando o relevo muda */
-export function groundBaseT(size: number, grid: number, H: Float32Array, water: number | null, seed = 1337) {
+export function groundBaseT(size: number, grid: number, H: Float32Array, water: number | null, seed = 1337, peaks = true) {
   const w = size + 1, step = grid / size;
   let lo = Infinity, hi = -Infinity;
   for (let k = 0; k < H.length; k++) { lo = Math.min(lo, H[k]); hi = Math.max(hi, H[k]); }
@@ -121,7 +121,7 @@ export function groundBaseT(size: number, grid: number, H: Float32Array, water: 
     const k = j * w + i, x = i * step, z = j * step;
     const dx = (H[j * w + Math.min(size, i + 1)] - H[j * w + Math.max(0, i - 1)]) / (2 * step);
     const dz = (H[Math.min(size, j + 1) * w + i] - H[Math.max(0, j - 1) * w + i]) / (2 * step);
-    out[k] = zoneT(H[k], Math.hypot(dx, dz), (H[k] - lo) / (hi - lo), water, fbm(x / 90, z / 90, seed));
+    out[k] = zoneT(H[k], Math.hypot(dx, dz), peaks ? (H[k] - lo) / (hi - lo) : 0, water, fbm(x / 90, z / 90, seed));
   }
   return out;
 }

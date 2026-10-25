@@ -216,7 +216,9 @@ export interface AppUpdate { version: string; notes: string; url: string; assetN
 
 export interface PropInfo { bp: string; name: string; category: string; size?: [number, number, number] | null }
 export interface LayerSet { map: string; name: string; d: string; n?: string | null; s?: string | null; slotD: number; slotN: number; slotS: number }
-export interface MapAssets { props: PropInfo[]; layers: LayerSet[] }
+/** Céu de um mapa do jogo (caixa do céu, reflexo e correção de cor) */
+export interface SkyInfo { map: string; env: string; sky: string; sight: string; fog: string; color: [number, number, number] }
+export interface MapAssets { props: PropInfo[]; layers: LayerSet[]; skies?: SkyInfo[] }
 export interface PropPreview { mesh: MeshView; texture?: string | null; /** posições, normais, uvs e índices em base64 (o app manda assim; a api.ts desfaz) */ bin?: [string, string, string, string] }
 
 // ---------------------------------------------------------------- projetos de criação

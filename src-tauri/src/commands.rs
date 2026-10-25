@@ -1506,6 +1506,7 @@ pub async fn build_enhance(
 pub struct MapAssets {
     props: Vec<cp_core::mapassets::PropInfo>,
     layers: Vec<cp_core::mapassets::LayerSet>,
+    skies: Vec<cp_core::mapassets::SkyInfo>,
 }
 
 /// Decorações e camadas de textura do chão disponíveis no jogo (de todos os mapas).
@@ -1516,6 +1517,8 @@ pub async fn map_assets(state: State<'_, AppState>) -> R<MapAssets> {
         Ok(MapAssets {
             props: cp_core::mapassets::props_catalog(&srcs)?,
             layers: cp_core::mapassets::terrain_layers(&srcs)?,
+            // céus são opcionais: um mapa com info.win.bdf estranho não impede o editor
+            skies: cp_core::mapassets::map_skies(&srcs).unwrap_or_default(),
         })
     })
     .await

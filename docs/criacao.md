@@ -60,6 +60,14 @@ jogo mistura vizinhas da cadeia, então as passagens ficam suaves.
   com as mesmas texturas (nada de chão liso infinito).
 - Mapas em branco de 1024 já vêm com água (nível 40): lagos e rios gerados aparecem de verdade.
 
+### Céu
+
+Em **Propriedades → Chão e visual → Céu** (ou no gerador de mundo, em Acabamento) escolha o céu de
+qualquer mapa do jogo: a caixa do céu, o reflexo do ambiente e a correção de cor dele vão para o seu
+mapa (a prévia do editor ganha a cor do céu). "O do terreno base" mantém o original. Em mapas de
+plataformas, desligue **Neve no alto** (o gerador já faz isso) para o topo das plataformas não virar
+neve.
+
 ### Texturas próprias (.png / .jpg)
 
 No **Trocar textura** de qualquer papel do bioma, **Importar imagem como textura** (ou arraste a
@@ -99,7 +107,13 @@ pacote do mapa. As importadas aparecem em **Minhas texturas** (o × tira da list
   massa) e **paredões** que criam gargalos. A massa gerada é simétrica, fica em chão plano, seco e
   alcançável, aparece no explorador e pode ser movida. Em "Massa: automática do toolkit" o toolkit
   sorteia as expansões na hora de gerar.
-- **Acabamento**: bordas (montanhas, borda rochosa ou mar), economia e cores do minimapa.
+- **Estilo do terreno: plataformas sobre um abismo** (estilos prontos "Plataformas no abismo" e
+  "Fortalezas suspensas", no jeito de Shiva Prime, Geothermal Borehole e Sinorok Rift Armory): as
+  bases, o centro e as expansões ficam em plataformas altas de borda a pique, ligadas por **pontes**;
+  o resto do mapa é um abismo (fundo de rocha ou mar). Controles: altura das plataformas, número de
+  plataformas de expansão, torres de pedra sem ponte e fundo do abismo. A massa só vai para o que é
+  alcançável a pé, e se alguma base ficar isolada o gerador põe mais uma ponte.
+- **Acabamento**: bordas (montanhas, borda rochosa ou mar), economia, **céu** e cores do minimapa.
 - **Ver 6 variações**: a mesma configuração com sementes vizinhas, lado a lado; clique para escolher.
 
 A prévia ao vivo mostra o mapa de cima, as bases, as linhas de rios e cordilheiras, o total de
@@ -141,6 +155,10 @@ problema (bases e relevo não mudam; Ctrl+Z desfaz).
   que dá para esconder para comparar ou apagar.
 - **Formas** (faixa Formas): montanha, colina, cordilheira (arrastar), planalto, dunas, ilha, lago,
   rio (arrastar), cânion (arrastar), cratera e passagem. Cada uma vira um objeto editável.
+- **Plataformas e abismo** (faixa Formas): **plataforma** (topo plano, borda a pique, medida a
+  partir do chão mais baixo em volta), **ponte** (arrastar de uma plataforma a outra: tabuleiro
+  plano), **abismo** (buraco fundo de paredes retas) e **fenda** (arrastar). Dá para montar um mapa
+  de plataformas à mão ou mexer no que o gerador fez.
 - **Relevo simples**: morro, vale, platô, área plana, rampa e vau sobre a água.
 - **Simetria ao colocar**: com uma simetria ligada, bases, massa, decorações, formas, relevo e
   pinceladas são repetidos nos outros lados do mapa.
@@ -287,6 +305,8 @@ O launcher nunca supõe que o jogo aceita um formato não testado. Hoje:
 | Lagos e rios em terrenos sem água | viram vales e leitos secos (o jogo não desenha água num terreno feito sem ela) |
 | Relevo gerado (montanhas, formas, pincel) | mesma técnica do relevo esculpido, que já funciona no jogo |
 | **Visual limpo / mapa em branco** | malha nova do chão e colisão: testadas no jogo (carrega, câmera acima do chão); **biomas, pincel e luz refeita**: experimental (máscaras novas no formato das originais) |
+| **Céu de outro mapa** | experimental: troca os caminhos do céu, do reflexo e da correção de cor no `info.win.bdf` |
+| **Plataformas sobre abismo** | relevo e pontes: mesma técnica do relevo gerado; paredões altos ainda precisam de confirmação no jogo (câmera e navegação) |
 | **Texturas importadas** | experimental: DDS gerados pelo launcher no formato das texturas de chão do jogo |
 | **Paisagem em volta e água no mapa em branco** | experimental |
 | Armas copiadas e ícone gerado | experimental: confira os pontos de disparo e o ícone no jogo |

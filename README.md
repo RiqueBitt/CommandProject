@@ -130,6 +130,8 @@ disponível em Sistema → Visual.
   - **chão por biomas** (praia, chão, terra, rocha e topo misturados pelo relevo) e **pincel de
     textura** para pintar partes do mapa; **texturas próprias** importadas de .png/.jpg (contínuas,
     com relevo e brilho gerados); **paisagem em volta** do mapa com montanhas;
+  - gerador de **mapas de plataformas sobre um abismo** (pontes, torres, fundo de rocha ou mar) e
+    **céu** de qualquer mapa do jogo;
   - gerador com **vilas, estradas de terra e plantações**, matas com espécies e chão próprio,
     árvores na beira da água e relevo com o dobro da resolução e detalhe fino;
   - vista 3D com as texturas e o tamanho reais das decorações e do chão, explorador (esconder e
