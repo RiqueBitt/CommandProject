@@ -3,7 +3,7 @@ import { Icon, Modal } from "../../components/ui";
 import { api } from "../../lib/api";
 import type { PropInfo, PropPreview } from "../../lib/types";
 import { layerFits, type GroundBiome, type GroundLayer } from "./mapEdit";
-import { isGroundLayer, ROLE_LABEL, ROLES, type GroundRole } from "./biome";
+import { isDeckLayer, isGroundLayer, ROLE_LABEL, ROLES, type GroundRole } from "./biome";
 import { isCustomPath, texUrl } from "./customTex";
 
 const ModelViewer = lazy(() => import("../../components/ModelViewer"));
@@ -178,10 +178,13 @@ const BIOMES: { id: GroundBiome; label: string; icon: string }[] = [
 ];
 
 /** Chão por biomas: o pincel de textura (principal) e as texturas de cada parte. */
-export function GroundPaint({ all, chain, biome, role, painting, hasPaint, ring, radius, strength, onRole, onBiome, onPick, onClearPaint, onRing, onRadius, onStrength, onImport, onForget }: {
+export function GroundPaint({ all, chain, deck, onDeck, biome, role, painting, hasPaint, ring, radius, strength, onRole, onBiome, onPick, onClearPaint, onRing, onRadius, onStrength, onImport, onForget }: {
   all: GroundLayer[] | null;
   /** textura de cada papel (praia, chão, terra, rocha, topo) */
   chain: (GroundLayer | null)[];
+  /** textura do tabuleiro das pontes (só quando o mapa tem pontes) */
+  deck?: GroundLayer | null;
+  onDeck: (d: string | null) => void;
   biome: GroundBiome;
   role: number;
   painting: boolean;
@@ -201,7 +204,7 @@ export function GroundPaint({ all, chain, biome, role, painting, hasPaint, ring,
   /** tira uma textura importada da lista do mapa */
   onForget: (d: string) => void;
 }) {
-  const [swap, setSwap] = useState<GroundRole | null>(null);
+  const [swap, setSwap] = useState<GroundRole | "deck" | null>(null);
   return (
     <div className="col ground-paint" style={{ gap: 10 }}>
       <div className="card-title" style={{ margin: 0 }}><Icon name="brush" size={18} /><b>Pincel de textura</b></div>
@@ -240,14 +243,26 @@ export function GroundPaint({ all, chain, biome, role, painting, hasPaint, ring,
           </div>
         ))}
       </div>
+      {deck !== undefined && (
+        <div className="ground-layers">
+          <div className="ground-layer">
+            <TextureThumb path={deck?.d} size={40} />
+            <div className="grow">
+              <b>Pontes</b>
+              <span className="faint small" style={{ textTransform: "none" }}>{deck ? `${nice(deck.name)} · ${deck.map.replace(/^SC2_/, "")}` : "sem textura de metal no jogo"}</span>
+            </div>
+            <button className="btn icon-btn sm" title="Trocar textura das pontes" aria-label="Trocar textura das pontes" onClick={() => setSwap("deck")}><Icon name="format_paint" size={18} /></button>
+          </div>
+        </div>
+      )}
       <label className="check small"><input type="checkbox" checked={ring} onChange={(e) => onRing(e.target.checked)} /> Paisagem em volta do mapa (montanhas além da borda)</label>
-      {swap && <RoleChooser role={swap} all={all} onPick={(d) => { onPick(swap, d); setSwap(null); }} onClose={() => setSwap(null)} onImport={onImport} onForget={onForget} />}
+      {swap && <RoleChooser role={swap} all={all} onPick={(d) => { if (swap === "deck") onDeck(d); else onPick(swap, d); setSwap(null); }} onClose={() => setSwap(null)} onImport={onImport} onForget={onForget} />}
     </div>
   );
 }
 
 function RoleChooser({ role, all, onPick, onClose, onImport, onForget }: {
-  role: GroundRole; all: GroundLayer[] | null; onPick: (d: string | null) => void; onClose: () => void;
+  role: GroundRole | "deck"; all: GroundLayer[] | null; onPick: (d: string | null) => void; onClose: () => void;
   onImport: (file: File, seamless: boolean) => Promise<string>; onForget: (d: string) => void;
 }) {
   const [q, setQ] = useState("");
@@ -261,11 +276,13 @@ function RoleChooser({ role, all, onPick, onClose, onImport, onForget }: {
     const seen = new Set<string>();
     return (all ?? []).filter((l) => {
       const k = l.d.toLowerCase();
-      if (seen.has(k) || !isGroundLayer(l) || isCustomPath(l.d)) return false;
+      if (seen.has(k) || isCustomPath(l.d)) return false;
+      // pontes: metal, piso e grade primeiro (mas qualquer textura vale); chão: só texturas de chão
+      if (role !== "deck" && !isGroundLayer(l)) return false;
       seen.add(k);
       return !t || l.name.toLowerCase().includes(t) || l.map.toLowerCase().includes(t);
-    });
-  }, [all, q]);
+    }).sort((a, b) => (role === "deck" ? Number(isDeckLayer(b)) - Number(isDeckLayer(a)) : 0));
+  }, [all, q, role]);
   const take = async (f: File | undefined | null) => {
     if (!f) return;
     if (!/^image\/(png|jpe?g|webp|bmp|gif)$/i.test(f.type) && !/\.(png|jpe?g|webp|bmp)$/i.test(f.name)) { setErr("Use uma imagem .png, .jpg, .webp ou .bmp."); return; }
@@ -273,7 +290,7 @@ function RoleChooser({ role, all, onPick, onClose, onImport, onForget }: {
     try { onPick(await onImport(f, seamless)); } catch (e) { setErr(String((e as Error)?.message ?? e)); } finally { setBusy(false); }
   };
   return (
-    <Modal title={`Textura: ${ROLE_LABEL[role]}`} icon="format_paint" onClose={onClose} wide>
+    <Modal title={`Textura: ${role === "deck" ? "Pontes" : ROLE_LABEL[role]}`} icon="format_paint" onClose={onClose} wide>
       <div className="col" style={{ gap: 12 }}>
         <label className={`tex-drop${drag ? " over" : ""}${busy ? " busy" : ""}`}
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}

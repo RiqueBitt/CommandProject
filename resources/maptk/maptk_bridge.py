@@ -398,7 +398,18 @@ def _clean_spec(spec):
                 raise ValueError("camada do pincel de textura inválida")
             m = (n + 1) ** 2
             paint = (n, raw[:m], raw[m:])
-        spec["clean"] = dict(paint=paint, ground=ground, chain=chain if len(chain) >= 2 else None, relight=bool(clean.get("relight", True)),
+        # tabuleiro das pontes: textura própria (metal, piso) nos segmentos das pontes
+        deck = None
+        dk = clean.get("deck")
+        if dk and dk.get("d"):
+            for k in ("d", "n", "s"):
+                v = dk.get(k)
+                if v and not re.match(r"^/textures/terrain/[\w/.-]+\.dds$", v, re.I):
+                    raise ValueError(f"textura inválida: {v}")
+            segs = [tuple(float(v) for v in sg[:5]) for sg in (dk.get("segs") or [])[:400] if len(sg) >= 5]
+            if segs:
+                deck = dict(tex={k: dk.get(k) for k in ("d", "n", "s") if dk.get(k)}, segs=segs)
+        spec["clean"] = dict(paint=paint, deck=deck, ground=ground, chain=chain if len(chain) >= 2 else None, relight=bool(clean.get("relight", True)),
                              clear_props=bool(clean.get("clear_props", True)), ring=bool(clean.get("ring", True)), peaks=bool(clean.get("peaks", True)),
                              ring_rise=max(0.0, min(250.0, float(clean.get("ring_rise", 95)))))
     else:
@@ -652,10 +663,25 @@ def _clean_visual(sm, spec, state, terrain, new_id):
             chain = _existing_textures(sm, clean.get("chain") or []) if clean.get("chain") else []
             zones = cp_world.chain_zones(chain) if len(chain) >= 2 else None
             biome = cp_world.Biome(height, g, water, paint=clean.get("paint"), peaks=clean.get("peaks", True)).prepare(-margin, g + 2 * margin) if zones else None
+            zone_t = biome.t if biome else None
+            blend = biome.blend if biome else None
+            deck = clean.get("deck")
+            if zones and deck:
+                dtex = _existing_textures(sm, [deck["tex"]])
+                if dtex:
+                    on_deck = cp_world.deck_tester(deck["segs"])
+                    t = dtex[0]
+                    zones = zones + [{"d": (t["d"], t["d"]), "n": (t.get("n"), t.get("n")), "s": (t.get("s"), t.get("s"))}]
+                    di = len(zones) - 1
+                    zone_t = lambda x, z, _t=biome.t: di if on_deck(x, z) else _t(x, z)  # noqa: E731
+                    blend = lambda x, z, _b=biome.blend: 0.0 if on_deck(x, z) else _b(x, z)  # noqa: E731
+                    emit("progress", message=f"pontes: {len(deck['segs'])} trecho(s) com textura própria")
+                else:
+                    state["warnings"].append("a textura das pontes não foi achada no jogo: as pontes usam o chão do bioma")
             path = f"/maps/{new_id}/lighting/cpgrid.dds"
             wpath = f"/maps/{new_id}/{new_id}.waterDepth.dds" if water and terrain.raw.get("waterDepth.dds") else None
             tb2, info = cp_regrid.rebuild_terrain(tb, height, g, step=step, mask_path=path, margin=margin, ring_step=16.0,
-                                                  zones=zones, zone_t=biome.t if biome else None,
+                                                  zones=zones, zone_t=zone_t,
                                                   water_y=wl, water_mask_path=wpath, log=lambda m: emit("progress", message=m))
             if zones and info["zones"] < len(zones):
                 state["warnings"].append(f"o terreno base só tem {info['zones']} material(is) de mistura: o chão usa {info['zones'] + 1} texturas")
@@ -667,7 +693,7 @@ def _clean_visual(sm, spec, state, terrain, new_id):
             if not all(donor):
                 raise ValueError("máscaras de luz do terreno base não encontradas")
             masks = cp_lighting.grid_masks(donor, height, g, sun=state.get("sun") or cp_lighting.SUN,
-                                           ext0=info["ext0"], ext=info["ext"], blend=biome.blend if biome else None)
+                                           ext0=info["ext0"], ext=info["ext"], blend=blend)
             if len(masks) != 3:
                 raise ValueError("máscaras de luz novas incompletas")
             for f, b in masks.items():

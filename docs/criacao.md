@@ -110,9 +110,13 @@ pacote do mapa. As importadas aparecem em **Minhas texturas** (o × tira da list
 - **Estilo do terreno: plataformas sobre um abismo** (estilos prontos "Plataformas no abismo" e
   "Fortalezas suspensas", no jeito de Shiva Prime, Geothermal Borehole e Sinorok Rift Armory): as
   bases, o centro e as expansões ficam em plataformas altas de borda a pique, ligadas por **pontes**;
-  o resto do mapa é um abismo (fundo de rocha ou mar). Controles: altura das plataformas, número de
-  plataformas de expansão, torres de pedra sem ponte e fundo do abismo. A massa só vai para o que é
-  alcançável a pé, e se alguma base ficar isolada o gerador põe mais uma ponte.
+  o resto do mapa é um abismo (fundo de rocha ou mar). Os paredões descem em degraus de rocha, com
+  contrafortes e cascalho no pé; beirais mais baixos encostados nas plataformas e torres de pedra
+  soltas dão a noção de altura. As pontes ganham textura própria de metal/piso (escolha em **Chão →
+  Pontes**), portal nas cabeceiras e postes dos dois lados; a beira das plataformas tem pedras e
+  entulho, e a paisagem em volta continua o abismo. Controles: altura da queda (até 260), número
+  de plataformas de expansão, torres e fundo do abismo. A massa só vai para o que é alcançável a pé,
+  e se alguma base ficar isolada o gerador põe mais uma ponte.
 - **Acabamento**: bordas (montanhas, borda rochosa ou mar), economia, **céu** e cores do minimapa.
 - **Ver 6 variações**: a mesma configuração com sementes vizinhas, lado a lado; clique para escolher.
 

@@ -270,3 +270,24 @@ def set_info_sky(info_bytes, sky):
     while len(pl) % 4:
         pl += b"\x00"
     return cp_regrid.write_bdf(head, fix, sec, pl)
+
+
+def deck_tester(segs, grid_cell=32.0):
+    """(x, z) → está no tabuleiro de alguma ponte? segs = [(x0, z0, x1, z1, meia_largura)].
+    Índice por células para não testar todas as pontes em cada ponto."""
+    cells = {}
+    for sg in segs:
+        x0, z0, x1, z1, r = sg
+        for i in range(int(min(x0, x1) - r) // int(grid_cell) - 1, int(max(x0, x1) + r) // int(grid_cell) + 2):
+            for j in range(int(min(z0, z1) - r) // int(grid_cell) - 1, int(max(z0, z1) + r) // int(grid_cell) + 2):
+                cells.setdefault((i, j), []).append(sg)
+
+    def on(x, z):
+        for x0, z0, x1, z1, r in cells.get((int(x // grid_cell), int(z // grid_cell)), ()):
+            dx, dz = x1 - x0, z1 - z0
+            L2 = dx * dx + dz * dz or 1.0
+            t = max(0.0, min(1.0, ((x - x0) * dx + (z - z0) * dz) / L2))
+            if math.hypot(x - (x0 + dx * t), z - (z0 + dz * t)) <= r * 0.92:
+                return True
+        return False
+    return on

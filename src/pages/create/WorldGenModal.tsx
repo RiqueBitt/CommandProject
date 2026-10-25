@@ -196,11 +196,11 @@ export default function WorldGenModal(props: Props) {
             <section className="wg-group">
               <h4><Icon name="layers" size={17} /> Plataformas e abismo</h4>
               {([
-                { key: "platformHeight", label: "Altura das plataformas", min: 40, max: 180, step: 5 },
+                { key: "platformHeight", label: "Altura da queda", min: 60, max: 260, step: 5 },
                 { key: "plateaus", label: "Plataformas de expansão", min: 0, max: 12 },
                 { key: "mountains", label: "Torres de pedra (sem ponte)", min: 0, max: 12 },
               ] as { key: keyof WorldGen; label: string; min: number; max: number; step?: number }[]).map((it) => {
-                const v = (wg[it.key] as number | undefined) ?? (it.key === "platformHeight" ? 95 : 0);
+                const v = (wg[it.key] as number | undefined) ?? (it.key === "platformHeight" ? 150 : 0);
                 return (
                   <label key={it.key} className="range">
                     <span>{it.label}</span>

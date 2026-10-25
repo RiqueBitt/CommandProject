@@ -53,6 +53,8 @@ export interface GroundTextures {
   sand: string; grass: string; rock: string; snow: string;
   /** 5ª camada (terra), usada com `t` */
   dirt?: string;
+  /** tabuleiro das pontes (t = 5) */
+  deck?: string | null;
   /** uma textura só no chão inteiro, sem tinta da paleta */
   uniform?: boolean;
   /** posição de cada vértice na cadeia praia(0)→chão(1)→terra(2)→rocha(3)→topo(4), como no jogo */
@@ -107,6 +109,7 @@ export default function MapView3D(props: Props) {
     const col = new Float32Array(w * w * 3);
     const splat = new Float32Array(w * w * 4);
     const splatB = new Float32Array(w * w);
+    const splatC = new Float32Array(w * w);
     for (let j = 0; j < w; j++) for (let i = 0; i < w; i++) {
       const k = j * w + i;
       pos[k * 3] = i * step;
@@ -127,6 +130,7 @@ export default function MapView3D(props: Props) {
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
     geo.setAttribute("splat", new THREE.BufferAttribute(splat, 4));
     geo.setAttribute("splatB", new THREE.BufferAttribute(splatB, 1));
+    geo.setAttribute("splatC", new THREE.BufferAttribute(splatC, 1));
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0, vertexColors: true });
     // chão com texturas: 4 camadas misturadas por vértice (praia, chão, rocha, topo), em dois
@@ -134,23 +138,24 @@ export default function MapView3D(props: Props) {
     const groundU = {
       tSand: { value: null as THREE.Texture | null }, tGrass: { value: null as THREE.Texture | null },
       tRock: { value: null as THREE.Texture | null }, tSnow: { value: null as THREE.Texture | null },
-      tDirt: { value: null as THREE.Texture | null },
+      tDirt: { value: null as THREE.Texture | null }, tDeck: { value: null as THREE.Texture | null },
       uGround: { value: 0 }, uTile: { value: 1 / 22 },
     };
     mat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, groundU);
       sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec4 splat;\nattribute float splatB;\nvarying vec4 vSplat;\nvarying float vSplatB;\nvarying vec2 vGround;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvSplat = splat;\nvSplatB = splatB;\nvGround = position.xz;");
+        .replace("#include <common>", "#include <common>\nattribute vec4 splat;\nattribute float splatB;\nattribute float splatC;\nvarying vec4 vSplat;\nvarying float vSplatB;\nvarying float vSplatC;\nvarying vec2 vGround;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvSplat = splat;\nvSplatB = splatB;\nvSplatC = splatC;\nvGround = position.xz;");
       sh.fragmentShader = sh.fragmentShader
         .replace("#include <common>", `#include <common>
-uniform sampler2D tSand; uniform sampler2D tGrass; uniform sampler2D tRock; uniform sampler2D tSnow; uniform sampler2D tDirt;
+uniform sampler2D tSand; uniform sampler2D tGrass; uniform sampler2D tRock; uniform sampler2D tSnow; uniform sampler2D tDirt; uniform sampler2D tDeck;
 uniform float uGround; uniform float uTile;
-varying vec4 vSplat; varying float vSplatB; varying vec2 vGround;
+varying vec4 vSplat; varying float vSplatB; varying float vSplatC; varying vec2 vGround;
 vec3 layerAt(vec2 p) {
-  float tot = max(0.0001, dot(vSplat, vec4(1.0)) + vSplatB);
+  float tot = max(0.0001, dot(vSplat, vec4(1.0)) + vSplatB + vSplatC);
   vec3 c = texture2D(tSand, p).rgb * vSplat.x + texture2D(tGrass, p).rgb * vSplat.y + texture2D(tRock, p).rgb * vSplat.z + texture2D(tSnow, p).rgb * vSplat.w;
   if (vSplatB > 0.001) c += texture2D(tDirt, p).rgb * vSplatB;
+  if (vSplatC > 0.001) c += texture2D(tDeck, p).rgb * vSplatC;
   return c / tot;
 }`)
         .replace("#include <map_fragment>", `#include <map_fragment>
@@ -161,7 +166,7 @@ if (uGround > 0.5) {
   diffuseColor.rgb *= c * 0.62;
 }`);
     };
-    mat.customProgramCacheKey = () => "cp-ground5";
+    mat.customProgramCacheKey = () => "cp-ground6";
     const ground = new THREE.Mesh(geo, mat);
     ground.receiveShadow = true;
     ground.castShadow = true;
@@ -236,6 +241,7 @@ if (uGround > 0.5) {
       g2.setAttribute("color", new THREE.BufferAttribute(C, 3));
       g2.setAttribute("splat", new THREE.BufferAttribute(S, 4));
       g2.setAttribute("splatB", new THREE.BufferAttribute(SB, 1));
+      g2.setAttribute("splatC", new THREE.BufferAttribute(new Float32Array(SB.length), 1));
       g2.setIndex(I);
       g2.computeVertexNormals();
       if (ringMesh) { ringMesh.geometry.dispose(); ringMesh.geometry = g2; } else {
@@ -320,15 +326,15 @@ if (uGround > 0.5) {
     let groundKey = "";
     const setGround = () => {
       const g = live.current.ground;
-      const key = g ? `${g.uniform ? "u" : ""}${g.sand.length}:${g.grass.slice(-40)}:${g.rock.slice(-40)}:${g.snow.slice(-40)}:${(g.dirt ?? "").slice(-40)}` : "";
+      const key = g ? `${g.uniform ? "u" : ""}${g.sand.length}:${g.grass.slice(-40)}:${g.rock.slice(-40)}:${g.snow.slice(-40)}:${(g.dirt ?? "").slice(-40)}:${(g.deck ?? "").slice(-40)}` : "";
       if (key === groundKey) { if (groundU.uGround.value > 0.5) { setHeights(); invalidate(); } return; }
       groundKey = key;
       groundTex.splice(0).forEach((t) => t.dispose());
       groundU.uGround.value = 0;
       if (!g) { invalidate(); return; }
-      const urls = [g.sand, g.grass, g.rock, g.snow, g.dirt ?? g.grass];
+      const urls = [g.sand, g.grass, g.rock, g.snow, g.dirt ?? g.grass, g.deck ?? g.rock];
       let done = 0;
-      const slots = [groundU.tSand, groundU.tGrass, groundU.tRock, groundU.tSnow, groundU.tDirt];
+      const slots = [groundU.tSand, groundU.tGrass, groundU.tRock, groundU.tSnow, groundU.tDirt, groundU.tDeck];
       urls.forEach((u, k) => loader.load(u, (t) => {
         if (groundKey !== key) { t.dispose(); return; }
         t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -377,11 +383,13 @@ if (uGround > 0.5) {
           if (gt && gt.length === w * w) {
             // cadeia do jogo: pesos em "tenda" em volta de cada papel
             const tv = gt[k], wt = (r: number) => Math.max(0, 1 - Math.abs(tv - r));
-            splat.set([wt(0), wt(1), wt(3), wt(4)], k * 4);
-            splatB[k] = wt(2);
+            // t = 5: tabuleiro das pontes (sem mistura com o chão)
+            if (tv > 4.5) { splat.set([0, 0, 0, 0], k * 4); splatB[k] = 0; splatC[k] = 1; }
+            else { splat.set([wt(0), wt(1), wt(3), wt(4)], k * 4); splatB[k] = wt(2); splatC[k] = 0; }
           } else {
             splat.set([sand, grass, rock, snow], k * 4);
             splatB[k] = 0;
+            splatC[k] = 0;
           }
           // com textura, a paleta só tinge de leve (a cor vem da textura do jogo)
           // (chão de uma textura só, o "visual limpo": sem tinta — fica como no jogo)
@@ -391,6 +399,7 @@ if (uGround > 0.5) {
       }
       geo.attributes.splat.needsUpdate = true;
       geo.attributes.splatB.needsUpdate = true;
+      geo.attributes.splatC.needsUpdate = true;
       geo.attributes.position.needsUpdate = true;
       geo.attributes.color.needsUpdate = true;
       geo.computeVertexNormals();

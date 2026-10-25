@@ -212,3 +212,13 @@ export function biomeChain(layers: LayerSet[], biome: GroundBiome, over: Partial
   });
 }
 export const isGroundLayer = (l: LayerSet) => !NOT_GROUND.test(l.d.toLowerCase());
+
+/** Texturas boas para o tabuleiro das pontes (metal, piso, grade). */
+const DECK = /floor|plate|metal|grate|deck|walkway|panel|tile/;
+const NOT_DECK = /water|cloud|decal|foam|wave|glass|window|light|glow|black|white/;
+export const isDeckLayer = (l: LayerSet) => DECK.test(l.d.toLowerCase()) && !NOT_DECK.test(l.d.toLowerCase());
+/** A textura das pontes: a escolhida (se existir) ou a primeira de metal/piso do jogo. */
+export function deckLayer(layers: LayerSet[], chosen: string | null | undefined): LayerSet | null {
+  if (chosen) { const hit = layers.find((l) => l.d.toLowerCase() === chosen.toLowerCase()); if (hit) return hit; }
+  return layers.filter(isDeckLayer).sort((a, b) => Number(/floor|plate/.test(b.d.toLowerCase())) - Number(/floor|plate/.test(a.d.toLowerCase())) || a.d.length - b.d.length)[0] ?? null;
+}

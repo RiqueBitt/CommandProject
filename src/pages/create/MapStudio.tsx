@@ -18,7 +18,7 @@ import { useTabs } from "../../lib/tabs";
 import type { CreationMeta, MapAssets, MapBuildResult, MaptkStatus, SkyInfo, Terrain, TerrainPreview } from "../../lib/types";
 import { useProject } from "../../lib/useProject";
 import { GroundPaint, GroundTextures, PropPicker } from "../studio/MapDecor";
-import { biomeChain, combinePaint, decodePaint, encodePaint, groundBaseT, paintDab, paintT, resamplePaint, type PaintLayer } from "../studio/biome";
+import { biomeChain, combinePaint, deckLayer, decodePaint, encodePaint, groundBaseT, paintDab, paintT, resamplePaint, type PaintLayer } from "../studio/biome";
 import { customLayers, customStem, importTexture, isCustomPath, registerCustomTextures, texUrl } from "../studio/customTex";
 import {
   applyRelief, BLANK_BASES, BLANK_LABEL, BLANK_WATER, BLANK_Y, blankSizeOf, cutTester, decodeHeights, decorKind, groundCandidates, groundSpec, heightAt, meanInDisc,
@@ -703,17 +703,42 @@ export default function MapStudio({ id }: { id: string }) {
   // t automático (caro: ruído em cada ponto) só muda com o relevo; o pincel vai por cima a cada pincelada
   const baseT = useMemo(() => (doc.clean && relief3d && heights ? groundBaseT(relief3d.size, relief3d.grid, heights, hasWater ? water : null, 1337, doc.peaks !== false) : null),
     [doc.clean, relief3d, heights, hasWater, water, doc.peaks]);
-  const tField = useMemo(() => (baseT && relief3d ? paintT(baseT, relief3d.size, relief3d.grid, combinePaint(worldPaint, paintNow)) : null),
+  // pontes: tabuleiro com textura própria (metal/piso), no editor (t = 5) e no jogo
+  const spans = useMemo(() => activeFeatures.filter((f) => f.kind === "span" && f.pts.length > 1), [activeFeatures]);
+  const deck = useMemo(() => (doc.clean && allLayers && spans.length ? deckLayer(allLayers, doc.deckTex) : null), [doc.clean, allLayers, spans.length, doc.deckTex]);
+  const [deckUrl, setDeckUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!deck) { setDeckUrl(null); return; }
+    let alive = true;
+    void texUrl(deck.d, 512).catch(() => null).then((u) => { if (alive) setDeckUrl(u ?? null); });
+    return () => { alive = false; };
+  }, [deck]);
+  const deckSegs = useMemo(() => spans.flatMap((f) => f.pts.slice(1).map((q, k) => [f.pts[k][0], f.pts[k][1], q[0], q[1], f.r] as [number, number, number, number, number])), [spans]);
+  const tField = useMemo(() => {
+    if (!baseT || !relief3d) return null;
+    const t = paintT(baseT, relief3d.size, relief3d.grid, combinePaint(worldPaint, paintNow));
+    if (!deckUrl || !deckSegs.length) return t;
+    const out = t === baseT ? t.slice() : t, s = relief3d.size, w = s + 1, st = relief3d.grid / s;
+    for (const [x0, z0, x1, z1, r] of deckSegs) {
+      const dx = x1 - x0, dz = z1 - z0, L2 = dx * dx + dz * dz || 1;
+      const i0 = Math.max(0, Math.floor((Math.min(x0, x1) - r) / st)), i1 = Math.min(s, Math.ceil((Math.max(x0, x1) + r) / st));
+      const j0 = Math.max(0, Math.floor((Math.min(z0, z1) - r) / st)), j1 = Math.min(s, Math.ceil((Math.max(z0, z1) + r) / st));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const x = i * st, z = j * st, q = Math.max(0, Math.min(1, ((x - x0) * dx + (z - z0) * dz) / L2));
+        if (Math.hypot(x - (x0 + dx * q), z - (z0 + dz * q)) <= r * 0.92) out[j * w + i] = 5;
+      }
+    }
+    return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [baseT, relief3d, worldPaint, paintNow, paintRev]);
+  }, [baseT, relief3d, worldPaint, paintNow, paintRev, deckUrl, deckSegs]);
   const groundView: GroundTexSet | null = useMemo(() => {
     if (doc.clean) {
       if (!chainTex) return null;
-      return { sand: chainTex[0], grass: chainTex[1], dirt: chainTex[2], rock: chainTex[3], snow: chainTex[4], t: tField,
-        ring: doc.ring !== false ? { margin: grid <= 1024 ? 256 : 384, rise: 95, water: hasWater ? water : null } : null };
+      return { sand: chainTex[0], grass: chainTex[1], dirt: chainTex[2], rock: chainTex[3], snow: chainTex[4], t: tField, deck: deckUrl,
+        ring: doc.ring !== false ? { margin: grid <= 1024 ? 256 : 384, rise: doc.ringRise ?? 95, water: hasWater ? water : null } : null };
     }
     return groundTex;
-  }, [doc.clean, chainTex, tField, doc.ring, grid, hasWater, water, groundTex]);
+  }, [doc.clean, chainTex, tField, doc.ring, doc.ringRise, grid, hasWater, water, groundTex, deckUrl]);
   const allCuts = useMemo(() => (doc.clean || doc.world?.clearDonor ? [...edits.cuts, ...fullCuts(grid)] : edits.cuts), [edits.cuts, doc.clean, doc.world?.clearDonor, grid]);
   const [kept, removedCount] = useMemo(() => {
     const bps = donor?.kinds ?? [];
@@ -788,7 +813,8 @@ export default function MapStudio({ id }: { id: string }) {
       const enc = encodePaint(combinePaint(doc.worldPaint ? decodePaint(doc.worldPaint, n) : null, decodePaint(doc.paint, n)));
       s.clean = {
         ground: full ? [full[1], ...groundSpec(cleanCands)] : groundSpec(cleanCands), relight: true, clear_props: true,
-        ...(full ? { chain: full } : {}), ring: doc.ring !== false, peaks: doc.peaks !== false,
+        ...(full ? { chain: full } : {}), ring: doc.ring !== false, ring_rise: doc.ringRise ?? 95, peaks: doc.peaks !== false,
+        ...(deck && deckSegs.length ? { deck: { d: deck.d, ...(deck.n ? { n: deck.n } : {}), ...(deck.s ? { s: deck.s } : {}), segs: deckSegs.map((v) => v.map((x) => Math.round(x * 10) / 10)) } } : {}),
         ...(enc ? { paint: { size: doc.paintSize || 256, data: enc } } : {}),
       };
     }
@@ -817,7 +843,7 @@ export default function MapStudio({ id }: { id: string }) {
     }
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, edits, usePatch, grid, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands, chain, hasWater, water, id, heights, relief3d, skyNow]);
+  }, [doc, edits, usePatch, grid, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands, chain, hasWater, water, id, heights, relief3d, skyNow, deck, deckSegs]);
 
   // ------------------------------------------------------------ ações
   const saveNow = useCallback(async () => {
@@ -907,6 +933,7 @@ export default function MapStudio({ id }: { id: string }) {
         ...d, world: wg, features: [...d.features.filter((f) => !f.gen), ...res.features], economy, minimap, patch: true, paintSize, worldPaint,
         ...(dropSculpt ? { sculpt: null, sculptSize: 0 } : {}),
         clean: d.base === "blank" || wg.clearDonor !== false, groundBiome: wg.biome, peaks: wg.style !== "platforms",
+        ringRise: wg.style === "platforms" ? 0 : 95,
         sky: wg.sky !== undefined ? wg.sky : d.sky, groundTex: wg.biome === d.groundBiome ? d.groundTex : null,
         teams: wg.players % 2 === 0 && wg.symmetry !== "none" ? "2" : "ffa", rugged: wg.edge === "rugged",
         edits: { ...d.edits, spawns: res.spawns, props, mass },
@@ -1050,7 +1077,9 @@ export default function MapStudio({ id }: { id: string }) {
           { kind: "select", label: "Bioma do chão", value: doc.groundBiome, onChange: (v: string) => setDoc((d) => ({ ...d, groundBiome: v as GroundBiome, groundRoles: {}, groundTex: null })), options: (Object.keys(BIOME_LABEL) as GroundBiome[]).map((k) => ({ value: k, label: BIOME_LABEL[k] })) } as Prop,
           { kind: "info", label: "Texturas", value: chain.filter(Boolean).length ? `${chain.filter(Boolean).length} (praia, chão, terra, rocha, topo)` : "carregando…" } as Prop,
           { kind: "toggle", label: "Neve no alto", value: doc.peaks !== false, onChange: (v: boolean) => setDoc((d) => ({ ...d, peaks: v })), hint: "Pontos mais altos com a textura de topo do bioma (neve na grama). Desligue em mapas de plataformas." } as Prop,
-          { kind: "toggle", label: "Paisagem em volta", value: doc.ring !== false, onChange: (v: boolean) => setDoc((d) => ({ ...d, ring: v })), hint: "Montanhas além da borda do mapa, com as texturas do bioma." } as Prop,
+          { kind: "select", label: "Paisagem em volta", value: doc.ring === false ? "off" : String(doc.ringRise ?? 95), onChange: (v: string) => setDoc((d) => (v === "off" ? { ...d, ring: false } : { ...d, ring: true, ringRise: Number(v) })),
+            options: [{ value: "95", label: "Montanhas" }, { value: "40", label: "Morros baixos" }, { value: "0", label: "Abismo (o chão continua lá embaixo)" }, { value: "off", label: "Nenhuma" }],
+            hint: "O que aparece além da borda do mapa, com as texturas do bioma." } as Prop,
           { kind: "custom", label: "", node: <button className="btn sm" onClick={() => { setTool("paint"); setLeft("ground"); }}><Icon name="brush" size={16} /> Pincel de textura</button> } as Prop,
         ] : []),
       ] });
@@ -1426,7 +1455,7 @@ export default function MapStudio({ id }: { id: string }) {
                 )
               )}
               {left === "ground" && (assets === null ? <div className="bar indeterminate"><i /></div> : doc.clean ? (
-                <GroundPaint all={allLayers} chain={chain} biome={doc.groundBiome} role={paintRole} painting={tool === "paint"}
+                <GroundPaint all={allLayers} chain={chain} deck={spans.length ? deck : undefined} onDeck={(dPath: string | null) => setDoc((d) => ({ ...d, deckTex: dPath }))} biome={doc.groundBiome} role={paintRole} painting={tool === "paint"}
                   hasPaint={!!doc.paint || !!doc.worldPaint} ring={doc.ring !== false} radius={radius} strength={strength}
                   onRole={(r) => { setPaintRole(r); setTool("paint"); }}
                   onBiome={(b) => setDoc((d) => ({ ...d, groundBiome: b, groundRoles: {}, groundTex: null }))}

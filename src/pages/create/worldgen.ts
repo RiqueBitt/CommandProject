@@ -145,9 +145,22 @@ export const FEATURE_COLOR: Record<FeatureKind, string> = {
 };
 export const LINE_FEATURES: FeatureKind[] = ["ridge", "river", "canyon", "pass", "span", "rift"];
 
+/** Largura (horizontal) do paredão de uma plataforma: mais alta = parede mais larga e com mais degraus. */
+export const wallWidth = (f: Pick<Feature, "h">) => 9 + Math.max(0, f.h) * 0.065;
+
+/** Raio da borda de uma plataforma na direção `a` (radianos, no mundo) — o mesmo contorno do relevo. */
+export function platformRim(f: Feature, a: number) {
+  const n = simplex(f.seed), m = f.m ?? [1, 0, 0, 1];
+  const dx = Math.cos(a), dz = Math.sin(a);
+  const u = m[0] * dx + m[1] * dz, v = m[2] * dx + m[3] * dz;
+  const ang = Math.atan2(v, u);
+  return f.r * (1 + f.rough * 0.32 * n(Math.cos(ang) * 1.6 + 7.1, Math.sin(ang) * 1.6 - 3.3));
+}
+
 /** Caixa que a forma afeta (para não percorrer o mapa inteiro). */
 function featureBox(f: Feature): [number, number, number, number] {
-  const ext = f.r * (f.kind === "lake" || f.kind === "river" ? 2.3 : f.kind === "pass" ? 2.1 : f.kind === "pad" ? 1.6 : f.kind === "crater" ? 1.4 : f.kind === "span" ? 1.4 : 1.25) + 4;
+  const ext = f.kind === "platform" ? f.r * 1.36 + wallWidth(f) * 2 + 6
+    : f.r * (f.kind === "lake" || f.kind === "river" ? 2.3 : f.kind === "pass" ? 2.1 : f.kind === "pad" ? 1.6 : f.kind === "crater" ? 1.4 : f.kind === "span" ? 1.4 : 1.25) + 4;
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (const [x, z] of f.pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
   return [x0 - ext, x1 + ext, z0 - ext, z1 + ext];
@@ -334,11 +347,25 @@ export function applyFeatures(g: Grid, H: Float32Array, features: Feature[], wat
           break;
         }
         case "platform": {
-          // plataforma: topo plano (com pouco relevo), borda a pique; contorno irregular
-          if (t >= 1.06) break;
+          // plataforma: topo plano, borda a pique em degraus (camadas de rocha), contrafortes
+          // (a parede avança e recua conforme o ângulo) e um monte de cascalho no pé
+          const rim = f.r * warp, e = d - rim;
+          const W = wallWidth(f) * (0.75 + 0.5 * Math.abs(Math.sin(ang * (5 + (f.seed % 5)) + 2.2 * n(Math.cos(ang) * 3.1 + 1.7, Math.sin(ang) * 3.1 - 5.3))));
+          if (e >= W * 1.7) break;
           const top = local + f.h + f.rough * 1.6 * n(u / 34, v / 34);
-          const y = Math.max(cur, top);
-          H[idx] = t < 1 ? y : lerp(y, cur, smooth(1, 1.06, t));
+          if (e <= 0) { H[idx] = Math.max(cur, top); break; }
+          const drop = Math.max(0, top - cur);
+          const steps = Math.max(2, Math.min(6, Math.round(f.h / 45)));
+          const q = Math.min(1, e / W) * steps;
+          // cada degrau: um beiral quase plano e depois a queda
+          const frac = (Math.floor(q) + smooth(0.28, 1, q - Math.floor(q))) / steps;
+          let y = top - drop * Math.min(1, frac + 0.02 * n(u / 7, v / 7));
+          if (e > W) {
+            // pé do paredão: cascalho que escorre e some no fundo
+            const k = (e - W) / (W * 0.7);
+            y = cur + drop * 0.07 * (1 - smooth(0, 1, k)) ** 2;
+          }
+          H[idx] = Math.max(cur, y);
           break;
         }
         case "chasm": {
@@ -425,7 +452,7 @@ export interface WorldGen {
 
 /** Altura do fundo do abismo (estilo plataformas). */
 export function abyssFloor(wg: WorldGen, water: number, hasWater: boolean, donorMedian: number) {
-  if (hasWater) return wg.abyss === "water" ? water - 18 : water + 3;
+  if (hasWater) return wg.abyss === "water" ? water - 18 : water + 9;
   return Math.max(4, donorMedian - 40);
 }
 const medianOf = (a: Float32Array) => { const sorted = Float32Array.from(a).sort(); return sorted[sorted.length >> 1]; };
@@ -441,8 +468,8 @@ export const WORLD_PRESETS: { id: string; label: string; icon: string; desc: str
   { id: "desert", label: "Deserto", icon: "wb_sunny", desc: "Dunas, cânions e ruínas.", over: { blend: 1, style: "natural", hilliness: 5, scale: 300, mountains: 1, mountainHeight: 45, ridges: 1, hills: 2, plateaus: 3, craters: 1, canyons: 2, lakes: 0, rivers: 0, dunes: 4, islands: 0, edge: "rugged", forests: 0.05, rocks: 0.55, structures: 4, wrecks: 0.6, biome: "desert", settlements: 2, farms: 0, roads: true, detail: 0.7 } },
   { id: "wasteland", label: "Terra arrasada", icon: "local_fire_department", desc: "Crateras, destroços e bases em ruínas.", over: { blend: 1, style: "natural", hilliness: 8, scale: 180, mountains: 1, mountainHeight: 40, ridges: 1, hills: 3, plateaus: 1, craters: 6, canyons: 1, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "rugged", forests: 0.1, rocks: 0.6, structures: 5, wrecks: 1, biome: "volcanic", settlements: 2, farms: 0, roads: true, detail: 0.8 } },
   { id: "frozen", label: "Gelo", icon: "ac_unit", desc: "Planaltos gelados e lagos.", over: { blend: 1, style: "natural", hilliness: 10, scale: 240, mountains: 3, mountainHeight: 70, ridges: 2, hills: 3, plateaus: 2, craters: 1, canyons: 1, lakes: 3, rivers: 0, dunes: 0, islands: 0, edge: "mountains", forests: 0.3, rocks: 0.6, structures: 2, wrecks: 0.3, biome: "snow", settlements: 1, farms: 0, roads: true, detail: 0.6 } },
-  { id: "abyss", label: "Plataformas no abismo", icon: "layers", desc: "Plataformas altas e pontes sobre um abismo (como Shiva Prime).", over: { blend: 1, style: "platforms", platformHeight: 100, abyss: "deep", hilliness: 4, scale: 220, mountains: 4, mountainHeight: 60, ridges: 0, hills: 0, plateaus: 6, craters: 0, canyons: 0, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.25, rocks: 0.5, structures: 4, wrecks: 0.5, biome: "volcanic", settlements: 0, farms: 0, roads: false, detail: 0.5 } },
-  { id: "skyforts", label: "Fortalezas suspensas", icon: "fort", desc: "Plataformas verdes com vilas, ligadas por pontes (como Sinorok Rift).", over: { blend: 1, style: "platforms", platformHeight: 85, abyss: "deep", hilliness: 4, scale: 220, mountains: 6, mountainHeight: 60, ridges: 0, hills: 0, plateaus: 8, craters: 0, canyons: 0, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.45, rocks: 0.35, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 2, farms: 0.3, roads: true, detail: 0.5 } },
+  { id: "abyss", label: "Plataformas no abismo", icon: "layers", desc: "Plataformas altas e pontes sobre um abismo (como Shiva Prime).", over: { blend: 1, style: "platforms", platformHeight: 170, abyss: "deep", hilliness: 4, scale: 220, mountains: 6, mountainHeight: 60, ridges: 0, hills: 0, plateaus: 6, craters: 0, canyons: 0, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.25, rocks: 0.5, structures: 4, wrecks: 0.5, biome: "volcanic", settlements: 0, farms: 0, roads: false, detail: 0.5 } },
+  { id: "skyforts", label: "Fortalezas suspensas", icon: "fort", desc: "Plataformas verdes com vilas, ligadas por pontes (como Sinorok Rift).", over: { blend: 1, style: "platforms", platformHeight: 140, abyss: "deep", hilliness: 4, scale: 220, mountains: 8, mountainHeight: 60, ridges: 0, hills: 0, plateaus: 8, craters: 0, canyons: 0, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.45, rocks: 0.35, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 2, farms: 0.3, roads: true, detail: 0.5 } },
   { id: "open", label: "Campo aberto", icon: "grass", desc: "Plano e rápido, poucos obstáculos.", over: { blend: 1, style: "natural", hilliness: 4, scale: 320, mountains: 0, mountainHeight: 40, ridges: 0, hills: 4, plateaus: 1, craters: 0, canyons: 0, lakes: 1, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.35, rocks: 0.2, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 4, farms: 0.85, roads: true, detail: 0.45 } },
 ];
 
@@ -488,7 +515,8 @@ export function baseHeights(g: Grid, donor: Float32Array, water: number, hasWate
         dv += fbm(n3, px / 30, pz / 30, 2);
       }
       v /= ops.length; dv /= ops.length;
-      out[j * w + i] = Math.max(0, lerp(donor[j * w + i], floorY + 9 * (v - 0.4) + 2.5 * dv, wg.blend));
+      // fundo: cristas de pedra e valas (de cima parece um chão distante e irregular)
+      out[j * w + i] = Math.max(0, lerp(donor[j * w + i], floorY + 16 * (v - 0.35) + 3 * dv, wg.blend));
       continue;
     }
     const e = Math.min(x, z, G - x, G - z);
@@ -815,7 +843,7 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
   const big = Math.max(0.6, Math.min(1.4, G / 1024));
   const per = (n: number) => Math.max(0, Math.round(n / ops.length));
   const plat = wg.style === "platforms";
-  const PH = wg.platformHeight ?? 95;
+  const PH = wg.platformHeight ?? 150;
   const floorY = plat ? abyssFloor(wg, water, hasWater, medianOf(donor)) : -Infinity;
   /** abaixo disso é abismo (sem árvores, vilas nem massa) */
   const minLand = plat ? floorY + PH * 0.5 : -Infinity;
@@ -834,7 +862,37 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
       const before = features.length;
       if (put("platform", [58 * big, 95 * big], [PH * 0.9, PH * 1.08], 0.6, 175, 95)) canonPlat.push({ p: features[before].pts[0], r: features[before].r });
     }
-    for (let i = 0; i < per(wg.mountains); i++) put("platform", [14, 28], [PH * 1.15, PH * 1.6], 0.4, 175, 150);
+    // beirais: degraus mais baixos encostados nas plataformas (dão profundidade à queda)
+    for (const c of [...canonPlat]) {
+      const nb = 1 + Math.floor(r() * 2);
+      for (let b = 0; b < nb; b++) {
+        const a = r() * Math.PI * 2, rr = lerp(22, 42, r()) * big, d = c.r + rr * 0.45;
+        const p: Pt = [Math.round(c.p[0] + Math.cos(a) * d), Math.round(c.p[1] + Math.sin(a) * d)];
+        if (p[0] < rr || p[1] < rr || p[0] > G - rr || p[1] > G - rr) continue;
+        const copies = ops.map((o) => o.pt(p));
+        if (copies.some((q) => spawns.some((s0) => Math.hypot(s0[0] - q[0], s0[1] - q[1]) < 60))) continue;
+        if (copies.some((q, k) => copies.some((q2, k2) => k2 > k && Math.hypot(q[0] - q2[0], q[1] - q2[1]) < rr * 2.2))) continue;
+        const seed = Math.floor(r() * 1e6), hh = Math.round(PH * lerp(0.35, 0.65, r()));
+        ops.forEach((o, k) => features.push({ id: fid(), kind: "platform", pts: [copies[k]], r: Math.round(rr), h: hh, rough: 0.7, seed, m: invert(o.m), gen: true, name: "Beiral" }));
+      }
+    }
+    // torres de pedra no abismo: altas e finas, às vezes em grupo
+    for (let i = 0; i < per(wg.mountains); i++) {
+      const before = features.length;
+      if (!put("platform", [10, 24], [PH * 0.6, PH * 1.45], 0.5, 175, 120)) continue;
+      const c = features[before];
+      // vizinhas menores ao lado da torre
+      const extra = Math.floor(r() * 3);
+      for (let q = 0; q < extra; q++) {
+        const a = r() * Math.PI * 2, d = c.r * lerp(1.6, 2.6, r()), rr = Math.round(c.r * lerp(0.4, 0.75, r()));
+        const p: Pt = [Math.round(c.pts[0][0] + Math.cos(a) * d), Math.round(c.pts[0][1] + Math.sin(a) * d)];
+        const copies = ops.map((o) => o.pt(p));
+        if (copies.some((q2) => features.some((f) => f.kind === "platform" && f.name !== "Torre" && f.r > 40 && Math.hypot(f.pts[0][0] - q2[0], f.pts[0][1] - q2[1]) < f.r + 40))) continue;
+        const seed = Math.floor(r() * 1e6), hh = Math.round(c.h * lerp(0.45, 0.85, r()));
+        ops.forEach((o, k) => features.push({ id: fid(), kind: "platform", pts: [copies[k]], r: rr, h: hh, rough: 0.5, seed, m: invert(o.m), gen: true, name: "Torre" }));
+      }
+      for (let k = before; k < before + ops.length && k < features.length; k++) features[k].name = "Torre";
+    }
     // pontes: cada plataforma liga nas duas mais perto (borda a borda)
     const allPlat = canonPlat.flatMap((q) => ops.map((o) => ({ p: o.pt(q.p), r: q.r })));
     const done: Pt[][] = [];
@@ -1170,6 +1228,44 @@ function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, 
       const a = r() * Math.PI * 2, d = v.r * lerp(0.95, 1.35, r());
       const x = v.p[0] + Math.cos(a) * d, z = v.p[1] + Math.sin(a) * d;
       if (!wet(x, z) && human(x, z) !== 3 && human(x, z) !== 2) emit(pick(singles), x, z, r() * 360, lerp(0.75, 1.1, r()));
+    }
+  }
+
+  // ---------------------------------------------------------------- plataformas: pontes e bordas
+  if (Number.isFinite(minLand)) {
+    const gate = sub(buildings, (bp) => /gate/i.test(bp) && meta(bp).r <= 24);
+    const debris = sub(wrecks, (bp) => catOf(bp) === "debris");
+    // pontes: portal nas cabeceiras, postes dos dois lados e caixas de vez em quando
+    for (const f of features) {
+      if (f.kind !== "span" || f.pts.length < 2) continue;
+      const [a, b] = [f.pts[0], f.pts[f.pts.length - 1]];
+      if (!inRegion((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) continue;
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, dx = (b[0] - a[0]) / L, dz = (b[1] - a[1]) / L;
+      const yaw = (Math.atan2(dz, dx) * 180) / Math.PI;
+      if (gate.pool.length) for (const [p, s0] of [[a, 1], [b, -1]] as const) emit(pick(gate), p[0] + dx * s0 * 4, p[1] + dz * s0 * 4, yaw + 90, 1, false);
+      if (lamps.pool.length) for (let t = 14, k = 0; t < L - 10; t += 26, k++) {
+        for (const side of [-1, 1]) emit(pick(lamps), a[0] + dx * t - dz * side * f.r * 0.78, a[1] + dz * t + dx * side * f.r * 0.78, yaw, 1, false);
+      }
+      if (crates.pool.length && L > 60 && r() < 0.5) emit(pick(crates), a[0] + dx * L * 0.5 + dz * f.r * 0.5, a[1] + dz * L * 0.5 - dx * f.r * 0.5, yaw, lerp(0.8, 1.1, r()));
+    }
+    // bordas: pedrinhas e entulho na beira; pedras grandes no pé dos paredões; destroços no fundo
+    for (const f of features) {
+      if (f.kind !== "platform" || !inRegion(f.pts[0][0], f.pts[0][1])) continue;
+      const per = Math.max(8, Math.round((2 * Math.PI * f.r) / 10));
+      for (let k = 0; k < per; k++) {
+        const ang = (k / per) * Math.PI * 2 + r() * 0.2, rim = platformRim(f, ang), W = wallWidth(f);
+        const ca = Math.cos(ang), sa = Math.sin(ang);
+        if (r() < 0.32) {
+          const list = r() < 0.5 && debris.pool.length ? debris : smallRocks.pool.length ? smallRocks : rocks;
+          if (list.pool.length) emit(pick(list), f.pts[0][0] + ca * (rim - 3), f.pts[0][1] + sa * (rim - 3), r() * 360, lerp(0.6, 1.1, r()));
+        }
+        if (r() < 0.22 && rocks.pool.length) emit(pick(rocks), f.pts[0][0] + ca * (rim + W * lerp(1.05, 1.5, r())), f.pts[0][1] + sa * (rim + W * lerp(1.05, 1.5, r())), r() * 360, lerp(1.2, 2.4, r()));
+      }
+    }
+    if (wrecks.pool.length) for (let k = 0, tries = 0; k < budget(0.05) && tries < 500; tries++) {
+      const x = 20 + r() * (G - 40), z = 20 + r() * (G - 40);
+      if (!inRegion(x, z) || !deep(x, z) || slope(x, z) > 0.6) continue;
+      if (emit(pick(r() < 0.5 && debris.pool.length ? debris : wrecks), x, z, r() * 360, lerp(0.8, 1.3, r()))) k++;
     }
   }
 
