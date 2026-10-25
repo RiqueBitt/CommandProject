@@ -39,6 +39,9 @@ pub struct LayerSet {
     pub slot_d: usize,
     pub slot_n: usize,
     pub slot_s: usize,
+    /** repetições da textura por unidade do mapa no mapa de origem (o tamanho com que ela foi
+     * pensada); `None` quando não deu para medir */
+    pub tile: Option<f32>,
 }
 
 /// Payload de um container MFDB (`.bdf`).
@@ -299,6 +302,7 @@ pub fn layers_in(map: &str, payload: &[u8]) -> Vec<LayerSet> {
             slot_d: 0,
             slot_n: 0,
             slot_s: 0,
+            tile: None,
         });
         match kind.as_str() {
             "d" => {
@@ -315,7 +319,110 @@ pub fn layers_in(map: &str, payload: &[u8]) -> Vec<LayerSet> {
             }
         }
     }
-    sets.into_values().filter(|l| !l.d.is_empty()).collect()
+    let tiles = record_tiles(payload);
+    sets.into_values()
+        .filter(|l| !l.d.is_empty())
+        .map(|mut l| {
+            l.tile = tiles.get(&l.d.to_ascii_lowercase()).copied();
+            l
+        })
+        .collect()
+}
+
+fn f16(h: u16) -> f32 {
+    let s = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
+    let e = ((h >> 10) & 0x1f) as i32;
+    let m = (h & 0x3ff) as f32;
+    match e {
+        0 => s * m * 2f32.powi(-24),
+        31 => f32::NAN,
+        _ => s * (1.0 + m / 1024.0) * 2f32.powi(e - 15),
+    }
+}
+
+/// Repetições por unidade de cada textura de cor (d0/d1 dos materiais) no `terrain.win.bdf`:
+/// gradiente da UV dos vértices do material (mínimos quadrados de u = a·x + b·z + c).
+pub fn record_tiles(pl: &[u8]) -> HashMap<String, f32> {
+    let u32at = |o: usize| pl.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let mut out = HashMap::new();
+    let (Some(nrec), Some(st)) = (u32at(4), u32at(16)) else { return out };
+    let (nrec, st) = (nrec as usize, st as usize);
+    if nrec == 0 || nrec > 4096 || st >= pl.len() {
+        return out;
+    }
+    // bloco da malha: [3, NV, 20, NI, 20 + NV*32]
+    let mut blob = None;
+    let mut o = 0;
+    while o + 20 <= pl.len() {
+        if u32at(o) == Some(3) && u32at(o + 8) == Some(20) {
+            if let (Some(nv), Some(e)) = (u32at(o + 4), u32at(o + 16)) {
+                if nv > 0 && nv < 5_000_000 && e as u64 == 20 + nv as u64 * 32 && o + 20 + nv as usize * 32 <= pl.len() {
+                    blob = Some((o, nv as usize));
+                    break;
+                }
+            }
+        }
+        o += 4;
+    }
+    let Some((blob, nv)) = blob else { return out };
+    let cstr = |p: usize| -> Option<String> {
+        if p == 0 || p >= pl.len() {
+            return None;
+        }
+        let end = pl[p..].iter().position(|&b| b == 0)?;
+        std::str::from_utf8(&pl[p..p + end]).ok().map(|s| s.to_ascii_lowercase())
+    };
+    for r in 0..nrec {
+        let (Some(v0), Some(v1)) = (u32at(20 + r * 108 + 12), if r + 1 < nrec { u32at(20 + (r + 1) * 108 + 12) } else { Some(nv as u32) }) else { continue };
+        let (v0, v1) = (v0 as usize, (v1 as usize).min(nv));
+        if v1 <= v0 + 8 {
+            continue;
+        }
+        // amostra até 400 vértices e resolve o sistema 3×3
+        let stepv = ((v1 - v0) / 400).max(1);
+        let (mut sxx, mut sxz, mut szz, mut sx, mut sz, mut n, mut sxu, mut szu, mut su) = (0f64, 0f64, 0f64, 0f64, 0f64, 0f64, 0f64, 0f64, 0f64);
+        let mut k = v0;
+        while k < v1 {
+            let b = blob + 20 + k * 32;
+            let f = |i: usize| f32::from_le_bytes([pl[b + i], pl[b + i + 1], pl[b + i + 2], pl[b + i + 3]]) as f64;
+            let (x, z) = (f(0), f(8));
+            let u = f16(u16::from_le_bytes([pl[b + 12], pl[b + 13]])) as f64;
+            if x.is_finite() && z.is_finite() && u.is_finite() && x.abs() < 1e5 && z.abs() < 1e5 {
+                n += 1.0; sx += x; sz += z; sxx += x * x; szz += z * z; sxz += x * z; sxu += x * u; szu += z * u; su += u;
+            }
+            k += stepv;
+        }
+        if n < 8.0 {
+            continue;
+        }
+        let m = [[sxx, sxz, sx], [sxz, szz, sz], [sx, sz, n]];
+        let det = |m: [[f64; 3]; 3]| m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+        let d = det(m);
+        if d.abs() < 1e-9 {
+            continue;
+        }
+        let rhs = [sxu, szu, su];
+        let col = |c: usize| {
+            let mut mm = m;
+            for (row, v) in mm.iter_mut().zip(rhs) {
+                row[c] = v;
+            }
+            det(mm) / d
+        };
+        let g = (col(0).powi(2) + col(1).powi(2)).sqrt() as f32;
+        if !(0.001..0.2).contains(&g) {
+            continue;
+        }
+        let mo = st + r * 84;
+        for field in [8usize, 9] {
+            if let Some(path) = u32at(mo + field * 4).and_then(|p| cstr(p as usize)) {
+                if path.starts_with("/textures/terrain/") {
+                    out.entry(path).or_insert(g);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Lê um arquivo do jogo pelo caminho que os blueprints e mapas usam (`/props/…/x.dds`):

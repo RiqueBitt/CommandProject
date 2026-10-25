@@ -60,11 +60,15 @@ export function PropPicker({ props, used, selected, onSelect }: {
     );
   }, [props, q, cat, usedSet]);
 
+  // a prévia anterior fica na tela enquanto a nova carrega: o visualizador 3D não é desmontado a
+  // cada clique (abrir um contexto WebGL por decoração derrubava o do mapa)
+  const [loadingPrev, setLoadingPrev] = useState(false);
   useEffect(() => {
     if (!selected) { setPreview(undefined); return; }
     let alive = true;
-    setPreview(undefined);
-    void api.propPreview(selected).then((p) => { if (alive) setPreview(p); }).catch(() => { if (alive) setPreview(null); });
+    setLoadingPrev(true);
+    void api.propPreview(selected).then((p) => { if (alive) setPreview(p); }).catch(() => { if (alive) setPreview(null); })
+      .finally(() => { if (alive) setLoadingPrev(false); });
     return () => { alive = false; };
   }, [selected]);
 
@@ -98,10 +102,13 @@ export function PropPicker({ props, used, selected, onSelect }: {
           <div className="empty-preview"><Icon name="park" /><span className="faint small">Escolha uma decoração para ver em 3D e colocar no mapa.</span></div>
         ) : preview === undefined ? (
           <div className="bar indeterminate" style={{ margin: 20 }}><i /></div>
-        ) : preview === null ? (
-          <div className="empty-preview"><Icon name="view_in_ar" /><span className="faint small">Sem prévia 3D para esta, mas dá para colocar.</span></div>
         ) : (
-          <Suspense fallback={null}><ModelViewer mesh={preview.mesh} texture={preview.texture} /></Suspense>
+          <div style={{ position: "relative" }}>
+            {preview === null
+              ? <div className="empty-preview"><Icon name="view_in_ar" /><span className="faint small">Sem prévia 3D para esta, mas dá para colocar.</span></div>
+              : <Suspense fallback={null}><ModelViewer mesh={preview.mesh} texture={preview.texture} /></Suspense>}
+            {loadingPrev && <div className="bar indeterminate" style={{ position: "absolute", left: 0, right: 0, top: 0 }}><i /></div>}
+          </div>
         )}
         {current && <div className="small"><b>{nice(current.name)}</b> <span className="faint">{catLabel(current.category)}</span></div>}
       </div>
@@ -208,13 +215,17 @@ export function GroundPaint({ all, chain, deck, onDeck, biome, role, painting, h
   return (
     <div className="col ground-paint" style={{ gap: 10 }}>
       <div className="card-title" style={{ margin: 0 }}><Icon name="brush" size={18} /><b>Pincel de textura</b></div>
-      <p className="faint small" style={{ margin: 0 }}>Escolha a textura e pinte partes do chão. O resto fica automático: praia na água, terra nas encostas, rocha nos paredões e neve no alto.</p>
+      <p className="faint small" style={{ margin: 0 }}>Escolha a textura e pinte partes do chão. Cada pincel pode usar <b>qualquer textura</b> (do jogo ou uma imagem sua): clique em <Icon name="swap_horiz" size={13} /> ou dê duplo clique. O resto fica automático: praia na água, terra nas encostas, rocha nos paredões e neve no alto.</p>
       <div className="paint-roles">
         {ROLES.map((r, k) => (
-          <button key={r} className="paint-role" aria-pressed={painting && role === k} onClick={() => onRole(k)} title={`Pintar: ${ROLE_LABEL[r]}`}>
-            <TextureThumb path={chain[k]?.d} size={46} />
-            <span>{ROLE_LABEL[r]}</span>
-          </button>
+          <div key={r} className="paint-role-wrap">
+            <button className="paint-role" aria-pressed={painting && role === k} onClick={() => onRole(k)} onDoubleClick={() => setSwap(r)}
+              onContextMenu={(e) => { e.preventDefault(); setSwap(r); }} title={`Pintar: ${ROLE_LABEL[r]}${chain[k] ? ` (${nice(chain[k]!.name)})` : ""}. Duplo clique: trocar a textura`}>
+              <TextureThumb path={chain[k]?.d} size={46} />
+              <span>{ROLE_LABEL[r]}</span>
+            </button>
+            <button className="paint-swap" title={`Trocar a textura de "${ROLE_LABEL[r]}" (qualquer textura do jogo ou uma imagem sua)`} aria-label={`Trocar textura ${ROLE_LABEL[r]}`} onClick={() => setSwap(r)}><Icon name="swap_horiz" size={14} /></button>
+          </div>
         ))}
         <button className="paint-role eraser" aria-pressed={painting && role < 0} onClick={() => onRole(-1)} title="Borracha: volta ao automático">
           <span className="paint-eraser-icon"><Icon name="auto_fix_high" size={24} /></span>
@@ -277,11 +288,10 @@ function RoleChooser({ role, all, onPick, onClose, onImport, onForget }: {
     return (all ?? []).filter((l) => {
       const k = l.d.toLowerCase();
       if (seen.has(k) || isCustomPath(l.d)) return false;
-      // pontes: metal, piso e grade primeiro (mas qualquer textura vale); chão: só texturas de chão
-      if (role !== "deck" && !isGroundLayer(l)) return false;
+      // qualquer textura vale; as de chão (ou de metal, para as pontes) aparecem primeiro
       seen.add(k);
       return !t || l.name.toLowerCase().includes(t) || l.map.toLowerCase().includes(t);
-    }).sort((a, b) => (role === "deck" ? Number(isDeckLayer(b)) - Number(isDeckLayer(a)) : 0));
+    }).sort((a, b) => (role === "deck" ? Number(isDeckLayer(b)) - Number(isDeckLayer(a)) : Number(isGroundLayer(b)) - Number(isGroundLayer(a))));
   }, [all, q, role]);
   const take = async (f: File | undefined | null) => {
     if (!f) return;

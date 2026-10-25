@@ -117,13 +117,29 @@ export function groundBaseT(size: number, grid: number, H: Float32Array, water: 
   // o "alto" é relativo a pelo menos 120 de desnível (mapa quase plano não vira neve)
   hi = Math.max(hi, lo + 120);
   const out = new Float32Array(w * w);
+  const nz = noiseField(size, grid, seed);
   for (let j = 0; j <= size; j++) for (let i = 0; i <= size; i++) {
-    const k = j * w + i, x = i * step, z = j * step;
+    const k = j * w + i;
     const dx = (H[j * w + Math.min(size, i + 1)] - H[j * w + Math.max(0, i - 1)]) / (2 * step);
     const dz = (H[Math.min(size, j + 1) * w + i] - H[Math.max(0, j - 1) * w + i]) / (2 * step);
-    out[k] = zoneT(H[k], Math.hypot(dx, dz), peaks ? (H[k] - lo) / (hi - lo) : 0, water, fbm(x / 90, z / 90, seed));
+    out[k] = zoneT(H[k], Math.hypot(dx, dz), peaks ? (H[k] - lo) / (hi - lo) : 0, water, nz[k]);
   }
   return out;
+}
+
+/** O ruído das manchas de terra não depende do relevo: calculado uma vez por grade. */
+const noiseCache = new Map<string, Float32Array>();
+function noiseField(size: number, grid: number, seed: number) {
+  const key = `${size}:${grid}:${seed}`;
+  let f = noiseCache.get(key);
+  if (!f) {
+    const w = size + 1, step = grid / size;
+    f = new Float32Array(w * w);
+    for (let j = 0; j <= size; j++) for (let i = 0; i <= size; i++) f[j * w + i] = fbm((i * step) / 90, (j * step) / 90, seed);
+    if (noiseCache.size > 4) noiseCache.clear();
+    noiseCache.set(key, f);
+  }
+  return f;
 }
 
 /** aplica o pincel sobre o t automático (rápido: dá para refazer a cada pincelada) */
@@ -245,4 +261,25 @@ export function trailPaint(n: number, grid: number, trails: { pts: [number, numb
     }
   }
   return p;
+}
+
+/**
+ * Repetição das texturas do chão (vezes por unidade) para o jogo e para a prévia: cada textura foi
+ * feita para um tamanho no mapa de origem; usa a média (pesando mais o "chão") sem deixar nenhuma
+ * mais de 2× maior que o tamanho dela (fica borrada/esticada) nem 3× menor (fica repetitiva).
+ */
+export function chainTile(chain: (LayerSet | null)[], fallback = 0.025): number {
+  const W = [1, 3, 2, 1, 1];
+  let sw = 0, sl = 0, hi = 0, lo = Infinity;
+  chain.forEach((l, k) => {
+    if (!l) return;
+    const t = l.tile && l.tile > 0.002 && l.tile < 0.2 ? l.tile : fallback;
+    sw += W[k] ?? 1; sl += (W[k] ?? 1) * Math.log(t);
+    hi = Math.max(hi, t); lo = Math.min(lo, t);
+  });
+  if (!sw) return fallback;
+  let g = Math.exp(sl / sw);
+  g = Math.min(g, lo * 3);
+  g = Math.max(g, hi / 2);
+  return Math.max(0.004, Math.min(0.12, g));
 }

@@ -1,6 +1,7 @@
 // "Criar": a biblioteca de projetos (mapas, tropas e modelos 3D). Daqui cada projeto abre em
 // uma aba própria no topo do launcher.
 import { useEffect, useMemo, useState } from "react";
+import { UNITS_ENABLED } from "../../lib/features";
 import { Empty, Field, Icon, Modal } from "../../components/ui";
 import { ContextMenu, type CtxItem } from "../../components/studio/kit";
 import { api, confirmDialog, pickFile, pickSave } from "../../lib/api";
@@ -74,9 +75,11 @@ export default function Create() {
   const area = createKind === "map"
     ? { icon: "map", over: "Mapas", title: "Editor e gerador de mapas", text: "Gere mundos por semente (relevo, água, massa, florestas e áreas estratégicas), edite à mão, valide e exporte o .scd. Tudo fica no seu computador.", links: [] as { icon: string; label: string; go: () => void }[] }
     : createKind === "unit"
-    ? { icon: "smart_toy", over: "Tropas", title: "Gerador e editor de tropas", text: "Parta de uma unidade do jogo ou misture três (chassi, torre e arma). Ajuste atributos, armas, animações, textura e ícone; a verificação de combate e movimento roda antes de gerar.", links: [{ icon: "photo_camera", label: "Gerador de ícones", go: () => go("icons") }] }
+    ? (UNITS_ENABLED
+      ? { icon: "smart_toy", over: "Tropas", title: "Gerador e editor de tropas", text: "Parta de uma unidade do jogo ou misture três (chassi, torre e arma). Ajuste atributos, armas, animações, textura e ícone; a verificação de combate e movimento roda antes de gerar.", links: [{ icon: "photo_camera", label: "Gerador de ícones", go: () => go("icons") }] }
+      : { icon: "pause_circle", over: "Tropas", title: "Editor de tropas pausado", text: "Desligado por enquanto: o foco agora é o gerador e o editor de mapas. Os projetos de tropa que você já tem continuam salvos.", links: [{ icon: "map", label: "Ir para os mapas", go: () => useStore.getState().goCreate("map") }] })
     : createKind === "model"
-    ? { icon: "view_in_ar", over: "Modelos 3D e texturas", title: "Modelos 3D e texturas", text: "Modele com formas, edite vértices, UVs e materiais. Texturas procedurais (camuflagem, painéis, desgaste e sujeira) ficam no editor de tropas; texturas HD e skins dos arquivos do jogo, no Estúdio.", links: [{ icon: "texture", label: "Texturas HD e skins (Estúdio)", go: () => { setStudioTab("hd"); go("studio"); } }, { icon: "smart_toy", label: "Texturas de tropas", go: () => useStore.getState().goCreate("unit") }] }
+    ? { icon: "view_in_ar", over: "Modelos 3D e texturas", title: "Modelos 3D e texturas", text: "Modele com formas, edite vértices, UVs e materiais. Texturas procedurais (camuflagem, painéis, desgaste e sujeira) ficam no editor de tropas; texturas HD e skins dos arquivos do jogo, no Estúdio.", links: [{ icon: "texture", label: "Texturas HD e skins (Estúdio)", go: () => { setStudioTab("hd"); go("studio"); } }, ...(UNITS_ENABLED ? [{ icon: "smart_toy", label: "Texturas de tropas", go: () => useStore.getState().goCreate("unit") }] : [])] }
     : { icon: "auto_awesome", over: "Estúdio de criação", title: "O que vamos criar hoje?", text: "Cada projeto abre numa aba própria, com salvamento automático, versões anteriores e cópias de segurança locais.", links: [] };
 
   return (
@@ -91,7 +94,7 @@ export default function Create() {
           ))}</div>}
         </div>
         <div className="create-actions">
-          {(createKind === "all" ? (["map", "unit", "model"] as CreationKind[]) : [createKind]).map((k) => (
+          {(createKind === "all" ? (["map", "unit", "model"] as CreationKind[]) : [createKind]).filter((k) => UNITS_ENABLED || k !== "unit").map((k) => (
             <button key={k} className="create-card" style={{ ["--kc" as string]: KIND_META[k].color }} onClick={() => setCreating(k)}>
               <span className="ic"><Icon name={KIND_META[k].icon} size={30} /></span>
               <b>{k === "map" ? "Criar novo mapa" : k === "unit" ? "Criar nova tropa" : "Criar modelo 3D"}</b>
@@ -110,7 +113,7 @@ export default function Create() {
           </div>
           <div className="chips" style={{ padding: 0 }}>
             <button className="chip" aria-pressed={kind === "all"} onClick={() => setKind("all")}>Todos ({list?.length ?? 0})</button>
-            {(["map", "unit", "model"] as CreationKind[]).map((k) => (
+            {(["map", "unit", "model"] as CreationKind[]).filter((k) => UNITS_ENABLED || k !== "unit" || counts[k] > 0).map((k) => (
               <button key={k} className="chip" aria-pressed={kind === k} onClick={() => setKind(k)}><Icon name={KIND_META[k].icon} size={15} /> {k === "model" ? "Modelos 3D" : `${KIND_META[k].label}s`} ({counts[k]})</button>
             ))}
             <button className="chip" aria-pressed={kind === "fav"} onClick={() => setKind("fav")}><Icon name="star" size={15} /> Favoritos</button>

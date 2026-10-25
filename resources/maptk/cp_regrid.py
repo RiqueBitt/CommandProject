@@ -295,7 +295,7 @@ def regrid_terrain(data, height, grid, new_mask_path, step=4.0, log=None):
 
 
 def rebuild_terrain(data, height, grid, *, step=4.0, mask_path, margin=0.0, ring_step=16.0,
-                    zones=None, zone_t=None, water_y=None, water_mask_path=None, log=None):
+                    zones=None, zone_t=None, water_y=None, water_mask_path=None, log=None, uv_scale=None):
     """Troca a malha do chão por uma grade regular que segue `height` (com um anel de paisagem em
     volta quando `margin` > 0) e devolve (bytes novos, info).
 
@@ -355,7 +355,9 @@ def rebuild_terrain(data, height, grid, *, step=4.0, mask_path, margin=0.0, ring
     nz = max(1, len(zones))
     hosts = pool[:nz]
     old_mask = _cstr(pl, struct.unpack_from("<I", pl, st + hosts[0] * 84 + 18 * 4)[0])
-    uv_scale = _uv_scale(pl, vb, vc[hosts[0]], vc[hosts[0] + 1]) or 0.01
+    # repetição das texturas: a escolhida pelo editor (pelo tamanho com que cada textura foi feita)
+    # ou a do material original
+    uv_scale = uv_scale if uv_scale and 0.002 < uv_scale < 0.2 else (_uv_scale(pl, vb, vc[hosts[0]], vc[hosts[0] + 1]) or 0.01)
     gp, gv, gt = world_mesh(height, grid, step, uv_scale, margin, ring_step)
     # triângulos por zona
     parts = [[] for _ in range(nz)]

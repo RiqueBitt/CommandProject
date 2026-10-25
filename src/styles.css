@@ -1117,3 +1117,7 @@ textarea.pinput { height: auto; padding: 4px 6px; resize: vertical; }
 .layer-tile.mine .layer-pick { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px; width: 100%; background: none; border: 0; color: inherit; cursor: pointer; }
 .layer-tile.mine .forget { position: absolute; top: 4px; right: 4px; opacity: 0; transition: opacity .15s; }
 .layer-tile.mine:hover .forget, .layer-tile.mine .forget:focus-visible { opacity: 1; }
+.paint-role-wrap { position: relative; }
+.paint-role-wrap > .paint-role { width: 100%; }
+.paint-swap { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 85%, transparent); color: var(--muted); display: grid; place-items: center; cursor: pointer; opacity: .75; transition: opacity .15s, color .15s; }
+.paint-swap:hover, .paint-swap:focus-visible { opacity: 1; color: var(--primary); }

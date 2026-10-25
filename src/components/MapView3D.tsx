@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { fbm, zoneT } from "../pages/studio/biome";
 import { naturalColor } from "../pages/create/worldgen";
@@ -57,6 +57,8 @@ export interface GroundTextures {
   dirt?: string;
   /** tabuleiro das pontes (t = 5) */
   deck?: string | null;
+  /** repetições da textura por unidade (a mesma do jogo); sem isso, o padrão da prévia */
+  tile?: number;
   /** uma textura só no chão inteiro, sem tinta da paleta */
   uniform?: boolean;
   /** posição de cada vértice na cadeia praia(0)→chão(1)→terra(2)→rocha(3)→topo(4), como no jogo */
@@ -83,11 +85,19 @@ export default function MapView3D(props: Props) {
     setSky: () => void;
   } | null>(null);
 
+  // contexto WebGL perdido (driver, falta de memória de vídeo, muitos contextos abertos): a cena é
+  // refeita quando o navegador devolver o contexto, em vez de a vista ficar branca
+  const [ctxGen, setCtxGen] = useState(0);
+
   // cena: criada uma vez por terreno
   useEffect(() => {
     const el = host.current!;
     const { size, grid } = live.current;
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    const onLost = (e: Event) => { e.preventDefault(); };
+    const onRestored = () => setCtxGen((g) => g + 1);
+    renderer.domElement.addEventListener("webglcontextlost", onLost);
+    renderer.domElement.addEventListener("webglcontextrestored", onRestored);
     renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio));
     let dirty = true;
     const invalidate = () => { dirty = true; };
@@ -141,7 +151,7 @@ export default function MapView3D(props: Props) {
       tSand: { value: null as THREE.Texture | null }, tGrass: { value: null as THREE.Texture | null },
       tRock: { value: null as THREE.Texture | null }, tSnow: { value: null as THREE.Texture | null },
       tDirt: { value: null as THREE.Texture | null }, tDeck: { value: null as THREE.Texture | null },
-      uGround: { value: 0 }, uTile: { value: 1 / 22 },
+      uGround: { value: 0 }, uTile: { value: 1 / 22 }, uExact: { value: 0 },
     };
     mat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, groundU);
@@ -151,7 +161,7 @@ export default function MapView3D(props: Props) {
       sh.fragmentShader = sh.fragmentShader
         .replace("#include <common>", `#include <common>
 uniform sampler2D tSand; uniform sampler2D tGrass; uniform sampler2D tRock; uniform sampler2D tSnow; uniform sampler2D tDirt; uniform sampler2D tDeck;
-uniform float uGround; uniform float uTile;
+uniform float uGround; uniform float uTile; uniform float uExact;
 varying vec4 vSplat; varying float vSplatB; varying float vSplatC; varying vec2 vGround;
 vec3 layerAt(vec2 p) {
   float tot = max(0.0001, dot(vSplat, vec4(1.0)) + vSplatB + vSplatC);
@@ -163,12 +173,13 @@ vec3 layerAt(vec2 p) {
         .replace("#include <map_fragment>", `#include <map_fragment>
 if (uGround > 0.5) {
   vec2 p = vGround * uTile;
-  vec2 q = mat2(0.8, -0.6, 0.6, 0.8) * vGround * uTile * 0.23 + 0.37;
-  vec3 c = mix(layerAt(p), layerAt(q), 0.35);
+  vec3 c;
+  if (uExact > 0.5) c = layerAt(p); // como no jogo: uma escala só
+  else { vec2 q = mat2(0.8, -0.6, 0.6, 0.8) * vGround * uTile * 0.23 + 0.37; c = mix(layerAt(p), layerAt(q), 0.35); }
   diffuseColor.rgb *= c * 0.62;
 }`);
     };
-    mat.customProgramCacheKey = () => "cp-ground6";
+    mat.customProgramCacheKey = () => "cp-ground7";
     const ground = new THREE.Mesh(geo, mat);
     ground.receiveShadow = true;
     ground.castShadow = true;
@@ -191,6 +202,7 @@ if (uGround > 0.5) {
     // paisagem em volta do mapa (mesmo cálculo do jogo: cp_world.ring_height)
     let ringMesh: THREE.Mesh | null = null;
     let ringKey = "";
+    let ringSig = "";
     const setRing = (e: number, lo: number, hi: number) => {
       const r = live.current.ground?.ring;
       const { heights } = live.current;
@@ -201,6 +213,12 @@ if (uGround > 0.5) {
         return;
       }
       skirt.visible = false;
+      // a paisagem em volta só depende da borda do mapa: refaz só se a borda (ou a altura) mudou
+      let edgeSum = 0;
+      for (let i = 0; i < w; i += 2) edgeSum += heights[i] + heights[size * w + i] + heights[i * w] + heights[i * w + size];
+      const sig = `${key}:${e}:${Math.round(lo)}:${Math.round(hi)}:${Math.round(edgeSum * 10)}`;
+      if (ringMesh && sig === ringSig) return;
+      ringSig = sig;
       const R = Math.max(8, grid / 64), M = Math.ceil(r.margin / R) * R;
       const n = Math.round((grid + 2 * M) / R) + 1;
       const hIn = (x: number, z: number) => {
@@ -328,8 +346,10 @@ if (uGround > 0.5) {
     let groundKey = "";
     const setGround = () => {
       const g = live.current.ground;
+      groundU.uTile.value = g?.tile ? g.tile : 1 / 22;
+      groundU.uExact.value = g?.tile ? 1 : 0;
       const key = g ? `${g.uniform ? "u" : ""}${g.sand.length}:${g.grass.slice(-40)}:${g.rock.slice(-40)}:${g.snow.slice(-40)}:${(g.dirt ?? "").slice(-40)}:${(g.deck ?? "").slice(-40)}` : "";
-      if (key === groundKey) { if (groundU.uGround.value > 0.5) { setHeights(); invalidate(); } return; }
+      if (key === groundKey) { if (groundU.uGround.value > 0.5) scheduleHeights(); return; }
       groundKey = key;
       groundTex.splice(0).forEach((t) => t.dispose());
       groundU.uGround.value = 0;
@@ -365,6 +385,7 @@ if (uGround > 0.5) {
       const textured = !!pal && groundU.uGround.value > 0.5;
       const wet = waterLevel > 0.5;
       const base = Math.max(lo, wet ? waterLevel : lo);
+      const gtFast = textured && !!live.current.ground?.t && live.current.ground.t.length === w * w;
       for (let k = 0; k < w * w; k++) {
         pos[k * 3 + 1] = heights[k] * e;
         if (pal) {
@@ -372,8 +393,9 @@ if (uGround > 0.5) {
           const dx = (heights[Math.min(k + 1, j * w + size)] - heights[Math.max(k - 1, j * w)]) / (2 * st);
           const dz = (heights[Math.min(k + w, w * w - 1)] - heights[Math.max(k - w, 0)]) / (2 * st);
           const sl = Math.hypot(dx, dz), y = heights[k];
-          const [r, g, b] = naturalColor(y, sl, waterLevel, wet, lo, hi, pal, 1);
-          c.setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace);
+          // chão do jogo (textura por papel): a cor da paleta não aparece, nem precisa ser calculada
+          if (gtFast) c.setRGB(1, 1, 1);
+          else { const [r, g, b] = naturalColor(y, sl, waterLevel, wet, lo, hi, pal, 1); c.setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace); }
           // pesos das camadas: praia perto da água, rocha nas encostas, topo nas partes altas
           const t = Math.max(0, Math.min(1, (y - base) / Math.max(1, hi - base)));
           const sm = (a: number, b2: number, x: number) => { const q = Math.max(0, Math.min(1, (x - a) / (b2 - a))); return q * q * (3 - 2 * q); };
@@ -426,10 +448,17 @@ if (uGround > 0.5) {
       water.visible = waterLevel > lo + 0.5;
       // com a paisagem em volta, a água vai até o horizonte (como a lâmina d'água do jogo)
       water.scale.setScalar(live.current.ground?.ring && waterLevel > 0.5 ? 3 : 1);
-      setMarkers();
-      setDecor();
-      setHighlights();
+      // marcadores e decorações acompanham o chão um instante depois (não a cada pincelada)
+      if (heightsTimer) window.clearTimeout(heightsTimer);
+      heightsTimer = window.setTimeout(() => { heightsTimer = 0; setMarkers(); setDecor(); setHighlights(); invalidate(); }, 140);
       redrawBrush();
+    };
+    let heightsTimer = 0;
+    // várias mudanças no mesmo quadro (pincel, pintura) viram uma atualização só
+    let heightsFrame = 0;
+    const scheduleHeights = () => {
+      if (heightsFrame) return;
+      heightsFrame = requestAnimationFrame(() => { heightsFrame = 0; setHeights(); invalidate(); });
     };
 
     const label = (text: string, color: string) => {
@@ -773,8 +802,8 @@ if (uGround > 0.5) {
     };
     api.current = {
       setSky: dirtying(setSky),
-      setHeights: dirtying(setHeights), setTexture: dirtying(setTexture), setMarkers: dirtying(setMarkers), setDecor: dirtying(setDecor), setHighlights: dirtying(setHighlights),
-      setOrbit: dirtying(setOrbit), setExaggeration: dirtying(setHeights), redrawBrush: dirtying(redrawBrush), setGround: dirtying(setGround),
+      setHeights: scheduleHeights, setTexture: dirtying(setTexture), setMarkers: dirtying(setMarkers), setDecor: dirtying(setDecor), setHighlights: dirtying(setHighlights),
+      setOrbit: dirtying(setOrbit), setExaggeration: scheduleHeights, redrawBrush: dirtying(redrawBrush), setGround: dirtying(setGround),
     };
     setGround();
     setSky();
@@ -784,6 +813,8 @@ if (uGround > 0.5) {
 
     return () => {
       api.current = null;
+      if (heightsFrame) cancelAnimationFrame(heightsFrame);
+      if (heightsTimer) window.clearTimeout(heightsTimer);
       cancelAnimationFrame(raf);
       ro.disconnect();
       controls.dispose();
@@ -804,10 +835,12 @@ if (uGround > 0.5) {
         }
       });
       floor.dispose();
+      renderer.domElement.removeEventListener("webglcontextlost", onLost);
+      renderer.domElement.removeEventListener("webglcontextrestored", onRestored);
       renderer.dispose();
       el.removeChild(cv);
     };
-  }, [props.size, props.grid]);
+  }, [props.size, props.grid, ctxGen]);
 
   useEffect(() => { api.current?.setHeights(); }, [props.heights, props.waterLevel, props.exaggeration, props.palette, props.pass]);
   useEffect(() => { api.current?.setTexture(props.texture); }, [props.texture]);

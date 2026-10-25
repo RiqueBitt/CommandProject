@@ -53,7 +53,12 @@ jogo mistura vizinhas da cadeia, então as passagens ficam suaves.
 
 - **Pincel de textura** (Início → Pintar chão, ou a aba **Chão** da caixa de recursos): escolha a
   textura (praia, chão, terra, rocha, topo) e pinte partes do mapa — estradas, clareiras, neve num
-  pico. **Automático** é a borracha. Tamanho e força ajustáveis; a simetria ao colocar vale também.
+  pico. Cada pincel pode usar **qualquer textura do jogo ou uma imagem sua** (botão de trocar no
+  canto do pincel ou duplo clique). **Automático** é a borracha. Tamanho e força ajustáveis; a
+  simetria ao colocar vale também.
+- **Tamanho das texturas**: cada textura do jogo foi feita para um tamanho no mapa de origem; o
+  editor mede isso e usa a mesma repetição no jogo e na prévia (nenhuma textura fica esticada e
+  borrada), igual nos dois.
 - **Bioma**: grama, areia, neve ou terra escura. Cada papel pode trocar de textura (qualquer uma do
   jogo, ou uma sua — abaixo).
 - **Paisagem em volta do mapa**: fora da área jogável o relevo continua a borda e sobe em montanhas,
@@ -238,6 +243,10 @@ mesmo mapa de passagem. No jogo, isso entra na navegação do mapa (unidades aé
 - Modelos prontos: vazio, torre, caixas, tanque.
 
 ## Criador de tropas
+
+> **Pausado na versão 0.18:** o editor de tropas está desligado enquanto o foco é o gerador e o
+> editor de mapas. Os projetos de tropa existentes continuam salvos. Para religar no código-fonte:
+> `UNITS_ENABLED` em `src/lib/features.ts`.
 
 Uma tropa nova sempre parte de uma **unidade base** do jogo. A base não é alterada: o launcher gera
 uma unidade nova (`units/<novo id>/`) num mod próprio (`tropa-<id>`), que aparece na biblioteca e

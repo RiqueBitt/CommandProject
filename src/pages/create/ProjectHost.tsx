@@ -3,6 +3,8 @@
 import { lazy, Suspense } from "react";
 import { ActiveEditor } from "../../components/studio/kit";
 import { useTabs } from "../../lib/tabs";
+import { UNITS_ENABLED } from "../../lib/features";
+import { Empty } from "../../components/ui";
 
 const MapStudio = lazy(() => import("./MapStudio"));
 const ModelStudio = lazy(() => import("./ModelStudio"));
@@ -19,7 +21,9 @@ export default function ProjectHost() {
             <Suspense fallback={<div className="page muted">Abrindo o editor…</div>}>
               {t.kind === "map" && <MapStudio id={t.id} />}
               {t.kind === "model" && <ModelStudio id={t.id} />}
-              {t.kind === "unit" && <UnitStudio id={t.id} />}
+              {t.kind === "unit" && (UNITS_ENABLED ? <UnitStudio id={t.id} /> : (
+                <div className="page"><Empty icon="pause_circle" title="Editor de tropas pausado">O editor de tropas está desligado por enquanto: o foco agora é o gerador e o editor de mapas. Seu projeto continua salvo e abre normalmente quando o editor voltar.</Empty></div>
+              ))}
             </Suspense>
           </ActiveEditor.Provider>
         </div>

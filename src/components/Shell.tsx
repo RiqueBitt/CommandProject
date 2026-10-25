@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { UNITS_ENABLED } from "../lib/features";
 import { api, openUrl, windowAction } from "../lib/api";
 import { switchProfile, useStore, type Page } from "../lib/store";
 import { KIND_META, useTabs } from "../lib/tabs";
@@ -159,7 +160,7 @@ export function Rail() {
         <AreaItem label="Início" icon="sports_esports" active={page === "home"} onClick={() => go("home")} />
         <AreaItem label="Arquivos" icon="folder_open" active={page === "files"} onClick={() => go("files")} />
         <AreaItem label="Mapas" icon="map" active={area("map")} onClick={() => goCreate("map")} />
-        <AreaItem label="Tropas" icon="smart_toy" active={area("unit")} onClick={() => goCreate("unit")} />
+        {UNITS_ENABLED && <AreaItem label="Tropas" icon="smart_toy" active={area("unit")} onClick={() => goCreate("unit")} />}
         <AreaItem label="Modelos" icon="view_in_ar" active={area("model") || page === "studio"} onClick={() => goCreate("model")} />
         <AreaItem label="Ícones" icon="photo_camera" active={page === "icons"} onClick={() => go("icons")} />
         <AreaItem label="Mods" icon="extension" active={page === "library" || page === "hub"} onClick={() => go("library")} />

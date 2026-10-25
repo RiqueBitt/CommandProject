@@ -215,7 +215,7 @@ export interface MemoryStatus { system: SystemMemory; limitMb: number; recommend
 export interface AppUpdate { version: string; notes: string; url: string; assetName?: string | null; assetUrl?: string | null; size: number; sha256?: string | null }
 
 export interface PropInfo { bp: string; name: string; category: string; size?: [number, number, number] | null }
-export interface LayerSet { map: string; name: string; d: string; n?: string | null; s?: string | null; slotD: number; slotN: number; slotS: number }
+export interface LayerSet { map: string; name: string; d: string; n?: string | null; s?: string | null; slotD: number; slotN: number; slotS: number; /** repetições por unidade no mapa de origem */ tile?: number | null }
 /** Céu de um mapa do jogo (caixa do céu, reflexo e correção de cor) */
 export interface SkyInfo { map: string; env: string; sky: string; sight: string; fog: string; color: [number, number, number] }
 export interface MapAssets { props: PropInfo[]; layers: LayerSet[]; skies?: SkyInfo[] }

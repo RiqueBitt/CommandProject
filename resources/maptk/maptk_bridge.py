@@ -411,6 +411,7 @@ def _clean_spec(spec):
                 deck = dict(tex={k: dk.get(k) for k in ("d", "n", "s") if dk.get(k)}, segs=segs)
         spec["clean"] = dict(paint=paint, deck=deck, ground=ground, chain=chain if len(chain) >= 2 else None, relight=bool(clean.get("relight", True)),
                              clear_props=bool(clean.get("clear_props", True)), ring=bool(clean.get("ring", True)), peaks=bool(clean.get("peaks", True)),
+                             uv_tile=max(0.003, min(0.15, float(clean["uv_tile"]))) if clean.get("uv_tile") else None,
                              ring_rise=max(0.0, min(250.0, float(clean.get("ring_rise", 95)))))
     else:
         spec.pop("clean", None)
@@ -747,7 +748,7 @@ def _clean_visual(sm, spec, state, terrain, new_id):
             ring_step = 16.0
             for _try in range(3):
                 tb2, info = cp_regrid.rebuild_terrain(tb, height, g, step=step, mask_path=path, margin=margin, ring_step=ring_step,
-                                                      zones=zones, zone_t=zone_t,
+                                                      zones=zones, zone_t=zone_t, uv_scale=clean.get("uv_tile"),
                                                       water_y=wl, water_mask_path=wpath, log=lambda m: emit("progress", message=m))
                 # os mapas do jogo nunca passam de ~61 mil vértices num material: fica abaixo de 65 mil
                 if info.get("max_rec", 0) <= 65000:

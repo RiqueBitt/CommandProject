@@ -18,7 +18,7 @@ import { useTabs } from "../../lib/tabs";
 import type { CreationMeta, MapAssets, MapBuildResult, MaptkStatus, SkyInfo, Terrain, TerrainPreview } from "../../lib/types";
 import { useProject } from "../../lib/useProject";
 import { GroundPaint, GroundTextures, PropPicker } from "../studio/MapDecor";
-import { biomeChain, combinePaint, deckLayer, decodePaint, encodePaint, groundBaseT, paintDab, paintT, resamplePaint, trailPaint, type PaintLayer } from "../studio/biome";
+import { biomeChain, chainTile, combinePaint, deckLayer, decodePaint, encodePaint, groundBaseT, paintDab, paintT, resamplePaint, trailPaint, type PaintLayer } from "../studio/biome";
 import { customLayers, customStem, importTexture, isCustomPath, registerCustomTextures, texUrl } from "../studio/customTex";
 import {
   applyRelief, BLANK_BASES, BLANK_LABEL, BLANK_WATER, BLANK_Y, blankSizeOf, cutTester, decodeHeights, decorKind, groundCandidates, groundSpec, heightAt, meanInDisc,
@@ -829,6 +829,8 @@ export default function MapStudio({ id }: { id: string }) {
   const allLayers = useMemo(() => (assets ? [...customLayers(doc.customTex), ...assets.layers] : null), [assets, doc.customTex]);
   const chain = useMemo(() => (doc.clean && allLayers ? biomeChain(allLayers, doc.groundBiome, doc.groundRoles) : []), [doc.clean, allLayers, doc.groundBiome, doc.groundRoles]);
   const [chainTex, setChainTex] = useState<string[] | null>(null);
+  // repetição das texturas igual à do jogo (pelo tamanho com que cada textura foi feita)
+  const uvTile = useMemo(() => chainTile(chain), [chain]);
   const chainKey = chain.map((l) => l?.d ?? "").join("|");
   const groundKey = doc.clean ? `chain:${chainKey}` : groundLayers.map((l) => edits.reskin[l.d]?.d ?? l.d).join("|") + `#${doc.world?.biome ?? ""}`;
   useEffect(() => {
@@ -943,11 +945,11 @@ export default function MapStudio({ id }: { id: string }) {
   const groundView: GroundTexSet | null = useMemo(() => {
     if (doc.clean) {
       if (!chainTex) return null;
-      return { sand: chainTex[0], grass: chainTex[1], dirt: chainTex[2], rock: chainTex[3], snow: chainTex[4], t: tField, deck: deckUrl,
+      return { sand: chainTex[0], grass: chainTex[1], dirt: chainTex[2], rock: chainTex[3], snow: chainTex[4], t: tField, deck: deckUrl, tile: uvTile,
         ring: doc.ring !== false ? { margin: grid <= 1024 ? 256 : 384, rise: doc.ringRise ?? 95, water: hasWater ? water : null } : null };
     }
     return groundTex;
-  }, [doc.clean, chainTex, tField, doc.ring, doc.ringRise, grid, hasWater, water, groundTex, deckUrl]);
+  }, [doc.clean, chainTex, tField, doc.ring, doc.ringRise, grid, hasWater, water, groundTex, deckUrl, uvTile]);
   const allCuts = useMemo(() => (doc.clean || doc.world?.clearDonor ? [...edits.cuts, ...fullCuts(grid)] : edits.cuts), [edits.cuts, doc.clean, doc.world?.clearDonor, grid]);
   const [kept, removedCount] = useMemo(() => {
     const bps = donor?.kinds ?? [];
@@ -998,7 +1000,9 @@ export default function MapStudio({ id }: { id: string }) {
   const waterNew = hasWater && editsTerrain && !!doc.terrain;
   const scenarioId = waterNew ? fitId(slugId(doc.lobbyName), doc.terrain!.length) : slugId(doc.lobbyName);
 
-  const spec = useMemo(() => {
+  // a especificação do mapa só é montada ao gerar (montar a cada pincelada travava o editor:
+  // codifica a pintura, a passagem e confere todas as decorações)
+  const makeSpec = useCallback(() => {
     if (!doc.terrain) return null;
     const { spawns, mass, bridges, seed, relief, props, reskin } = edits;
     const ids = spawns.map((_, i) => i + 1);
@@ -1023,7 +1027,7 @@ export default function MapStudio({ id }: { id: string }) {
       const enc = encodePaint(combinePaint(worldPaint, decodePaint(doc.paint, n)));
       s.clean = {
         ground: full ? [full[1], ...groundSpec(cleanCands)] : groundSpec(cleanCands), relight: true, clear_props: true,
-        ...(full ? { chain: full } : {}), ring: doc.ring !== false, ring_rise: doc.ringRise ?? 95, peaks: doc.peaks !== false,
+        ...(full ? { chain: full } : {}), uv_tile: uvTile, ring: doc.ring !== false, ring_rise: doc.ringRise ?? 95, peaks: doc.peaks !== false,
         ...(deck && deckSegs.length ? { deck: { d: deck.d, ...(deck.n ? { n: deck.n } : {}), ...(deck.s ? { s: deck.s } : {}), segs: deckSegs.map((v) => v.map((x) => Math.round(x * 10) / 10)) } } : {}),
         ...(enc ? { paint: { size: doc.paintSize || 256, data: enc } } : {}),
       };
@@ -1054,7 +1058,8 @@ export default function MapStudio({ id }: { id: string }) {
     }
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, edits, usePatch, grid, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands, chain, hasWater, water, id, heights, relief3d, skyNow, deck, deckSegs, worldPaint, navNow]);
+  }, [doc, edits, usePatch, grid, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands, chain, hasWater, water, id, heights, relief3d, skyNow, deck, deckSegs, worldPaint, navNow, uvTile]);
+  const canBuild = !!doc.terrain;
 
   // ------------------------------------------------------------ ações
   const saveNow = useCallback(async () => {
@@ -1074,6 +1079,7 @@ export default function MapStudio({ id }: { id: string }) {
     window.setTimeout(() => setIssues(runCheck()), 50);
   };
   const build = async (play: boolean) => {
+    const spec = makeSpec();
     if (!spec) return;
     if (usesWorld && (!relief3d || !composed)) { toast("info", "Espere o relevo do terreno carregar para gerar."); return; }
     const found = runCheck();
@@ -1551,8 +1557,8 @@ export default function MapStudio({ id }: { id: string }) {
               {toolBtn("decor", "park", "Decorar", "#7fae6b")}
             </RibbonGroup>
             <RibbonGroup label="Testar">
-              <RibbonButton icon="construction" label={busy ? "Gerando…" : "Gerar mapa"} onClick={() => void build(false)} disabled={!spec || edits.spawns.length < 2 || busy} color="#a3e635" hint="Gera o .scd, verifica e liga o mapa na biblioteca" />
-              <RibbonButton icon="play_circle" label="Gerar e jogar" onClick={() => void build(true)} disabled={!spec || edits.spawns.length < 2 || busy} color="#a3e635" />
+              <RibbonButton icon="construction" label={busy ? "Gerando…" : "Gerar mapa"} onClick={() => void build(false)} disabled={!canBuild || edits.spawns.length < 2 || busy} color="#a3e635" hint="Gera o .scd, verifica e liga o mapa na biblioteca" />
+              <RibbonButton icon="play_circle" label="Gerar e jogar" onClick={() => void build(true)} disabled={!canBuild || edits.spawns.length < 2 || busy} color="#a3e635" />
             </RibbonGroup>
           </>}
           {ribbon === "terrain" && <>
@@ -1652,8 +1658,8 @@ export default function MapStudio({ id }: { id: string }) {
           </>}
           {ribbon === "game" && <>
             <RibbonGroup label="Gerar">
-              <RibbonButton icon="construction" label={busy ? "Gerando…" : "Gerar mapa"} onClick={() => void build(false)} disabled={!spec || edits.spawns.length < 2 || busy} color="#a3e635" />
-              <RibbonButton icon="play_circle" label="Gerar e jogar" onClick={() => void build(true)} disabled={!spec || edits.spawns.length < 2 || busy} color="#a3e635" />
+              <RibbonButton icon="construction" label={busy ? "Gerando…" : "Gerar mapa"} onClick={() => void build(false)} disabled={!canBuild || edits.spawns.length < 2 || busy} color="#a3e635" />
+              <RibbonButton icon="play_circle" label="Gerar e jogar" onClick={() => void build(true)} disabled={!canBuild || edits.spawns.length < 2 || busy} color="#a3e635" />
               <RibbonButton icon="save_alt" label="Exportar .scd" onClick={() => void exportScd()} disabled={!builtMod} hint="Salva o arquivo .scd do mapa gerado numa pasta (para compartilhar ou instalar à mão)" />
             </RibbonGroup>
             <RibbonGroup label="Configurar">
