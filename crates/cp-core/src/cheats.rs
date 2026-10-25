@@ -102,8 +102,16 @@ pub fn menu_lua(o: &CheatOptions) -> String {
 
 const MARK: &str = "CommandProject cheats";
 const SIM_HOOK: &str = "\tForkThread(CPCheatsRun) -- CommandProject cheats\n";
-const CALLBACK_HOOK: &str =
-    "\n-- CommandProject cheats: in-game menu\nCallbacks.CPCheats = function(data) CPCheatsSet(data) end\n";
+/// Comandos da interface para a simulação, iguais em todos os mods do CommandProject: o jogo usa o
+/// `SimCallbacks.lua` de um só mod (o último a carregar), então cada um leva os comandos de todos.
+pub const SHARED_CALLBACKS: &str = "
+-- CommandProject callbacks (the same in every CommandProject mod: any of them may provide this file)
+Callbacks.CPCheats = function(data) if CPCheatsSet then CPCheatsSet(data) end end
+Callbacks.CPAIMemory = function(data)
+    local ok, m = pcall(import, '/lua/ai/skirmish/system/skirmishaisystem.lua')
+    if ok and m and m.CPAIReceiveMemory then m.CPAIReceiveMemory(data) end
+end
+";
 const UI_HOOK: &str = "\tpcall(CPMenuInit, false) -- CommandProject cheats\n";
 const SYNC_HOOK: &str = "\tif Sync.CPCheats then pcall(import('/lua/ui/game/gamemain_pc.lua').CPMenuInit, false) end -- CommandProject cheats\n";
 
@@ -143,7 +151,7 @@ pub fn patch_sim_init(text: &str, sim: &str) -> Result<String> {
 
 /// `SimCallbacks.lua` com o comando que o menu usa.
 pub fn patch_sim_callbacks(text: &str) -> Result<String> {
-    if text.contains("Callbacks.CPCheats") {
+    if text.contains("CommandProject callbacks") {
         return Ok(text.to_string());
     }
     if !text.contains("local Callbacks = {}") {
@@ -153,7 +161,7 @@ pub fn patch_sim_callbacks(text: &str) -> Result<String> {
     if !out.ends_with('\n') {
         out.push('\n');
     }
-    out.push_str(CALLBACK_HOOK);
+    out.push_str(SHARED_CALLBACKS);
     Ok(out)
 }
 
@@ -233,7 +241,8 @@ mod tests {
     #[test]
     fn menu_hooks() {
         let cb = patch_sim_callbacks("local Callbacks = {}\nfunction DoCallback() end").unwrap();
-        assert!(cb.ends_with("Callbacks.CPCheats = function(data) CPCheatsSet(data) end\n"));
+        assert!(cb.contains("Callbacks.CPCheats = function(data) if CPCheatsSet then CPCheatsSet(data) end end\n"));
+        assert!(cb.contains("Callbacks.CPAIMemory = function(data)"));
         assert_eq!(patch_sim_callbacks(&cb).unwrap(), cb);
         assert!(patch_sim_callbacks("x = 1").is_err());
 

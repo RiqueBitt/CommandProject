@@ -72,6 +72,13 @@ disponível em Sistema → Visual.
     - **personalidades**: Misturadas, Equilibrada, Agressiva, Defensiva, Saqueadora, Naval, Aérea;
     - **dificuldade adaptativa** (pressiona mais quando você está ganhando fácil, segura quando você
       está perdendo feio);
+    - **aprende o seu jeito de jogar**: monta um perfil seu (estilo: rush, defensivo, aéreo, naval,
+      saqueador, econômico, experimentais; quando você ataca; por onde suas tropas passam; o que você
+      ataca; onde você expande) e se adapta — emboscada na rota que você usa, torres onde você
+      costuma bater (e em casa antes do seu rush), guarda contra saques, produção contra o seu
+      exército, bombardeiros contra fortalezas e experimentais, contra-ataque logo depois de você
+      atacar. Jogando sozinho, o perfil fica guardado no `Game.prefs` do próprio jogo, por mapa, e a
+      IA começa a partida seguinte já preparada (botão "Esquecer o que aprendeu" no painel);
     - **painel "o que a IA está pensando"** dentro do jogo (tecla F4 por padrão ou botão "IA"), só
       jogando sozinho.
   Montado com os arquivos de IA do seu jogo (inclusive as cópias da expansão, que são as que o jogo usa).
@@ -333,6 +340,9 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
   `SimCallbacks.lua` do seu jogo e, com o menu, também do `gamemain.lua` e do `UserSync.lua` (o
   código vai dentro desses arquivos, que o jogo já conhece); outro mod que mexa neles entra em
   conflito (veja Conflitos). Ao começar a partida aparece no alto da tela "trapacas ligadas". Os textos do menu ficam sem acento para não depender da fonte do jogo. As unidades criadas viram invencíveis em até 1 s.
+- **IA que aprende**: a memória entre partidas passa por um comando no `SimCallbacks.lua`, que o
+  menu de trapaças também usa; as duas versões levam os mesmos comandos, mas trapaças montadas
+  antes da 0.23.0 não têm o da memória — atualize as trapaças depois de instalar.
 - **IA mais esperta** (experimental: confirme no jogo): os ataques "neurais" da IA ficam no executável
   e não dá para editar; o comandante assume o exército de terra e a frota (a aviação continua com a
   IA do jogo). Ele consulta as unidades inimigas pelo motor do jogo, o que pode incluir algumas fora

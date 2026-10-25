@@ -54,6 +54,8 @@ pub struct AiOptions {
     pub panel: bool,
     /// tecla do painel (uma de [`crate::cheats::MENU_KEYS`])
     pub panel_key: String,
+    /// lembra o jeito do jogador entre partidas (em `Game.prefs`, jogando sozinho)
+    pub learn: bool,
 }
 
 /// Personalidades aceitas (a primeira é o padrão).
@@ -76,6 +78,7 @@ impl Default for AiOptions {
             adaptive: true,
             panel: true,
             panel_key: "F4".into(),
+            learn: true,
         }
     }
 }
@@ -116,11 +119,13 @@ pub fn commander_lua(o: &AiOptions) -> String {
         .replace("@TEAM@", b(o.team))
         .replace("@ADAPTIVE@", b(o.adaptive))
         .replace("@STATUS@", b(o.panel))
+        .replace("@LEARN@", b(o.learn))
 }
 
 /// O script do painel da IA.
 pub fn panel_lua(o: &AiOptions) -> String {
-    PANEL_LUA.replace("@KEY@", o.panel_key())
+    let b = |v: bool| if v { "true" } else { "false" };
+    PANEL_LUA.replace("@KEY@", o.panel_key()).replace("@PANEL@", b(o.panel)).replace("@LEARN@", b(o.learn))
 }
 const SHADOW: &str = "mods/DLC1/shadow/";
 
@@ -131,6 +136,8 @@ enum Op {
     Append(String),
     /// insere `line` antes do `end` (no começo da linha) que fecha a função que começa em `function`
     InsertBeforeEnd { function: String, line: String },
+    /// acrescenta no fim se o arquivo ainda não tiver `marker`
+    AppendOnce { marker: String, code: String },
 }
 
 struct FileEdit {
@@ -388,7 +395,16 @@ fn edits(o: &AiOptions) -> Vec<FileEdit> {
                 ("código do comandante".into(), Op::Append(code)),
             ],
         );
-        if o.panel {
+        if o.learn {
+            add(
+                "lua/sim/SimCallbacks.lua",
+                vec![(
+                    "comando que devolve a memória à IA".into(),
+                    Op::AppendOnce { marker: "CommandProject callbacks".into(), code: crate::cheats::SHARED_CALLBACKS.into() },
+                )],
+            );
+        }
+        if o.panel || o.learn {
             add(
                 "lua/ui/game/consoleecho.lua",
                 vec![
@@ -454,6 +470,15 @@ fn apply(text: &str, ops: &[(String, Op)], skipped: &mut Vec<String>) -> (String
                     }
                     None => skipped.push(what.clone()),
                 }
+            }
+            Op::AppendOnce { marker, code } => {
+                if !out.contains(marker.as_str()) {
+                    if !out.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    out.push_str(code);
+                }
+                applied += 1;
             }
             Op::Append(code) => {
                 if !out.ends_with('\n') {
@@ -555,11 +580,18 @@ mod tests {
         assert_eq!(n, 1);
         assert!(out.starts_with("function CreateConsoleEcho(parent)\n    if a then\n    end\n\tpcall(CPAIPanelInit)\nend\n"));
         let p = panel_lua(&AiOptions { panel_key: "home".into(), ..Default::default() });
-        assert!(p.contains("local KEY = 'Home'") && !p.contains('@') && !p.contains('#') && p.is_ascii());
+        assert!(p.contains("local KEY = 'Home'") && p.contains("local LEARN = true") && !p.contains('@') && !p.contains('#') && p.is_ascii());
+        let c2 = commander_lua(&AiOptions { learn: false, ..Default::default() });
+        assert!(c2.contains("learn = false,"));
+        // memória ligada: o SimCallbacks.lua leva os comandos compartilhados com as trapaças
+        let with = edits(&AiOptions::default());
+        assert!(with.iter().any(|f| f.path.ends_with("SimCallbacks.lua")));
+        let without = edits(&AiOptions { learn: false, panel: false, ..Default::default() });
+        assert!(without.iter().all(|f| !f.path.ends_with("SimCallbacks.lua") && !f.path.ends_with("consoleecho.lua")));
         let c = commander_lua(&AiOptions { personality: "inventada".into(), ..Default::default() });
         assert!(c.contains("personality = 'mixed',") && !c.contains('@'));
-        // sem painel, o consoleecho.lua não é tocado
-        let none = edits(&AiOptions { panel: false, ..Default::default() });
+        // sem painel e sem memória, o consoleecho.lua não é tocado
+        let none = edits(&AiOptions { panel: false, learn: false, ..Default::default() });
         assert!(none.iter().all(|f| !f.path.ends_with("consoleecho.lua")));
     }
 

@@ -43,6 +43,11 @@ local modules = {
     ['/lua/ui/game/gamemain.lua'] = { AddBeatFunction = function(f) table.insert(UI.beats, f) end },
     ['/lua/ui/game/textdisplay.lua'] = { PrintToScreen = function(d) UI.printed = d.text end },
 }
+UI.prefs = {}
+modules['/lua/user/prefs.lua'] = { GetFromCurrentProfile = function(k) return UI.prefs[k] end, SetToCurrentProfile = function(k, v) UI.prefs[k] = v end }
+function SavePreferences() UI.saved = (UI.saved or 0) + 1 end
+function SessionGetScenarioInfo() return { file = '/maps/Test/Test_scenario.lua' } end
+function SimCallback(t) UI.callback = t end
 function import(path) return modules[path] or {} end
 function GetFrame(i) return control() end
 function GetArmiesTable() return { armiesTable = { { human = true }, { human = false } } } end
@@ -55,7 +60,7 @@ function Sound(t) return t end
 
 DEFAULTS = {
     "LEVEL": "1", "RAIDS": "true", "PERSONALITY": "balanced", "AIR": "true", "MICRO": "true",
-    "BUILD": "true", "COUNTER": "true", "TEAM": "true", "ADAPTIVE": "true", "STATUS": "true",
+    "BUILD": "true", "COUNTER": "true", "TEAM": "true", "ADAPTIVE": "true", "STATUS": "true", "LEARN": "true",
 }
 
 
@@ -82,7 +87,20 @@ function GetGameTimeSeconds() return World.time end
 function VDist2(x1, z1, x2, z2) return math.sqrt((x1 - x2) ^ 2 + (z1 - z2) ^ 2) end
 function GetSurfaceHeight(x, z) return 0 end
 function WaitSeconds(s) coroutine.yield(s) end
-function ForkThread(f, ...) end
+World.threads = {}
+function ForkThread(f, ...)
+    local args = { ... }
+    local unpack = table.unpack or unpack
+    table.insert(World.threads, coroutine.create(function() f(unpack(args)) end))
+end
+function RunThreads()
+    for _, co in ipairs(World.threads) do
+        if coroutine.status(co) ~= 'dead' then
+            local ok, err = coroutine.resume(co)
+            if not ok then World.warn = (World.warn or '') .. 'thread: ' .. tostring(err) .. '\n' end
+        end
+    end
+end
 function Random(a, b) return a end
 function LOG(s) end
 function WARN(s) World.warn = (World.warn or '') .. s .. '\n' end
@@ -236,6 +254,7 @@ class Scenario:
                 ok, err = self.resume(a)
                 if not ok:
                     raise SystemExit(f"Lua error: {err}")
+            self.g.RunThreads()
 
     def last(self, u):
         return self.g.Last(u)
@@ -443,9 +462,15 @@ def drop_team_adaptive_status():
 def panel():
     lua = LuaRuntime(unpack_returned_tuples=True)
     lua.execute(UI_HARNESS)
-    lua.execute(moho_to_lua(PANEL.replace("@KEY@", "F4")))
+    lua.execute(moho_to_lua(PANEL.replace("@KEY@", "F4").replace("@PANEL@", "true").replace("@LEARN@", "true")))
+    # memory from an earlier match on this map
+    lua.execute("""UI.prefs.CPAIMemory = { games = 2, style = { rush = 0.8, air = 0.1 }, firstAttack = 250,
+        maps = { ['/maps/test/test_scenario.lua'] = { games = 2, route = { ['2:2'] = 6 }, hit = { ['1:1'] = 4 }, expand = {} } } }""")
     g = lua.globals()
     g.CPAIPanelInit()
+    cb = g.UI.callback
+    check(cb is not None and cb.Func == "CPAIMemory" and cb.Args.games == 2 and cb.Args.route["2:2"] == 6,
+          "memória de partidas anteriores volta para a IA no começo (com as rotas deste mapa)")
     check(g.UI.bound is not None and g.UI.bound["F4"] is not None, "painel: tecla F4 registrada")
     check(len(g.UI.beats) == 1, "painel: acompanha o jogo a cada batida")
     lua.execute("""Sync = { CPAIStatus = { [3] = { name = 'Mr. Cow', personality = 'Agressiva', plan = 'atacando', adaptive = 'normal',
@@ -461,10 +486,93 @@ def panel():
     check("Mr. Cow  -  Agressiva  -  normal" in joined, "painel mostra nome, personalidade e modo")
     check("Exercito 14 (forca 52, atacando)" in joined and "Cacas 4" in joined, f"painel mostra exército e aviação ({joined[:160]})")
     check(g.UI.printed is None, f"painel sem erro ({g.UI.printed})")
+    # the model of this match arrives and is kept, blended with the earlier matches
+    lua.execute("""Sync = { CPAIModel = { style = { rush = 0.2, air = 0.9 }, firstAttack = 600, route = { ['3:3'] = 10 }, hit = {}, expand = {} } }""")
+    g.UI.beats[1]()
+    mem = g.UI.prefs.CPAIMemory
+    check(mem.games == 3 and 0.3 < mem.style.air < 0.9 and mem.style.rush < 0.8, f"memória misturada com a partida atual (ar {mem.style.air}, rush {mem.style.rush})")
+    m = mem.maps["/maps/test/test_scenario.lua"]
+    check(m.route["3:3"] is not None and m.route["2:2"] is not None, "rotas do mapa guardadas (antigas e novas)")
+    g.CPAIForget()
+    check(g.UI.prefs.CPAIMemory is None, "botão esquecer apaga a memória")
+
+
+def player_model():
+    # an air player who attacks early: the AI notices and answers
+    s = Scenario(micro="false", build="true", counter="true", adaptive="false")
+    new = s.new
+    new(1, "STRUCTURE FACTORY", 50, 50, 0, {"canBuild": {"uua0101": True, "uul0105": True, "uul0101": True, "uua0102": True}})
+    new(1, "STRUCTURE MASSEXTRACTION", 200, 60, 0)
+    new(1, "ENGINEER MOBILE LAND", 60, 60, 0)
+    for i in range(6):
+        new(2, "MOBILE AIR GROUNDATTACK", 400 + i, 400, 3, {"air": 0})
+    s.step(times=4)  # model starts after 15 s
+    raid = [new(2, "MOBILE LAND", 195 + i, 62, 3) for i in range(6)]
+    s.step(times=3)
+    M = s.g.CPAI.model
+    check(bool(M.firstAttack) and M.firstAttack < 300, f"modelo nota o ataque cedo ({M.firstAttack})")
+    check(M.style.rush > 0.5, f"modelo classifica rush ({M.style.rush:.2f})")
+    check(M.style.air > 0.3, f"modelo nota a aviação do jogador ({M.style.air:.2f})")
+    check(len(list(M.hit.keys())) > 0, "modelo guarda onde o jogador ataca")
+    for r in raid:
+        r.dead = True
+    s.W.factoryQueue = s.lua.table()
+    s.step(times=8)
+    ids = [q.id for q in s.W.factoryQueue.values()]
+    check("uua0101" in ids, f"contra a aviação do jogador: caças ({ids})")
+    st = s.g.Sync.CPAIStatus[1]
+    check(st.learned is not None and "rush" in st.learned.style, f"painel mostra o estilo aprendido ({st.learned.style if st.learned else None})")
+    mem = s.g.CPAIModelMemory()
+    check(mem.firstAttack is not None and mem.style.rush > 0.5, "memória para a próxima partida")
+
+    # rush expected (from memory): the army waits close to home and towers go up early
+    s = Scenario(micro="false", air="false", counter="false", adaptive="false", build="true")
+    new = s.new
+    s.g.CPAIReceiveMemory(s.lua.eval("{ games = 3, style = { rush = 0.9 }, firstAttack = 240, route = { ['3:3'] = 8 } }"))
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    new(1, "ENGINEER MOBILE LAND", 60, 60, 0)
+    new(2, "STRUCTURE FACTORY", 450, 450, 0)
+    new(2, "MOBILE LAND", 455, 455, 3)
+    tanks = [new(1, "MOBILE LAND", 60 + i, 60, 3) for i in range(3)]
+    s.step(times=5)
+    o = s.last(tanks[0])
+    check(o is not None and o.pos[1] < 110, f"rush esperado: exército espera perto de casa ({o.pos[1] if o else None})")
+    built = [b.id for b in s.W.built.values()]
+    check("uub0101" in built, f"rush esperado: torre em casa antes do ataque ({built})")
+
+    # ambush on the route the player uses
+    s = Scenario(micro="false", air="false", counter="false", adaptive="false", build="false")
+    new = s.new
+    s.g.CPAIReceiveMemory(s.lua.eval("{ games = 3, style = { air = 0.2 }, route = { ['1:3'] = 20 } }"))
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    new(2, "STRUCTURE FACTORY", 450, 450, 0)
+    new(2, "MOBILE LAND", 455, 455, 3)
+    tanks = [new(1, "MOBILE LAND", 60 + i, 60, 3) for i in range(3)]
+    s.step(times=5)
+    o = s.last(tanks[0])
+    check(o is not None and abs(o.pos[1] - 75) < 10 and abs(o.pos[3] - 175) < 10,
+          f"emboscada na rota que o jogador usa ({[o.pos[1], o.pos[3]] if o else None})")
+
+    # raider: a guard stays where the player strikes
+    s = Scenario(micro="false", air="false", counter="false", adaptive="false", build="false")
+    new = s.new
+    s.g.CPAIReceiveMemory(s.lua.eval("{ games = 3, style = { raider = 0.9 }, hit = { ['4:1'] = 10 } }"))
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    new(1, "STRUCTURE MASSEXTRACTION", 225, 75, 0)
+    new(2, "STRUCTURE FACTORY", 450, 450, 0)
+    new(2, "MOBILE LAND", 455, 455, 3)
+    for i in range(10):
+        new(1, "MOBILE LAND", 60 + i, 60, 3)
+    s.step(times=6)
+    g = s.g.CPAI.commanders[1].squads.guard
+    n = len(list(g.members.values())) if g.members else 0
+    check(n >= 3 and g.post is not None and abs(g.post[1] - 225) < 5, f"guarda fica onde o saqueador ataca ({n} unidades)")
+    check(not s.W.warn, f"sem erros ({s.W.warn})")
 
 
 def main() -> int:
     panel()
+    player_model()
     basics()
     micro_pincer_escort()
     air_acu_counter_bases()

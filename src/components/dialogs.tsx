@@ -154,8 +154,9 @@ export function CheatsModal({ installed, onClose }: { installed: boolean; onClos
 const AI_DEFAULT: AiOptions = {
   level: 1, naval: true, economy: true, commander: true, raids: true, personality: "mixed",
   air: true, micro: true, build: true, counter: true, team: true, adaptive: true, panel: true, panelKey: "F4",
+  learn: true,
 };
-type AiToggle = "naval" | "economy" | "commander" | "raids" | "air" | "micro" | "build" | "counter" | "team" | "adaptive" | "panel";
+type AiToggle = "naval" | "economy" | "commander" | "raids" | "air" | "micro" | "build" | "counter" | "team" | "adaptive" | "panel" | "learn";
 const AI_ROWS: { key: AiToggle; icon: string; label: string; hint: string; needsCommander?: boolean }[] = [
   { key: "commander", icon: "military_tech", label: "Comandante estratégico", hint: "Junta o exército antes de atacar, só ataca com vantagem, escolhe extratores e fábricas, defende as expansões, recua quando perde, manda feridos para casa e embosca no caminho da base." },
   { key: "air", icon: "flight", label: "Aviação estratégica", hint: "Caças pela superioridade aérea e escoltando o exército, bombardeiros em alvos sem antiaéreo, gunships apoiando o ataque.", needsCommander: true },
@@ -164,6 +165,7 @@ const AI_ROWS: { key: AiToggle; icon: string; label: string; hint: string; needs
   { key: "build", icon: "domain", label: "Defesa reativa e mini-bases", hint: "Torres e antiaéreo onde uma expansão é atacada, posto avançado com fábrica perto da frente, escudo sobre a base econômica.", needsCommander: true },
   { key: "raids", icon: "bolt", label: "Ataques-relâmpago e distração", hint: "Unidades rápidas atacam extratores sem defesa e, durante o ataque principal, um ponto longe dele.", needsCommander: true },
   { key: "team", icon: "groups", label: "IAs aliadas em equipe", hint: "Em 2v2 ou mais, atacam o mesmo alvo juntas e ajudam o aliado atacado.", needsCommander: true },
+  { key: "learn", icon: "school", label: "Aprende o seu jeito de jogar", hint: "A IA observa o seu estilo (rush, defensivo, aéreo, naval, saque, economia, experimentais), quando você ataca, por onde passa e o que ataca, e se adapta: emboscada na sua rota, torres onde você costuma bater, guarda contra saques, produção contra o seu exército, contra-ataque depois de você atacar. Jogando sozinho, lembra entre partidas (no Game.prefs do jogo, por mapa).", needsCommander: true },
   { key: "adaptive", icon: "tune", label: "Dificuldade adaptativa", hint: "Se você estiver ganhando fácil, a IA pressiona mais e recebe um reforço pequeno; se estiver perdendo feio, ela segura um pouco.", needsCommander: true },
   { key: "panel", icon: "monitoring", label: "Painel \"o que a IA está pensando\"", hint: "Mostra no jogo o plano de cada IA: personalidade, alvo, exército, aviação e comandante. Só aparece jogando sozinho.", needsCommander: true },
   { key: "naval", icon: "sailing", label: "Navios em mapas com água", hint: "Todo tipo de IA constrói estaleiro quando há mar perto; a IA naval ganha quando a água separa os jogadores; corrige os navios que nunca eram produzidos." },
@@ -239,6 +241,7 @@ export function AiModal({ installed, onClose }: { installed: boolean; onClose: (
             </div>
           </Field>
         )}
+        {o.commander && o.learn && <Notice kind="info">Se você usa as Trapaças, clique em Atualizar trapaças depois desta versão: os dois mods dividem um arquivo do jogo e as trapaças antigas não levam o canal da memória da IA.</Notice>}
         <Notice kind="info">O mod é montado agora com os arquivos de IA do seu jogo (incluindo os da expansão). Mexe no comportamento da IA, então todos numa partida multiplayer precisam ter o mesmo mod. Desligue na lista para voltar à IA original.</Notice>
         {busy && <TaskProgress task="ai" label="Montando a IA…" />}
         <footer>

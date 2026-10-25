@@ -154,7 +154,7 @@ export type AiPersonality = "mixed" | "balanced" | "aggressive" | "defensive" | 
 export interface AiOptions {
   level: number; naval: boolean; economy: boolean; commander: boolean; raids: boolean;
   personality: AiPersonality; air: boolean; micro: boolean; build: boolean; counter: boolean;
-  team: boolean; adaptive: boolean; panel: boolean; panelKey: string;
+  team: boolean; adaptive: boolean; panel: boolean; panelKey: string; learn: boolean;
 }
 export interface AiInstall { manifest: Manifest; applied: number; skipped: string[] }
 export interface UiSkinOptions { name: string; adjust: ColorAdjust; prefixes: string[]; exclude: string[]; quality: "fast" | "normal" | "best" }

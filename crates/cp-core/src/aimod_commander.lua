@@ -18,6 +18,9 @@
 --   team      allied AIs converge on the same target and help an ally under attack
 --   adaptive  more pressure when the human is winning easily, more caution when losing badly
 --   status    with one human in the match, the plan of every AI goes to the in-game panel
+--   player    a model of the human (style, timing, routes, favourite targets and expansions)
+--             shapes ambushes, defences, production, garrisons and counter-attacks, and is
+--             remembered between matches through the interface (Game.prefs)
 do
 local CFG = {
     level = @LEVEL@,
@@ -30,6 +33,7 @@ local CFG = {
     team = @TEAM@,
     adaptive = @ADAPTIVE@,
     status = @STATUS@,
+    learn = @LEARN@,
 }
 local CP_DEBUG = false
 
@@ -46,11 +50,11 @@ local PERSONALITY_ORDER = { 'balanced', 'aggressive', 'defensive', 'raider', 'na
 
 -- unit ids per faction (1 UEF, 2 Cybran, 3 Illuminate) for counters and buildings
 local UNITS = {
-    { aaLand = 'uul0105', fighter = 'uua0101', arty = 'uul0102', tank = 'uul0101', ship = 'uus0102',
+    { aaLand = 'uul0105', fighter = 'uua0101', bomber = 'uua0102', arty = 'uul0102', tank = 'uul0101', ship = 'uus0102',
       factory = 'uub0001', tower = 'uub0101', aatower = 'uub0102', shield = 'uub0202' },
-    { aaLand = false, fighter = 'uca0104', arty = 'ucl0102', tank = 'ucl0103', ship = 'ucs0103',
+    { aaLand = false, fighter = 'uca0104', bomber = 'uca0104', arty = 'ucl0102', tank = 'ucl0103', ship = 'ucs0103',
       factory = 'ucb0001', tower = 'ucb0101', aatower = 'ucb0102', shield = 'ucb0202' },
-    { aaLand = 'uil0105', fighter = 'uia0104', arty = 'uil0104', tank = 'uil0101', ship = false,
+    { aaLand = 'uil0105', fighter = 'uia0104', bomber = 'uia0104', arty = 'uil0104', tank = 'uil0101', ship = false,
       factory = 'uib0001', tower = 'uib0101', aatower = 'uib0102', shield = 'uib0202' },
 }
 
@@ -86,6 +90,7 @@ local function Categories()
         gunship = Cat('GROUNDATTACK'),
         antiair = Cat('ANTIAIR'),
         artillery = Cat('ARTILLERY'),
+        humanMobile = Cat('MOBILE -ENGINEER -COMMAND'),
     }
     return CAT
 end
@@ -287,6 +292,281 @@ local function Humans()
     return n
 end
 
+-- ---------------------------------------------------------------- the player model
+-- One model for the whole match, shared by every AI commander: what the human builds, when and
+-- where they attack, which of our places they hit, where they expand and which style they play.
+-- With a single human, the interface keeps it in Game.prefs and sends it back next match
+-- (CPAIReceiveMemory), so the AI starts every game already prepared for this player.
+local GRID = 50
+local STYLE_KEYS = { 'rush', 'turtle', 'air', 'naval', 'raider', 'eco', 'tech' }
+local STYLE_LABEL = {
+    rush = 'rush (ataca cedo)', turtle = 'defensivo (muitas torres)', air = 'aereo', naval = 'naval',
+    raider = 'saqueador (ataques pequenos em extratores)', eco = 'economico (muitas expansoes)',
+    tech = 'experimentais', balanced = 'equilibrado',
+}
+
+local function CellKey(p)
+    return math.floor(p[1] / GRID) .. ':' .. math.floor(p[3] / GRID)
+end
+
+local function CellCenter(key)
+    local a, b = 0, 0
+    pcall(function()
+        local i = string.find(key, ':', 1, true)
+        a = tonumber(string.sub(key, 1, i - 1)) or 0
+        b = tonumber(string.sub(key, i + 1)) or 0
+    end)
+    return Point(a * GRID + GRID / 2, b * GRID + GRID / 2)
+end
+
+local function Clamp(v)
+    if v < 0 then return 0 end
+    if v > 1 then return 1 end
+    return v
+end
+
+local function Top(map, n)
+    local list = {}
+    for k, w in map do table.insert(list, { k = k, w = w }) end
+    table.sort(list, function(a, b) return a.w > b.w end)
+    local out = {}
+    for i = 1, math.min(n, table.getn(list)) do out[list[i].k] = math.floor(list[i].w * 100 + 0.5) / 100 end
+    return out
+end
+
+local function NewModel()
+    local style = {}
+    for _, k in ipairs(STYLE_KEYS) do style[k] = 0 end
+    return {
+        style = style, prior = false,
+        shares = { land = 0, air = 0, naval = 0, arty = 0, exp = 0, defense = 0 },
+        route = {}, hit = {}, expand = {},
+        firstAttack = false, expectedAttack = false, attacks = 0, raids = 0, lastAttackAt = -999,
+        extractors = 0, experimentals = 0, expPos = false, expPower = 0,
+        dominant = 'balanced', games = 0, humans = 0,
+    }
+end
+
+local function Model()
+    if not CPAI.model then CPAI.model = NewModel() end
+    return CPAI.model
+end
+
+-- what the previous matches taught (sent by the interface at the start of the match)
+function CPAIReceiveMemory(data)
+    if type(data) ~= 'table' then return end
+    local M = Model()
+    local prior = {}
+    for _, k in ipairs(STYLE_KEYS) do
+        local v = type(data.style) == 'table' and data.style[k]
+        prior[k] = type(v) == 'number' and Clamp(v) or 0
+    end
+    M.prior = prior
+    for _, k in ipairs(STYLE_KEYS) do M.style[k] = math.max(M.style[k] or 0, prior[k]) end
+    M.games = type(data.games) == 'number' and data.games or 0
+    if type(data.firstAttack) == 'number' and data.firstAttack > 0 then M.expectedAttack = data.firstAttack end
+    for _, name in { 'route', 'hit', 'expand' } do
+        local src = data[name]
+        if type(src) == 'table' then
+            local count = 0
+            for key, w in src do
+                count = count + 1
+                if count > 24 then break end
+                if type(key) == 'string' and type(w) == 'number' and string.find(key, '^%-?%d+:%-?%d+$') then
+                    M[name][key] = math.max(M[name][key] or 0, math.min(w, 50) * 0.6)
+                end
+            end
+        end
+    end
+end
+
+local function HumanEnemies()
+    local list = {}
+    for _, b in ArmyBrains do
+        local ok, take = pcall(function()
+            if b.BrainType ~= 'Human' or b:IsDefeated() or ArmyIsCivilian(b:GetArmyIndex()) then return false end
+            for army, _ in CPAI.commanders do
+                if IsEnemy(army, b:GetArmyIndex()) then return true end
+            end
+            return false
+        end)
+        if ok and take then table.insert(list, b) end
+    end
+    return list
+end
+
+function CPAIModelUpdate()
+    local M = Model()
+    local c = Categories()
+    local t = Now()
+    local humans = HumanEnemies()
+    M.humans = table.getn(humans)
+    if M.humans == 0 then return end
+
+    -- memories fade: recent behaviour counts more
+    for _, name in { 'route', 'hit', 'expand' } do
+        local map = M[name]
+        for k, w in map do
+            w = w * 0.97
+            if w < 0.05 then map[k] = nil else map[k] = w end
+        end
+    end
+
+    local shares = { land = 0, air = 0, naval = 0, arty = 0, exp = 0, defense = 0 }
+    local extractors, exps, expPos, expPower = 0, 0, false, 0
+    local cells = {}
+    for _, b in humans do
+        for _, u in ipairs(ListOf(b, c.humanMobile)) do
+            if Ready(u) then
+                local p = Power(u) + AirPower(u) * 0.5
+                if Is(c.experimental, u) then
+                    shares.exp = shares.exp + p
+                    exps = exps + 1
+                    if p > expPower then expPos, expPower = u:GetPosition(), p end
+                elseif Is(c.enemyAir, u) then
+                    shares.air = shares.air + p
+                elseif Is(c.naval, u) then
+                    shares.naval = shares.naval + p
+                elseif Is(c.indirect, u) then
+                    shares.arty = shares.arty + p
+                else
+                    shares.land = shares.land + p
+                end
+                if not Is(c.enemyAir, u) then
+                    local key = CellKey(u:GetPosition())
+                    local cell = cells[key]
+                    if not cell then
+                        cell = { pos = u:GetPosition(), power = 0, n = 0 }
+                        cells[key] = cell
+                    end
+                    cell.power = cell.power + p
+                    cell.n = cell.n + 1
+                end
+            end
+        end
+        for _, u in ipairs(ListOf(b, c.structure)) do
+            if Ready(u) then
+                local d = Power(u, true) + AirPower(u)
+                if d > 0 then shares.defense = shares.defense + d end
+                if Is(c.extractor, u) or Is(c.factory, u) then
+                    local key = CellKey(u:GetPosition())
+                    M.expand[key] = math.min(20, (M.expand[key] or 0) + 0.3)
+                    if Is(c.extractor, u) then extractors = extractors + 1 end
+                end
+            end
+        end
+    end
+    local total = 0
+    for _, v in shares do total = total + v end
+    if total > 0 then
+        for k, v in shares do M.shares[k] = M.shares[k] * 0.7 + (v / total) * 0.3 end
+    end
+    M.extractors, M.experimentals, M.expPos, M.expPower = extractors, exps, expPos, expPower
+
+    -- where the human armies walk, and which of our places they come for
+    for key, cell in cells do
+        if cell.power >= 4 then
+            M.route[key] = math.min(50, (M.route[key] or 0) + cell.power * 0.05)
+            local near = false
+            for army, cmd in CPAI.commanders do
+                for _, cl in (cmd.lastClusters or {}) do
+                    if Dist(cl.pos, cell.pos) < 70 then near = cl break end
+                end
+                if near then break end
+            end
+            if near then
+                local hk = CellKey(near.pos)
+                M.hit[hk] = math.min(50, (M.hit[hk] or 0) + cell.power * 0.1)
+                if t - M.lastAttackAt > 45 then
+                    if cell.n < 6 and (near.factories or 0) == 0 then
+                        M.raids = M.raids + 1
+                    else
+                        M.attacks = M.attacks + 1
+                    end
+                    M.firstAttack = M.firstAttack or t
+                end
+                M.lastAttackAt = t
+            end
+        end
+    end
+
+    -- style scores (0..1), blended with what earlier matches taught
+    local aiExtractors, n = 0, 0
+    for _, cmd in CPAI.commanders do
+        aiExtractors = aiExtractors + (cmd.extractors or 0)
+        n = n + 1
+    end
+    if n > 0 then aiExtractors = aiExtractors / n end
+    local first = M.firstAttack
+    local s = {
+        rush = first and ((first < 300 and 1) or (first < 480 and 0.6) or 0.15) or (t < 480 and (M.style.rush or 0) or 0),
+        turtle = Clamp((M.shares.defense - 0.15) * 3) * ((M.attacks + M.raids) < 2 and 1 or 0.5),
+        air = Clamp((M.shares.air - 0.15) * 2.5),
+        naval = Clamp((M.shares.naval - 0.1) * 3),
+        raider = M.raids >= 2 and Clamp(M.raids / (M.raids + M.attacks) * 1.2) or 0,
+        eco = Clamp((extractors - aiExtractors) / 6),
+        tech = exps > 0 and ((t < 1200 and 1) or 0.6) or Clamp(M.shares.exp * 3),
+    }
+    -- little evidence yet: trust what earlier matches taught; later, what this match shows
+    local learned = 0.4
+    if t < 300 and (M.attacks + M.raids) == 0 then learned = 0.7 end
+    if t > 600 then learned = 0.2 end
+    local best, bestV = 'balanced', 0.35
+    for _, k in ipairs(STYLE_KEYS) do
+        local v = s[k]
+        if M.prior then v = v * (1 - learned) + (M.prior[k] or 0) * learned end
+        M.style[k] = v
+        if v > bestV then best, bestV = k, v end
+    end
+    M.dominant = best
+    M.updated = t
+end
+
+-- what goes to the interface: the panel summary and the memory for the next matches
+function CPAIModelSummary()
+    local M = Model()
+    local parts = {}
+    local list = {}
+    for _, k in ipairs(STYLE_KEYS) do table.insert(list, { k = k, v = M.style[k] or 0 }) end
+    table.sort(list, function(a, b) return a.v > b.v end)
+    for i = 1, 3 do
+        if list[i].v >= 0.2 then table.insert(parts, STYLE_LABEL[list[i].k] .. ' ' .. math.floor(list[i].v * 100) .. '%') end
+    end
+    local first = M.firstAttack or M.expectedAttack
+    local firstText = 'ainda nao atacou'
+    if first then firstText = math.floor(first / 60) .. ':' .. string.format('%02d', math.floor(math.mod(first, 60))) end
+    return {
+        style = table.getn(parts) > 0 and table.concat(parts, ', ') or 'ainda aprendendo',
+        dominant = STYLE_LABEL[M.dominant] or M.dominant,
+        firstAttack = firstText,
+        attacks = M.attacks, raids = M.raids, games = M.games,
+    }
+end
+
+function CPAIModelMemory()
+    local M = Model()
+    local style = {}
+    for _, k in ipairs(STYLE_KEYS) do style[k] = math.floor((M.style[k] or 0) * 100 + 0.5) / 100 end
+    return {
+        style = style,
+        firstAttack = M.firstAttack and math.floor(M.firstAttack) or false,
+        route = Top(M.route, 12), hit = Top(M.hit, 12), expand = Top(M.expand, 12),
+    }
+end
+
+-- the hottest cell of a heat map within a band of distances from a point
+local function Hottest(map, from, minD, maxD, minW)
+    local best, bestW = false, minW or 1
+    for key, w in map do
+        if w > bestW then
+            local p = CellCenter(key)
+            local d = Dist(p, from)
+            if d >= minD and d <= maxD then best, bestW = p, w end
+        end
+    end
+    return best, bestW
+end
+
 -- ---------------------------------------------------------------- the commander of one AI
 local Commander = {}
 
@@ -320,6 +600,7 @@ function Commander.New(brain, home)
             bombers = Squad('bombers'),
             gunships = Squad('gunships'),
             scouts = Squad('scouts'),
+            guard = Squad('guard'),
         },
         platoon = false,
         difficulty = brain.DifficultyLevel or 2,
@@ -387,6 +668,17 @@ end
 function Commander.Staging(self)
     local enemy, d = Commander.NearestEnemyStart(self)
     if not enemy or d <= 0 then return self.home end
+    local M = CPAI.model
+    if M and M.humans > 0 then
+        -- a rush is expected: wait close to home until the usual attack time has passed
+        local expected = M.firstAttack or M.expectedAttack
+        if M.style.rush > 0.5 and Now() < (expected or 420) + 90 then
+            return Toward(self.home, enemy, 45)
+        end
+        -- ambush on the route the human armies actually use
+        local spot = Hottest(M.route, self.home, 60, math.min(d * 0.55, 220), 1.5)
+        if spot then return spot end
+    end
     return Toward(self.home, enemy, math.min(150, d * 0.33))
 end
 
@@ -473,6 +765,23 @@ function Commander.Recruit(self)
         end
     end
     local plat = Commander.Platoon(self)
+    -- against a raider: a small guard stays where the human usually strikes
+    local M = CPAI.model
+    if M and M.humans > 0 and (M.style.raider or 0) > 0.5 then
+        local guard = 0
+        for _, u in ipairs(self.squads.guard.units) do if Alive(u) then guard = guard + 1 end end
+        local main = self.squads.main.members or {}
+        if guard < 4 and table.getn(main) > Commander.MinUnits(self) then
+            for i = 1, math.min(4 - guard, table.getn(main)) do
+                local u = main[i]
+                if not Is(Categories().experimental, u) then
+                    u.CPSquad = 'guard'
+                    fresh.guard = fresh.guard or {}
+                    table.insert(fresh.guard, u)
+                end
+            end
+        end
+    end
     for name, units in fresh do
         if plat then
             pcall(function() self.brain:AssignUnitsToPlatoon(plat, units, 'Attack', 'None') end)
@@ -611,6 +920,11 @@ function Commander.PickTarget(self, squad, power, opts)
                 local d = Dist(origin, cell.pos)
                 local score = cell.value * 10 / (1 + risk) / (1 + d / 400)
                 score = score * Commander.AllyTargetBonus(self, cell.pos)
+                local M = CPAI.model
+                if M then
+                    -- the places the human keeps expanding to are worth denying
+                    score = score * (1 + math.min(1, (M.expand[CellKey(cell.pos)] or 0) / 10))
+                end
                 if squad.name == 'raid' then
                     -- raiders only go where little can shoot back
                     if risk > (opts.raidRisk or 1) or cell.extractors == 0 then score = 0 end
@@ -714,6 +1028,26 @@ function Commander.Pincer(self, squad, center, target)
     return true
 end
 
+function Commander.LeadGuard(self, threatPos)
+    local sq = self.squads.guard
+    local members = sq.members
+    if table.getn(members) == 0 then return end
+    local M = CPAI.model
+    local post = (M and Hottest(M.hit, self.home, 40, 100000, 1)) or Commander.Staging(self)
+    if threatPos and Dist(threatPos, post) < 120 then
+        if sq.state ~= 'defend' then
+            sq.state = 'defend'
+            Order(members, 'attack', threatPos)
+        end
+        return
+    end
+    if sq.state ~= 'post' or not sq.post or Dist(sq.post, post) > 30 then
+        sq.state = 'post'
+        sq.post = post
+        Order(members, 'attack', post)
+    end
+end
+
 function Commander.Lead(self, squad, threatPos, threatPower)
     local members = squad.members
     local count = table.getn(members)
@@ -744,6 +1078,8 @@ function Commander.Lead(self, squad, threatPos, threatPower)
             return
         end
     elseif squad.state == 'defend' or squad.state == 'home' then
+        -- the attack was beaten off: strike back while the enemy army is weak
+        if squad.state == 'defend' then squad.counterUntil = t + 40 end
         squad.state = 'hold'
         squad.ordered = false
     end
@@ -778,6 +1114,10 @@ function Commander.Lead(self, squad, threatPos, threatPower)
     if squad.name == 'raid' then minUnits = 2 end
     if squad.name == 'drop' then minUnits = 1 end
     if water then minUnits = math.max(3, math.floor(minUnits * (self.P.fleet or 0.5))) end
+    if squad.counterUntil and t < squad.counterUntil then
+        minUnits = math.max(3, math.floor(minUnits * 0.6))
+        self.plan = 'contra-ataque'
+    end
     if count >= minUnits then
         local opts = { water = water }
         if squad.name == 'raid' and self.squads.main.state == 'attack' and self.squads.main.target then
@@ -818,11 +1158,13 @@ function Commander.Lead(self, squad, threatPos, threatPower)
         if squad.name == 'main' then Commander.TryDrop(self, squad, power) end
     end
 
-    -- 4. nothing worth it yet: wait at the ambush point on the way to our base
-    if squad.state ~= 'hold' or not squad.ordered then
+    -- 4. nothing worth it yet: wait at the ambush point on the way to our base (it moves as
+    -- the AI learns where the human comes from)
+    local rally = Commander.Staging(self)
+    if water and not CanReach(members, rally) then rally = squad.rally or center end
+    if squad.state ~= 'hold' or not squad.ordered or not squad.rally or Dist(squad.rally, rally) > 40 then
         squad.state = 'hold'
-        squad.rally = Commander.Staging(self)
-        if water and not CanReach(members, squad.rally) then squad.rally = center end
+        squad.rally = rally
         squad.ordered = true
         Order(members, 'attack', squad.rally)
     end
@@ -936,7 +1278,10 @@ function Commander.LeadAir(self, threatPos)
     if table.getn(gunships) > 0 then
         local sq = self.squads.gunships
         local goal = false
-        if threatPos then
+        local M = CPAI.model
+        if M and M.expPos and Commander.AntiAir(self, M.expPos, 40) < AirPowerOf(fighters) + 4 then
+            goal = M.expPos
+        elseif threatPos then
             goal = threatPos
         elseif main.state == 'attack' and main.target then
             goal = main.target
@@ -1028,21 +1373,38 @@ function Commander.Counter(self)
     local c = Categories()
     local myAA = AirPowerOf(self.squads.fighters.members) + AirPowerOf(self.squads.main.members)
     local made = false
-    if intel.air > 6 and myAA < intel.air * 0.8 then
+    local M = CPAI.model
+    local st = (M and M.humans > 0) and M.style or {}
+    -- an air player: anti-air before the bombers arrive
+    local airLimit = 6
+    if (st.air or 0) > 0.4 then airLimit = 2 end
+    -- an experimental appeared: bombers and a big army
+    if M and M.expPos and (st.tech or 0) > 0.3 then
+        made = Commander.Queue(self, self.units.bomber, 2)
+        if made then self.plan = 'contra o experimental' end
+    end
+    if not made and intel.air > airLimit and myAA < intel.air * ((st.air or 0) > 0.4 and 1.1 or 0.8) then
         made = Commander.Queue(self, self.units.fighter, 3) or Commander.Queue(self, self.units.aaLand, 3)
         if made then self.plan = 'contra-ataque aereo' end
     end
-    if not made and intel.towers > 40 then
+    if not made and (intel.towers > 40 or (st.turtle or 0) > 0.5) then
         local arty = 0
         for _, u in ipairs(self.squads.main.members) do if Is(c.indirect, u) then arty = arty + 1 end end
-        if arty < 4 then
+        local want = 4
+        if (st.turtle or 0) > 0.5 then want = 8 end
+        if arty < want then
             made = Commander.Queue(self, self.units.arty, 2)
             if made then self.plan = 'artilharia contra defesas' end
         end
     end
-    if not made and intel.naval > 10 and PowerOf(self.squads.fleet.members) < intel.naval then
+    if not made and (intel.naval > 10 or (st.naval or 0) > 0.5) and PowerOf(self.squads.fleet.members) < math.max(intel.naval, 10) then
         made = Commander.Queue(self, self.units.ship, 2)
         if made then self.plan = 'reforco naval' end
+    end
+    if not made and (st.turtle or 0) > 0.5 and Commander.Cooldown(self, 'turtlebombers', 90) then
+        -- a turtle player: bombers over the defences
+        made = Commander.Queue(self, self.units.bomber, 2)
+        if made then self.plan = 'bombardeiros contra a fortaleza' end
     end
     if not made and intel.land > PowerOf(self.squads.main.members) * 1.5 then
         made = Commander.Queue(self, self.units.tank, 3)
@@ -1094,6 +1456,33 @@ end
 function Commander.Bases(self, clusters, threatKey)
     if not CFG.build then return end
     local mass = Stored(self.brain, 'MASS')
+    local M = CPAI.model
+    if M and M.humans > 0 and mass >= 250 and Commander.Cooldown(self, 'foresight', 90) then
+        local st = M.style
+        local id = self.units.tower
+        if (st.air or 0) > 0.5 then id = self.units.aatower end
+        -- a rush is expected: towers at home facing the route the human uses
+        if (st.rush or 0) > 0.5 and Now() < 600 then
+            local enemy = Commander.NearestEnemyStart(self)
+            local spot = Hottest(M.route, self.home, 40, 260, 0.5) or (enemy and Toward(self.home, enemy, 30))
+            if spot and Commander.Build(self, self.units.tower, Toward(self.home, spot, 28)) then
+                self.plan = 'preparando contra o rush'
+                return
+            end
+        end
+        -- the places the human keeps hitting get a tower before the next attack
+        local hot = Hottest(M.hit, self.home, 0, 100000, 2)
+        if hot then
+            local towers = 0
+            for _, u in ipairs(Around(self.brain, Categories().structure, hot, 30, 'Ally')) do
+                if Ready(u) and (Power(u, true) + AirPower(u)) > 0 then towers = towers + 1 end
+            end
+            if towers < 2 and Commander.Build(self, id, hot) then
+                self.plan = 'fortificando onde voce ataca'
+                return
+            end
+        end
+    end
     if threatKey and clusters[threatKey] and mass >= 200 / self.P.towers and Commander.Cooldown(self, 'tower', 40 / self.P.towers) then
         local cl = clusters[threatKey]
         local toward = Toward(cl.pos, self.home, 8)
@@ -1237,11 +1626,21 @@ function Commander.Publish(self)
         minUnits = Commander.MinUnits(self),
         acu = self.acuFleeing and 'recuando' or (self.acuDefending and 'defendendo' or 'na base'),
         intel = { air = math.floor(self.intel.air), land = math.floor(self.intel.land), naval = math.floor(self.intel.naval) },
+        guard = squad('guard'),
+        learned = CPAIModelSummary(),
     }
     pcall(function()
         if not Sync.CPAIStatus then Sync.CPAIStatus = {} end
         Sync.CPAIStatus[self.army] = entry
     end)
+end
+
+-- the model goes to the interface every 30 s, which keeps it in Game.prefs for the next matches
+function Commander.Remember(self)
+    if not CFG.learn or Humans() ~= 1 then return end
+    if CPAI.rememberedAt and Now() - CPAI.rememberedAt < 30 then return end
+    CPAI.rememberedAt = Now()
+    pcall(function() Sync.CPAIModel = CPAIModelMemory() end)
 end
 
 -- ---------------------------------------------------------------- main loop
@@ -1250,6 +1649,10 @@ function Commander.Step(self)
     Commander.Recruit(self)
     Commander.Collect(self)
     local clusters = Commander.Clusters(self)
+    self.lastClusters = clusters
+    local ex = 0
+    for _, cl in clusters do ex = ex + cl.extractors end
+    self.extractors = ex
     local threatPos, threatPower, threatKey = Commander.Threat(self, clusters)
     self.threatPos, self.threatPower = threatPos, threatPower
     local helpPos, helpPower = false, 0
@@ -1272,6 +1675,7 @@ function Commander.Step(self)
     elseif self.plan == 'atacando' or self.plan == 'defendendo' or self.plan == 'preparando' then
         self.plan = 'esperando vantagem'
     end
+    Commander.LeadGuard(self, threatPos)
     if CFG.air then Commander.LeadAir(self, threatPos) end
     Commander.LeadAcu(self, threatPos, threatPower)
     Commander.Scout(self)
@@ -1279,6 +1683,7 @@ function Commander.Step(self)
     Commander.Bases(self, clusters, threatKey)
     Commander.Adapt(self)
     Commander.Publish(self)
+    Commander.Remember(self)
 end
 
 function Commander.Run(self)
@@ -1297,8 +1702,25 @@ function Commander.Run(self)
     CPAI.commanders[self.army] = nil
 end
 
+local function ModelThread()
+    WaitSeconds(15)
+    while true do
+        local ok, err = pcall(CPAIModelUpdate)
+        if not ok then
+            WARN('*CommandProject AI player model: ' .. tostring(err))
+            WaitSeconds(20)
+        end
+        WaitSeconds(8)
+    end
+end
+
 function CPCommanderRun(brain, home)
     if not brain or brain.BrainType == 'Human' then return end
+    if not CPAI.modelThread then
+        CPAI.modelThread = true
+        Model()
+        ForkThread(ModelThread)
+    end
     local self = Commander.New(brain, home or { 0, 0, 0 })
     Commander.Run(self)
 end

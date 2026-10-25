@@ -1259,6 +1259,7 @@ pub async fn build_ai(state: State<'_, AppState>, opts: cp_core::aimod::AiOption
                 (opts.build, "defesa reativa e postos avançados"),
                 (opts.team, "IAs aliadas em equipe"),
                 (opts.adaptive, "dificuldade adaptativa"),
+                (opts.learn, "aprende o seu jeito de jogar"),
             ] {
                 if on {
                     list.push(what);
