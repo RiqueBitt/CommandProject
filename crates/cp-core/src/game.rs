@@ -301,6 +301,17 @@ pub fn is_running() -> bool {
         .any(|p| p.name().to_string_lossy().eq_ignore_ascii_case(EXE_NAME))
 }
 
+/// Fecha à força o jogo (quando trava sem janela e não sai sozinho). Devolve quantos processos fechou.
+pub fn kill_game() -> usize {
+    use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+    let sys = System::new_with_specifics(RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()));
+    sys.processes()
+        .values()
+        .filter(|p| p.name().to_string_lossy().eq_ignore_ascii_case(EXE_NAME))
+        .filter(|p| p.kill())
+        .count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

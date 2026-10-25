@@ -17,6 +17,7 @@ export const GAME_COLORS: { hex: string; name: string }[] = [
   { hex: "#b07040", name: "Marrom" }, { hex: "#ff7f60", name: "Coral" }, { hex: "#b8a0ff", name: "Lavanda" }, { hex: "#505050", name: "Preto" },
 ];
 type ColorMode = "team" | "player";
+let mapCache: MatchMap[] | null = null;
 
 /** Cor de cada vaga: a escolhida à mão; senão a do time (times diferentes, cores diferentes) ou uma por jogador. */
 function slotColors(slots: MatchSlot[], mode: ColorMode): number[] {
@@ -123,7 +124,17 @@ export default function BigMatch() {
   const [splitBy, setSplitBy] = useState<"side" | "order">("side");
   const [colorMode, setColorMode] = useState<ColorMode>(() => { try { return (localStorage.getItem("cp-bigmatch-colors") as ColorMode) || "team"; } catch { return "team"; } });
 
-  useEffect(() => { void load(() => api.bigMatchMaps()).then((m) => setMaps(m ?? [])); }, []);
+  useEffect(() => {
+    // a lista demora (lê os mapas de todos os .scd): a última fica guardada enquanto o launcher está aberto
+    if (mapCache) setMaps(mapCache);
+    void load(() => api.bigMatchMaps()).then((m) => { if (m) { mapCache = m; setMaps(m); } else if (!mapCache) setMaps([]); });
+  }, []);
+  // com o jogo aberto, confere de tempos em tempos se ele fechou (para liberar o botão)
+  useEffect(() => {
+    if (!running) return;
+    const t = window.setInterval(() => void refresh(), 5000);
+    return () => window.clearInterval(t);
+  }, [running, refresh]);
   const map = useMemo(() => maps?.find((m) => m.path === path) ?? null, [maps, path]);
   useEffect(() => {
     if (!maps?.length) return;
@@ -337,6 +348,14 @@ export default function BigMatch() {
               {busy && <TaskProgress task="apply" label="Preparando a partida…" />}
               <div className="row bm-launch">
                 <span className="grow">{sum.error ? <span className="chip warn"><Icon name="error_outline" size={14} /> {sum.error}</span> : <span className="muted">{sum.text} · {map.name}</span>}</span>
+                {running && (
+                  <button className="btn" onClick={async () => {
+                    const n = await run("kill", () => api.killGame(), (k) => (k ? "Jogo fechado." : "O jogo já tinha fechado."));
+                    if (n !== undefined) await refresh();
+                  }} title="Fecha o jogo quando ele some da tela mas continua aberto">
+                    <Icon name="close" /> Fechar o jogo travado
+                  </button>
+                )}
                 <button className="btn primary" disabled={!!sum.error || busy || !!running} onClick={() => void play()}>
                   <Icon name="play_arrow" /> {busy ? "Abrindo…" : running ? "Jogo aberto" : "Jogar partida grande"}
                 </button>

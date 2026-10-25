@@ -1550,7 +1550,7 @@ export default function MapStudio({ id }: { id: string }) {
               <RibbonButton icon="deselect" label="Limpar seleção" onClick={() => setSel(new Set(["map"]))} disabled={!selIds.length} />
             </RibbonGroup>
             <RibbonGroup label="Inserir">
-              {toolBtn("spawn", "flag", `Bases ${edits.spawns.length}/8`, "#5aa9e6")}
+              {toolBtn("spawn", "flag", `Bases ${edits.spawns.length}`, "#5aa9e6")}
               {toolBtn("mass", "diamond", "Massa", "#7bd88f")}
               {toolBtn("f-mountain", FEATURE_ICON.mountain, "Montanha", FEATURE_COLOR.mountain)}
               {toolBtn("f-lake", FEATURE_ICON.lake, "Lago", FEATURE_COLOR.lake)}

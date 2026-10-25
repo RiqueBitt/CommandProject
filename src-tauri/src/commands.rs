@@ -375,6 +375,12 @@ pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<Launch
     launch_inner(app, state, None).await
 }
 
+/// Fecha o jogo travado (o processo fica aberto sem janela).
+#[tauri::command]
+pub async fn kill_game() -> R<usize> {
+    Ok(tauri::async_runtime::spawn_blocking(cp_core::game::kill_game).await.unwrap_or(0))
+}
+
 /// Mapas de escaramuça para a partida grande: os do jogo e os dos mods de mapa ligados no perfil.
 #[tauri::command]
 pub async fn big_match_maps(state: State<'_, AppState>) -> R<Vec<cp_core::bigmatch::MatchMap>> {

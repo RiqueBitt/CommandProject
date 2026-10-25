@@ -253,6 +253,7 @@ export default function Home() {
           <MenuItem icon="restore" onClick={purge} disabled={working || d.gameRunning}>Voltar ao original</MenuItem>
           <hr />
           <MenuItem icon="groups" onClick={() => go("bigmatch")}>Partida grande (mais de 8 jogadores)</MenuItem>
+          {d.gameRunning && <MenuItem icon="close" onClick={async () => { setMenu(false); await run("kill", () => api.killGame(), (k) => (k ? "Jogo fechado." : "O jogo já tinha fechado.")); await refresh(); }}>Fechar o jogo travado</MenuItem>}
           <MenuItem icon="extension" onClick={() => go("library")}>Mods do perfil</MenuItem>
           <MenuItem icon="share" onClick={share}>Copiar código do perfil</MenuItem>
           <MenuItem icon="tune" onClick={() => go("settings")}>Opções de jogo</MenuItem>

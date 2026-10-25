@@ -347,6 +347,7 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       deployed = enabledIds();
       return r({ plan: { kind: "url", url: "steam://rungameid/40100" }, applied: p, watching: settings.restoreOnExit });
     }
+    case "kill_game": return r(0);
     case "big_match_maps": {
       const ring = (n: number, size: number) => Array.from({ length: n }, (_, i) => [Math.round(size / 2 + Math.cos((i / n) * Math.PI * 2) * size * 0.4), Math.round(size / 2 + Math.sin((i / n) * Math.PI * 2) * size * 0.4)] as [number, number]);
       const map = (id: string, name: string, n: number, size: number, source = "Jogo"): T.MatchMap => ({ path: `/maps/${id.toLowerCase()}/${id.toLowerCase()}_scenario.lua`, id, name, armies: Array.from({ length: n }, (_, i) => `ARMY_${i + 1}`), starts: ring(n, size), size: [size, size], source, lobbyRisk: false });
