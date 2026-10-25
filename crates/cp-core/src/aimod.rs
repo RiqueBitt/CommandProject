@@ -616,3 +616,163 @@ mod tests {
         assert_eq!(path2, "lua/AI/ArchetypeEvaluator.lua");
     }
 }
+
+// ===================================================================== o que a IA aprendeu
+/// O que a IA guardou sobre o jogador (no `Game.prefs`, por perfil do jogo).
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMemoryReport {
+    pub path: Option<PathBuf>,
+    pub exists: bool,
+    pub error: Option<String>,
+    pub profiles: Vec<AiMemoryProfile>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMemoryProfile {
+    /// nome do perfil no jogo
+    pub name: String,
+    /// perfil em uso no jogo
+    pub current: bool,
+    /// partidas lembradas
+    pub games: u32,
+    /// estilo (0..1) por chave: rush, turtle, air, naval, raider, eco, tech
+    pub style: Vec<(String, f64)>,
+    /// primeiro ataque típico, em segundos de partida
+    pub first_attack: Option<f64>,
+    pub maps: Vec<AiMapMemory>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMapMemory {
+    /// nome legível do mapa (do caminho do cenário)
+    pub map: String,
+    pub games: u32,
+    /// lugares lembrados: rotas das suas tropas, pontos que você ataca, onde você expande
+    pub routes: usize,
+    pub hits: usize,
+    pub expansions: usize,
+}
+
+fn to_json(v: &crate::blueprint::Value) -> serde_json::Value {
+    use crate::blueprint::{Key, Value};
+    match v {
+        Value::Number(n) => serde_json::json!(n),
+        Value::Str(s) => serde_json::json!(s),
+        Value::Bool(b) => serde_json::json!(b),
+        Value::Table { entries, .. } => {
+            let mut map = serde_json::Map::new();
+            let mut pos = 0;
+            for e in entries {
+                let key = match &e.key {
+                    Some(Key::Name(n)) => n.clone(),
+                    Some(Key::Index(i)) => i.to_string(),
+                    None => {
+                        pos += 1;
+                        pos.to_string()
+                    }
+                };
+                map.insert(key, to_json(&e.value));
+            }
+            serde_json::Value::Object(map)
+        }
+        _ => serde_json::Value::Null,
+    }
+}
+
+fn map_label(path: &str) -> String {
+    let file = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    let stem = file.trim_end_matches(".lua").trim_end_matches("_scenario");
+    let label = stem.replace('_', " ");
+    if label.is_empty() { "mapa".into() } else { label }
+}
+
+/// Lê a memória da IA do texto do `Game.prefs`.
+pub fn memory_from_prefs(text: &str) -> Result<Vec<AiMemoryProfile>> {
+    let bp = crate::blueprint::parse(&crate::perf::wrap(text))?;
+    let root = to_json(&bp.root);
+    let profile = &root["profile"];
+    let current = profile["current"].as_f64().map(|c| c as i64);
+    let mut out = Vec::new();
+    if let Some(list) = profile["profiles"].as_object() {
+        for (key, p) in list {
+            let mem = &p["CPAIMemory"];
+            if !mem.is_object() {
+                continue;
+            }
+            let mut style: Vec<(String, f64)> = mem["style"]
+                .as_object()
+                .map(|m| m.iter().filter_map(|(k, v)| v.as_f64().map(|n| (k.clone(), n.clamp(0.0, 1.0)))).collect())
+                .unwrap_or_default();
+            style.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let count = |v: &serde_json::Value| v.as_object().map(|m| m.len()).unwrap_or(0);
+            let mut maps: Vec<AiMapMemory> = mem["maps"]
+                .as_object()
+                .map(|m| {
+                    m.iter()
+                        .map(|(path, data)| AiMapMemory {
+                            map: map_label(path),
+                            games: data["games"].as_f64().unwrap_or(0.0) as u32,
+                            routes: count(&data["route"]),
+                            hits: count(&data["hit"]),
+                            expansions: count(&data["expand"]),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            maps.sort_by_key(|m| std::cmp::Reverse(m.games));
+            out.push(AiMemoryProfile {
+                name: p["Name"].as_str().unwrap_or("perfil").to_string(),
+                current: current.map(|c| c.to_string() == *key).unwrap_or(false),
+                games: mem["games"].as_f64().unwrap_or(0.0) as u32,
+                style,
+                first_attack: mem["firstAttack"].as_f64().filter(|v| *v > 0.0),
+                maps,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Lê a memória da IA do `Game.prefs` do usuário.
+pub fn read_memory(path: Option<&Path>) -> AiMemoryReport {
+    let Some(path) = path else {
+        return AiMemoryReport { error: Some("não achei a pasta de opções do jogo".into()), ..Default::default() };
+    };
+    let mut report = AiMemoryReport { path: Some(path.to_path_buf()), exists: path.exists(), ..Default::default() };
+    if !report.exists {
+        return report;
+    }
+    match std::fs::read(path) {
+        Ok(bytes) => match memory_from_prefs(&String::from_utf8_lossy(&bytes)) {
+            Ok(p) => report.profiles = p,
+            Err(e) => report.error = Some(format!("não deu para ler o Game.prefs: {e}")),
+        },
+        Err(e) => report.error = Some(format!("não deu para abrir o Game.prefs: {e}")),
+    }
+    report
+}
+
+#[cfg(test)]
+mod memory_tests {
+    use super::*;
+
+    #[test]
+    fn reads_memory_from_prefs() {
+        let text = "profile = {\n    current = 2,\n    profiles = {\n        { Name = 'Outro' },\n        {\n            Name = 'RiqueBitt',\n            CPAIMemory = {\n                games = 3,\n                firstAttack = 250,\n                style = { rush = 0.8, air = 0.35, turtle = 0 },\n                maps = {\n                    ['/maps/sc2_mp_203/sc2_mp_203_scenario.lua'] = {\n                        games = 2,\n                        route = { ['3:4'] = 6.5, ['4:4'] = 2 },\n                        hit = { ['1:1'] = 4 },\n                        expand = {},\n                    },\n                },\n            },\n        },\n    },\n}\noptions = { fidelity = 2 }\n";
+        let p = memory_from_prefs(text).unwrap();
+        assert_eq!(p.len(), 1);
+        let m = &p[0];
+        assert_eq!(m.name, "RiqueBitt");
+        assert!(m.current);
+        assert_eq!(m.games, 3);
+        assert_eq!(m.first_attack, Some(250.0));
+        assert_eq!(m.style[0], ("rush".to_string(), 0.8));
+        assert_eq!(m.maps[0].map, "sc2 mp 203");
+        assert_eq!((m.maps[0].games, m.maps[0].routes, m.maps[0].hits), (2, 2, 1));
+        // sem memória: lista vazia, sem erro
+        assert!(memory_from_prefs("profile = { current = 1, profiles = { { Name = 'x' } } }").unwrap().is_empty());
+    }
+}

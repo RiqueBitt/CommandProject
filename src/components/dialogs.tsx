@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
-import type { AiOptions, AiPersonality, CheatOptions, ConflictReport } from "../lib/types";
+import type { AiMemoryReport, AiOptions, AiPersonality, CheatOptions, ConflictReport } from "../lib/types";
 import { Field, Icon, Modal, Notice, Switch, TaskProgress } from "./ui";
 
 export function ConflictsModal({ report, onClose }: { report: ConflictReport; onClose: () => void }) {
@@ -242,6 +242,7 @@ export function AiModal({ installed, onClose }: { installed: boolean; onClose: (
           </Field>
         )}
         {o.commander && o.learn && <Notice kind="info">Se você usa as Trapaças, clique em Atualizar trapaças depois desta versão: os dois mods dividem um arquivo do jogo e as trapaças antigas não levam o canal da memória da IA.</Notice>}
+        {o.commander && o.learn && <AiMemoryCard />}
         <Notice kind="info">O mod é montado agora com os arquivos de IA do seu jogo (incluindo os da expansão). Mexe no comportamento da IA, então todos numa partida multiplayer precisam ter o mesmo mod. Desligue na lista para voltar à IA original.</Notice>
         {busy && <TaskProgress task="ai" label="Montando a IA…" />}
         <footer>
@@ -250,5 +251,48 @@ export function AiModal({ installed, onClose }: { installed: boolean; onClose: (
         </footer>
       </form>
     </Modal>
+  );
+}
+
+// ------------------------------------------------------------------ o que a IA aprendeu
+
+const STYLE_LABEL: Record<string, string> = {
+  rush: "Rush (ataca cedo)", turtle: "Defensivo (muitas torres)", air: "Aéreo", naval: "Naval",
+  raider: "Saqueador", eco: "Econômico (muitas expansões)", tech: "Experimentais",
+};
+
+const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+/** O que a IA guardou sobre o jogador no Game.prefs (só leitura; para esquecer, botão no painel F4 do jogo). */
+export function AiMemoryCard() {
+  const [report, setReport] = useState<AiMemoryReport | null>(null);
+  useEffect(() => { api.aiMemory().then(setReport).catch(() => setReport(null)); }, []);
+  if (!report) return null;
+  const profile = report.profiles.find((p) => p.current) ?? report.profiles[0];
+  return (
+    <div className="col" style={{ gap: 8 }}>
+      <div className="row" style={{ gap: 8 }}><Icon name="school" size={18} /><strong>O que a IA aprendeu sobre você</strong></div>
+      {report.error && <div className="small faint">{report.error}</div>}
+      {!report.error && !profile && <div className="small faint">Ainda nada: jogue uma escaramuça sozinho contra a IA com "Aprende o seu jeito de jogar" ligado.</div>}
+      {profile && (
+        <>
+          <div className="small faint">Perfil {profile.name} · {profile.games} {profile.games === 1 ? "partida lembrada" : "partidas lembradas"}{profile.firstAttack ? ` · primeiro ataque perto de ${mmss(profile.firstAttack)}` : ""}</div>
+          <div className="col" style={{ gap: 4 }}>
+            {profile.style.filter(([, v]) => v >= 0.05).slice(0, 5).map(([k, v]) => (
+              <div key={k} className="row" style={{ gap: 8 }}>
+                <span className="small" style={{ width: 190 }}>{STYLE_LABEL[k] ?? k}</span>
+                <div className="grow" style={{ height: 6, borderRadius: 3, background: "var(--surface-bright)" }}>
+                  <div style={{ width: `${Math.round(v * 100)}%`, height: "100%", borderRadius: 3, background: "var(--primary)" }} />
+                </div>
+                <span className="small faint" style={{ width: 36, textAlign: "right" }}>{Math.round(v * 100)}%</span>
+              </div>
+            ))}
+          </div>
+          {profile.maps.length > 0 && (
+            <div className="small faint">Mapas: {profile.maps.slice(0, 4).map((m) => `${m.map} (${m.games}× · ${m.routes} rotas, ${m.hits} pontos que você ataca)`).join(" · ")}</div>
+          )}
+        </>
+      )}
+    </div>
   );
 }

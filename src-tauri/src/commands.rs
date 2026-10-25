@@ -1304,6 +1304,14 @@ pub struct AiInstall {
     skipped: Vec<String>,
 }
 
+/// O que a IA aprendeu sobre o jogador (lido do `Game.prefs`).
+#[tauri::command]
+pub async fn ai_memory() -> R<cp_core::aimod::AiMemoryReport> {
+    tauri::async_runtime::spawn_blocking(|| cp_core::aimod::read_memory(cp_core::perf::prefs_path().as_deref()))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 // ===================================================================== estúdio: mapas
 
 #[derive(Serialize)]

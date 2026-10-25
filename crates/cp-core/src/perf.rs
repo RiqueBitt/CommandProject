@@ -34,7 +34,7 @@ const WRAP_TAIL: &str = "\n}";
 
 /// O arquivo é uma sequência de `nome = valor` em Lua: vira uma tabela para usar o mesmo leitor
 /// dos blueprints (que mantém comentários e formatação ao alterar).
-fn wrap(text: &str) -> String {
+pub(crate) fn wrap(text: &str) -> String {
     format!("{WRAP_HEAD}{}{WRAP_TAIL}", text.trim_start_matches('\u{feff}'))
 }
 

@@ -85,7 +85,14 @@ Sync = {}
 
 function GetGameTimeSeconds() return World.time end
 function VDist2(x1, z1, x2, z2) return math.sqrt((x1 - x2) ^ 2 + (z1 - z2) ^ 2) end
-function GetSurfaceHeight(x, z) return 0 end
+World.hills = {}
+function GetTerrainHeight(x, z)
+    for _, h in ipairs(World.hills) do
+        if VDist2(x, z, h[1], h[2]) < h[3] then return h[4] end
+    end
+    return 0
+end
+function GetSurfaceHeight(x, z) return GetTerrainHeight(x, z) end
 function WaitSeconds(s) coroutine.yield(s) end
 World.threads = {}
 function ForkThread(f, ...)
@@ -182,6 +189,8 @@ local function brainOf(index, kind, start)
     function b:PlatoonExists(p) return p ~= nil end
     function b:AssignUnitsToPlatoon(p, units) end
     function b:CanBuildStructureAt(id, pos) return true end
+    b.SkirmishAISystem = { needs = {} }
+    function b.SkirmishAISystem:ResearchNeed(n) table.insert(self.needs, n) end
     function b:BuildStructure(eng, id, loc, _) table.insert(World.built, { id = id, x = loc[1], z = loc[2] }) end
     return b
 end
@@ -203,6 +212,7 @@ function IssueGuard(units, target) record('guard', units, nil, target) end
 function IssueBuildFactory(f, id, n) table.insert(World.factoryQueue, { id = id, n = n }) end
 function IssueTransportLoad(units, transport) World.loads = World.loads + 1 end
 function IssueTransportUnload(transports, pos) World.unload = pos end
+function IssueRepair(units, target) World.repaired = target end
 
 function Last(u)
     local l = World.orders[u.id]
@@ -570,8 +580,43 @@ def player_model():
     check(not s.W.warn, f"sem erros ({s.W.warn})")
 
 
+def terrain_losses_research():
+    # a hill next to the ambush point: the army waits on top of it
+    s = Scenario(micro="false", air="false", counter="false", adaptive="false", build="false")
+    new = s.new
+    s.lua.execute("table.insert(World.hills, { 156, 181, 9, 15 })")
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    new(2, "STRUCTURE FACTORY", 450, 450, 0)
+    tanks = [new(1, "MOBILE LAND", 60 + i, 60, 3) for i in range(3)]
+    s.step(times=3)
+    o = s.last(tanks[0])
+    check(o is not None and abs(o.pos[1] - 156) < 6 and abs(o.pos[3] - 181) < 6, f"emboscada no alto do morro ({[o.pos[1], o.pos[3]] if o else None})")
+
+    # losses mark a dangerous place
+    for t in tanks[:2]:
+        t.dead = True
+    s.step()
+    kills = s.g.CPAI.commanders[1].kills
+    check(len(list(kills.keys())) > 0, "lembra onde perdeu tropas (zona de perigo)")
+
+    # an air player: anti-air research; a damaged building gets repaired
+    s = Scenario(micro="false", counter="false", adaptive="false", build="false")
+    new = s.new
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    hurt = new(1, "STRUCTURE MASSEXTRACTION", 70, 70, 0, {"hp": 100})
+    new(1, "ENGINEER MOBILE LAND", 60, 60, 0)
+    for i in range(10):
+        new(2, "MOBILE AIR GROUNDATTACK", 400 + i, 400, 3, {"air": 0})
+    s.step(times=16)
+    needs = list(s.g.ArmyBrains[1].SkirmishAISystem.needs.values())
+    check("NeedAAUpgrade" in needs, f"pesquisa antiaéreo contra jogador aéreo ({needs})")
+    check(s.W.repaired is not None and s.W.repaired.id == hurt.id, "engenheiro conserta o prédio danificado")
+    check(not s.W.warn, f"sem erros ({s.W.warn})")
+
+
 def main() -> int:
     panel()
+    terrain_losses_research()
     player_model()
     basics()
     micro_pincer_escort()

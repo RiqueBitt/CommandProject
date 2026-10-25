@@ -567,6 +567,107 @@ local function Hottest(map, from, minD, maxD, minW)
     return best, bestW
 end
 
+-- ---------------------------------------------------------------- terrain and map markers
+-- Ambushes go to narrow passages and high ground near the planned spot (and to the map's own
+-- "Defensive Point" markers); artillery looks for high ground behind the front.
+local function Height(x, z)
+    local h = 0
+    pcall(function() h = GetTerrainHeight(x, z) end)
+    return h
+end
+
+local function IsWater(x, z)
+    local wet = false
+    pcall(function() wet = GetSurfaceHeight(x, z) > GetTerrainHeight(x, z) + 0.5 end)
+    return wet
+end
+
+-- passable width across the direction (dx, dz): walks sideways until a cliff or water (max 120)
+local function Corridor(p, dx, dz)
+    local px, pz = -dz, dx
+    local width = 0
+    for side = -1, 1, 2 do
+        local lastH = Height(p[1], p[3])
+        for step = 1, 12 do
+            local x = p[1] + px * side * step * 5
+            local z = p[3] + pz * side * step * 5
+            local h = Height(x, z)
+            if IsWater(x, z) or math.abs(h - lastH) > 3 then break end
+            width = width + 5
+            lastH = h
+        end
+    end
+    return width
+end
+
+-- how much a point stands above the ground around it (radius 20)
+local function HighGround(p)
+    local h = Height(p[1], p[3])
+    local sum = 0
+    for i = 0, 7 do
+        local a = i * 0.785
+        sum = sum + Height(p[1] + math.cos(a) * 20, p[3] + math.sin(a) * 20)
+    end
+    return h - sum / 8
+end
+
+local MARKERS = false
+local function Markers()
+    if MARKERS then return MARKERS end
+    MARKERS = { defensive = {}, expansion = {} }
+    pcall(function()
+        local SU = import('/lua/sim/ScenarioUtilities.lua')
+        for _, m in (SU.GetMarkersByType('Defensive Point') or {}) do
+            if m.position then table.insert(MARKERS.defensive, m.position) end
+        end
+        for _, m in (SU.GetMarkersByType('Expansion Area') or {}) do
+            if m.position then table.insert(MARKERS.expansion, m.position) end
+        end
+    end)
+    return MARKERS
+end
+
+-- the best place to wait near `spot`, facing `enemy`: narrow, high, away from where we died
+local function AmbushSpot(spot, enemy, kills)
+    local d = Dist(spot, enemy)
+    if d <= 0 then return spot end
+    local dx, dz = (enemy[1] - spot[1]) / d, (enemy[3] - spot[3]) / d
+    local candidates = { spot }
+    for ring = 1, 2 do
+        for i = 0, 7 do
+            local a = i * 0.785
+            table.insert(candidates, Point(spot[1] + math.cos(a) * 25 * ring, spot[3] + math.sin(a) * 25 * ring))
+        end
+    end
+    for _, m in Markers().defensive do
+        if Dist(m, spot) < 100 then table.insert(candidates, Point(m[1], m[3])) end
+    end
+    local best, bestScore = spot, -1000
+    for _, c in candidates do
+        if not IsWater(c[1], c[3]) then
+            local choke = (120 - Corridor(c, dx, dz)) / 120
+            local high = HighGround(c) / 10
+            if high > 1 then high = 1 end
+            if high < -1 then high = -1 end
+            local score = choke * 1.2 + high * 0.8 - Dist(c, spot) / 100 - (kills[CellKey(c)] or 0) * 0.3
+            if score > bestScore then best, bestScore = c, score end
+        end
+    end
+    return best
+end
+
+-- the highest point near `behind` (for artillery)
+local function HighSpot(behind)
+    local best, bestH = behind, HighGround(behind)
+    for i = 0, 5 do
+        local a = i * 1.047
+        local c = Point(behind[1] + math.cos(a) * 12, behind[3] + math.sin(a) * 12)
+        local h = HighGround(c)
+        if h > bestH and not IsWater(c[1], c[3]) then best, bestH = c, h end
+    end
+    return best
+end
+
 -- ---------------------------------------------------------------- the commander of one AI
 local Commander = {}
 
@@ -610,6 +711,9 @@ function Commander.New(brain, home)
         plan = 'preparando',
         intel = { air = 0, land = 0, naval = 0, towers = 0, seen = 0 },
         memo = {},
+        kills = {},   -- where our units died (cells, fading)
+        track = {},   -- unit -> last position, to notice losses
+        needs = {},   -- research already asked for
     }
     if key == 'naval' and faction == 3 then
         -- Illuminate has no navy
@@ -675,11 +779,29 @@ function Commander.Staging(self)
         if M.style.rush > 0.5 and Now() < (expected or 420) + 90 then
             return Toward(self.home, enemy, 45)
         end
-        -- ambush on the route the human armies actually use
-        local spot = Hottest(M.route, self.home, 60, math.min(d * 0.55, 220), 1.5)
-        if spot then return spot end
     end
-    return Toward(self.home, enemy, math.min(150, d * 0.33))
+    -- where to wait: on the route the human armies actually use, else a third of the way (an
+    -- expansion area of the map nearby is held instead: map control)
+    local raw = M and M.humans > 0 and Hottest(M.route, self.home, 60, math.min(d * 0.55, 220), 1.5)
+    if not raw then
+        raw = Toward(self.home, enemy, math.min(150, d * 0.33))
+        for _, m in Markers().expansion do
+            if Dist(m, raw) < 60 and Dist(m, self.home) < Dist(m, enemy) then
+                raw = Point(m[1], m[3])
+                break
+            end
+        end
+    end
+    -- then the narrowest, highest place around it (recomputed every minute or when it moves)
+    local key = CellKey(raw)
+    local t = Now()
+    if self.ambushKey ~= key or not self.ambush or t - (self.ambushAt or 0) > 60 then
+        self.ambushKey = key
+        self.ambushAt = t
+        local ok, spot = pcall(AmbushSpot, raw, enemy, self.kills)
+        self.ambush = ok and spot or raw
+    end
+    return self.ambush
 end
 
 function Commander.MinUnits(self)
@@ -787,7 +909,19 @@ function Commander.Recruit(self)
             pcall(function() self.brain:AssignUnitsToPlatoon(plat, units, 'Attack', 'None') end)
         end
         local sq = self.squads[name]
-        Order(units, 'move', sq.rally or Commander.Staging(self))
+        local front = sq.state == 'attack' and sq.target and sq.center
+        if front then
+            local from = Centroid(units) or self.home
+            local mid = Point((from[1] + front[1]) / 2, (from[3] + front[3]) / 2)
+            if Commander.Danger(self, mid, 50) < PowerOf(units) and CanReach(units, front) then
+                -- the way to the front is safe: join the fight directly
+                Order(units, 'attack', sq.target)
+            else
+                Order(units, 'move', sq.rally or Commander.Staging(self))
+            end
+        else
+            Order(units, 'move', sq.rally or Commander.Staging(self))
+        end
     end
 end
 
@@ -824,6 +958,22 @@ function Commander.Collect(self)
         end
     end
     for _, sq in self.squads do sq.members = Commander.Members(self, sq) end
+    -- losses: units we were tracking that died mark a dangerous place (fades over time)
+    for k, w in self.kills do
+        w = w * 0.98
+        if w < 0.05 then self.kills[k] = nil else self.kills[k] = w end
+    end
+    local track = {}
+    for _, sq in self.squads do
+        for _, u in ipairs(sq.units) do track[u] = u:GetPosition() end
+    end
+    for u, pos in self.track do
+        if not track[u] and not Alive(u) then
+            local key = CellKey(pos)
+            self.kills[key] = math.min(20, (self.kills[key] or 0) + 1)
+        end
+    end
+    self.track = track
 end
 
 -- ---------------------------------------------------------------- targets and threats
@@ -869,15 +1019,28 @@ function Commander.Clusters(self)
             local key = math.floor(p[1] / 60) .. ':' .. math.floor(p[3] / 60)
             local cl = centers[key]
             if not cl then
-                cl = { key = key, pos = p, extractors = 0, factories = 0, count = 0 }
+                cl = { key = key, pos = p, extractors = 0, factories = 0, count = 0, defense = 0 }
                 centers[key] = cl
             end
             cl.count = cl.count + 1
             if Is(Categories().extractor, u) then cl.extractors = cl.extractors + 1 end
             if Is(Categories().factory, u) then cl.factories = cl.factories + 1 end
+            cl.defense = cl.defense + Power(u, true) + AirPower(u)
         end
     end
     return centers
+end
+
+-- the nearest place with our towers (or home) to fall back to
+function Commander.SafeSpot(self, from)
+    local best, bestD = self.home, Dist(from, self.home)
+    for _, cl in (self.lastClusters or {}) do
+        if cl.defense >= 6 then
+            local d = Dist(from, cl.pos)
+            if d < bestD then best, bestD = cl.pos, d end
+        end
+    end
+    return best
 end
 
 function Commander.Threat(self, clusters)
@@ -915,7 +1078,7 @@ function Commander.PickTarget(self, squad, power, opts)
     local ratio = opts.ratio or self.ratio
     for _, cell in Commander.Targets(self) do
         if not (opts.avoid and Dist(cell.pos, opts.avoid) < 120) then
-            local risk = Commander.Danger(self, cell.pos, 45)
+            local risk = Commander.Danger(self, cell.pos, 45) + (self.kills[CellKey(cell.pos)] or 0) * 1.5
             if power >= risk * ratio and power > 0 then
                 local d = Dist(origin, cell.pos)
                 local score = cell.value * 10 / (1 + risk) / (1 + d / 400)
@@ -983,8 +1146,9 @@ function Commander.Micro(self, squad, center)
     if table.getn(arty) > 0 then
         local behind = Toward(center, self.home, 22)
         if not squad.artyAt or Dist(squad.artyAt, behind) > 12 then
+            local ok, spot = pcall(HighSpot, behind)
             squad.artyAt = behind
-            Order(arty, 'attack', behind)
+            Order(arty, 'attack', ok and spot or behind)
         end
     end
 end
@@ -1058,6 +1222,7 @@ function Commander.Lead(self, squad, threatPos, threatPower)
     end
     local power = PowerOf(members)
     local center = Centroid(members)
+    squad.center = center
     local t = Now()
     local water = squad.name == 'fleet'
 
@@ -1095,7 +1260,7 @@ function Commander.Lead(self, squad, threatPos, threatPower)
             squad.state = 'retreat'
             squad.until_ = t + 25
             squad.target = false
-            Order(members, 'move', squad.rally or self.home)
+            Order(members, 'move', Commander.SafeSpot(self, center))
             Log(self.brain, squad.name .. ' retreats')
             return
         end
@@ -1523,6 +1688,57 @@ function Commander.Bases(self, clusters, threatKey)
     end
 end
 
+-- ---------------------------------------------------------------- research and repairs
+-- research follows the player: anti-air upgrades against an air player, shields against
+-- artillery and bombers, long range artillery against a turtle, anti-nukes against nukes
+function Commander.Research(self)
+    if not Commander.Cooldown(self, 'research', 45) then return end
+    local M = CPAI.model
+    local sys = self.brain.SkirmishAISystem
+    if not sys or not M or M.humans == 0 then return end
+    local st = M.style
+    local function need(name, why)
+        if self.needs[name] then return end
+        local ok = pcall(function() sys:ResearchNeed(name) end)
+        if ok then
+            self.needs[name] = true
+            self.plan = why
+        end
+    end
+    if (st.air or 0) > 0.4 then need('NeedAAUpgrade', 'pesquisando antiaereo') end
+    if (M.shares.arty or 0) > 0.2 or (st.air or 0) > 0.5 then need('NeedShields', 'pesquisando escudos') end
+    if (st.turtle or 0) > 0.5 then need('NeedArtillery', 'pesquisando artilharia de longo alcance') end
+    local nukes = false
+    for _, b in HumanEnemies() do
+        for _, u in ipairs(ListOf(b, Cat('NUKE STRUCTURE'))) do
+            if Alive(u) then nukes = true break end
+        end
+        if nukes then break end
+    end
+    if nukes then need('NeedAntiNukes', 'pesquisando defesa antimissil') end
+    if Stored(self.brain, 'MASS') < 20 and (self.extractors or 0) >= 8 and Now() > 900 then
+        need('NeedMassConv', 'pesquisando conversor de massa')
+    end
+end
+
+-- after a fight, a free engineer repairs the most damaged building nearby
+function Commander.Repair(self, threatPos)
+    if threatPos or not Commander.Cooldown(self, 'repair', 30) then return end
+    local worst, worstF = false, 0.7
+    for _, u in ipairs(Commander.List(self, Categories().structure)) do
+        if Ready(u) and Dist(u:GetPosition(), self.home) < 200 then
+            local f = HealthFraction(u)
+            if f < worstF then worst, worstF = u, f end
+        end
+    end
+    if not worst then return end
+    local eng = Commander.Engineer(self, worst:GetPosition())
+    if eng then
+        pcall(IssueClearCommands, { eng })
+        pcall(IssueRepair, { eng }, worst)
+    end
+end
+
 -- ---------------------------------------------------------------- the ACU
 function Commander.LeadAcu(self, threatPos, threatPower)
     local acu = Commander.List(self, Categories().acu)[1]
@@ -1628,6 +1844,7 @@ function Commander.Publish(self)
         intel = { air = math.floor(self.intel.air), land = math.floor(self.intel.land), naval = math.floor(self.intel.naval) },
         guard = squad('guard'),
         learned = CPAIModelSummary(),
+        dangers = (function() local n = 0 for _, w in self.kills do if w >= 2 then n = n + 1 end end return n end)(),
     }
     pcall(function()
         if not Sync.CPAIStatus then Sync.CPAIStatus = {} end
@@ -1681,6 +1898,8 @@ function Commander.Step(self)
     Commander.Scout(self)
     Commander.Counter(self)
     Commander.Bases(self, clusters, threatKey)
+    Commander.Research(self)
+    Commander.Repair(self, threatPos)
     Commander.Adapt(self)
     Commander.Publish(self)
     Commander.Remember(self)

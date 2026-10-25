@@ -163,6 +163,7 @@ pub fn run() {
             commands::build_ui_skin,
             commands::build_cheats,
             commands::build_ai,
+            commands::ai_memory,
             commands::enhance_groups,
             commands::enhance_preview,
             commands::build_enhance,

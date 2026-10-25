@@ -156,6 +156,9 @@ export interface AiOptions {
   personality: AiPersonality; air: boolean; micro: boolean; build: boolean; counter: boolean;
   team: boolean; adaptive: boolean; panel: boolean; panelKey: string; learn: boolean;
 }
+export interface AiMapMemory { map: string; games: number; routes: number; hits: number; expansions: number }
+export interface AiMemoryProfile { name: string; current: boolean; games: number; style: [string, number][]; firstAttack: number | null; maps: AiMapMemory[] }
+export interface AiMemoryReport { path: string | null; exists: boolean; error: string | null; profiles: AiMemoryProfile[] }
 export interface AiInstall { manifest: Manifest; applied: number; skipped: string[] }
 export interface UiSkinOptions { name: string; adjust: ColorAdjust; prefixes: string[]; exclude: string[]; quality: "fast" | "normal" | "best" }
 

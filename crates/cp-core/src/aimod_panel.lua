@@ -76,7 +76,8 @@ local function Rows()
             if p then table.insert(air, p) end
         end
         if table.getn(air) > 0 then table.insert(rows, { '  ' .. table.concat(air, '   '), C_TEXT }) end
-        table.insert(rows, { '  Comandante: ' .. ai.acu .. '   Ve no inimigo: aviacao ' .. ai.intel.air .. ', terra ' .. ai.intel.land .. ', mar ' .. ai.intel.naval, C_FAINT })
+        table.insert(rows, { '  Comandante: ' .. ai.acu .. '   Ve no inimigo: aviacao ' .. ai.intel.air .. ', terra ' .. ai.intel.land .. ', mar ' .. ai.intel.naval
+            .. '   Zonas de perigo: ' .. (ai.dangers or 0), C_FAINT })
     end
     return rows
 end
