@@ -1231,6 +1231,54 @@ pub async fn build_cheats(state: State<'_, AppState>, opts: cp_core::cheats::Che
     .await
 }
 
+/// Mod "IA mais esperta", montado com os arquivos do jogo do próprio usuário.
+#[tauri::command]
+pub async fn build_ai(state: State<'_, AppState>, opts: cp_core::aimod::AiOptions, enable: bool) -> R<AiInstall> {
+    with_ws(&state.ws, move |ws| {
+        let dir = ws.data_dir.join("cache").join("ai");
+        std::fs::create_dir_all(&dir).map_err(|e| cp_core::Error::io(&dir, e))?;
+        let res = cp_core::aimod::build(&ws.stock_sources()?, &opts, &dir.join("zz_cp_ia_esperta.scd"))?;
+        let mut list: Vec<&str> = Vec::new();
+        if opts.naval {
+            list.push("navios em mapas com água");
+        }
+        if opts.economy {
+            list.push("economia, engenheiros e mini-bases");
+        }
+        if opts.commander {
+            list.push("comandante estratégico (ataca junto, defende, recua, embosca)");
+        }
+        if opts.commander && opts.raids {
+            list.push("ataques-relâmpago em extratores");
+        }
+        let import = ImportOptions {
+            id: Some("cp-ia-esperta".into()),
+            name: Some(if opts.level >= 2 { "IA mais esperta (brutal)".into() } else { "IA mais esperta".into() }),
+            category: Some(Category::Gameplay),
+            description: Some(format!(
+                "{}. Vale para todas as dificuldades da IA em escaramuça. {} ajustes aplicados.",
+                list.join(", "),
+                res.applied
+            )),
+            replace: true,
+            move_source: true,
+            ..Default::default()
+        };
+        let manifest = ws.import_mod(&res.archive, &import, enable)?;
+        let _ = std::fs::remove_file(&res.archive);
+        Ok(AiInstall { manifest, applied: res.applied, skipped: res.skipped })
+    })
+    .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiInstall {
+    manifest: Manifest,
+    applied: usize,
+    skipped: Vec<String>,
+}
+
 // ===================================================================== estúdio: mapas
 
 #[derive(Serialize)]

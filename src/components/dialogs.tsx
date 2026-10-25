@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
-import type { CheatOptions, ConflictReport } from "../lib/types";
+import type { AiOptions, CheatOptions, ConflictReport } from "../lib/types";
 import { Field, Icon, Modal, Notice, Switch, TaskProgress } from "./ui";
 
 export function ConflictsModal({ report, onClose }: { report: ConflictReport; onClose: () => void }) {
@@ -143,6 +143,72 @@ export function CheatsModal({ installed, onClose }: { installed: boolean; onClos
         <footer>
           <button type="button" className="btn text" onClick={onClose}>Cancelar</button>
           <button className="btn primary" disabled={!any || busy}>{installed ? "Atualizar trapaças" : "Instalar e ativar"}</button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------------ IA mais esperta
+
+const AI_DEFAULT: AiOptions = { level: 1, naval: true, economy: true, commander: true, raids: true };
+const AI_ROWS: { key: "naval" | "economy" | "commander" | "raids"; icon: string; label: string; hint: string }[] = [
+  { key: "commander", icon: "military_tech", label: "Comandante estratégico", hint: "Junta o exército antes de atacar, só ataca com vantagem, escolhe extratores e fábricas, defende as expansões, recua quando perde, manda feridos para casa e embosca no caminho da base." },
+  { key: "naval", icon: "sailing", label: "Navios em mapas com água", hint: "Todo tipo de IA constrói estaleiro quando há mar perto; a IA naval ganha quando a água separa os jogadores; corrige os navios que nunca eram produzidos." },
+  { key: "economy", icon: "factory", label: "Economia e mini-bases", hint: "Mais engenheiros, expansões espalhadas pelo mapa mais cedo e em paralelo, mais extratores ao mesmo tempo, pesquisa sem atraso." },
+  { key: "raids", icon: "bolt", label: "Ataques-relâmpago", hint: "Unidades rápidas atacam extratores sem defesa enquanto o exército principal se prepara." },
+];
+
+function loadAi(): AiOptions {
+  try {
+    const raw = localStorage.getItem("cp-ai");
+    if (raw) return { ...AI_DEFAULT, ...JSON.parse(raw) };
+  } catch { /* sem armazenamento: usa o padrão */ }
+  return AI_DEFAULT;
+}
+
+/** Monta e instala o mod "IA mais esperta". */
+export function AiModal({ installed, onClose }: { installed: boolean; onClose: () => void }) {
+  const { run, refreshMods } = useStore.getState();
+  const busy = useStore((s) => s.busy.ai);
+  const [o, setO] = useState<AiOptions>(loadAi);
+  const set = (patch: Partial<AiOptions>) => setO((v) => ({ ...v, ...patch }));
+  const any = o.naval || o.economy || o.commander;
+  return (
+    <Modal title="IA mais esperta" icon="psychology" onClose={onClose}>
+      <form className="col" style={{ gap: 14 }} onSubmit={async (e) => {
+        e.preventDefault();
+        try { localStorage.setItem("cp-ai", JSON.stringify(o)); } catch { /* ok */ }
+        const r = await run("ai", () => api.buildAi(o, true), (r) =>
+          `${installed ? "IA atualizada" : "IA instalada e ativada"}: ${r.applied} ajustes${r.skipped.length ? ` (${r.skipped.length} não serviram nesta versão do jogo)` : ""}.`);
+        if (r) {
+          await refreshMods();
+          onClose();
+        }
+      }}>
+        <Field label="Nível" hint="Vale para todas as dificuldades da escaramuça (Fácil continua mais fácil que Difícil).">
+          <div className="seg" role="group" aria-label="Nível da IA">
+            <button type="button" className="btn" aria-pressed={o.level === 1} onClick={() => set({ level: 1 })}>Esperta</button>
+            <button type="button" className="btn" aria-pressed={o.level === 2} onClick={() => set({ level: 2 })}>Brutal</button>
+          </div>
+        </Field>
+        <div className="col" style={{ gap: 10 }}>
+          {AI_ROWS.map((r) => (
+            <div key={r.key} className="row" style={{ gap: 12, opacity: r.key === "raids" && !o.commander ? 0.5 : 1 }}>
+              <Icon name={r.icon} size={20} />
+              <div className="grow">
+                <div>{r.label}</div>
+                <div className="small faint">{r.hint}</div>
+              </div>
+              <Switch label={r.label} checked={o[r.key]} disabled={r.key === "raids" && !o.commander} onChange={(v) => set({ [r.key]: v } as Partial<AiOptions>)} />
+            </div>
+          ))}
+        </div>
+        <Notice kind="info">O mod é montado agora com os arquivos de IA do seu jogo (incluindo os da expansão). Mexe no comportamento da IA, então todos numa partida multiplayer precisam ter o mesmo mod. Desligue na lista para voltar à IA original.</Notice>
+        {busy && <TaskProgress task="ai" label="Montando a IA…" />}
+        <footer>
+          <button type="button" className="btn text" onClick={onClose}>Cancelar</button>
+          <button className="btn primary" disabled={!any || busy}>{installed ? "Atualizar IA" : "Instalar e ativar"}</button>
         </footer>
       </form>
     </Modal>

@@ -44,6 +44,10 @@ jobs:
         run: python tools/test_maptk_bridge.py
       - name: Arquivos que entram no instalador
         run: python tools/check_resources.py
+      - name: Comandante da IA (Lua num mundo falso)
+        run: |
+          python -m pip install --quiet lupa
+          python tools/test_ai_commander.py
       - name: Interface
         run: |
           npm ci

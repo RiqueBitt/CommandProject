@@ -162,6 +162,7 @@ pub fn run() {
             commands::ui_skin_preview,
             commands::build_ui_skin,
             commands::build_cheats,
+            commands::build_ai,
             commands::enhance_groups,
             commands::enhance_preview,
             commands::build_enhance,

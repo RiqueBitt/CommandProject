@@ -49,6 +49,17 @@ disponível em Sistema → Visual.
   (F3 por padrão, ou o botão "CP" na borda da tela) abre um painel na partida para ligar e desligar
   cada trapaça quando quiser. O mod é montado na hora com os arquivos do seu próprio jogo e só liga
   em partidas com um único jogador humano; em multiplayer se desliga sozinho.
+- **IA mais esperta** (Mods → IA esperta), para todas as dificuldades da escaramuça:
+  - **navios em mapas com água**: corrige os construtores de navios (usavam uma chave de prioridade
+    que o jogo não lê), todo tipo de IA constrói estaleiro quando há mar perto e a IA naval ganha
+    quando a água separa os jogadores;
+  - **economia e mini-bases**: mais engenheiros, expansões espalhadas pelo mapa mais cedo e em
+    paralelo, mais extratores ao mesmo tempo;
+  - **comandante estratégico** (Lua por cima da IA do motor): junta o exército antes de atacar, só
+    ataca com vantagem clara, escolhe pontos estratégicos (extratores, fábricas), defende as
+    expansões, recua quando perde, manda feridos para casa, embosca no caminho da base, faz
+    ataques-relâmpago em extratores sem defesa, e a frota caça o que alcança. Nível Esperta ou Brutal.
+  Montado com os arquivos de IA do seu jogo (inclusive as cópias da expansão, que são as que o jogo usa).
 - **Ação rápida** (`Ctrl+K`): jogar, aplicar, trocar de perfil ou abrir qualquer tela pelo teclado.
 
 **Hub de mods**
@@ -307,6 +318,10 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
   `SimCallbacks.lua` do seu jogo e, com o menu, também do `gamemain.lua` e do `UserSync.lua` (o
   código vai dentro desses arquivos, que o jogo já conhece); outro mod que mexa neles entra em
   conflito (veja Conflitos). Ao começar a partida aparece no alto da tela "trapacas ligadas". Os textos do menu ficam sem acento para não depender da fonte do jogo. As unidades criadas viram invencíveis em até 1 s.
+- **IA mais esperta** (experimental: confirme no jogo): os ataques "neurais" da IA ficam no executável
+  e não dá para editar; o comandante assume o exército de terra e a frota (a aviação continua com a
+  IA do jogo). Ele consulta as unidades inimigas pelo motor do jogo, o que pode incluir algumas fora
+  da visão da IA.
 - **Decorações** são visuais: não bloqueiam a passagem das unidades.
 - **Tropas novas, animações criadas e modelos próprios no jogo** são experimentais: veja a tabela
   em [docs/criacao.md](docs/criacao.md#o-que-é-experimental).

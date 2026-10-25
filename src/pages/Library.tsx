@@ -4,7 +4,7 @@ import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useMemo, useState } from "react";
-import { CheatsModal, ConflictsModal, InstallLinkModal } from "../components/dialogs";
+import { AiModal, CheatsModal, ConflictsModal, InstallLinkModal } from "../components/dialogs";
 import { Drawer, Empty, Field, Icon, ModThumb, Notice, Switch } from "../components/ui";
 import { api, confirmDialog, isTauri, pickFile } from "../lib/api";
 import { fmtBytes, fmtDate, useStore } from "../lib/store";
@@ -26,6 +26,7 @@ export default function Library() {
   const [conflicts, setConflicts] = useState<ConflictReport | null>(null);
   const [link, setLink] = useState(false);
   const [cheats, setCheats] = useState(false);
+  const [ai, setAi] = useState(false);
   const [order, setOrder] = useState<string[]>([]);
 
   useEffect(() => { setOrder(mods.map((m) => m.manifest.id)); }, [mods]);
@@ -87,6 +88,7 @@ export default function Library() {
           </div>
           <div className="row">
             <button className="btn text" disabled={busyConflicts} onClick={async () => setConflicts((await run("conflicts", () => api.conflicts())) ?? null)}><Icon name={busyConflicts ? "hourglass_top" : "compare_arrows"} /> {busyConflicts ? "Analisando…" : "Conflitos"}</button>
+            <button className="btn text" onClick={() => setAi(true)} title="Navios, economia, mini-bases e um comandante estratégico para a IA"><Icon name="psychology" /> IA esperta</button>
             <button className="btn text" onClick={() => setCheats(true)} title="Massa, energia e pesquisa infinitas, modo deus"><Icon name="auto_fix_high" /> Trapaças</button>
             <button className="btn text" onClick={() => setLink(true)}><Icon name="link" /> De um link</button>
             <button className="btn" onClick={() => importFrom(true)}><Icon name="folder_open" /> Pasta</button>
@@ -132,6 +134,7 @@ export default function Library() {
       {opened && <ModDrawer m={opened} onClose={() => setOpenId(null)} />}
       {conflicts && <ConflictsModal report={conflicts} onClose={() => setConflicts(null)} />}
       {link && <InstallLinkModal onClose={() => setLink(false)} />}
+      {ai && <AiModal installed={mods.some((m) => m.manifest.id === "cp-ia-esperta")} onClose={() => setAi(false)} />}
       {cheats && <CheatsModal installed={mods.some((m) => m.manifest.id === "cp-trapacas")} onClose={() => setCheats(false)} />}
     </div>
   );
