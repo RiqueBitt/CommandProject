@@ -20,7 +20,7 @@ const ENTRY: &str = "function StartCommandLineSession(mapName, isPerfTest)\n";
 const HOOK: &str = "\tif CPBigMatchStart and CPBigMatchStart(mapName) then return end -- CommandProject big match\n";
 
 /// Versão do código do mod: quando muda, o launcher monta o mod de novo.
-pub const MOD_VERSION: &str = "1.2.0";
+pub const MOD_VERSION: &str = "1.3.0";
 /// Cores de exército na partida grande: as 10 do jogo e mais 14 (o mod acrescenta só com `/cpmatch`).
 pub const COLORS: i32 = 24;
 /// Mapas com mais de 8 bases são gravados com este tipo: o lobby do jogo (8 posições, que trava com

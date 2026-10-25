@@ -3,7 +3,7 @@
 -- launcher with /cpmatch (the game's own lobby has 10 color slots and stays as it is). Same layout
 -- as the game's colors; the flags reuse the game's team color pictures.
 do
-    local ok, big = pcall(function() return HasCommandLineArg('/cpmatch') end)
+    local ok, big = pcall(function() return HasCommandLineArg('/cpmatch') and not HasCommandLineArg('/cpnocolors') end)
     if ok and big and GameColors and GameColors.FactionColors and not GameColors.CPExtra then
         GameColors.CPExtra = true
         local flag = '/textures/ui/common/360/hd/skirmish/teamcolors/tc'

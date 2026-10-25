@@ -23,6 +23,13 @@ local function CPSplit(s, sep)
     end
 end
 
+-- diagnostic switches (extra command line arguments): each one turns a part off, to find what
+-- a given game install does not accept
+local function CPOff(name)
+    local ok, on = pcall(HasCommandLineArg, '/cpno' .. name)
+    return ok and on
+end
+
 function CPBigMatchSession(mapName, spec)
     if FixupMapName then mapName = FixupMapName(mapName) end
     local scenario = import('/lua/ui/maputil.lua').LoadScenario(mapName)
@@ -34,14 +41,16 @@ function CPBigMatchSession(mapName, spec)
     local options = table.copy(defaultOptions)
     options.Victory = 'demoralization'
     options.CheatsEnabled = 'false'
-    options.TeamLock = 'locked'
-    -- the same options the game's skirmish screen sets
-    options.NoNIS = false
-    options.TeamSpawn = 'fixed'
-    options.AllowObservers = false
-    options.Ranked = false
-    options.PreBuiltUnits = 'Off'
-    options.RestrictedCategories = {}
+    if not CPOff('opts') then
+        options.TeamLock = 'locked'
+        -- the same options the game's skirmish screen sets
+        options.NoNIS = false
+        options.TeamSpawn = 'fixed'
+        options.AllowObservers = false
+        options.Ranked = false
+        options.PreBuiltUnits = 'Off'
+        options.RestrictedCategories = {}
+    end
     for _, kv in CPSplit(parts[1] or '', ';') do
         local eq = string.find(kv, '=', 1, true)
         if eq and eq > 1 then options[string.sub(kv, 1, eq - 1)] = string.sub(kv, eq + 1) end
@@ -57,6 +66,7 @@ function CPBigMatchSession(mapName, spec)
     -- research); without it the match stops loading
     local Mods = import('/lua/system/mods.lua')
     local okDlc, dlc = pcall(function() return Mods.GetOfficialDLCModForSession() end)
+    if CPOff('dlc') then okDlc = false end
     if okDlc and type(dlc) == 'table' and table.getn(dlc) > 0 then
         sessionInfo.scenarioMods = dlc
     else
@@ -78,11 +88,13 @@ function CPBigMatchSession(mapName, spec)
             if faction < 1 or faction > factions then faction = GetRandomFaction() end
             p.Faction = faction
             p.Team = math.max(1, tonumber(s[2] or '1') or 1)
+            if CPOff('teams') then p.Team = 1 end
             p.ArmyName = name
-            p.StartSpot = index
+            if not CPOff('spot') then p.StartSpot = index end
             -- the engine reads the color 0-based (FactionColors[faction][color + 1])
             local color = tonumber(s[5] or '') or (index - 1)
             p.PlayerColor = math.mod(math.max(0, color), colors)
+            if CPOff('color') then p.PlayerColor = math.mod(index, 10) end
             p.ArmyColor = p.PlayerColor
             if kind == 'H' and not human then
                 p.Human = true
@@ -99,8 +111,18 @@ function CPBigMatchSession(mapName, spec)
     end
     if not human and table.getn(others) == 0 then error('CommandProject: nenhum jogador na partida') end
     -- the human first: the game expects the local player among the first entries
-    if human then table.insert(sessionInfo.teamInfo, human) end
-    for _, p in others do table.insert(sessionInfo.teamInfo, p) end
+    if CPOff('order') then
+        -- the order of the bases (as the game's own command line does)
+        local all = {}
+        if human then table.insert(all, human) end
+        for _, p in others do table.insert(all, p) end
+        table.sort(all, function(a, b) return a.StartSpot < b.StartSpot end)
+        for _, p in all do table.insert(sessionInfo.teamInfo, p) end
+    else
+        if human then table.insert(sessionInfo.teamInfo, human) end
+        for _, p in others do table.insert(sessionInfo.teamInfo, p) end
+    end
+    LOG('*CommandProject big match: ' .. table.getn(sessionInfo.teamInfo) .. ' players on ' .. tostring(mapName))
     if not human then options.FullAI = true end
 
     local extras = MapUtils.GetExtraArmies(scenario)
