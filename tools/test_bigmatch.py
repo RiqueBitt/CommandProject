@@ -164,24 +164,25 @@ GameColors = {
 
 
 def colors(source: str, label: str):
-    for big in (True, False):
-        lua = LuaRuntime(unpack_returned_tuples=True)
-        lua.execute(HARNESS)
-        g = lua.globals()
-        if big:
-            g.World.args = lua.table_from({"/cpmatch": lua.table_from(["x"])})
-        lua.execute(moho_to_lua(source))
-        gc = g.GameColors
-        n = len(list(gc.PlayerColors.values()))
-        per = [len(list(f.values())) for f in gc.FactionColors.values()]
-        base = 10 if "FF152142" in source else 2
-        if big:
-            check(n == base + 14 and all(p == base + 14 for p in per) and len(list(gc.ArmyColors.values())) == base + 14,
-                  f"{label}: 14 cores a mais na partida grande ({n})")
-            last = list(gc.FactionColors.values())[0][base + 14]
-            check(last.ui_flag.endswith(".dds") and last.icon.startswith("FF"), f"{label}: cores novas com bandeira e ícone")
-        else:
-            check(n == base and all(p == base for p in per), f"{label}: lobby do jogo continua com as cores originais")
+    # o motor lê o GameColors.lua num Lua "pelado" (sem pcall, sem table, sem funções do jogo):
+    # o arquivo precisa carregar ali sem chamar nenhuma função
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    bare = lua.eval("function(code) local env = {} local f, e = load(code, 'GameColors', 't', env) "
+                    "if not f then return false, e end local ok, err = pcall(f) return ok, err, env end")
+    ok, err, env = bare(moho_to_lua(source))
+    check(ok, f"{label}: carrega num Lua sem funções, como o motor lê ({err})")
+    if not ok:
+        return
+    gc = env.GameColors
+    n = len(list(gc.PlayerColors.values()))
+    per = [len(list(f.values())) for f in gc.FactionColors.values()]
+    base = 10 if "FF152142" in source else 2
+    check(n == base + 14 and all(p == base + 14 for p in per) and len(list(gc.ArmyColors.values())) == base + 14
+          and len(list(gc.SecondaryPlayerColors.values())) == base + 14, f"{label}: 14 cores a mais ({n})")
+    last = list(gc.FactionColors.values())[0][base + 14]
+    check(last.ui_flag.endswith(".dds") and last.icon.startswith("FF"), f"{label}: cores novas com bandeira e ícone")
+    if "CivilianArmyColor" in source:
+        check(gc.CivilianArmyColor == "BurlyWood", f"{label}: cor dos civis continua")
 
 
 def main() -> int:
