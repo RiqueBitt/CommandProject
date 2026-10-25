@@ -85,7 +85,7 @@ export default function BigMatch() {
   const [options, setOptions] = useState<MatchOptions>(() => read("cp-bigmatch-options", DEFAULT_OPTIONS));
   const [teamCount, setTeamCount] = useState(2);
   const [splitBy, setSplitBy] = useState<"side" | "order">("side");
-  const [colorMode, setColorMode] = useState<ColorMode>(() => { try { return (localStorage.getItem("cp-bigmatch-colors") as ColorMode) || "team"; } catch { return "team"; } });
+  const [colorMode, setColorMode] = useState<ColorMode>(() => { try { return (localStorage.getItem("cp-bigmatch-colors2") as ColorMode) || "player"; } catch { return "player"; } });
 
   useEffect(() => {
     // a lista demora (lê os mapas de todos os .scd): a última fica guardada enquanto o launcher está aberto
@@ -109,7 +109,7 @@ export default function BigMatch() {
   }, [maps, map]);
   useEffect(() => { if (map && slots.length === map.armies.length) save("cp-bigmatch:" + map.path, slots); }, [map, slots]);
   useEffect(() => { save("cp-bigmatch-options", options); }, [options]);
-  useEffect(() => { try { localStorage.setItem("cp-bigmatch-colors", colorMode); } catch { /* ok */ } }, [colorMode]);
+  useEffect(() => { try { localStorage.setItem("cp-bigmatch-colors2", colorMode); } catch { /* ok */ } }, [colorMode]);
 
   const list = useMemo(() => (maps ?? []).filter((m) => (!onlyBig || m.armies.length > 8) && (!query.trim() || `${m.name} ${m.id} ${m.source}`.toLowerCase().includes(query.trim().toLowerCase()))), [maps, query, onlyBig]);
   const sum = summary(slots);
@@ -123,13 +123,15 @@ export default function BigMatch() {
     const sameTeam = colorMode === "team" && list[i].team > 0 && x.team === list[i].team;
     return j === i || sameTeam ? { ...x, color } : x;
   }));
-  /** quem já usa cada cor (para não repetir em outro time) */
+  /** quem já usa cada cor (por jogador: qualquer outra vaga; por time: outro time) */
   const colorOwner = (k: number, i: number) => {
     const me = colorMode === "team" ? groupOf(slots[i], i) : `p${i}`;
     for (let j = 0; j < slots.length; j++) {
       if (slots[j].kind === "empty" || colors[j] !== k) continue;
       const other = colorMode === "team" ? groupOf(slots[j], j) : `p${j}`;
-      if (other !== me && !(colorMode === "player" && slots[j].team > 0 && slots[j].team === slots[i].team)) return slots[j].team > 0 ? `time ${slots[j].team}` : `base ${j + 1}`;
+      if (other === me) continue;
+      if (colorMode === "team") return slots[j].team > 0 ? `time ${slots[j].team}` : `base ${j + 1}`;
+      return slots[j].team > 0 ? `base ${j + 1}, time ${slots[j].team}` : `base ${j + 1}`;
     }
     return null;
   };
@@ -234,10 +236,10 @@ export default function BigMatch() {
                         </select>
                       </div>
                     </Field>
-                    <Field label="Cores" hint={colorMode === "team" ? "Cada time com uma cor só dele (até 24 times). A cor escolhida numa vaga vale para o time todo." : "Cada jogador com uma cor; dois times nunca dividem uma cor (com mais de 24 jogadores, a cor fica por time)."}>
+                    <Field label="Cores" hint={colorMode === "team" ? `Cada time com uma cor só dele (até ${GAME_COLORS.length} times). A cor escolhida numa vaga vale para o time todo.` : `Cada jogador com uma cor diferente, mesmo no mesmo time (${GAME_COLORS.length} cores). Cores já usadas por outra base ficam bloqueadas.`}>
                       <div className="seg" role="group" aria-label="Cores">
-                        <button type="button" className="btn" aria-pressed={colorMode === "team"} onClick={() => setColorMode("team")}>Por time</button>
                         <button type="button" className="btn" aria-pressed={colorMode === "player"} onClick={() => setColorMode("player")}>Por jogador</button>
+                        <button type="button" className="btn" aria-pressed={colorMode === "team"} onClick={() => setColorMode("team")}>Por time</button>
                         <button type="button" className="btn" onClick={() => setSlots((l) => l.map((x) => ({ ...x, color: -1 })))} title="Volta todas as cores escolhidas à mão para automáticas">Automáticas</button>
                       </div>
                     </Field>
@@ -253,6 +255,7 @@ export default function BigMatch() {
                       </div>
                     </Field>
                     <p className="faint small">Clique numa base da prévia para jogar nela.</p>
+                    {colorPlan.note && <Notice kind="info">{colorPlan.note}</Notice>}
                     {map.lobbyRisk && <Notice kind="warn">Este mapa foi feito numa versão antiga e também aparece no lobby do jogo, que fecha o jogo com mais de 8 bases. Aqui ele funciona; para o lobby não mostrar, gere o mapa de novo no editor.</Notice>}
                   </div>
                 </div>

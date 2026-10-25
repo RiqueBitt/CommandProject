@@ -20,15 +20,15 @@ const ENTRY: &str = "function StartCommandLineSession(mapName, isPerfTest)\n";
 const HOOK: &str = "\tif CPBigMatchStart and CPBigMatchStart(mapName) then return end -- CommandProject big match\n";
 
 /// Versão do código do mod: quando muda, o launcher monta o mod de novo.
-pub const MOD_VERSION: &str = "1.5.0";
+pub const MOD_VERSION: &str = "1.6.0";
 /// Cores de exército na partida grande: as 10 do jogo e mais 14 (o mod acrescenta só com `/cpmatch`).
-pub const COLORS: i32 = 24;
+pub const COLORS: i32 = 32;
 /// Mapas com mais de 8 bases são gravados com este tipo: o lobby do jogo (8 posições, que trava com
 /// mais) não os mostra; a partida grande os trata como escaramuça.
 pub const BIG_MAP_TYPE: &str = "cp_bigmatch";
 const COLORS_CODE: &str = include_str!("bigmatch_colors.lua");
 const COLORS_FILE: &str = "lua/common/GameColors.lua";
-const COLORS_MARK: &str = "CommandProject big match: 14 more army colors";
+const COLORS_MARK: &str = "CommandProject big match: 22 more army colors";
 /// Dificuldades da IA do jogo (chaves de `aitypes.lua`).
 pub const AI_LEVELS: &[&str] = &["Easy", "Normal", "Hard", "Cheat"];
 /// Limite de vagas que o launcher aceita (o motor do jogo pode ter um limite menor: veja o README).
@@ -449,12 +449,12 @@ mod tests {
             s.team = 0;
         }
         assert!(encode(&ffa).unwrap().contains("|H,1,0,,|A,1,0,Normal,"));
-        // cor escolhida (0-based, até 23)
+        // cor escolhida (0-based, até 31)
         let mut colored = ffa.clone();
-        colored.slots[1].color = 30;
+        colored.slots[1].color = 40;
         colored.slots[0].color = 3;
         let e = encode(&colored).unwrap();
-        assert!(e.contains("|H,1,0,,3|A,1,0,Normal,23"), "{e}");
+        assert!(e.contains("|H,1,0,,3|A,1,0,Normal,31"), "{e}");
     }
 
     #[test]

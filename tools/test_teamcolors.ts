@@ -15,38 +15,50 @@ const distinctTeams = (slots: ColorSlot[], colors: number[]) => {
   return true;
 };
 
-// 12 contra 12: dois times, duas cores (azul e vermelho)
+const distinctAll = (slots: ColorSlot[], colors: number[]) => {
+  const on = colors.filter((_, i) => slots[i].kind !== "empty");
+  return new Set(on).size === on.length;
+};
+
+// por jogador (padrão): 12 contra 12 com 24 cores diferentes, mesmo dentro do time
 const twelve = [...Array(12)].map(() => slot(1)).concat([...Array(12)].map(() => slot(2)));
-let r = assignColors(twelve, "team");
-check(distinctTeams(twelve, r.colors) && r.colors[0] === 0 && r.colors[23] === 2, "12 contra 12: azul contra vermelho");
+let r = assignColors(twelve, "player");
+check(r.error === null && distinctAll(twelve, r.colors) && r.note === null, "12 contra 12 por jogador: 24 cores diferentes");
+check(r.colors[0] === 0 && r.colors[1] === 2, "por jogador: as primeiras são as mais diferentes (azul, vermelho)");
 
-// 24 times de 1 (todos contra todos em times): 24 cores diferentes
-const solo24 = [...Array(24)].map((_, i) => slot(i + 1));
-r = assignColors(solo24, "team");
-check(r.error === null && new Set(r.colors).size === 24, "24 times: 24 cores diferentes");
+// 32 jogadores: 32 cores diferentes
+const t32 = [...Array(32)].map((_, i) => slot(1 + (i % 2)));
+r = assignColors(t32, "player");
+check(distinctAll(t32, r.colors) && r.note === null, "32 jogadores: 32 cores diferentes");
 
-// 25 times: não há cores para todos
-const solo25 = [...Array(25)].map((_, i) => slot(0));
-r = assignColors(solo25, "team");
-check(r.error !== null, "25 sozinhos: avisa que faltam cores");
+// 40 jogadores em 2 times: repete, avisa, e nunca repete a cor de um colega de time
+const t40 = [...Array(40)].map((_, i) => slot(i < 20 ? 1 : 2));
+r = assignColors(t40, "player");
+let mateClash = false;
+for (let a = 0; a < 40; a++) for (let b = a + 1; b < 40; b++) if (t40[a].team === t40[b].team && r.colors[a] === r.colors[b]) mateClash = true;
+check(r.error === null && r.note !== null && !mateClash, "40 jogadores: avisa e não repete cor dentro do time");
 
-// cor escolhida à mão igual à de outro time: não repete
-const manual = [slot(1, 2), slot(1), slot(2, 2), slot(2), slot(3)];
-r = assignColors(manual, "team");
-check(distinctTeams(manual, r.colors) && r.colors[0] === 2 && r.colors[1] === 2, "cor à mão vale para o time e não é copiada por outro time");
+// cor à mão igual à de outra vaga (mesmo time): a segunda vira automática
+const manualP = [slot(1, 5), slot(1, 5), slot(2)];
+r = assignColors(manualP, "player");
+check(r.colors[0] === 5 && r.colors[1] !== 5 && distinctAll(manualP, r.colors), "por jogador: cor à mão não se repete nem no mesmo time");
 
-// por jogador: todos diferentes; com mais de 24 jogadores, volta a ser por time
+// vagas vazias não gastam cor
 const mixed = [slot(1), slot(1), slot(2), slot(0), slot(0), slot(2, -1, "empty")];
 r = assignColors(mixed, "player");
 check(new Set(r.colors.slice(0, 5)).size === 5, "por jogador: cada um com uma cor");
-const many = [...Array(30)].map((_, i) => slot(1 + (i % 3)));
-r = assignColors(many, "player");
-check(r.error === null && distinctTeams(many, r.colors) && new Set(r.colors).size === 3, "30 jogadores por jogador: cai para cor por time");
 
-// sozinhos e times juntos
-const fx = [slot(0), slot(0), slot(1), slot(1), slot(0)];
-r = assignColors(fx, "team");
-check(distinctTeams(fx, r.colors), "sozinhos e times: ninguém de times diferentes com a mesma cor");
+// por time (opção): 12 contra 12 com duas cores
+r = assignColors(twelve, "team");
+check(distinctTeams(twelve, r.colors) && r.colors[0] === 0 && r.colors[23] === 2, "por time: azul contra vermelho");
+const solo32 = [...Array(32)].map((_, i) => slot(i + 1));
+r = assignColors(solo32, "team");
+check(r.error === null && new Set(r.colors).size === 32, "por time: 32 times, 32 cores");
+r = assignColors([...Array(33)].map(() => slot(0)), "team");
+check(r.error !== null, "por time: 33 sozinhos avisa que faltam cores");
+const manual = [slot(1, 2), slot(1), slot(2, 2), slot(2), slot(3)];
+r = assignColors(manual, "team");
+check(distinctTeams(manual, r.colors) && r.colors[0] === 2 && r.colors[1] === 2, "por time: cor à mão vale para o time e não é copiada por outro time");
 
 console.log(fails ? `\n${fails} falha(s)` : "\ntudo certo");
 process.exit(fails ? 1 : 0);

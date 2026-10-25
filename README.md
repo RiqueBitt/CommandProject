@@ -98,10 +98,9 @@ disponível em Sistema → Visual.
   tiver** — 12 contra 12, três times de 5, todos contra todos. Cada base vira você, uma IA (Fácil,
   Normal, Difícil ou Trapaceira) ou fica vazia, com time e facção à escolha; os times se dividem
   sozinhos pelo lado do mapa ou pela ordem das bases, e clicar numa base da prévia põe você nela.
-  Até um time por base (24 bases, até 24 times) e **24 cores de exército** (as 10 do jogo e mais 14
-  só nas partidas grandes): cor por time, por jogador ou escolhida à mão em cada vaga — **dois times
-  nunca ficam com a mesma cor** (a cor escolhida numa vaga vale para o time todo, e as cores de outros
-  times aparecem bloqueadas).
+  Até um time por base (24 bases, até 24 times) e **32 cores de exército** (as 10 do jogo e mais 22
+  só nas partidas grandes): **cada jogador com uma cor diferente, mesmo no mesmo time** (padrão), ou
+  uma cor por time; cores já usadas por outra base aparecem bloqueadas na escolha à mão.
   Regras: tipo de vitória, limite de unidades, névoa, velocidade, tempo sem ataques, civis e base
   montada. O lobby do jogo é em Flash e só tem 8 vagas, então o launcher abre o jogo direto na
   partida (`/map` + `/cpmatch`); o mod que faz isso é montado na hora com o `SinglePlayerLaunch.lua`

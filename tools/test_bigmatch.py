@@ -177,9 +177,9 @@ def colors(source: str, label: str):
     n = len(list(gc.PlayerColors.values()))
     per = [len(list(f.values())) for f in gc.FactionColors.values()]
     base = 10 if "FF152142" in source else 2
-    check(n == base + 14 and all(p == base + 14 for p in per) and len(list(gc.ArmyColors.values())) == base + 14
-          and len(list(gc.SecondaryPlayerColors.values())) == base + 14, f"{label}: 14 cores a mais ({n})")
-    last = list(gc.FactionColors.values())[0][base + 14]
+    check(n == base + 22 and all(p == base + 22 for p in per) and len(list(gc.ArmyColors.values())) == base + 22
+          and len(list(gc.SecondaryPlayerColors.values())) == base + 22, f"{label}: 22 cores a mais ({n})")
+    last = list(gc.FactionColors.values())[0][base + 22]
     check(last.ui_flag.endswith(".dds") and last.icon.startswith("FF"), f"{label}: cores novas com bandeira e ícone")
     if "CivilianArmyColor" in source:
         check(gc.CivilianArmyColor == "BurlyWood", f"{label}: cor dos civis continua")

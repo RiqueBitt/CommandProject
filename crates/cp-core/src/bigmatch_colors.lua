@@ -1,5 +1,5 @@
 
--- CommandProject big match: 14 more army colors (24 in all). The engine reads this file in a bare
+-- CommandProject big match: 22 more army colors (32 in all). The engine reads this file in a bare
 -- Lua state of its own (no pcall, no table library, no game functions), so this block only uses
 -- plain statements: a function call here would stop the file from loading and the game from
 -- creating the armies. The game's own lobby still offers its 10 colors; the launcher's big match
@@ -23,6 +23,14 @@ do
         { 'FF9a3a2a', 'FFff8060', 'FF2b3b76', '03' }, -- coral
         { 'FF6a5a9a', 'FFc0b0ff', 'FFce9d07', '04' }, -- lavender
         { 'FF0c0c0c', 'FF404040', 'FFff8000', '06' }, -- black
+        { 'FF0c1e5a', 'FF3a5ad8', 'FFd9d9d9', '01' }, -- navy
+        { 'FF0e3a14', 'FF2e9e46', 'FFce9d07', '02' }, -- forest
+        { 'FF9a6a4a', 'FFffc8a0', 'FF2b3b76', '05' }, -- peach
+        { 'FF5a2408', 'FFc0581c', 'FFa0a0a0', '10' }, -- rust
+        { 'FF3a1440', 'FF9a4ab0', 'FFc1b278', '04' }, -- plum
+        { 'FF6a5a10', 'FFc8b040', 'FF2b3b76', '09' }, -- mustard
+        { 'FF0a3038', 'FF2a8a9a', 'FFce9d07', '08' }, -- petrol
+        { 'FF9a5a72', 'FFffb0d0', 'FF2b3b76', '04' }, -- light pink
     }
     if GameColors and GameColors.FactionColors and not GameColors.CPExtra then
         GameColors.CPExtra = true
