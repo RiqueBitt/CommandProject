@@ -1186,6 +1186,48 @@ pub async fn build_ui_skin(
     .await
 }
 
+/// Mod de trapaças para jogar sozinho, montado com os arquivos do jogo do próprio usuário.
+#[tauri::command]
+pub async fn build_cheats(state: State<'_, AppState>, opts: cp_core::cheats::CheatOptions, enable: bool) -> R<Manifest> {
+    with_ws(&state.ws, move |ws| {
+        let dir = ws.data_dir.join("cache").join("cheats");
+        std::fs::create_dir_all(&dir).map_err(|e| cp_core::Error::io(&dir, e))?;
+        let archive = cp_core::cheats::build(&ws.stock_sources()?, &opts, &dir.join("zz_cp_trapacas.scd"))?;
+        let mut list: Vec<String> = Vec::new();
+        for (on, what) in [
+            (opts.mass, "massa infinita"),
+            (opts.energy, "energia infinita"),
+            (opts.research, "pesquisa infinita"),
+            (opts.unlock_all, "toda a pesquisa liberada"),
+            (opts.god, "unidades invencíveis"),
+            (opts.ai_too, "a IA também trapaceia"),
+        ] {
+            if on {
+                list.push(what.to_string());
+            }
+        }
+        if opts.build_speed > 1.0 {
+            list.push(format!("construção {}× mais rápida", opts.build_speed));
+        }
+        let import = ImportOptions {
+            id: Some("cp-trapacas".into()),
+            name: Some("Trapaças (jogar sozinho)".into()),
+            category: Some(Category::Gameplay),
+            description: Some(format!(
+                "{}. Só vale em partidas com um único jogador humano (escaramuça contra a IA); em multiplayer se desliga sozinho.",
+                if list.is_empty() { "Nenhuma trapaça marcada".to_string() } else { list.join(", ") }
+            )),
+            replace: true,
+            move_source: true,
+            ..Default::default()
+        };
+        let m = ws.import_mod(&archive, &import, enable)?;
+        let _ = std::fs::remove_file(&archive);
+        Ok(m)
+    })
+    .await
+}
+
 // ===================================================================== estúdio: mapas
 
 #[derive(Serialize)]

@@ -173,6 +173,7 @@ export const api = {
 
   uiSkinTargets: (opts: T.UiSkinOptions) => call<{ count: number; sample: string[] }>("ui_skin_targets", { opts }),
   uiSkinPreview: (entry: string, adjust: T.ColorAdjust) => call<T.TextureView>("ui_skin_preview", { entry, adjust }),
+  buildCheats: (opts: T.CheatOptions, enable = true) => call<T.Manifest>("build_cheats", { opts, enable }),
   buildUiSkin: (opts: T.UiSkinOptions, enable = true) => call<T.Manifest>("build_ui_skin", { opts, enable }),
 
   enhanceGroups: () => call<T.EnhanceGroup[]>("enhance_groups"),

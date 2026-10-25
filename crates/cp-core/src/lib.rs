@@ -4,6 +4,7 @@
 
 pub mod anim;
 pub mod blueprint;
+pub mod cheats;
 pub mod conflicts;
 pub mod creator;
 pub mod dds;

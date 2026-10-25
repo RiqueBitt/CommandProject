@@ -147,6 +147,8 @@ export interface Project {
 }
 export interface ProjectFile { path: string; size: number; kind: "lua" | "texture" | "model" | "blueprint" | "audio" | "other" }
 
+/** Mod de trapaças para jogar sozinho (montado com os arquivos do jogo). */
+export interface CheatOptions { mass: boolean; energy: boolean; research: boolean; unlockAll: boolean; god: boolean; buildSpeed: number; aiToo: boolean }
 export interface UiSkinOptions { name: string; adjust: ColorAdjust; prefixes: string[]; exclude: string[]; quality: "fast" | "normal" | "best" }
 
 export interface PythonInfo { program: string; prefixArgs: string[]; version: string }
