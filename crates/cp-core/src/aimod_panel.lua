@@ -1,7 +1,7 @@
 -- CommandProject: "what the AI is thinking" panel and the AI's memory of the player (generated
 -- by the launcher). Appended to the game's own consoleecho.lua; CreateConsoleEcho (called when the
 -- game screen is built) runs CPAIPanelInit. Only with a single human in the match:
---   * the AI commanders send their plans through Sync.CPAIStatus; @KEY@ (or the IA tab on the
+--   * the AI commanders send their plans through Sync.CPAIStatus (read every frame); @KEY@ (or the IA tab on the
 --     left edge) shows and hides the panel;
 --   * the player model arrives through Sync.CPAIModel and is kept in Game.prefs (CPAIMemory),
 --     per map; at the start of the next match it goes back to the AI (SimCallback CPAIMemory).
@@ -18,10 +18,9 @@ local Prefs = import('/lua/user/prefs.lua')
 local memory = false      -- what earlier matches taught (loaded at the start)
 local mapKey = 'default'
 local learnedSaves = 0
-local memorySent = false
-local beat = 0
-local seen = {}           -- army -> last beat its AI sent a plan (defeated AIs stop sending)
-local STALE_BEATS = 600   -- about a minute
+local memorySent = 0      -- how many times the memory went to the simulation (twice, to be sure)
+local savedSeq = false    -- the last model of this match already kept in Game.prefs
+local STALE = 60          -- seconds of game time without news before an AI leaves the panel
 
 local C_PANEL = 'E80E161E'
 local C_HEAD = 'FF15212C'
@@ -70,6 +69,7 @@ local function Rows()
     for army, ai in status do
         table.insert(rows, { ai.name .. '  -  ' .. ai.personality .. '  -  ' .. ai.adaptive, C_ACCENT })
         table.insert(rows, { '  Plano: ' .. ai.plan .. '   (ataca com ' .. ai.minUnits .. '+ unidades)', C_TEXT })
+        if ai.error then table.insert(rows, { '  Erro: ' .. ai.error, C_WARN }) end
         local parts = {}
         for _, p in { SquadText('Exercito', ai.main), SquadText('Guarda', ai.guard), SquadText('Rapidos', ai.raid), SquadText('Frota', ai.fleet), SquadText('Desembarque', ai.drop) } do
             if p then table.insert(parts, p) end
@@ -311,12 +311,21 @@ local function BindKey()
     end)
 end
 
--- every beat: keep the latest plans sent by the simulation
-local function OnBeat()
-    beat = beat + 1
-    -- the memory goes to the simulation once it is running (first beat), not while the screen is built
-    if LEARN and not memorySent then
-        memorySent = true
+local function GameTime()
+    local ok, t = pcall(GetGameTimeSeconds)
+    if ok and type(t) == 'number' then return t end
+    return 0
+end
+
+-- every frame: read what the simulation sent on the last beat. (On PC the game never calls the
+-- beat functions of gamemain.lua, so this runs in its own thread; the simulation repeats its data
+-- on every tick, so no beat is missed.)
+local lastSweep = 0
+local function Poll()
+    local now = GameTime()
+    -- the memory goes to the simulation once it is running, not while the screen is built
+    if LEARN and ((memorySent == 0 and now > 2) or (memorySent == 1 and now > 20)) then
+        memorySent = memorySent + 1
         SendMemory()
     end
     local s = false
@@ -324,17 +333,19 @@ local function OnBeat()
     if s and SHOW_PANEL then
         status = status or {}
         for army, entry in s do
+            local old = status[army]
+            if not old or old.time ~= entry.time or old.plan ~= entry.plan then dirty = true end
             status[army] = entry
-            seen[army] = beat
         end
-        dirty = true
         if not tab then pcall(CreateTab) end
     end
-    if status and math.mod(beat, 50) == 0 then
-        for army, _ in status do
-            if beat - (seen[army] or 0) > STALE_BEATS then
+    if status and now - lastSweep > 10 then
+        lastSweep = now
+        local newest = 0
+        for _, entry in status do newest = math.max(newest, entry.time or 0) end
+        for army, entry in status do
+            if not entry.stopped and newest - (entry.time or 0) > STALE then
                 status[army] = nil
-                seen[army] = nil
                 dirty = true
             end
         end
@@ -342,10 +353,14 @@ local function OnBeat()
     if LEARN then
         local m = false
         pcall(function() m = Sync.CPAIModel end)
-        if m then pcall(SaveMemory, m) end
+        if m and m.seq ~= savedSeq then
+            savedSeq = m.seq
+            pcall(SaveMemory, m)
+        end
     end
     if dirty then pcall(Refresh) end
 end
+CPAIPanelPoll = Poll -- for the tests
 
 local function HumanCount()
     local n = 0
@@ -381,6 +396,11 @@ function CPAIPanelInit()
             end
         end)
     end
-    pcall(function() import('/lua/ui/game/gamemain.lua').AddBeatFunction(OnBeat) end)
+    ForkThread(function()
+        while true do
+            pcall(Poll)
+            WaitFrames(1)
+        end
+    end)
 end
 end

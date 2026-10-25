@@ -54,7 +54,10 @@ function GetFrame(i) return control() end
 function GetArmiesTable() return { armiesTable = { { human = true }, { human = false } } } end
 function SessionIsReplay() return false end
 function IN_AddKeyMapTable(t) UI.bound = t end
-function ForkThread(f) end
+function ForkThread(f) UI.threads = (UI.threads or 0) + 1 end
+function WaitFrames() end
+UI.time = 0
+function GetGameTimeSeconds() return UI.time end
 function PlaySound() end
 function Sound(t) return t end
 """
@@ -98,6 +101,7 @@ function GetTerrainHeight(x, z)
 end
 function GetSurfaceHeight(x, z) return GetTerrainHeight(x, z) end
 function WaitSeconds(s) coroutine.yield(s) end
+function WaitTicks(n) coroutine.yield(n) end
 World.threads = {}
 function ForkThread(f, ...)
     local args = { ... }
@@ -499,20 +503,20 @@ def panel():
     g = lua.globals()
     g.CPAIPanelInit()
     check(g.UI.callback is None, "memória espera a simulação começar (não vai durante a montagem da tela)")
-    lua.execute("Sync = {}")
-    g.UI.beats[1]()
+    lua.execute("Sync = {} UI.time = 3")
+    g.CPAIPanelPoll()
     cb = g.UI.callback
     check(cb is not None and cb.Func == "CPAIMemory" and cb.Args.games == 2 and cb.Args.route["2:2"] == 6,
           "memória de partidas anteriores volta para a IA no começo (com as rotas deste mapa)")
     check(g.UI.bound is not None and g.UI.bound["F4"] is not None, "painel: tecla F4 registrada")
-    check(len(g.UI.beats) == 1, "painel: acompanha o jogo a cada batida")
+    check(len(g.UI.beats) == 0 and g.UI.threads == 2, "painel: acompanha o jogo a cada quadro (sem as batidas do gamemain, que o PC não chama)")
     lua.execute("""Sync = { CPAIStatus = { [3] = { name = 'Mr. Cow', personality = 'Agressiva', plan = 'atacando', adaptive = 'normal',
         minUnits = 9, acu = 'na base', intel = { air = 4, land = 30, naval = 0 },
         main = { n = 14, power = 52, state = 'atacando' }, raid = { n = 0, power = 0, state = 'na emboscada' },
         fleet = { n = 0, power = 0, state = 'na emboscada' }, drop = { n = 0, power = 0, state = 'na emboscada' },
         fighters = { n = 4, power = 24, state = 'cobrindo o exercito' }, bombers = { n = 0, power = 0, state = 'na emboscada' },
-        gunships = { n = 2, power = 8, state = 'atacando' } } } }""")
-    g.UI.beats[1]()
+        gunships = { n = 2, power = 8, state = 'atacando' }, time = 10 } } }""")
+    g.CPAIPanelPoll()
     g.CPAIPanelToggle()
     texts = [t.text for t in g.UI.texts.values() if t.text and not t.hidden]
     joined = " | ".join(texts)
@@ -520,8 +524,10 @@ def panel():
     check("Exercito 14 (forca 52, atacando)" in joined and "Cacas 4" in joined, f"painel mostra exército e aviação ({joined[:160]})")
     check(g.UI.printed is None, f"painel sem erro ({g.UI.printed})")
     # the model of this match arrives and is kept, blended with the earlier matches
-    lua.execute("""Sync = { CPAIModel = { style = { rush = 0.2, air = 0.9 }, firstAttack = 600, route = { ['3:3'] = 10 }, hit = {}, expand = {} } }""")
-    g.UI.beats[1]()
+    lua.execute("""Sync = { CPAIModel = { seq = 1, style = { rush = 0.2, air = 0.9 }, firstAttack = 600, route = { ['3:3'] = 10 }, hit = {}, expand = {} } }""")
+    g.CPAIPanelPoll()
+    g.CPAIPanelPoll()  # the same model again (sent on every tick): kept only once
+    check(g.UI.prefs.CPAIMemory.games == 3, "o mesmo modelo repetido é guardado uma vez só")
     mem = g.UI.prefs.CPAIMemory
     check(mem.games == 3 and 0.3 < mem.style.air < 0.9 and mem.style.rush < 0.8, f"memória misturada com a partida atual (ar {mem.style.air}, rush {mem.style.rush})")
     m = mem.maps["/maps/test/test_scenario.lua"]
@@ -530,9 +536,9 @@ def panel():
     check(g.UI.prefs.CPAIMemory is None, "botão esquecer apaga a memória")
     check(g.UI.callback is not None and g.UI.callback.Func == "CPAIForget", "botão esquecer também zera a IA da partida")
     # an AI that stops sending its plan (defeated) leaves the panel after about a minute
-    lua.execute("Sync = {}")
-    for _ in range(700):
-        g.UI.beats[1]()
+    lua.execute("""UI.time = 120 Sync = { CPAIStatus = { [4] = { name = 'Outra', personality = 'Naval', plan = 'atacando', adaptive = 'normal',
+        minUnits = 9, acu = 'na base', intel = { air = 0, land = 0, naval = 0 }, time = 110 } } }""")
+    g.CPAIPanelPoll()
     texts = [t.text for t in g.UI.texts.values() if t.text and not t.hidden]
     check(not any("Mr. Cow" in t for t in texts), "IA derrotada sai do painel")
 
@@ -717,6 +723,10 @@ def review_fixes():
     s.W.boom = False
     check((s.W.pooled or 0) >= 6, f"erros repetidos: unidades voltam para a IA original ({s.W.pooled})")
     check("stopped" in (s.W.warn or ""), "erros repetidos: comandante para e avisa no log")
+    s.g.RunThreads()
+    st = s.g.Sync.CPAIStatus[1]
+    check(st is not None and st.stopped and st.error and "boom" in st.error,
+          f"erros repetidos: o painel mostra o erro e que a IA original assumiu ({st.error if st else None})")
 
 
 def main() -> int:

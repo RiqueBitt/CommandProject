@@ -62,6 +62,7 @@ local UNITS = {
 
 -- shared by every AI commander in the match (allies coordinate through it)
 CPAI = CPAI or { commanders = {} }
+CPAI.status = CPAI.status or {} -- army -> what the in-game panel shows
 
 -- ---------------------------------------------------------------- helpers
 local CAT = false
@@ -2137,10 +2138,33 @@ function Commander.Publish(self)
         time = Now(),
     }
     if Commander.M(self) then entry.learned = CPAIModelSummary() end
-    pcall(function()
-        if not Sync.CPAIStatus then Sync.CPAIStatus = {} end
-        Sync.CPAIStatus[self.army] = entry
-    end)
+    if self.lastError then entry.error = self.lastError end
+    CPAI.status[self.army] = entry
+end
+
+-- what goes to the interface is kept here and sent again on every tick by SyncThread: the Sync
+-- table is emptied after each beat, and the interface may read it on a frame between two beats
+local function Report(army, fields)
+    local entry = CPAI.status[army]
+    if not entry then
+        entry = { name = 'IA ' .. army, personality = '-', plan = 'iniciando', adaptive = 'normal', minUnits = 0,
+            acu = '-', intel = { air = 0, land = 0, naval = 0 }, dangers = 0 }
+        local b = ArmyBrains[army]
+        if b and b.Nickname then entry.name = b.Nickname end
+        CPAI.status[army] = entry
+    end
+    for k, v in fields do entry[k] = v end
+    entry.time = Now()
+end
+
+local function SyncThread()
+    while true do
+        pcall(function()
+            if CFG.status and next(CPAI.status) then Sync.CPAIStatus = CPAI.status end
+            if CPAI.modelOut and Now() < (CPAI.modelOutUntil or 0) then Sync.CPAIModel = CPAI.modelOut end
+        end)
+        WaitTicks(1)
+    end
 end
 
 -- the model goes to the interface every 30 s after 5 minutes of play (a match abandoned right at
@@ -2149,7 +2173,13 @@ function Commander.Remember(self)
     if not CFG.learn or Humans() ~= 1 or Now() < 300 or not Commander.M(self) then return end
     if CPAI.rememberedAt and Now() - CPAI.rememberedAt < 30 then return end
     CPAI.rememberedAt = Now()
-    pcall(function() Sync.CPAIModel = CPAIModelMemory() end)
+    local ok, m = pcall(CPAIModelMemory)
+    if ok and m then
+        CPAI.modelSeq = (CPAI.modelSeq or 0) + 1
+        m.seq = CPAI.modelSeq
+        CPAI.modelOut = m
+        CPAI.modelOutUntil = Now() + 5
+    end
 end
 
 -- ---------------------------------------------------------------- main loop
@@ -2223,6 +2253,7 @@ function Commander.Release(self)
     end)
     CPAI.commanders[self.army] = nil
     WARN('*CommandProject AI commander: stopped for army ' .. self.army .. ', units returned to the original AI')
+    Report(self.army, { plan = 'parou por erro: a IA original do jogo assumiu', stopped = true })
 end
 
 function Commander.Run(self)
@@ -2237,6 +2268,8 @@ function Commander.Run(self)
         else
             self.failures = self.failures + 1
             WARN('*CommandProject AI commander: ' .. tostring(err))
+            self.lastError = string.sub(tostring(err), 1, 160)
+            Report(self.army, { error = self.lastError })
             if self.failures >= 3 then
                 Commander.Release(self)
                 return
@@ -2246,6 +2279,7 @@ function Commander.Run(self)
         WaitSeconds(period)
     end
     CPAI.commanders[self.army] = nil
+    CPAI.status[self.army] = nil
 end
 
 local function ModelThread()
@@ -2281,7 +2315,19 @@ function CPCommanderRun(brain, home)
         Model()
         ForkThread(ModelThread)
     end
-    local self = Commander.New(brain, home or { 0, 0, 0 })
+    if not CPAI.syncThread then
+        CPAI.syncThread = true
+        ForkThread(SyncThread)
+    end
+    local ok, self = pcall(Commander.New, brain, home or { 0, 0, 0 })
+    if not ok then
+        local army = 0
+        pcall(function() army = brain:GetArmyIndex() end)
+        WARN('*CommandProject AI commander: ' .. tostring(self))
+        Report(army, { plan = 'nao iniciou: a IA original do jogo continua', error = string.sub(tostring(self), 1, 160), stopped = true })
+        return
+    end
+    Report(self.army, { name = brain.Nickname or ('IA ' .. self.army), personality = self.P.label, plan = 'preparando' })
     Commander.Run(self)
 end
 end
