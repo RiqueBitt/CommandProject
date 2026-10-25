@@ -96,20 +96,46 @@ fn faction_of(bp: &blueprint::Blueprint, cats: &[String]) -> String {
         .unwrap_or_else(|| "?".into())
 }
 
-/// id da unidade a partir do caminho `/units/<id>/<id>_unit.bp` (ou com `/uncompiled` antes).
+/// Id da unidade a partir do caminho do blueprint. No jogo eles ficam em
+/// `/units/<facção>/<ID>/<ID>_unit.bp`; tropas de mods podem estar em `/units/<ID>/`.
 fn unit_id_of(key: &str) -> Option<String> {
     let k = key.strip_prefix("/uncompiled").unwrap_or(key);
     let rest = k.strip_prefix("/units/")?;
-    let (dir, file) = rest.split_once('/')?;
-    if file.contains('/') {
-        return None;
-    }
+    let (dirs, file) = rest.rsplit_once('/')?;
+    let dir = dirs.rsplit('/').next()?;
     let f = file.strip_suffix("_unit.bp")?;
-    (f == dir).then(|| dir.to_string())
+    (f == dir && !dir.is_empty() && dirs.split('/').count() <= 2).then(|| dir.to_string())
 }
 
-/// (fonte, entrada) do blueprint em texto de cada unidade.
-type Index = BTreeMap<String, (usize, usize, bool)>;
+/// Pasta da unidade no jogo (`/units/uef/uul0101/`), com barra no fim.
+fn dir_of(key: &str) -> String {
+    let k = key.strip_prefix("/uncompiled").unwrap_or(key);
+    k.rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default()
+}
+
+/// Pasta da unidade do jogo (ex.: `/units/uef/uul0101/`).
+pub fn unit_dir(sources: &[PathBuf], id: &str) -> Result<String> {
+    let id = id.to_ascii_lowercase();
+    let (idx, _) = index(sources)?;
+    idx.get(&id).map(|e| e.3.clone()).ok_or_else(|| Error::Other(format!("unidade {id} não encontrada nos arquivos do jogo")))
+}
+
+/// Troca a pasta da base pela pasta da tropa nova (e o id no nome do arquivo):
+/// `/units/uef/uul0101/uul0101_lod0.scm` → `/units/cpmart01/cpmart01_lod0.scm`.
+pub fn relocate(path: &str, base_dir: &str, base: &str, new: &str) -> String {
+    let lower = path.to_ascii_lowercase();
+    let bd = base_dir.trim_start_matches('/');
+    let (lead, rest) = match lower.find(bd) {
+        Some(p) if !bd.is_empty() => (&path[..p], &path[p + bd.len()..]),
+        _ => return rename(path, base, new),
+    };
+    // o caminho continua relativo ou absoluto como era
+    let lead = if lead.ends_with('/') || lead.is_empty() { lead } else { "" };
+    format!("{lead}units/{new}/{}", rename(rest, base, new))
+}
+
+/// (fonte, entrada, é texto, pasta) do blueprint de cada unidade.
+type Index = BTreeMap<String, (usize, usize, bool, String)>;
 type Cached = (Vec<PathBuf>, Index, Vec<UnitInfo>);
 static INDEX: Mutex<Option<Cached>> = Mutex::new(None);
 
@@ -127,17 +153,18 @@ fn index(sources: &[PathBuf]) -> Result<(Index, Vec<UnitInfo>)> {
                 let uncompiled = e.key.starts_with("/uncompiled");
                 // prefere o texto (uncompiled); entre iguais, o montado por último vence
                 let keep = match idx.get(&id) {
-                    Some(&(_, _, u)) => uncompiled || !u,
+                    Some(&(_, _, u, _)) => uncompiled || !u,
                     None => true,
                 };
                 if keep {
-                    idx.insert(id, (si, i, uncompiled));
+                    idx.insert(id, (si, i, uncompiled, dir_of(&e.key)));
                 }
             }
         }
     }
     let mut cat = Vec::new();
-    for (id, &(si, i, _)) in &idx {
+    for (id, (si, i, _, dir)) in &idx {
+        let (si, i) = (*si, *i);
         let Ok(data) = Scd::open(&sources[si]).and_then(|mut s| s.read_at(i)) else { continue };
         if data.starts_with(b"\x1bLua") {
             continue; // só bytecode: não dá para editar
@@ -154,7 +181,11 @@ fn index(sources: &[PathBuf]) -> Result<(Index, Vec<UnitInfo>)> {
         cat.push(UnitInfo {
             id: id.clone(),
             name,
-            faction: faction_of(&bp, &cats),
+            faction: Some(faction_of(&bp, &cats)).filter(|f| f != "?").unwrap_or_else(|| {
+                // sem facção no blueprint: a pasta do jogo diz (/units/uef/…)
+                let seg = dir.trim_start_matches("/units/").split('/').next().unwrap_or_default().to_ascii_uppercase();
+                if FACTIONS.iter().any(|f| f.eq_ignore_ascii_case(&seg)) { seg } else { "?".into() }
+            }),
             role: role_of(&cats),
             description: bp.text("Description").map(|s| blueprint::strip_loc(&s)).unwrap_or_default(),
             categories: cats,
@@ -202,7 +233,7 @@ pub fn missing_files(sources: &[PathBuf], paths: &[String]) -> Result<Vec<String
 pub fn blueprint_text(sources: &[PathBuf], id: &str) -> Result<String> {
     let id = id.to_ascii_lowercase();
     let (idx, _) = index(sources)?;
-    let &(si, i, _) = idx.get(&id).ok_or_else(|| Error::Other(format!("unidade {id} não encontrada nos arquivos do jogo")))?;
+    let &(si, i, _, _) = idx.get(&id).ok_or_else(|| Error::Other(format!("unidade {id} não encontrada nos arquivos do jogo")))?;
     let data = Scd::open(&sources[si])?.read_at(i)?;
     if data.starts_with(b"\x1bLua") {
         return Err(Error::Format(format!("o blueprint de {id} só existe compilado; não dá para usar como base")));
@@ -214,7 +245,7 @@ pub fn blueprint_text(sources: &[PathBuf], id: &str) -> Result<String> {
 /// pelo id em outras pastas de texturas (ícones). (fonte, entrada, caminho, tamanho)
 fn unit_files(sources: &[PathBuf], id: &str) -> Result<Vec<(usize, usize, String, u64)>> {
     let id = id.to_ascii_lowercase();
-    let dir = format!("/units/{id}/");
+    let dir = unit_dir(sources, &id).unwrap_or_else(|_| format!("/units/{id}/"));
     let mut found: HashMap<String, (usize, usize, String, u64)> = HashMap::new();
     for (si, src) in sources.iter().enumerate() {
         let Ok(mut scd) = Scd::open(src) else { continue };
@@ -415,13 +446,16 @@ pub fn make_blueprint(sources: &[PathBuf], b: &UnitBuild) -> Result<(String, Vec
 
     // 1) caminhos da pasta da unidade base passam a apontar para a pasta nova
     let bp = blueprint::parse(&text)?;
-    let base_dir = format!("/units/{base}/");
+    let base_dir = unit_dir(sources, &base)?;
+    // só os caminhos de arquivos que vão junto no pacote (sons e outros nomes ficam como eram)
+    let norm = |p: &str| p.trim_start_matches('/').to_ascii_lowercase().replace('\\', "/").replace(".win.", ".");
+    let shipped: std::collections::HashSet<String> = unit_files(sources, &base)?.iter().map(|f| norm(&f.2)).collect();
     let mut changes: Vec<(String, Set)> = bp
         .leaves()
         .into_iter()
         .filter_map(|l| {
             let t = l.text?;
-            t.to_ascii_lowercase().contains(&base_dir).then(|| (l.path, Set::Str(rename(&t, &base, &new))))
+            (t.to_ascii_lowercase().contains(&base_dir) && shipped.contains(&norm(&t))).then(|| (l.path, Set::Str(relocate(&t, &base_dir, &base, &new))))
         })
         .collect();
     // 2) alterações do editor
@@ -534,8 +568,9 @@ pub fn build(sources: &[PathBuf], b: &UnitBuild, dest: &Path) -> Result<BuildRep
     };
     let bp_path = format!("units/{new}/{new}_unit.bp");
     add(&mut out, &bp_path, format!("{header}{text}").as_bytes())?;
+    let base_dir = unit_dir(sources, &base)?;
     let script = format!(
-        "-- Gerado pelo CommandProject: {new} usa o comportamento de {base}.\nlocal base = import('/units/{base}/{base}_script.lua')\nTypeClass = base.TypeClass\n"
+        "-- Gerado pelo CommandProject: {new} usa o comportamento de {base}.\nlocal base = import('{base_dir}{base}_script.lua')\nTypeClass = base.TypeClass\n"
     );
     add(&mut out, &format!("units/{new}/{new}_script.lua"), script.as_bytes())?;
 
@@ -551,7 +586,7 @@ pub fn build(sources: &[PathBuf], b: &UnitBuild, dest: &Path) -> Result<BuildRep
         if ln.ends_with("_unit.bp") || ln.ends_with("_script.lua") {
             continue;
         }
-        let new_name = rename(name, &base, &new);
+        let new_name = relocate(name, &base_dir, &base, &new);
         let mut data = Scd::open(&sources[*si])?.read_at(*i)?;
         let is_dds = ln.ends_with(".dds") && name.to_ascii_lowercase().starts_with("units/");
         if let Some(png) = b.icon_png.as_ref().filter(|_| ln.ends_with(".dds") && !name.to_ascii_lowercase().starts_with("units/")) {
@@ -725,6 +760,18 @@ pub fn prop_files(sources: &[PathBuf], slug: &str, name: &str, m: &crate::modelg
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unit_ids_in_faction_folders() {
+        assert_eq!(unit_id_of("/units/uef/uul0101/uul0101_unit.bp").as_deref(), Some("uul0101"));
+        assert_eq!(unit_id_of("/uncompiled/units/cybran/url0101/url0101_unit.bp").as_deref(), Some("url0101"));
+        assert_eq!(unit_id_of("/units/cpmart01/cpmart01_unit.bp").as_deref(), Some("cpmart01"));
+        assert_eq!(unit_id_of("/units/uef/uux0114/uux0114-shell_unit.bp"), None);
+        assert_eq!(dir_of("/uncompiled/units/uef/uul0101/uul0101_unit.bp"), "/units/uef/uul0101/");
+        assert_eq!(relocate("/units/uef/uul0101/UUL0101_awalk.sca", "/units/uef/uul0101/", "uul0101", "cpmart01"), "/units/cpmart01/cpmart01_awalk.sca");
+        assert_eq!(relocate("Units/UEF/UUL0101/UUL0101_lod0.scm", "/units/uef/uul0101/", "uul0101", "cpmart01"), "units/cpmart01/cpmart01_lod0.scm");
+        assert_eq!(relocate("textures/ui/icons/uul0101_icon.dds", "/units/uef/uul0101/", "uul0101", "cpmart01"), "textures/ui/icons/cpmart01_icon.dds");
+    }
+
     use super::*;
 
     fn game(dir: &Path) -> Vec<PathBuf> {

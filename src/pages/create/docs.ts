@@ -43,15 +43,31 @@ export interface MapDoc {
   clean: boolean;
   /** bioma do chão limpo (com o gerador de mundo, segue o bioma dele) */
   groundBiome: GroundBiome;
-  /** textura do chão limpo escolhida à mão (difusa); null = a melhor do bioma */
+  /** textura do chão limpo escolhida à mão (difusa); null = a melhor do bioma (versões antigas) */
   groundTex: string | null;
+  /** texturas trocadas à mão em cada papel do bioma (praia, chão, terra, rocha, topo) */
+  groundRoles: Partial<Record<"beach" | "low" | "mid" | "steep" | "peak", string>>;
+  /** pincel de textura: papel e força por ponto ((paintSize+1)², base64) */
+  paint: string | null;
+  paintSize: number;
+  /** pintura feita pelo gerador de mundo (estradas, vilas, plantações, chão das matas) — fica por
+   * baixo da sua; mesma resolução de `paintSize` */
+  worldPaint: string | null;
+  /** paisagem em volta do mapa (montanhas além da borda) */
+  ring: boolean;
+  /** texturas de chão importadas (.png/.jpg) — o arquivo fica nos arquivos do projeto */
+  customTex: CustomTex[];
 }
+
+/** Textura de chão importada: `asset` é o PNG guardado no projeto; `slug` dá o caminho no jogo. */
+export interface CustomTex { slug: string; name: string; asset: string }
 
 export const newMapDoc = (over: Partial<MapDoc> = {}): MapDoc => ({
   schema: 1, terrain: null, lobbyName: "Meu mapa", teams: "2", economy: { baseMass: 4, sites: 8, perSite: 3 }, norush: 70,
   patch: false, maxSlope: 6, waterMargin: 4, smooth: false, rugged: false, minimap: "donor", strip: "moving",
   edits: EMPTY_EDITS, models: [], notes: "", world: null, features: [], sculpt: null, sculptSize: 0, symmetry: "none",
-  layers: { hidden: [], locked: [] }, base: "game", clean: false, groundBiome: "temperate", groundTex: null, ...over,
+  layers: { hidden: [], locked: [] }, base: "game", clean: false, groundBiome: "temperate", groundTex: null,
+  groundRoles: {}, paint: null, paintSize: 512, worldPaint: null, ring: true, customTex: [], ...over,
 });
 
 export function migrateMap(raw: unknown): MapDoc {
@@ -62,6 +78,7 @@ export function migrateMap(raw: unknown): MapDoc {
     features: d.features ?? [], layers: { hidden: d.layers?.hidden ?? [], locked: d.layers?.locked ?? [] }, schema: 1,
     // projetos antigos: mundo gerado sobre um mapa do jogo já ganha o visual limpo
     base: d.base ?? "game", clean: d.clean ?? !!d.world, groundBiome: d.groundBiome ?? d.world?.biome ?? "temperate", groundTex: d.groundTex ?? null,
+    groundRoles: d.groundRoles ?? (d.groundTex ? { low: d.groundTex } : {}), paint: d.paint ?? null, paintSize: d.paintSize ?? 256, worldPaint: d.worldPaint ?? null, ring: d.ring ?? true, customTex: d.customTex ?? [],
   };
 }
 

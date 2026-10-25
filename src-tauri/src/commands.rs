@@ -1537,6 +1537,17 @@ pub async fn game_texture(state: State<'_, AppState>, path: String, max: Option<
 pub struct PropPreview {
     mesh: cp_core::scm::MeshView,
     texture: Option<String>,
+    /// posições, normais, uvs (f32) e índices (u32) em base64, little-endian: bem mais leve que
+    /// milhares de números em JSON (os vetores de `mesh` vão vazios)
+    bin: [String; 4],
+}
+
+fn b64_le<T: Copy, const N: usize>(v: &[T], to: fn(T) -> [u8; N]) -> String {
+    let mut b = Vec::with_capacity(v.len() * N);
+    for x in v {
+        b.extend_from_slice(&to(*x));
+    }
+    base64::engine::general_purpose::STANDARD.encode(b)
 }
 
 /// Modelo 3D de uma decoração (para ver antes de colocar no mapa).
@@ -1544,8 +1555,14 @@ pub struct PropPreview {
 pub async fn prop_preview(state: State<'_, AppState>, bp: String, lod: Option<u8>) -> R<PropPreview> {
     let srcs = sources(&state.ws).await?;
     off_lock(move || {
-        let (mesh, tex) = cp_core::mapassets::prop_preview(&srcs, &bp, lod.unwrap_or(0).min(3))?;
-        Ok(PropPreview { mesh, texture: tex.map(|p| data_url("image/png", &p)) })
+        let (mut mesh, tex) = cp_core::mapassets::prop_preview(&srcs, &bp, lod.unwrap_or(0).min(3))?;
+        let bin = [
+            b64_le(&std::mem::take(&mut mesh.positions), f32::to_le_bytes),
+            b64_le(&std::mem::take(&mut mesh.normals), f32::to_le_bytes),
+            b64_le(&std::mem::take(&mut mesh.uvs), f32::to_le_bytes),
+            b64_le(&std::mem::take(&mut mesh.indices), u32::to_le_bytes),
+        ];
+        Ok(PropPreview { mesh, texture: tex.map(|p| data_url("image/png", &p)), bin })
     })
     .await
 }

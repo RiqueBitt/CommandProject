@@ -251,11 +251,12 @@ export default function UnitStudio({ id }: { id: string }) {
   // arquivos citados (projéteis, animações…) que não existem no jogo
   useEffect(() => {
     if (!details || !doc.base) return;
-    const baseDir = `/units/${doc.base}/`;
+    // pasta da base: /units/<facção>/<id>/ no jogo (ou /units/<id>/ em mods)
+    const inBase = (v: string) => new RegExp(`^/units/(?:[^/]+/)?${doc.base}/`, "i").test(v);
     const paths = new Set<string>();
     for (const [path, l] of leaves) {
       const v = path in doc.overrides ? doc.overrides[path] : l.text;
-      if (typeof v === "string" && isPath(v) && !v.toLowerCase().startsWith(baseDir)) paths.add(v);
+      if (typeof v === "string" && isPath(v) && !inBase(v)) paths.add(v);
     }
     for (const [k, v] of Object.entries(doc.overrides)) if (typeof v === "string" && isPath(v) && !leaves.has(k)) paths.add(v);
     for (const a of Object.values(doc.animations)) if (!a.file.startsWith("asset:")) paths.add(a.file);

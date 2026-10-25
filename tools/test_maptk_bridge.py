@@ -275,6 +275,7 @@ def main():
         assert abs(H6[700 * w6 + 512] / 128 - 33) < 0.01 and abs(H6[3 * w6 + 3] / 128 - 33) < 0.01
         print("base lisa ok: heightfield plano e decorações originais retiradas")
         test_lighting()
+        test_rebuild()
 
         bad = dict(spec, scenario_id="meu mapa")
         env = dict(os.environ, SC2_GAMEDATA=gd, SC2_MAP_OUT=out)
@@ -341,6 +342,122 @@ def test_lighting():
     cols = {struct.unpack_from("<H", m0, 128 + i * 16 + 8)[0] for i in range(blocks)}
     assert len(cols) > 3, "a luz nova acompanha o relevo"
     print(f"luz refeita ok: {len(cols)} tons, caminho da máscara apontando para o mapa novo")
+
+
+def test_rebuild():
+    """Malha nova completa (cp_regrid.rebuild_terrain) num terreno mínimo no formato do jogo:
+    1 material de chão com mistura (BLENDING) + 1 de água; grade, anel em volta, biomas e água."""
+    sys.path.insert(0, os.path.join(ROOT, "resources", "maptk"))
+    import cp_regrid as rg
+    import cp_world
+    nrec = 2
+    # textos: nomes, defines, texturas, máscara, água
+    strs = {}
+    tab = bytearray()
+    base_st = 20 + nrec * 108
+    def S(t):
+        if t not in strs:
+            while len(tab) % 4:
+                tab.append(0)
+            strs[t] = len(tab)
+            tab.extend(t.encode() + b"\x00")
+        return strs[t]
+    for t in ("Ground", "Water", "BLENDING", "RNM_LIGHTING", "49", "/textures/Terrain/MP_901/a_d.dds", "/textures/Terrain/MP_901/b_d.dds",
+              "/maps/SC2_MP_901/lighting/mask02.dds", "/textures/Terrain/Water/foam_001.dds", "/maps/SC2_MP_901/SC2_MP_901.waterDepth.dds"):
+        S(t)
+    # defines (2 pares nome/valor) logo depois dos materiais
+    mats_len = nrec * 84
+    defs_off = mats_len
+    defs = bytearray()
+    N = 0xFFFFFFFF
+    mk_mats = lambda st: [
+        [st + mats_len + 16 + strs["Ground"], N, N, 2, st + defs_off, N, 0, 0, st + mats_len + 16 + strs["/textures/Terrain/MP_901/a_d.dds"],
+         st + mats_len + 16 + strs["/textures/Terrain/MP_901/b_d.dds"], N, N, N, N, N, N, N, N, st + mats_len + 16 + strs["/maps/SC2_MP_901/lighting/mask02.dds"], N, N],
+        [st + mats_len + 16 + strs["Water"], N, N, 0, N, N, 0, 0, st + mats_len + 16 + strs["/textures/Terrain/Water/foam_001.dds"], N, N, N, N, N,
+         st + mats_len + 16 + strs["/maps/SC2_MP_901/SC2_MP_901.waterDepth.dds"], N, N, N, N, N, N]]
+    # malha: chão 3×3 vértices sobre o mapa (y = 20) e água 2 triângulos (y = -90)
+    G = 512
+    ground = [(x, 20.0, z) for z in (0, 256, 512) for x in (0, 256, 512)]
+    gt = []
+    for j in range(2):
+        for i in range(2):
+            a = j * 3 + i
+            gt += [(a, a + 3, a + 1), (a + 1, a + 3, a + 4)]
+    waterp = [(-1000.0, -90.0, -1000.0), (1500.0, -90.0, -1000.0), (-1000.0, -90.0, 1500.0), (1500.0, -90.0, 1500.0)]
+    wt = [(0, 2, 1), (1, 2, 3)]
+    def vtx(p):
+        return struct.pack("<3f2e2H3I", *p, 0.0, 0.0, 0, 0, 0, 0, 0)
+    recs = [(ground, gt), (waterp, wt)]
+    # árvores
+    blocks, fix = [], []
+    bvh0 = 20 + nrec * 108
+    vbuf, ibuf, vc, ic = b"", b"", [], []
+    for P, T in recs:
+        vorder, ntris, nodes = rg.build_bvh(P, T)
+        base = bvh0 + sum(len(b) for b in blocks)
+        nb, nf = rg._pack_nodes(nodes, base)
+        blocks.append(nb); fix += nf
+        vc.append(len(vbuf) // 32); ic.append(len(ibuf) // 4)
+        vbuf += b"".join(vtx(P[k]) for k in vorder)
+        ibuf += struct.pack(f"<{len(ntris) * 3}I", *[k for t in ntris for k in t])
+    st = bvh0 + sum(len(b) for b in blocks)
+    out = bytearray(struct.pack("<5I", 6, nrec, 20, nrec, st))
+    fix += [8, 16]
+    for r in range(nrec):
+        d = bytearray(108)
+        struct.pack_into("<3I", d, 0, 200, 30, 0x43480000)
+        struct.pack_into("<2I", d, 12, vc[r], ic[r])
+        struct.pack_into("<I", d, 32, bvh0 + sum(len(b) for b in blocks[:r]))
+        fix.append(20 + r * 108 + 32)
+        out += d
+    for b in blocks:
+        out += b
+    assert len(out) == st
+    for m in mk_mats(st):
+        out += struct.pack("<21I", *m)
+    for r in range(nrec):
+        for f in (0, 4, 8, 9, 14, 18):
+            fix.append(st + r * 84 + f * 4)
+    defs += struct.pack("<4I", st + mats_len + 16 + strs["BLENDING"], st + mats_len + 16 + strs["49"],
+                        st + mats_len + 16 + strs["RNM_LIGHTING"], st + mats_len + 16 + strs["49"])
+    fix += [st + mats_len + k * 4 for k in range(4)]
+    out += defs + tab
+    while len(out) % 32:
+        out.append(0)
+    blob = len(out)
+    nv, ni = len(vbuf) // 32, len(ibuf) // 4
+    out += struct.pack("<5I", 3, nv, 20, ni, 20 + nv * 32) + vbuf + ibuf
+    fix += [blob + 8, blob + 16]
+    data = rg.write_bdf([0x4244464D, 7, 2, 0, 0, 0, 0, 0], sorted(fix), [0, blob], out)
+    # a malha mínima lê de volta
+    h, f2, sec, pl = rg.read_bdf(data)
+    assert sec == [0, blob] and len(f2) == len(fix)
+    height = cp_world.ring_height(lambda x, z: 20.0 + 30.0 * max(0.0, 1 - ((x - 256) ** 2 + (z - 256) ** 2) ** 0.5 / 120), G)
+    biome = cp_world.Biome(height, G, water=10.0)
+    zones = cp_world.chain_zones([{"d": f"/textures/Terrain/MP_007/t{k}_d.dds"} for k in range(5)])
+    new, info = rg.rebuild_terrain(data, height, G, step=8.0, mask_path="/maps/SC2_CPGRID/lighting/cpgrid.dds", margin=128.0,
+                                   ring_step=32.0, zones=zones, zone_t=biome.t, water_y=10.0,
+                                   water_mask_path="/maps/SC2_CPGRID/SC2_CPGRID.waterDepth.dds")
+    assert info["zones"] == 1 and info["water"], info  # só 1 material com mistura neste terreno
+    h, f3, sec3, pl3 = rg.read_bdf(new)
+    st3 = struct.unpack_from("<I", pl3, 16)[0]
+    w0 = struct.unpack_from("<21I", pl3, st3)
+    cs = lambda p: pl3[p:pl3.find(b"\x00", p)].decode()
+    assert cs(w0[18]) == "/maps/SC2_CPGRID/lighting/cpgrid.dds" and cs(w0[8]).endswith("t0_d.dds") and cs(w0[9]).endswith("t1_d.dds")
+    assert "BLENDING" in {cs(struct.unpack_from("<I", pl3, w0[4] + 8 * k)[0]) for k in range(2)}, "defines continuam apontando certo"
+    w1 = struct.unpack_from("<21I", pl3, st3 + 84)
+    assert cs(w1[14]) == "/maps/SC2_CPGRID/SC2_CPGRID.waterDepth.dds"
+    a, nv3, _, ni3, _ = struct.unpack_from("<5I", pl3, sec3[1])
+    ys = [struct.unpack_from("<f", pl3, sec3[1] + 20 + k * 32 + 4)[0] for k in range(nv3)]
+    xs = [struct.unpack_from("<f", pl3, sec3[1] + 20 + k * 32)[0] for k in range(nv3)]
+    assert min(xs) < -100 and max(xs) > G + 100, "anel em volta do mapa"
+    assert any(abs(y - 10.0) < 1e-3 for y in ys), "lâmina d'água na altura nova"
+    assert max(ys) > 60, "montanhas em volta"
+    for p in f3:
+        if p < sec3[1]:
+            v = struct.unpack_from("<I", pl3, p)[0]
+            assert v == 0xFFFFFFFF or v < sec3[1], f"ponteiro fora do lugar em {p}"
+    print(f"malha nova ok: {ni3 // 3} triângulos, anel em volta, água e texturas por bioma")
 
 
 if __name__ == "__main__":

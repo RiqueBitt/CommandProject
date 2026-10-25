@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { fbm, zoneT } from "../pages/studio/biome";
 import { naturalColor } from "../pages/create/worldgen";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { heightAt, type DecorKind, type Pt, type Rect } from "../pages/studio/mapEdit";
@@ -46,7 +47,17 @@ interface Props {
 const SKY = 0x0b1118;
 
 /** Texturas do chão para as cores do relevo: praia, chão, rocha (encostas) e topo. */
-export interface GroundTextures { sand: string; grass: string; rock: string; snow: string; /** uma textura só no chão inteiro, sem tinta da paleta */ uniform?: boolean }
+export interface GroundTextures {
+  sand: string; grass: string; rock: string; snow: string;
+  /** 5ª camada (terra), usada com `t` */
+  dirt?: string;
+  /** uma textura só no chão inteiro, sem tinta da paleta */
+  uniform?: boolean;
+  /** posição de cada vértice na cadeia praia(0)→chão(1)→terra(2)→rocha(3)→topo(4), como no jogo */
+  t?: Float32Array | null;
+  /** paisagem em volta do mapa (como no jogo): largura e altura das montanhas */
+  ring?: { margin: number; rise: number; water: number | null } | null;
+}
 
 /** Editor 3D: relevo do terreno com a textura do jogo, água, marcadores e pincel. */
 export default function MapView3D(props: Props) {
@@ -92,6 +103,7 @@ export default function MapView3D(props: Props) {
     const uv = new Float32Array(w * w * 2);
     const col = new Float32Array(w * w * 3);
     const splat = new Float32Array(w * w * 4);
+    const splatB = new Float32Array(w * w);
     for (let j = 0; j < w; j++) for (let i = 0; i < w; i++) {
       const k = j * w + i;
       pos[k * 3] = i * step;
@@ -111,6 +123,7 @@ export default function MapView3D(props: Props) {
     geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
     geo.setAttribute("splat", new THREE.BufferAttribute(splat, 4));
+    geo.setAttribute("splatB", new THREE.BufferAttribute(splatB, 1));
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0, vertexColors: true });
     // chão com texturas: 4 camadas misturadas por vértice (praia, chão, rocha, topo), em dois
@@ -118,21 +131,24 @@ export default function MapView3D(props: Props) {
     const groundU = {
       tSand: { value: null as THREE.Texture | null }, tGrass: { value: null as THREE.Texture | null },
       tRock: { value: null as THREE.Texture | null }, tSnow: { value: null as THREE.Texture | null },
+      tDirt: { value: null as THREE.Texture | null },
       uGround: { value: 0 }, uTile: { value: 1 / 22 },
     };
     mat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, groundU);
       sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec4 splat;\nvarying vec4 vSplat;\nvarying vec2 vGround;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvSplat = splat;\nvGround = position.xz;");
+        .replace("#include <common>", "#include <common>\nattribute vec4 splat;\nattribute float splatB;\nvarying vec4 vSplat;\nvarying float vSplatB;\nvarying vec2 vGround;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvSplat = splat;\nvSplatB = splatB;\nvGround = position.xz;");
       sh.fragmentShader = sh.fragmentShader
         .replace("#include <common>", `#include <common>
-uniform sampler2D tSand; uniform sampler2D tGrass; uniform sampler2D tRock; uniform sampler2D tSnow;
+uniform sampler2D tSand; uniform sampler2D tGrass; uniform sampler2D tRock; uniform sampler2D tSnow; uniform sampler2D tDirt;
 uniform float uGround; uniform float uTile;
-varying vec4 vSplat; varying vec2 vGround;
+varying vec4 vSplat; varying float vSplatB; varying vec2 vGround;
 vec3 layerAt(vec2 p) {
-  vec4 w = vSplat / max(0.0001, dot(vSplat, vec4(1.0)));
-  return texture2D(tSand, p).rgb * w.x + texture2D(tGrass, p).rgb * w.y + texture2D(tRock, p).rgb * w.z + texture2D(tSnow, p).rgb * w.w;
+  float tot = max(0.0001, dot(vSplat, vec4(1.0)) + vSplatB);
+  vec3 c = texture2D(tSand, p).rgb * vSplat.x + texture2D(tGrass, p).rgb * vSplat.y + texture2D(tRock, p).rgb * vSplat.z + texture2D(tSnow, p).rgb * vSplat.w;
+  if (vSplatB > 0.001) c += texture2D(tDirt, p).rgb * vSplatB;
+  return c / tot;
 }`)
         .replace("#include <map_fragment>", `#include <map_fragment>
 if (uGround > 0.5) {
@@ -142,7 +158,7 @@ if (uGround > 0.5) {
   diffuseColor.rgb *= c * 0.62;
 }`);
     };
-    mat.customProgramCacheKey = () => "cp-ground";
+    mat.customProgramCacheKey = () => "cp-ground5";
     const ground = new THREE.Mesh(geo, mat);
     ground.receiveShadow = true;
     ground.castShadow = true;
@@ -162,10 +178,76 @@ if (uGround > 0.5) {
     const skirt = new THREE.Mesh(skirtGeo, skirtMat);
     scene.add(skirt);
 
+    // paisagem em volta do mapa (mesmo cálculo do jogo: cp_world.ring_height)
+    let ringMesh: THREE.Mesh | null = null;
+    let ringKey = "";
+    const setRing = (e: number, lo: number, hi: number) => {
+      const r = live.current.ground?.ring;
+      const { heights } = live.current;
+      const key = r ? `${r.margin}:${r.rise}:${r.water}` : "";
+      if (!r) {
+        if (ringMesh) { scene.remove(ringMesh); ringMesh.geometry.dispose(); ringMesh = null; ringKey = ""; }
+        skirt.visible = true;
+        return;
+      }
+      skirt.visible = false;
+      const R = Math.max(8, grid / 64), M = Math.ceil(r.margin / R) * R;
+      const n = Math.round((grid + 2 * M) / R) + 1;
+      const hIn = (x: number, z: number) => {
+        const fx = Math.max(0, Math.min(size, x / step)), fz = Math.max(0, Math.min(size, z / step));
+        const i0 = Math.min(size - 1, Math.floor(fx)), j0 = Math.min(size - 1, Math.floor(fz)), u = fx - i0, v = fz - j0;
+        const a = heights[j0 * w + i0], b = heights[j0 * w + i0 + 1], c = heights[(j0 + 1) * w + i0], d = heights[(j0 + 1) * w + i0 + 1];
+        return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+      };
+      const hAt = (x: number, z: number) => {
+        const cx = Math.max(0, Math.min(grid, x)), cz = Math.max(0, Math.min(grid, z));
+        const base = hIn(cx, cz), d = Math.hypot(x - cx, z - cz);
+        if (d <= 0) return base;
+        const t = Math.min(1, d / 220), k = t * t * (3 - 2 * t);
+        const big = 0.55 + 0.45 * fbm(x / 260, z / 260, 4242);
+        const crag = 1 - Math.abs(fbm(x / 70, z / 70, 4249));
+        return base + r.rise * k * big + 22 * k * crag * crag;
+      };
+      const P = new Float32Array(n * n * 3), C = new Float32Array(n * n * 3).fill(1), S = new Float32Array(n * n * 4), SB = new Float32Array(n * n), U = new Float32Array(n * n * 2);
+      const ee = grid / 256;
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+        const k = j * n + i, x = -M + i * R, z = -M + j * R;
+        const y = hAt(x, z);
+        P.set([x, y * e, z], k * 3);
+        const dx = (hAt(x + ee, z) - hAt(x - ee, z)) / (2 * ee), dz = (hAt(x, z + ee) - hAt(x, z - ee)) / (2 * ee);
+        const tv = zoneT(y, Math.hypot(dx, dz), (y - lo) / Math.max(1, hi - lo), r.water, fbm(x / 90, z / 90, 1337));
+        const wt = (q: number) => Math.max(0, 1 - Math.abs(tv - q));
+        S.set([wt(0), wt(1), wt(3), wt(4)], k * 4);
+        SB[k] = wt(2);
+      }
+      const I: number[] = [];
+      const inner = (i: number, j: number) => { const x = -M + i * R, z = -M + j * R; return x >= 0 && z >= 0 && x + R <= grid && z + R <= grid; };
+      for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
+        if (inner(i, j)) continue;
+        const a = j * n + i, b = a + 1, c = a + n, d = c + 1;
+        I.push(a, c, b, b, c, d);
+      }
+      const g2 = new THREE.BufferGeometry();
+      g2.setAttribute("position", new THREE.BufferAttribute(P, 3));
+      g2.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+      g2.setAttribute("color", new THREE.BufferAttribute(C, 3));
+      g2.setAttribute("splat", new THREE.BufferAttribute(S, 4));
+      g2.setAttribute("splatB", new THREE.BufferAttribute(SB, 1));
+      g2.setIndex(I);
+      g2.computeVertexNormals();
+      if (ringMesh) { ringMesh.geometry.dispose(); ringMesh.geometry = g2; } else {
+        ringMesh = new THREE.Mesh(g2, mat);
+        ringMesh.receiveShadow = true;
+        scene.add(ringMesh);
+      }
+      ringKey = key;
+    };
+    void ringKey;
+
     // água
     const water = new THREE.Mesh(
       new THREE.PlaneGeometry(grid, grid),
-      new THREE.MeshStandardMaterial({ color: 0x2b6c9e, transparent: true, opacity: 0.62, roughness: 0.15, metalness: 0.1, depthWrite: false }),
+      new THREE.MeshStandardMaterial({ color: 0x2b6c9e, transparent: true, opacity: 0.66, roughness: 0.38, metalness: 0.05, depthWrite: false }),
     );
     water.rotation.x = -Math.PI / 2;
     water.position.set(grid / 2, 0, grid / 2);
@@ -235,15 +317,15 @@ if (uGround > 0.5) {
     let groundKey = "";
     const setGround = () => {
       const g = live.current.ground;
-      const key = g ? `${g.uniform ? "u" : ""}${g.sand.length}:${g.grass.slice(-40)}:${g.rock.slice(-40)}:${g.snow.slice(-40)}` : "";
-      if (key === groundKey) return;
+      const key = g ? `${g.uniform ? "u" : ""}${g.sand.length}:${g.grass.slice(-40)}:${g.rock.slice(-40)}:${g.snow.slice(-40)}:${(g.dirt ?? "").slice(-40)}` : "";
+      if (key === groundKey) { if (groundU.uGround.value > 0.5) { setHeights(); invalidate(); } return; }
       groundKey = key;
       groundTex.splice(0).forEach((t) => t.dispose());
       groundU.uGround.value = 0;
       if (!g) { invalidate(); return; }
-      const urls = [g.sand, g.grass, g.rock, g.snow];
+      const urls = [g.sand, g.grass, g.rock, g.snow, g.dirt ?? g.grass];
       let done = 0;
-      const slots = [groundU.tSand, groundU.tGrass, groundU.tRock, groundU.tSnow];
+      const slots = [groundU.tSand, groundU.tGrass, groundU.tRock, groundU.tSnow, groundU.tDirt];
       urls.forEach((u, k) => loader.load(u, (t) => {
         if (groundKey !== key) { t.dispose(); return; }
         t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -288,14 +370,24 @@ if (uGround > 0.5) {
           const snow = (pal === "snow" ? 0.55 + 0.45 * sm(0.4, 0.8, t) : sm(0.7, 0.9, t)) * (1 - rock * 0.6);
           const sand = (wet ? sm(waterLevel + 4.5, waterLevel + 1, y) : 0) * (1 - rock);
           const grass = Math.max(0, 1 - rock - snow - sand);
-          splat.set([sand, grass, rock, snow], k * 4);
+          const gt = live.current.ground?.t;
+          if (gt && gt.length === w * w) {
+            // cadeia do jogo: pesos em "tenda" em volta de cada papel
+            const tv = gt[k], wt = (r: number) => Math.max(0, 1 - Math.abs(tv - r));
+            splat.set([wt(0), wt(1), wt(3), wt(4)], k * 4);
+            splatB[k] = wt(2);
+          } else {
+            splat.set([sand, grass, rock, snow], k * 4);
+            splatB[k] = 0;
+          }
           // com textura, a paleta só tinge de leve (a cor vem da textura do jogo)
           // (chão de uma textura só, o "visual limpo": sem tinta — fica como no jogo)
-          if (textured) { if (live.current.ground?.uniform) c.setRGB(1, 1, 1); else c.setRGB(0.8 + c.r * 0.3, 0.8 + c.g * 0.3, 0.8 + c.b * 0.3); }
+          if (textured) { if (live.current.ground?.uniform || live.current.ground?.t) c.setRGB(1, 1, 1); else c.setRGB(0.8 + c.r * 0.3, 0.8 + c.g * 0.3, 0.8 + c.b * 0.3); }
         } else colorFor(heights[k], waterLevel, lo, hi, c);
         col.set([c.r, c.g, c.b], k * 3);
       }
       geo.attributes.splat.needsUpdate = true;
+      geo.attributes.splatB.needsUpdate = true;
       geo.attributes.position.needsUpdate = true;
       geo.attributes.color.needsUpdate = true;
       geo.computeVertexNormals();
@@ -310,8 +402,12 @@ if (uGround > 0.5) {
       skirtGeo.attributes.position.needsUpdate = true;
       skirtGeo.computeVertexNormals();
       skirtGeo.computeBoundingSphere();
+      const rw = live.current.ground?.ring?.water;
+      setRing(e, rw != null ? Math.max(lo, rw) : lo, Math.max(hi, (rw != null ? Math.max(lo, rw) : lo) + 120));
       water.position.y = waterLevel * e;
       water.visible = waterLevel > lo + 0.5;
+      // com a paisagem em volta, a água vai até o horizonte (como a lâmina d'água do jogo)
+      water.scale.setScalar(live.current.ground?.ring && waterLevel > 0.5 ? 3 : 1);
       setMarkers();
       setDecor();
       setHighlights();
@@ -467,14 +563,14 @@ if (uGround > 0.5) {
           const kind = list[0].kind;
           mesh = new THREE.InstancedMesh(KIND_GEO[kind](), new THREE.MeshStandardMaterial({ color: KIND_COLOR[kind], roughness: 0.85, flatShading: true }), list.length);
         }
-        const fresh = new THREE.Color(0xc8f08a), plain = new THREE.Color(0xffffff);
+        const plain = new THREE.Color(0xffffff);
         list.forEach((d, i) => {
           q.setFromAxisAngle(up, (d.yaw * Math.PI) / 180);
           const s = Math.max(0.01, d.scale || 1);
           sc.set(s, s, s);
           v.set(d.x, hAt(d.x, d.z), d.z);
           mesh.setMatrixAt(i, m4.compose(v, q, sc));
-          mesh.setColorAt(i, d.added ? fresh : plain); // as que você colocou ficam levemente verdes
+          mesh.setColorAt(i, plain); // cor real da textura (antes as colocadas ficavam esverdeadas)
         });
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;

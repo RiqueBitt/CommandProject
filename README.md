@@ -125,9 +125,13 @@ disponível em Sistema → Visual.
   em declive ou sobreposta, decorações em cima de bases e massa, distâncias e massa desiguais.
 - **Editor de mapas** no estilo de um editor de jogo:
   - abre direto num **mapa em branco** (chão liso de grama, 512 ou 1024), sem escolher terreno;
-  - **visual limpo**: num mapa feito sobre um mapa do jogo, o chão inteiro ganha a textura do bioma,
-    a luz e as sombras são refeitas para o relevo novo e as decorações originais saem — nada do
-    mapa original aparece por cima;
+  - **visual limpo**: a malha do chão (e a colisão) é refeita para o relevo novo, a luz e as
+    sombras também, e as decorações originais saem — nada do mapa original aparece por cima;
+  - **chão por biomas** (praia, chão, terra, rocha e topo misturados pelo relevo) e **pincel de
+    textura** para pintar partes do mapa; **texturas próprias** importadas de .png/.jpg (contínuas,
+    com relevo e brilho gerados); **paisagem em volta** do mapa com montanhas;
+  - gerador com **vilas, estradas de terra e plantações**, matas com espécies e chão próprio,
+    árvores na beira da água e relevo com o dobro da resolução e detalhe fino;
   - vista 3D com as texturas e o tamanho reais das decorações e do chão, explorador (esconder e
     travar), propriedades;
   - pincel de escultura, formas do terreno, simetria;
@@ -286,13 +290,11 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
   diferentes do original podem deformar nas animações.
 - **Lua compilado**: só dá para editar como texto quando o jogo traz a versão em `uncompiled_lua.scd`.
 - **HUD**: a edição é por textura e por Lua (layout em código); ainda não há editor visual de arrastar.
-- **Texturas do chão dos mapas**: o jogo mistura as camadas com máscaras pré-calculadas junto da
-  iluminação, então a troca vale para a camada inteira (não dá para pintar pixel a pixel). O nome
-  do arquivo novo precisa caber no espaço do original; o editor só mostra as que cabem. No visual
-  limpo o chão inteiro usa uma textura só (as máscaras de mistura do mapa original não acompanham
-  o relevo novo, então não dá para pôr rocha só nas encostas no jogo).
-- **Luz refeita** (visual limpo): experimental — as máscaras de luz novas seguem o formato das
-  originais e a cor do céu do mapa, mas ainda falta a confirmação no jogo.
+- **Texturas do chão dos mapas**: sem o visual limpo, a troca vale para a camada inteira e o nome
+  novo precisa caber no espaço do original. Com o visual limpo, o chão usa as cinco texturas do bioma
+  misturadas pelo relevo e pelo pincel (experimental: confirme no jogo); o jogo só mistura texturas
+  vizinhas na cadeia (praia → chão → terra → rocha → topo), então pintar "topo" no meio da grama
+  passa por terra e rocha na borda da pincelada.
 - **Decorações** são visuais: não bloqueiam a passagem das unidades.
 - **Tropas novas, animações criadas e modelos próprios no jogo** são experimentais: veja a tabela
   em [docs/criacao.md](docs/criacao.md#o-que-é-experimental).

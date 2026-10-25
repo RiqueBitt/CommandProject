@@ -1,7 +1,7 @@
 //! Recursos do jogo para o editor de mapas: decorações (props) que podem ser colocadas, camadas
 //! de textura do chão de todos os mapas e leitura de arquivos/miniaturas sob demanda.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -247,6 +247,38 @@ pub fn layers_in(map: &str, payload: &[u8]) -> Vec<LayerSet> {
 
 /// Lê um arquivo do jogo pelo caminho que os blueprints e mapas usam (`/props/…/x.dds`):
 /// tenta o nome exato e a variante `.win.` que o motor insere.
+/// Índice de todos os arquivos dos `.scd` (o último montado vence), refeito quando a lista de
+/// arquivos ou o tamanho/data de algum muda. Sem ele, cada leitura abria e listava todos os `.scd`.
+type FileIndex = (Vec<(PathBuf, u64, Option<std::time::SystemTime>)>, HashMap<String, (usize, crate::scd::RawLoc)>);
+static FILES: Mutex<Option<FileIndex>> = Mutex::new(None);
+
+fn stamp(sources: &[PathBuf]) -> Vec<(PathBuf, u64, Option<std::time::SystemTime>)> {
+    sources
+        .iter()
+        .map(|p| {
+            let m = std::fs::metadata(p).ok();
+            (p.clone(), m.as_ref().map(|m| m.len()).unwrap_or(0), m.and_then(|m| m.modified().ok()))
+        })
+        .collect()
+}
+
+fn locate(sources: &[PathBuf], keys: &[String]) -> Result<Option<(usize, crate::scd::RawLoc)>> {
+    let st = stamp(sources);
+    let mut guard = FILES.lock().unwrap_or_else(|p| p.into_inner());
+    if guard.as_ref().map(|(s, _)| *s != st).unwrap_or(true) {
+        let mut map = HashMap::new();
+        for (si, src) in sources.iter().enumerate() {
+            let Ok(mut scd) = Scd::open(src) else { continue };
+            for (key, loc) in scd.locations()? {
+                map.insert(key, (si, loc));
+            }
+        }
+        *guard = Some((st, map));
+    }
+    let map = &guard.as_ref().expect("preenchido").1;
+    Ok(keys.iter().find_map(|k| map.get(k).copied()))
+}
+
 pub fn read_game_file(sources: &[PathBuf], path: &str) -> Result<Vec<u8>> {
     let key = crate::scd::normalize_key(path);
     let mut keys = vec![key.clone()];
@@ -255,24 +287,41 @@ pub fn read_game_file(sources: &[PathBuf], path: &str) -> Result<Vec<u8>> {
             keys.push(format!("{stem}.win.{ext}"));
         }
     }
-    for src in sources.iter().rev() {
-        let mut scd = Scd::open(src)?;
-        let entries = scd.entries()?;
-        if let Some(i) = entries.iter().position(|e| keys.contains(&e.key)) {
-            return scd.read_at(i);
-        }
+    match locate(sources, &keys)? {
+        Some((si, loc)) => crate::scd::read_raw(&sources[si], &loc).or_else(|_| Scd::open(&sources[si])?.read(&keys[0]).or_else(|_| Scd::open(&sources[si])?.read(keys.last().expect("1+")))),
+        None => Err(Error::Other(format!("{path} não encontrado nos arquivos do jogo"))),
     }
-    Err(Error::Other(format!("{path} não encontrado nos arquivos do jogo")))
 }
+
+/// Miniaturas prontas (as mesmas texturas são pedidas várias vezes pelo editor).
+type PngCache = (std::collections::VecDeque<(String, u32)>, HashMap<(String, u32), Vec<u8>>);
+static PNGS: Mutex<Option<PngCache>> = Mutex::new(None);
 
 /// Miniatura PNG de uma textura do jogo (lado máximo `max`).
 pub fn texture_png(sources: &[PathBuf], path: &str, max: u32) -> Result<Vec<u8>> {
+    let k = (crate::scd::normalize_key(path), max);
+    if let Some(hit) = PNGS.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(|c| c.1.get(&k)) {
+        return Ok(hit.clone());
+    }
     let data = read_game_file(sources, path)?;
-    let (_, mut img) = crate::dds::decode(&data)?;
+    // só o nível de mip do tamanho pedido (as texturas do jogo trazem todos)
+    let mut img = crate::dds::decode_max(&data, max.max(16))?;
     while img.width > max.max(16) || img.height > max.max(16) {
         img = crate::dds::downsample(&img);
     }
-    crate::dds::to_png(&img)
+    let png = crate::dds::to_png(&img)?;
+    let mut g = PNGS.lock().unwrap_or_else(|p| p.into_inner());
+    let c = g.get_or_insert_with(Default::default);
+    if !c.1.contains_key(&k) {
+        c.0.push_back(k.clone());
+        c.1.insert(k, png.clone());
+        while c.0.len() > 400 {
+            if let Some(old) = c.0.pop_front() {
+                c.1.remove(&old);
+            }
+        }
+    }
+    Ok(png)
 }
 
 /// Modelo de uma decoração para pré-visualizar: malha (LOD0) e a primeira textura de cor.
@@ -308,7 +357,8 @@ pub fn prop_preview(sources: &[PathBuf], bp: &str, lod: u8) -> Result<(crate::sc
         Some(x) => x,
         None => {
             let (src, idx, k) = best.ok_or_else(|| Error::Other("o modelo dessa decoração não foi encontrado".into()))?;
-            (Scd::open(&sources[src])?.read_at(idx)?, k)
+            let _ = (src, idx);
+            (read_game_file(sources, &k)?, k)
         }
     };
     let mut mesh = crate::scm::view(&crate::scm::read(&data)?);
@@ -319,7 +369,8 @@ pub fn prop_preview(sources: &[PathBuf], bp: &str, lod: u8) -> Result<(crate::sc
         .iter()
         .cloned()
         .chain(diffuse_candidates(sources, &dir, &scm_key))
-        .find_map(|p| texture_png(sources, &p, 256).ok());
+        // prévia de perto (nível 0) com mais resolução; no mapa, 256 basta e pesa menos
+        .find_map(|p| texture_png(sources, &p, if lod == 0 { 512 } else { 256 }).ok());
     let out = (mesh, texture);
     let mut g = PREVIEWS.lock().unwrap_or_else(|p| p.into_inner());
     let cache = g.get_or_insert_with(Default::default);
@@ -462,9 +513,82 @@ fn scm_index(sources: &[PathBuf]) -> Result<Vec<(usize, usize, String)>> {
     Ok(list)
 }
 
+/// Textura de chão do usuário (PNG quadrado) → as três texturas que o jogo usa numa camada:
+/// cor (`_d`, DXT1 com mips), relevo (`_n`, normal tirada do brilho da imagem) e brilho (`_s`).
+/// Lados que não são potência de 2 são reduzidos para a potência de 2 abaixo (máx. 2048).
+pub fn custom_ground_dds(png: &[u8]) -> Result<[Vec<u8>; 3]> {
+    use crate::dds::{encode, DdsFormat, Quality, Rgba};
+    let src = crate::dds::from_png(png)?;
+    let side = src.width.min(src.height).clamp(16, 2048);
+    let side = 1u32 << (31 - side.leading_zeros());
+    // recorte quadrado no centro e reamostragem simples (vizinho mais próximo ponderado 2×2)
+    let (ox, oy) = ((src.width - src.width.min(src.height)) / 2, (src.height - src.width.min(src.height)) / 2);
+    let span = src.width.min(src.height) as f32;
+    let mut img = Rgba { width: side, height: side, pixels: vec![0; (side * side * 4) as usize] };
+    for y in 0..side {
+        for x in 0..side {
+            let mut acc = [0u32; 4];
+            for (dx, dy) in [(0.25f32, 0.25f32), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
+                let sx = ox + (((x as f32 + dx) / side as f32 * span) as u32).min(span as u32 - 1);
+                let sy = oy + (((y as f32 + dy) / side as f32 * span) as u32).min(span as u32 - 1);
+                let i = ((sy * src.width + sx) * 4) as usize;
+                for (a, p) in acc.iter_mut().zip(&src.pixels[i..i + 4]) {
+                    *a += *p as u32;
+                }
+            }
+            let o = ((y * side + x) * 4) as usize;
+            for (px, a) in img.pixels[o..o + 3].iter_mut().zip(acc) {
+                *px = (a / 4) as u8;
+            }
+            img.pixels[o + 3] = 255;
+        }
+    }
+    let lum: Vec<f32> = img.pixels.chunks(4).map(|p| (0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32) / 255.0).collect();
+    let n = side as i64;
+    let at = |x: i64, y: i64| lum[(y.rem_euclid(n) * n + x.rem_euclid(n)) as usize];
+    let mut nrm = Rgba { width: side, height: side, pixels: vec![255; (side * side * 4) as usize] };
+    let mut spec = nrm.clone();
+    // força do relevo proporcional ao tamanho (a mesma aparência em 512 ou 2048)
+    let k = 2.2 * side as f32 / 1024.0;
+    for y in 0..n {
+        for x in 0..n {
+            let dx = (at(x + 1, y - 1) + 2.0 * at(x + 1, y) + at(x + 1, y + 1)) - (at(x - 1, y - 1) + 2.0 * at(x - 1, y) + at(x - 1, y + 1));
+            let dy = (at(x - 1, y + 1) + 2.0 * at(x, y + 1) + at(x + 1, y + 1)) - (at(x - 1, y - 1) + 2.0 * at(x, y - 1) + at(x + 1, y - 1));
+            let (vx, vy, vz) = (-dx * k, -dy * k, 1.0f32);
+            let l = (vx * vx + vy * vy + vz * vz).sqrt();
+            let o = ((y * n + x) * 4) as usize;
+            nrm.pixels[o] = ((vx / l * 0.5 + 0.5) * 255.0).round() as u8;
+            nrm.pixels[o + 1] = ((vy / l * 0.5 + 0.5) * 255.0).round() as u8;
+            nrm.pixels[o + 2] = ((vz / l * 0.5 + 0.5) * 255.0).round() as u8;
+            let g = (35.0 + 70.0 * at(x, y)).round() as u8;
+            spec.pixels[o..o + 3].copy_from_slice(&[g, g, g]);
+        }
+    }
+    let d = encode(&img, DdsFormat::Dxt1, 0, Quality::Normal)?;
+    let nn = encode(&nrm, DdsFormat::Dxt1, 0, Quality::Fast)?;
+    let half = crate::dds::downsample(&spec);
+    let sp = encode(&half, DdsFormat::Dxt1, 0, Quality::Fast)?;
+    Ok([d, nn, sp])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_ground_texture_makes_three_dds() {
+        let img = crate::dds::Rgba { width: 300, height: 200, pixels: (0..300 * 200).flat_map(|i| [(i % 251) as u8, 90, 40, 255]).collect() };
+        let png = crate::dds::to_png(&img).unwrap();
+        let [d, n, s] = custom_ground_dds(&png).unwrap();
+        let (di, _) = crate::dds::decode(&d).unwrap();
+        assert_eq!((di.width, di.height), (128, 128));
+        assert!(di.mip_count > 5);
+        let (_, nimg) = crate::dds::decode(&n).unwrap();
+        // normal aponta para cima na média (azul alto)
+        let blue: u32 = nimg.pixels.chunks(4).map(|p| p[2] as u32).sum::<u32>() / (nimg.width * nimg.height);
+        assert!(blue > 180, "{blue}");
+        assert_eq!(crate::dds::info(&s).unwrap().width, 64);
+    }
 
     #[test]
     fn reads_prop_scale_and_texture() {

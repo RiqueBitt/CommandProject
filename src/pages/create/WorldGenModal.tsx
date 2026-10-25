@@ -40,6 +40,7 @@ const SLIDERS: { group: string; icon: string; items: { key: keyof WorldGen; labe
     { key: "elevation", label: "Altura da terra", min: 4, max: 60 },
     { key: "hilliness", label: "Ondulação", min: 0, max: 30 },
     { key: "scale", label: "Largura das ondas", min: 100, max: 500, step: 10 },
+    { key: "detail", label: "Detalhe fino do chão", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
   ] },
   { group: "Montanhas", icon: "landscape", items: [
     { key: "mountains", label: "Montanhas", min: 0, max: 10 },
@@ -64,6 +65,10 @@ const SLIDERS: { group: string; icon: string; items: { key: keyof WorldGen; labe
     { key: "structures", label: "Estruturas e ruínas", min: 0, max: 12 },
     { key: "wrecks", label: "Destroços", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
   ] },
+  { group: "Vida humana", icon: "holiday_village", items: [
+    { key: "settlements", label: "Vilas", min: 0, max: 8 },
+    { key: "farms", label: "Plantações (no bioma temperado)", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
+  ] },
   { group: "Estratégia", icon: "flag", items: [
     { key: "expansions", label: "Expansões por jogador", min: 0, max: 4 },
     { key: "obstacles", label: "Paredões (gargalos)", min: 0, max: 8 },
@@ -72,7 +77,8 @@ const SLIDERS: { group: string; icon: string; items: { key: keyof WorldGen; labe
 
 export default function WorldGenModal(props: Props) {
   const { grid, donor, water, hasWater, catalog } = props;
-  const [wg, setWg] = useState<WorldGen>(() => props.initial ?? newWorld());
+  // mundos de versões antigas não têm as opções novas (vilas, estradas, detalhe): entram os padrões
+  const [wg, setWg] = useState<WorldGen>(() => (props.initial ? { ...newWorld(), ...props.initial } : newWorld()));
   const [img, setImg] = useState<string | null>(null);
   const [res, setRes] = useState<WorldResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -222,6 +228,7 @@ export default function WorldGenModal(props: Props) {
                 </select>
               </label>
             </div>
+            <label className="check"><input type="checkbox" checked={wg.roads !== false} disabled={!(wg.settlements ?? 0)} onChange={(e) => set("roads", e.target.checked)} /> Estradas de terra ligando as vilas às bases</label>
             <label className="check"><input type="checkbox" checked={wg.center !== false} disabled={wg.symmetry === "none"} onChange={(e) => set("center", e.target.checked)} /> Centro disputado (área plana com massa no meio)</label>
             <label className="check" title="O chão inteiro ganha as texturas do bioma, a luz e as sombras são refeitas para o relevo novo e as decorações do mapa original saem. Sem isso, o desenho do mapa original aparece por baixo do mundo novo."><input type="checkbox" checked={wg.clearDonor} onChange={(e) => set("clearDonor", e.target.checked)} /> Visual limpo: nada do mapa original por cima (texturas, sombras e decorações) — recomendado</label>
           </section>
@@ -238,6 +245,12 @@ export default function WorldGenModal(props: Props) {
                 {res.features.filter((f) => f.kind === "pass").map((f) => (
                   <polyline key={f.id} points={f.pts.map((p) => svgPt(p).join(",")).join(" ")} fill="none" stroke="#f2b33d" strokeWidth={0.6} strokeDasharray="1.4 1" />
                 ))}
+                {res.life?.fields.map((f, i) => {
+                  const [x, y] = svgPt(f.c), a = (f.ang * 180) / Math.PI;
+                  return <rect key={`f${i}`} x={x - (f.a / G) * 50} y={y - (f.b / G) * 50} width={(f.a / G) * 100} height={(f.b / G) * 100} transform={`rotate(${a} ${x} ${y})`} fill="#d9c27a" fillOpacity={0.55} stroke="#8a6d3b" strokeWidth={0.15} />;
+                })}
+                {res.life?.roads.map((rd, i) => <polyline key={`r${i}`} points={rd.map((p) => svgPt(p).join(",")).join(" ")} fill="none" stroke="#b08850" strokeOpacity={0.9} strokeWidth={0.55} strokeLinecap="round" />)}
+                {res.life?.villages.map((v, i) => { const [x, y] = svgPt(v.p); return <g key={`v${i}`}><circle cx={x} cy={y} r={(v.r / G) * 100} fill="#c9a26b" fillOpacity={0.35} stroke="#f2d39a" strokeWidth={0.3} /><rect x={x - 0.9} y={y - 0.9} width={1.8} height={1.8} fill="#f2d39a" /></g>; })}
                 {res.mass.map((p, i) => { const [x, y] = svgPt(p); return <path key={`m${i}`} d={`M${x} ${y - 1.1}L${x + 0.8} ${y}L${x} ${y + 1.1}L${x - 0.8} ${y}Z`} fill="#7bd88f" stroke="#0d1b26" strokeWidth={0.25} />; })}
                 {res.strategic.filter((q) => q.kind !== "safe").map((q, i) => { const [x, y] = svgPt(q.pos); return <circle key={`s${i}`} cx={x} cy={y} r={3.6} fill="none" stroke={q.kind === "center" ? "#ffd166" : "#ff9f43"} strokeWidth={0.4} strokeDasharray="1 0.8" />; })}
                 {res.spawns.map((p, i) => {
@@ -255,6 +268,8 @@ export default function WorldGenModal(props: Props) {
               <span><b>{walkPct}%</b> caminhável</span>
               <span><b>{wg.players}</b> bases</span>
               <span><b>{res.mass.length}</b> massa</span>
+              {!!res.life?.villages.length && <span><b>{res.life.villages.length}</b> vilas</span>}
+              {!!res.life?.roads.length && <span><b>{res.life.roads.length}</b> estradas</span>}
             </div>
           )}
           <div className="row" style={{ gap: 6 }}>

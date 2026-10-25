@@ -38,12 +38,36 @@ camadas de areia, rocha e cidade e as sombras pré-calculadas de morros e prédi
 antes. Com um relevo novo por cima, isso aparecia como manchas e sombras fora do lugar. O **visual
 limpo** (ligado no mapa em branco e ao gerar um mundo; em Propriedades → Chão e visual) resolve:
 
-- **todas** as camadas do chão recebem uma textura só, do bioma (grama, areia, neve ou terra
-  escura) — escolha em **Chão** na caixa de recursos; a prévia mostra exatamente essa textura;
-- a **luz do chão é refeita** para o relevo novo (as máscaras `lighting/maskNN_{0,1,2}` vão junto no
-  mapa, com a cor original do céu do mapa e as sombras do relevo novo; a paisagem em volta do mapa
-  mantém a luz original);
+- a **malha do chão é refeita** para o relevo novo (no jogo e na colisão: a câmera e os tiros
+  acompanham o chão novo);
+- o chão ganha as **texturas do bioma** (abaixo), com mistura entre elas;
+- a **luz do chão é refeita** (sombras do relevo novo, com a cor do céu do mapa);
 - **todas** as decorações do terreno original saem (as suas e as do gerador ficam).
+
+### Chão por biomas e pincel de textura
+
+Com o visual limpo, cada ponto do chão recebe uma de cinco texturas do bioma, numa cadeia:
+**praia** (junto da água), **chão** (grama, areia, neve…), **terra** (manchas e encostas leves),
+**rocha** (encostas íngremes) e **topo** (neve ou o equivalente do bioma nos pontos mais altos). O
+jogo mistura vizinhas da cadeia, então as passagens ficam suaves.
+
+- **Pincel de textura** (Início → Pintar chão, ou a aba **Chão** da caixa de recursos): escolha a
+  textura (praia, chão, terra, rocha, topo) e pinte partes do mapa — estradas, clareiras, neve num
+  pico. **Automático** é a borracha. Tamanho e força ajustáveis; a simetria ao colocar vale também.
+- **Bioma**: grama, areia, neve ou terra escura. Cada papel pode trocar de textura (qualquer uma do
+  jogo, ou uma sua — abaixo).
+- **Paisagem em volta do mapa**: fora da área jogável o relevo continua a borda e sobe em montanhas,
+  com as mesmas texturas (nada de chão liso infinito).
+- Mapas em branco de 1024 já vêm com água (nível 40): lagos e rios gerados aparecem de verdade.
+
+### Texturas próprias (.png / .jpg)
+
+No **Trocar textura** de qualquer papel do bioma, **Importar imagem como textura** (ou arraste a
+imagem para a janela): .png, .jpg, .webp ou .bmp. A imagem vira um quadrado de até 1024 px (recorte
+no centro) e, com **Deixar contínua**, as bordas são misturadas para não aparecer emenda quando ela
+se repete no chão. O PNG fica nos arquivos do projeto; ao gerar o mapa, o app cria as três texturas
+do jogo (cor, relevo tirado do brilho da imagem e brilho) em `/textures/terrain/cp/` dentro do
+pacote do mapa. As importadas aparecem em **Minhas texturas** (o × tira da lista do mapa).
 
 ### Gerar mundo (por semente)
 
@@ -58,8 +82,18 @@ limpo** (ligado no mapa em branco e ao gerar um mundo; em Propriedades → Chão
 - **Montanhas** (com picos irregulares), cordilheiras, colinas e planaltos.
 - **Água**: lagos, rios com curvas e ilhas.
 - **Cavidades**: crateras, cânions e campos de dunas.
-- **Vida e estruturas**: florestas em manchas naturais, pedras (mais nas encostas), ruínas e postos
-  em áreas planas, destroços espalhados.
+- **Vida e estruturas**: florestas em manchas naturais (bosques de uma espécie, árvores menores na
+  borda, chão de terra e folhas embaixo), árvores na beira de rios e lagos e soltas nos campos,
+  pedras (mais nas encostas e no pé dos paredões, grandes no meio e pequenas em volta), ruínas e
+  postos em áreas planas, destroços espalhados.
+- **Vida humana**: **vilas** com rua principal (e às vezes rua cruzada), casas alinhadas dos dois
+  lados, praça, postes, armazéns com caixas e árvores em volta; **estradas de terra** que seguem o
+  caminho mais fácil (desviam de subidas e da água) ligando cada vila à base mais perto e à vila
+  vizinha, com árvores, pedras e postes na beira; e **plantações** em faixas em volta das vilas (no
+  bioma temperado). O chão de ruas, estradas, praça e plantações vem pintado pelo gerador numa camada
+  própria, por baixo da sua pintura. No bioma vulcânico as vilas viram ruínas.
+- **Detalhe fino do chão**: ondulações pequenas, sulcos e lombadas em todo o terreno. O relevo do
+  editor e do mapa usa um ponto a cada 2 unidades num mapa 1024 (quatro vezes mais pontos que antes).
 - **Estratégia**: expansões de massa por jogador (a primeira **segura**, bem mais perto da própria
   base; a última **disputada**, no meio do caminho), **centro disputado** (área plana com 4 pontos de
   massa) e **paredões** que criam gargalos. A massa gerada é simétrica, fica em chão plano, seco e
@@ -125,8 +159,9 @@ problema (bases e relevo não mudam; Ctrl+Z desfaz).
 - **Inserir**: bases (2 a 8), massa extra, relevo (morro, vale, planalto), cortes, passagens.
 - **Objetos**: decorações do jogo com o **modelo e a textura reais** (lidos da sua instalação),
   modelos próprios feitos no editor 3D (experimental), retirada de decorações do terreno.
-- **Chão**: com o visual limpo, a textura do chão inteiro (por bioma ou qualquer uma que caiba);
-  sem ele, troca de camadas uma a uma por camadas de qualquer mapa do jogo.
+- **Chão**: com o visual limpo, o pincel de textura, o bioma, as texturas de cada papel (do jogo ou
+  importadas) e a paisagem em volta; sem ele, troca de camadas uma a uma por camadas de qualquer
+  mapa do jogo.
 - Selecionar e arrastar, seleção múltipla (`Shift`), duplicar (`Ctrl+D`), excluir (`Del`),
   visão 2D, grade.
 - **Gerar mapa** / **Gerar e jogar**: monta o mapa com o SC2 Map Toolkit, confere se todas as bases
@@ -245,7 +280,9 @@ O launcher nunca supõe que o jogo aceita um formato não testado. Hoje:
 | **Lagos e rios novos em terrenos com água** | experimental: a máscara de água é refeita e o id do mapa fica com o tamanho do id do terreno (exigência do formato) |
 | Lagos e rios em terrenos sem água | viram vales e leitos secos (o jogo não desenha água num terreno feito sem ela) |
 | Relevo gerado (montanhas, formas, pincel) | mesma técnica do relevo esculpido, que já funciona no jogo |
-| **Visual limpo / mapa em branco** | troca de textura: mesma técnica testada no jogo; **luz refeita**: experimental (máscaras de luz novas no formato das originais, apontadas pelo terreno do mapa) |
+| **Visual limpo / mapa em branco** | malha nova do chão e colisão: testadas no jogo (carrega, câmera acima do chão); **biomas, pincel e luz refeita**: experimental (máscaras novas no formato das originais) |
+| **Texturas importadas** | experimental: DDS gerados pelo launcher no formato das texturas de chão do jogo |
+| **Paisagem em volta e água no mapa em branco** | experimental |
 | Armas copiadas e ícone gerado | experimental: confira os pontos de disparo e o ícone no jogo |
 | Pacotes de tropas | experimental (mesmo caminho das tropas sozinhas) |
 

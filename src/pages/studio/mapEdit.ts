@@ -193,6 +193,8 @@ export type BlankSize = 512 | 1024;
 export const BLANK_BASES: Record<BlankSize, string> = { 512: "SC2_MP_004", 1024: "SC2_MP_007" };
 /** Altura do plano do mapa em branco (dá espaço para cavar vales e subir montanhas). */
 export const BLANK_Y = 60;
+/** Nível da água do mapa em branco (a lâmina d'água do terreno base sobe até ele); 0 = sem água. */
+export const BLANK_WATER: Record<BlankSize, number> = { 512: 0, 1024: 40 };
 export const BLANK_LABEL: Record<BlankSize, string> = { 512: "Pequeno (512 × 512)", 1024: "Padrão (1024 × 1024)" };
 export function blankSizeOf(terrain: string | null): BlankSize | null {
   const hit = (Object.keys(BLANK_BASES) as unknown as BlankSize[]).find((k) => BLANK_BASES[k] === terrain);

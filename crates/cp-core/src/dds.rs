@@ -157,11 +157,35 @@ pub fn info(data: &[u8]) -> Result<DdsInfo> {
 
 /// Decodifica o maior nível de mip para RGBA8.
 pub fn decode(data: &[u8]) -> Result<(DdsInfo, Rgba)> {
+    decode_level(data, 0)
+}
+
+/// Decodifica o primeiro nível de mip com o lado maior até `max` (só ele: bem mais rápido que
+/// decodificar a imagem inteira e reduzir depois). Sem níveis menores, usa o maior.
+pub fn decode_max(data: &[u8], max: u32) -> Result<Rgba> {
+    let i = info(data)?;
+    let mut l = 0;
+    if !i.is_cubemap && !i.is_volume {
+        while l + 1 < i.mip_count && (i.width >> l).max(i.height >> l) > max {
+            l += 1;
+        }
+    }
+    decode_level(data, l).map(|r| r.1)
+}
+
+/// Decodifica o nível de mip `level` (0 = o maior).
+pub fn decode_level(data: &[u8], level: u32) -> Result<(DdsInfo, Rgba)> {
     let info = info(data)?;
-    let (w, h) = (info.width as usize, info.height as usize);
-    let need = info.format.level_size(info.width, info.height);
+    let level = if info.is_cubemap || info.is_volume { 0 } else { level.min(info.mip_count.max(1) - 1) };
+    let mut off = 128usize;
+    for l in 0..level {
+        off += info.format.level_size((info.width >> l).max(1), (info.height >> l).max(1));
+    }
+    let (lw, lh) = ((info.width >> level).max(1), (info.height >> level).max(1));
+    let (w, h) = (lw as usize, lh as usize);
+    let need = info.format.level_size(lw, lh);
     let body = data
-        .get(128..128 + need)
+        .get(off..off + need)
         .ok_or_else(|| Error::Format("DDS truncado".into()))?;
     let mut px = vec![0u8; w * h * 4];
     match info.format.compressed() {
@@ -199,8 +223,8 @@ pub fn decode(data: &[u8]) -> Result<(DdsInfo, Rgba)> {
     Ok((
         info.clone(),
         Rgba {
-            width: info.width,
-            height: info.height,
+            width: lw,
+            height: lh,
             pixels: px,
         },
     ))

@@ -1099,3 +1099,21 @@ textarea.pinput { height: auto; padding: 4px 6px; resize: vertical; }
 .wg-gallery button { padding: 3px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--muted); }
 .wg-gallery button.on, .wg-gallery button:hover { border-color: var(--primary); }
 .wg-gallery img { width: 100%; aspect-ratio: 1; border-radius: 4px; image-rendering: auto; }
+
+/* pincel de textura (editor de mapas) */
+.paint-roles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.paint-role { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: inherit; cursor: pointer; font-size: 12px; transition: border-color .15s, transform .15s; }
+.paint-role:hover { border-color: var(--primary); transform: translateY(-1px); }
+.paint-role[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 35%, transparent); }
+.paint-role .tex-thumb { border-radius: 8px; }
+.paint-eraser-icon { width: 46px; height: 46px; flex: 0 0 46px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--surface-3, var(--surface-2)); box-shadow: inset 0 0 0 1px var(--border); color: var(--muted); }
+.paint-role[aria-pressed="true"] .paint-eraser-icon { color: var(--primary); }
+/* texturas importadas */
+.tex-drop { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 12px; border: 1.5px dashed var(--border); background: var(--surface-2); cursor: pointer; transition: border-color .15s, background .15s; }
+.tex-drop:hover, .tex-drop.over { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--surface-2)); }
+.tex-drop.busy { opacity: .7; cursor: progress; }
+.tex-drop > .mi { color: var(--primary); }
+.layer-tile.mine { position: relative; padding: 0; cursor: default; }
+.layer-tile.mine .layer-pick { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px; width: 100%; background: none; border: 0; color: inherit; cursor: pointer; }
+.layer-tile.mine .forget { position: absolute; top: 4px; right: 4px; opacity: 0; transition: opacity .15s; }
+.layer-tile.mine:hover .forget, .layer-tile.mine .forget:focus-visible { opacity: 1; }

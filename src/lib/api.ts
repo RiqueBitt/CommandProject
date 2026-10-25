@@ -255,9 +255,22 @@ export const api = {
   modelBaked: (id: string) => call<T.BakedModel | null>("model_baked", { id }),
   modelExportGame: (baked: T.BakedModel, dir: string, name: string) => call<string[]>("model_export_game", { baked, dir, name }),
   gameTexture: (path: string, max = 128) => call<string>("game_texture", { path, max }),
-  propPreview: (bp: string, lod = 0) => call<T.PropPreview>("prop_preview", { bp, lod }),
+  propPreview: (bp: string, lod = 0) => call<T.PropPreview>("prop_preview", { bp, lod }).then(unpackPreview),
   maptkTerrain3d: (terrain: string, size = 256) => call<T.Terrain3D>("maptk_terrain3d", { terrain, size }),
   maptkBuild: (spec: Record<string, unknown>, creation: string | null = null) => call<{ result: T.MapBuildResult; manifest: T.Manifest }>("maptk_build", { spec, creation }),
 
   openPath: (path: string, reveal = false) => call<void>("open_path", { path, reveal }),
 };
+
+// modelos chegam em binário (base64): vira Float32Array/Uint32Array, sem passar por JSON de números
+function b64Bytes(b64: string): ArrayBuffer {
+  const bin = atob(b64), out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
+function unpackPreview(p: T.PropPreview): T.PropPreview {
+  if (!p.bin) return p;
+  const [pos, nrm, uv, idx] = p.bin;
+  const f = (s: string) => new Float32Array(b64Bytes(s)) as unknown as number[];
+  return { ...p, bin: undefined, mesh: { ...p.mesh, positions: f(pos), normals: f(nrm), uvs: f(uv), indices: Array.from(new Uint32Array(b64Bytes(idx))) } };
+}

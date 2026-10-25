@@ -16,7 +16,7 @@ const loader = new THREE.TextureLoader();
 let running = 0;
 const waiting: (() => void)[] = [];
 async function limited<T>(fn: () => Promise<T>): Promise<T> {
-  if (running >= 3) await new Promise<void>((r) => waiting.push(r));
+  if (running >= 6) await new Promise<void>((r) => waiting.push(r));
   running++;
   try {
     return await fn();
@@ -35,12 +35,12 @@ function build(mesh: { positions: number[]; normals: number[]; uvs: number[]; in
   if (mesh.normals.some((n) => n !== 0)) geo.setAttribute("normal", new THREE.Float32BufferAttribute(mesh.normals, 3));
   else geo.computeVertexNormals();
   geo.computeBoundingSphere();
-  const mat = new THREE.MeshStandardMaterial({ color: 0x9aa59a, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+  const mat = new THREE.MeshStandardMaterial({ color: 0xa9a49b, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
   if (texture) {
     loader.load(texture, (t) => {
       t.colorSpace = THREE.SRGBColorSpace;
       t.flipY = false;
-      t.anisotropy = 4;
+      t.anisotropy = 8;
       mat.map = t;
       mat.color.set(0xffffff);
       // folhas e grades usam o alfa da textura como recorte

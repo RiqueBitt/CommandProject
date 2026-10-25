@@ -2,7 +2,9 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Icon, Modal } from "../../components/ui";
 import { api } from "../../lib/api";
 import type { PropInfo, PropPreview } from "../../lib/types";
-import { groundCandidates, layerFits, type GroundBiome, type GroundLayer } from "./mapEdit";
+import { layerFits, type GroundBiome, type GroundLayer } from "./mapEdit";
+import { isGroundLayer, ROLE_LABEL, ROLES, type GroundRole } from "./biome";
+import { isCustomPath, texUrl } from "./customTex";
 
 const ModelViewer = lazy(() => import("../../components/ModelViewer"));
 
@@ -20,7 +22,7 @@ export function useGameTexture(path?: string | null) {
   useEffect(() => {
     if (!path) { setUrl(null); return; }
     let alive = true;
-    if (!thumbs.has(path)) thumbs.set(path, api.gameTexture(path, 128).catch(() => null));
+    if (!thumbs.has(path) || isCustomPath(path)) thumbs.set(path, texUrl(path, 128).catch(() => null));
     void thumbs.get(path)!.then((u) => { if (alive) setUrl(u); });
     return () => { alive = false; };
   }, [path]);
@@ -174,63 +176,143 @@ const BIOMES: { id: GroundBiome; label: string; icon: string }[] = [
   { id: "temperate", label: "Grama", icon: "grass" }, { id: "desert", label: "Areia", icon: "wb_sunny" },
   { id: "snow", label: "Neve", icon: "ac_unit" }, { id: "volcanic", label: "Terra escura", icon: "local_fire_department" },
 ];
-/** nomes que não são chão natural (metal, piso de cidade, paredes…) */
-const NOT_GROUND = /metal|floor|wall|trim|window|teleporter|greeble|road|plate|tile|concrete|pipe|panel|decal|clouds|water|foam|wave|black|white|engine/;
 
-/** Chão do visual limpo: uma textura para o mapa inteiro (a mesma no editor e no jogo). */
-export function CleanGround({ all, minSlot, biome, chosen, onBiome, onPick }: {
+/** Chão por biomas: o pincel de textura (principal) e as texturas de cada parte. */
+export function GroundPaint({ all, chain, biome, role, painting, hasPaint, ring, radius, strength, onRole, onBiome, onPick, onClearPaint, onRing, onRadius, onStrength, onImport, onForget }: {
   all: GroundLayer[] | null;
-  /** menor espaço de texto entre as camadas do terreno base: o caminho novo precisa ser menor */
-  minSlot: number;
+  /** textura de cada papel (praia, chão, terra, rocha, topo) */
+  chain: (GroundLayer | null)[];
   biome: GroundBiome;
-  chosen: string | null;
+  role: number;
+  painting: boolean;
+  hasPaint: boolean;
+  ring: boolean;
+  radius: number;
+  strength: number;
+  onRole: (r: number) => void;
   onBiome: (b: GroundBiome) => void;
-  onPick: (d: string | null) => void;
+  onPick: (role: GroundRole, d: string | null) => void;
+  onClearPaint: () => void;
+  onRing: (v: boolean) => void;
+  onRadius: (v: number) => void;
+  onStrength: (v: number) => void;
+  /** importa uma imagem como textura (devolve o caminho da difusa) */
+  onImport: (file: File, seamless: boolean) => Promise<string>;
+  /** tira uma textura importada da lista do mapa */
+  onForget: (d: string) => void;
+}) {
+  const [swap, setSwap] = useState<GroundRole | null>(null);
+  return (
+    <div className="col ground-paint" style={{ gap: 10 }}>
+      <div className="card-title" style={{ margin: 0 }}><Icon name="brush" size={18} /><b>Pincel de textura</b></div>
+      <p className="faint small" style={{ margin: 0 }}>Escolha a textura e pinte partes do chão. O resto fica automático: praia na água, terra nas encostas, rocha nos paredões e neve no alto.</p>
+      <div className="paint-roles">
+        {ROLES.map((r, k) => (
+          <button key={r} className="paint-role" aria-pressed={painting && role === k} onClick={() => onRole(k)} title={`Pintar: ${ROLE_LABEL[r]}`}>
+            <TextureThumb path={chain[k]?.d} size={46} />
+            <span>{ROLE_LABEL[r]}</span>
+          </button>
+        ))}
+        <button className="paint-role eraser" aria-pressed={painting && role < 0} onClick={() => onRole(-1)} title="Borracha: volta ao automático">
+          <span className="paint-eraser-icon"><Icon name="auto_fix_high" size={24} /></span>
+          <span>Automático</span>
+        </button>
+      </div>
+      <label className="row small" style={{ gap: 8 }}>Tamanho<input type="range" min={8} max={260} value={radius} onChange={(e) => onRadius(Number(e.target.value))} className="grow" /><b style={{ width: 34, textAlign: "right" }}>{radius}</b></label>
+      <label className="row small" style={{ gap: 8 }}>Força<input type="range" min={5} max={60} value={strength} onChange={(e) => onStrength(Number(e.target.value))} className="grow" /><b style={{ width: 34, textAlign: "right" }}>{strength}</b></label>
+      {hasPaint && <button className="btn sm text" onClick={onClearPaint}><Icon name="layers_clear" size={16} /> Apagar toda a pintura</button>}
+
+      <div className="card-title" style={{ margin: "6px 0 0" }}><Icon name="public" size={18} /><b>Bioma</b></div>
+      <div className="chips" style={{ padding: 0 }}>
+        {BIOMES.map((b) => (
+          <button key={b.id} className="chip" aria-pressed={biome === b.id} onClick={() => onBiome(b.id)}><Icon name={b.icon} size={15} /> {b.label}</button>
+        ))}
+      </div>
+      <div className="ground-layers">
+        {ROLES.map((r, k) => (
+          <div key={r} className="ground-layer">
+            <TextureThumb path={chain[k]?.d} size={40} />
+            <div className="grow">
+              <b>{ROLE_LABEL[r]}</b>
+              <span className="faint small" style={{ textTransform: "none" }}>{chain[k] ? `${nice(chain[k]!.name)} · ${chain[k]!.map.replace(/^SC2_/, "")}` : "sem textura"}</span>
+            </div>
+            <button className="btn icon-btn sm" title="Trocar textura" aria-label={`Trocar ${ROLE_LABEL[r]}`} onClick={() => setSwap(r)}><Icon name="format_paint" size={18} /></button>
+          </div>
+        ))}
+      </div>
+      <label className="check small"><input type="checkbox" checked={ring} onChange={(e) => onRing(e.target.checked)} /> Paisagem em volta do mapa (montanhas além da borda)</label>
+      {swap && <RoleChooser role={swap} all={all} onPick={(d) => { onPick(swap, d); setSwap(null); }} onClose={() => setSwap(null)} onImport={onImport} onForget={onForget} />}
+    </div>
+  );
+}
+
+function RoleChooser({ role, all, onPick, onClose, onImport, onForget }: {
+  role: GroundRole; all: GroundLayer[] | null; onPick: (d: string | null) => void; onClose: () => void;
+  onImport: (file: File, seamless: boolean) => Promise<string>; onForget: (d: string) => void;
 }) {
   const [q, setQ] = useState("");
-  const fits = (l: GroundLayer) => !minSlot || l.d.length < minSlot;
-  const current = useMemo(() => groundCandidates(all ?? [], biome, chosen).find(fits) ?? null,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [all, biome, chosen, minSlot]);
+  const [seamless, setSeamless] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [drag, setDrag] = useState(false);
+  const mine = useMemo(() => (all ?? []).filter((l) => isCustomPath(l.d)), [all]);
   const options = useMemo(() => {
     const t = q.trim().toLowerCase();
     const seen = new Set<string>();
     return (all ?? []).filter((l) => {
       const k = l.d.toLowerCase();
-      if (seen.has(k) || !fits(l) || NOT_GROUND.test(k)) return false;
+      if (seen.has(k) || !isGroundLayer(l) || isCustomPath(l.d)) return false;
       seen.add(k);
       return !t || l.name.toLowerCase().includes(t) || l.map.toLowerCase().includes(t);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [all, q, minSlot]);
+  }, [all, q]);
+  const take = async (f: File | undefined | null) => {
+    if (!f) return;
+    if (!/^image\/(png|jpe?g|webp|bmp|gif)$/i.test(f.type) && !/\.(png|jpe?g|webp|bmp)$/i.test(f.name)) { setErr("Use uma imagem .png, .jpg, .webp ou .bmp."); return; }
+    setBusy(true); setErr(null);
+    try { onPick(await onImport(f, seamless)); } catch (e) { setErr(String((e as Error)?.message ?? e)); } finally { setBusy(false); }
+  };
   return (
-    <div className="col" style={{ gap: 10 }}>
-      <div className="ground-layer">
-        <TextureThumb path={current?.d} size={52} />
-        <div className="grow">
-          <b>{current ? nice(current.name) : "—"}</b>
-          <span className="faint small" style={{ textTransform: "none" }}>{current ? `${current.map.replace(/^SC2_/, "")} · em todo o chão` : "nenhuma textura cabe neste terreno"}</span>
+    <Modal title={`Textura: ${ROLE_LABEL[role]}`} icon="format_paint" onClose={onClose} wide>
+      <div className="col" style={{ gap: 12 }}>
+        <label className={`tex-drop${drag ? " over" : ""}${busy ? " busy" : ""}`}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); void take(e.dataTransfer.files?.[0]); }}>
+          <input type="file" accept="image/png,image/jpeg,image/webp,image/bmp,.png,.jpg,.jpeg,.webp,.bmp" hidden disabled={busy}
+            onChange={(e) => { void take(e.target.files?.[0]); e.target.value = ""; }} />
+          <Icon name={busy ? "hourglass_top" : "add_photo_alternate"} size={28} />
+          <div className="col" style={{ gap: 2 }}>
+            <b>{busy ? "Preparando a textura…" : "Importar imagem como textura"}</b>
+            <span className="faint small">Arraste ou clique: .png, .jpg, .webp ou .bmp. Vira um quadrado de até 1024 px; relevo e brilho saem da própria imagem.</span>
+          </div>
+        </label>
+        <label className="check small" style={{ marginTop: -4 }}><input type="checkbox" checked={seamless} onChange={(e) => setSeamless(e.target.checked)} /> Deixar contínua (sem emenda ao repetir no chão)</label>
+        {err && <div className="notice err small"><Icon name="error" size={16} /> {err}</div>}
+        {mine.length > 0 && <>
+          <b className="small">Minhas texturas</b>
+          <div className="layer-grid compact">
+            {mine.map((l) => (
+              <div key={l.d} className="layer-tile mine">
+                <button className="layer-pick" onClick={() => onPick(l.d)} title={`Usar ${l.name}`}><TextureThumb path={l.d} size={72} /><b>{l.name}</b></button>
+                <button className="btn icon-btn sm forget" title="Tirar da lista do mapa" aria-label={`Tirar ${l.name}`} onClick={() => onForget(l.d)}><Icon name="close" size={14} /></button>
+              </div>
+            ))}
+          </div>
+        </>}
+        <div className="row" style={{ gap: 8 }}>
+          <div className="search-bar grow"><Icon name="search" /><input className="input dense" autoFocus placeholder="Buscar no jogo: grass, sand, snow, rock, MP_007…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar textura" /></div>
+          <button className="btn sm" onClick={() => onPick(null)}><Icon name="undo" size={16} /> Automática do bioma</button>
         </div>
-        {chosen && <button className="btn icon-btn sm" title="Voltar à automática do bioma" aria-label="Textura automática" onClick={() => onPick(null)}><Icon name="undo" size={18} /></button>}
+        <div className="layer-grid">
+          {all === null ? <div className="bar indeterminate"><i /></div> : options.slice(0, 300).map((l) => (
+            <button key={l.d} className="layer-tile" onClick={() => onPick(l.d)} title={l.d}>
+              <TextureThumb path={l.d} size={96} />
+              <b>{nice(l.name)}</b>
+              <span className="faint small">{l.map.replace(/^SC2_/, "")}</span>
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="chips" style={{ padding: 0 }}>
-        {BIOMES.map((b) => (
-          <button key={b.id} className="chip" aria-pressed={biome === b.id} onClick={() => onBiome(b.id)}>
-            <Icon name={b.icon} size={15} /> {b.label}
-          </button>
-        ))}
-      </div>
-      <div className="search-bar"><Icon name="search" /><input className="input dense" placeholder="Buscar: grass, sand, snow, MP_007…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar textura do chão" /></div>
-      <div className="layer-grid compact">
-        {all === null ? <div className="bar indeterminate"><i /></div> : options.slice(0, 120).map((l) => (
-          <button key={l.d} className="layer-tile" aria-pressed={current?.d === l.d} onClick={() => onPick(l.d)} title={l.d}>
-            <TextureThumb path={l.d} size={72} />
-            <b>{nice(l.name)}</b>
-            <span className="faint small">{l.map.replace(/^SC2_/, "")}</span>
-          </button>
-        ))}
-      </div>
-      <p className="faint small">A luz e as sombras do chão são refeitas para o relevo novo ao gerar o mapa.</p>
-    </div>
+    </Modal>
   );
 }

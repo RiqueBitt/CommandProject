@@ -77,6 +77,29 @@ impl Scd {
         Ok(out)
     }
 
+    /// Onde cada entrada está gravada (para ler depois sem reabrir o arquivo inteiro: abrir um
+    /// `.scd` grande do jogo custa bem mais que ler uma entrada).
+    pub fn locations(&mut self) -> Result<Vec<(String, RawLoc)>> {
+        let mut out = Vec::with_capacity(self.zip.len());
+        for i in 0..self.zip.len() {
+            let f = self.zip.by_index_raw(i).map_err(|e| Error::archive(&self.path, e))?;
+            if f.is_dir() || f.encrypted() {
+                continue;
+            }
+            let deflate = match f.compression() {
+                CompressionMethod::Stored => false,
+                CompressionMethod::Deflated => true,
+                _ => continue,
+            };
+            let name = f.name().map(|n| n.into_owned()).unwrap_or_default();
+            out.push((
+                normalize_key(&name),
+                RawLoc { header: f.header_start(), compressed: f.compressed_size(), size: f.size(), deflate },
+            ));
+        }
+        Ok(out)
+    }
+
     /// Lê uma entrada pelo caminho (aceita qualquer forma: barras/maiúsculas).
     pub fn read(&mut self, name: &str) -> Result<Vec<u8>> {
         let key = normalize_key(name);
@@ -307,4 +330,44 @@ mod tests {
         assert_eq!(normalize_key("Units\\UEB0101\\a.BP"), "/units/ueb0101/a.bp");
         assert_eq!(normalize_key("/lua/x.lua"), "/lua/x.lua");
     }
+}
+
+/// Posição de uma entrada dentro do `.scd` (ver [`Scd::locations`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RawLoc {
+    pub header: u64,
+    pub compressed: u64,
+    pub size: u64,
+    pub deflate: bool,
+}
+
+/// Lê uma entrada direto pela posição (cabeçalho local + dados), sem ler o diretório do zip.
+pub fn read_raw(path: &Path, loc: &RawLoc) -> Result<Vec<u8>> {
+    use std::io::{Seek, SeekFrom};
+    if loc.size > MAX_ENTRY_BYTES || loc.compressed > MAX_ENTRY_BYTES {
+        return Err(Error::archive(path, "entrada grande demais"));
+    }
+    let mut f = File::open(path).at(path)?;
+    f.seek(SeekFrom::Start(loc.header)).at(path)?;
+    let mut hd = [0u8; 30];
+    f.read_exact(&mut hd).at(path)?;
+    if hd[0..4] != [0x50, 0x4b, 0x03, 0x04] {
+        return Err(Error::archive(path, "cabeçalho local inválido"));
+    }
+    let skip = u16::from_le_bytes([hd[26], hd[27]]) as i64 + u16::from_le_bytes([hd[28], hd[29]]) as i64;
+    f.seek(SeekFrom::Current(skip)).at(path)?;
+    let mut raw = vec![0u8; loc.compressed as usize];
+    f.read_exact(&mut raw).at(path)?;
+    if !loc.deflate {
+        return Ok(raw);
+    }
+    let mut out = Vec::with_capacity(loc.size as usize);
+    flate2::read::DeflateDecoder::new(&raw[..])
+        .take(loc.size + 1)
+        .read_to_end(&mut out)
+        .map_err(|e| Error::archive(path, e))?;
+    if out.len() as u64 != loc.size {
+        return Err(Error::archive(path, "tamanho descompactado não confere"));
+    }
+    Ok(out)
 }

@@ -270,28 +270,31 @@ def _norm(v):
     return tuple(c / l for c in v)
 
 
-def shade_fn(height, grid, sun=SUN):
+def shade_fn(height, grid, sun=SUN, lo=0.0, hi=None):
+    """luz de um ponto (1 = chão plano iluminado). lo/hi = limites da área (a paisagem em volta
+    do mapa entra quando a área é maior que o mapa)"""
     L = _norm(sun)
     flat = L[1]
+    hi = grid if hi is None else hi
 
     def f(x, z):
-        x = min(grid - 3, max(2, x)); z = min(grid - 3, max(2, z))
+        x = min(hi - 3, max(lo + 2, x)); z = min(hi - 3, max(lo + 2, z))
         dx = (height(x + 2, z) - height(x - 2, z)) / 4
         dz = (height(x, z + 2) - height(x, z - 2)) / 4
         n = _norm((-dx, 1.0, -dz))
         d = max(0.0, n[0] * L[0] + n[1] * L[1] + n[2] * L[2])
-        # sombra projetada simples: o terreno na direção do sol tapa a luz?
-        sh = 1.0
+        # sombra projetada suave: quanto o terreno na direção do sol passa acima do raio de luz
         hx, hz = -L[0] / math.hypot(L[0], L[2]), -L[2] / math.hypot(L[0], L[2])
         rise = L[1] / math.hypot(L[0], L[2])
         y0 = height(x, z)
-        for step in (6, 14, 26, 44, 70):
+        occ = 0.0
+        for step in (4, 8, 14, 22, 32, 46, 64, 90):
             px, pz = x - hx * step, z - hz * step
-            if not (0 <= px <= grid and 0 <= pz <= grid):
+            if not (lo <= px <= hi and lo <= pz <= hi):
                 break
-            if height(px, pz) > y0 + step * rise + 1.5:
-                sh = 0.55
-                break
+            occ = max(occ, height(px, pz) - (y0 + step * rise))
+        t = max(0.0, min(1.0, occ / 10.0))
+        sh = 1.0 - 0.38 * t * t * (3 - 2 * t)
         return max(0.35, min(1.35, (0.4 + 0.6 * d / flat) * sh))
     return f
 
@@ -424,3 +427,150 @@ def mask_dir(pl, map_id):
     """pasta das máscaras de luz usada nos caminhos do terreno (ex.: '/maps/SC2_MP_007/lighting/')"""
     m = re.search(rb"/maps/" + re.escape(map_id.encode()) + rb"/lighting/", pl, re.I)
     return m.group().decode("latin1") if m else None
+
+
+def _shade_map(sf, grid, res, ext0=0.0, ext=None):
+    """sombra em res×res pontos (centro de cada texel da área [ext0, ext0+ext]), suavizada 3×3"""
+    ext = grid if ext is None else ext
+    raw = [sf(ext0 + (i + 0.5) / res * ext, ext0 + (j + 0.5) / res * ext) for j in range(res) for i in range(res)]
+    out = [0.0] * (res * res)
+    for j in range(res):
+        for i in range(res):
+            acc = n = 0
+            for dj in (-1, 0, 1):
+                jj = j + dj
+                if 0 <= jj < res:
+                    for di in (-1, 0, 1):
+                        ii = i + di
+                        if 0 <= ii < res:
+                            w = 2 if (di == 0 and dj == 0) else 1
+                            acc += raw[jj * res + ii] * w
+                            n += w
+            out[j * res + i] = acc / n
+    return out
+
+
+def _sample(S, res, u, v):
+    """bilinear em S (res×res) nas coordenadas 0..1"""
+    x = min(res - 1.0, max(0.0, u * res - 0.5))
+    y = min(res - 1.0, max(0.0, v * res - 0.5))
+    x0, y0 = int(x), int(y)
+    x1, y1 = min(res - 1, x0 + 1), min(res - 1, y0 + 1)
+    fx, fy = x - x0, y - y0
+    a = S[y0 * res + x0] * (1 - fx) + S[y0 * res + x1] * fx
+    b = S[y1 * res + x0] * (1 - fx) + S[y1 * res + x1] * fx
+    return a * (1 - fy) + b * fy
+
+
+def _blocks(S, res, w, h, mips):
+    """Por nível e bloco 4×4: (sombra máx, sombra mín, índices DXT de 32 bits)."""
+    levels = []
+    for m in range(mips):
+        lw, lh = max(1, w >> m), max(1, h >> m)
+        bw, bh = max(1, lw // 4), max(1, lh // 4)
+        blk = []
+        for by in range(bh):
+            for bx in range(bw):
+                vals = []
+                for ty in range(4):
+                    for tx in range(4):
+                        vals.append(_sample(S, res, (bx * 4 + tx + 0.5) / lw, (by * 4 + ty + 0.5) / lh))
+                hi, lo = max(vals), min(vals)
+                idx = 0
+                if hi - lo > 1e-4:
+                    for k, v in enumerate(vals):
+                        t = (v - lo) / (hi - lo)
+                        code = 0 if t >= 5 / 6 else 2 if t >= 0.5 else 3 if t >= 1 / 6 else 1
+                        idx |= code << (2 * k)
+                blk.append((hi, lo, idx))
+        levels.append(blk)
+    return levels
+
+
+def _alpha_blocks(A, res, w, h, mips):
+    """Por nível e bloco 4×4: bytes do bloco de alfa DXT5 (8 valores interpolados)."""
+    levels = []
+    for m in range(mips):
+        lw, lh = max(1, w >> m), max(1, h >> m)
+        bw, bh = max(1, lw // 4), max(1, lh // 4)
+        blk = []
+        for by in range(bh):
+            for bx in range(bw):
+                vals = [max(0, min(255, int(round(_sample(A, res, (bx * 4 + tx + 0.5) / lw, (by * 4 + ty + 0.5) / lh) * 255))))
+                        for ty in range(4) for tx in range(4)]
+                a0, a1 = max(vals), min(vals)
+                if a0 == a1:
+                    blk.append(bytes((a0, a1, 0, 0, 0, 0, 0, 0)))
+                    continue
+                bits = 0
+                span = a0 - a1
+                for k, v in enumerate(vals):
+                    q = int(round((a0 - v) * 7 / span))  # 0 = a0 … 7 = a1
+                    code = 0 if q <= 0 else 1 if q >= 7 else q + 1
+                    bits |= code << (3 * k)
+                blk.append(bytes((a0, a1)) + bits.to_bytes(6, "little"))
+        levels.append(blk)
+    return levels
+
+
+def grid_masks(donor, height, grid, sun=SUN, stem="cpgrid", res=512, ext0=0.0, ext=None, blend=None):
+    """Máscaras de luz da malha nova (UV da máscara = posição na área [ext0, ext0+ext]): mesmo
+    formato das do terreno original (`donor` = os 3 arquivos maskNN_{0,1,2}). A cor típica de cada
+    uma é sombreada pelo relevo novo texel a texel (sombras suaves); o alfa do segundo arquivo é a
+    mistura das duas camadas do material (`blend(x, z)` → 0..1, 1 = segunda camada); os outros
+    alfas ficam no valor típico do terreno original. Devolve {nome: bytes}."""
+    ext = grid if ext is None else ext
+    sf = shade_fn(height, grid, sun, lo=ext0, hi=ext0 + ext)
+    S = _shade_map(sf, grid, res, ext0, ext)
+    A = None
+    if blend is not None:
+        A = [blend(ext0 + (i + 0.5) / res * ext, ext0 + (j + 0.5) / res * ext) for j in range(res) for i in range(res)]
+    out = {}
+    levels = None
+    for k, b in enumerate(donor):
+        w, h, mips = _dds(b)
+        cols, alps = ([], [], []), []
+        bw0 = max(1, w // 4)
+        for i in range(0, bw0 * max(1, h // 4), 7):
+            o = 128 + i * 16
+            c0, c1 = struct.unpack_from("<2H", b, o + 8)
+            a, c = _rgb565(c0), _rgb565(c1)
+            if sum(a) + sum(c) < 30:
+                continue
+            for q in range(3):
+                cols[q].append((a[q] + c[q]) / 2)
+            alps.append((b[o] + b[o + 1]) // 2)
+        if not alps:
+            return {}
+        color = tuple(sorted(v)[len(v) // 2] for v in cols)
+        alpha = sorted(alps)[len(alps) // 2]
+        if levels is None:
+            levels = _blocks(S, res, w, h, mips)
+        ablk = _alpha_blocks(A, res, w, h, mips) if (A is not None and k == 1) else None
+        img = bytearray(b)
+        o = 128
+        for li, blk in enumerate(levels):
+            for bi, (hi, lo, idx) in enumerate(blk):
+                if o + 16 > len(img):
+                    break
+                c0 = _c565(*(min(255, color[q] * hi) for q in range(3)))
+                c1 = _c565(*(min(255, color[q] * lo) for q in range(3)))
+                if c0 < c1:
+                    c0, c1 = c1, c0
+                    idx = _swap_codes(idx)
+                elif c0 == c1:
+                    idx = 0
+                img[o:o + 8] = ablk[li][bi] if ablk else bytes((alpha, alpha, 0, 0, 0, 0, 0, 0))
+                struct.pack_into("<2HI", img, o + 8, c0, c1, idx)
+                o += 16
+        out[f"{stem}_{k}.win.dds"] = bytes(img)
+    return out
+
+
+def _swap_codes(idx):
+    """troca c0↔c1 nos índices DXT (0↔1, 2↔3)"""
+    out = 0
+    for k in range(16):
+        c = (idx >> (2 * k)) & 3
+        out |= (c ^ 1) << (2 * k)
+    return out

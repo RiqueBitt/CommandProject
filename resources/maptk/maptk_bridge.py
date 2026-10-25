@@ -380,10 +380,41 @@ def _clean_spec(spec):
             if g.get("d"):
                 ok.append({k: g.get(k) for k in ("d", "n", "s") if g.get(k)})
         ground = ok or None
-        spec["clean"] = dict(ground=ground, relight=bool(clean.get("relight", True)),
-                             clear_props=bool(clean.get("clear_props", True)))
+        chain = []
+        for g in (clean.get("chain") or [])[:5]:
+            for k in ("d", "n", "s"):
+                v = g.get(k)
+                if v and not re.match(r"^/textures/terrain/[\w/.-]+\.dds$", v, re.I):
+                    raise ValueError(f"textura inválida: {v}")
+            if g.get("d"):
+                chain.append({k: g.get(k) for k in ("d", "n", "s") if g.get(k)})
+        paint = None
+        pt = clean.get("paint")
+        if pt:
+            import base64
+            n = int(pt["size"])
+            raw = base64.b64decode(pt["data"])
+            if not 16 <= n <= 1024 or len(raw) != (n + 1) ** 2 * 2:
+                raise ValueError("camada do pincel de textura inválida")
+            m = (n + 1) ** 2
+            paint = (n, raw[:m], raw[m:])
+        spec["clean"] = dict(paint=paint, ground=ground, chain=chain if len(chain) >= 2 else None, relight=bool(clean.get("relight", True)),
+                             clear_props=bool(clean.get("clear_props", True)), ring=bool(clean.get("ring", True)),
+                             ring_rise=max(0.0, min(250.0, float(clean.get("ring_rise", 95)))))
     else:
         spec.pop("clean", None)
+    # água do mapa em branco: nível novo (a lâmina d'água do terreno base sobe até ele)
+    if spec.get("water_level") is not None:
+        wl = float(spec["water_level"])
+        if not 1 <= wl <= 400:
+            raise ValueError("nível da água inválido")
+        spec["water_level"] = wl
+    else:
+        spec.pop("water_level", None)
+    # visual limpo: a malha nova aponta para a máscara de água do mapa novo (qualquer tamanho de id)
+    if spec.get("clean") and spec["clean"]["relight"]:
+        spec["water_rewrite"] = True
+        spec["_notes"] = [n for n in spec.get("_notes", []) if "tamanho do id" not in n]
     if (spec.get("clean") or spec.get("flat_base") is not None) and not spec.get("patch"):
         first = next(iter(spec["anchors"].values()))
         spec["patch"] = dict(max_slope=6.0, water_margin=4.0, seed=first, causeways=[])
@@ -419,6 +450,13 @@ def _hooks(sm, spec, state):
             hf = _flat(sm, hf, fb)
         if hd:
             hf = _apply_delta(sm, hf, hd)
+        if spec.get("water_level") is not None and self.raw.get("info.win.bdf"):
+            # o jogo lê o nível da água no info.win.bdf (offset 216)
+            import struct as _st
+            ipl = bytearray(sm.read_bdf_payload(self.raw["info.win.bdf"]))
+            if len(ipl) >= 220:
+                _st.pack_into("<f", ipl, 216, spec["water_level"])
+                self.raw["info.win.bdf"] = sm.rebuild_bdf(self.raw["info.win.bdf"], bytes(ipl))
         if fb is not None or hd:
             self.set_hfield(hf)
             if fb is not None:
@@ -438,7 +476,15 @@ def _hooks(sm, spec, state):
         except Exception as e:  # noqa: BLE001 — terrenos de escaramuça desenham direto do heightfield
             emit("progress", message=f"malha visual não ajustada ({e}); o relevo usa o heightfield")
         orig_set(self, new)
-        if spec.get("water_rewrite") and self.raw.get("waterDepth.dds"):
+        state["hf_changed"] = True
+        if spec.get("water_level") is not None:
+            # máscara de água do zero (o terreno base pode não ter): define onde é água para o jogo
+            import cp_world
+            wd = sm.write_waterdepth_dds_mips(self, spec["water_level"], header=cp_world.dds_header(512, 512, 10))
+            self.raw["waterDepth.dds"] = wd
+            self._wd = wd[128:]
+            state["water_mask"] = True
+        elif spec.get("water_rewrite") and self.raw.get("waterDepth.dds"):
             # a máscara de água acompanha o relevo novo (lagos e rios novos, terra nova)
             wd = sm.write_waterdepth_dds_mips(self, sm._water_level(self))
             self.raw["waterDepth.dds"] = wd
@@ -479,8 +525,12 @@ def _hooks(sm, spec, state):
                 k["strip_props"] = "moving"  # "remover todos" apagaria as novas também
         if clean and terrain.raw.get("terrain.win.bdf"):
             _clean_visual(sm, spec, state, terrain, a[0])
+        if state.get("hf_changed"):
+            _regrid_collision(sm, state, terrain)
         water = False
-        if state.get("water_mask") and terrain.raw.get("terrain.win.bdf"):
+        if state.get("water_repointed"):
+            water = True  # a malha nova já aponta para a máscara de água do mapa novo
+        elif state.get("water_mask") and terrain.raw.get("terrain.win.bdf"):
             try:
                 terrain.raw["terrain.win.bdf"] = sm.retarget_waterdepth_path(terrain.raw["terrain.win.bdf"], terrain.id, a[0])
                 water = True
@@ -537,6 +587,9 @@ def _existing_textures(sm, grounds):
 
     def has(p):
         k = p.lstrip("/").lower()
+        # texturas importadas pelo usuário: o launcher põe os arquivos no pacote do mapa depois
+        if k.startswith("textures/terrain/cp/"):
+            return True
         return k.replace(".dds", ".win.dds") in names or k in names
     out = []
     for g in grounds:
@@ -559,7 +612,53 @@ def _clean_visual(sm, spec, state, terrain, new_id):
         emit("progress", message=f"chão: {n} texturas trocadas pelo conjunto escolhido")
         if skipped:
             state["warnings"].append(f"{skipped} textura(s) do chão não couberam no espaço do terreno base e ficaram como eram")
+    tb = sm.rebuild_bdf(tb, pl)
+    # malha nova: grade regular que segue o relevo novo, com luz própria (nada do mapa original dentro
+    # do mapa). Se o terreno tiver um formato inesperado, cai na luz refeita sobre a malha original.
     if clean.get("relight"):
+        try:
+            import cp_regrid
+            import cp_world
+            g = terrain.grid
+            step = 2.0 if g <= 512 else 4.0 if g <= 1024 else 8.0
+            margin = (256.0 if g <= 1024 else 384.0) if clean.get("ring") else 0.0
+            inner = lambda x, z: terrain.y(min(g, max(0, x)), min(g, max(0, z)))  # noqa: E731
+            height = cp_world.ring_height(inner, g, rise=clean.get("ring_rise", 95.0)) if margin else inner
+            wl = spec.get("water_level")
+            water = wl if wl is not None else (sm._water_level(terrain) or None)
+            chain = _existing_textures(sm, clean.get("chain") or []) if clean.get("chain") else []
+            zones = cp_world.chain_zones(chain) if len(chain) >= 2 else None
+            biome = cp_world.Biome(height, g, water, paint=clean.get("paint")).prepare(-margin, g + 2 * margin) if zones else None
+            path = f"/maps/{new_id}/lighting/cpgrid.dds"
+            wpath = f"/maps/{new_id}/{new_id}.waterDepth.dds" if water and terrain.raw.get("waterDepth.dds") else None
+            tb2, info = cp_regrid.rebuild_terrain(tb, height, g, step=step, mask_path=path, margin=margin, ring_step=16.0,
+                                                  zones=zones, zone_t=biome.t if biome else None,
+                                                  water_y=wl, water_mask_path=wpath, log=lambda m: emit("progress", message=m))
+            if zones and info["zones"] < len(zones):
+                state["warnings"].append(f"o terreno base só tem {info['zones']} material(is) de mistura: o chão usa {info['zones'] + 1} texturas")
+            stem = info["old_mask"].replace("\\", "/").rsplit("/", 1)[-1][:-4] if info["old_mask"] else ""
+            lit = {n.replace("\\", "/").split("/")[-1].lower(): b for n, b in terrain.lighting.items()}
+            donor = [lit.get(f"{stem}_{k}.win.dds".lower()) for k in range(3)]
+            if not all(donor):
+                donor = [lit.get(f"mask01_{k}.win.dds") for k in range(3)]
+            if not all(donor):
+                raise ValueError("máscaras de luz do terreno base não encontradas")
+            masks = cp_lighting.grid_masks(donor, height, g, sun=state.get("sun") or cp_lighting.SUN,
+                                           ext0=info["ext0"], ext=info["ext"], blend=biome.blend if biome else None)
+            if len(masks) != 3:
+                raise ValueError("máscaras de luz novas incompletas")
+            for f, b in masks.items():
+                terrain.lighting[f"maps/{terrain.id}/lighting/{f}"] = b
+            terrain.raw["terrain.win.bdf"] = tb2
+            state["regrid"] = info
+            if wpath:
+                state["water_repointed"] = True
+            emit("progress", message="luz do chão refeita para o relevo novo"
+                 + (f"; {len(chain)} texturas por bioma" if zones else "") + ("; paisagem em volta do mapa" if margin else ""))
+            return
+        except Exception as e:  # noqa: BLE001 — segue com a malha original
+            emit("progress", message=f"malha do chão não refeita ({e}); refazendo só a luz")
+        pl = sm.read_bdf_payload(tb)
         old_dir = cp_lighting.mask_dir(pl, terrain.id)
         new_dir = f"/maps/{new_id}/lighting/"
         lit = {n.replace("\\", "/").split("/")[-1]: (n, b) for n, b in terrain.lighting.items()}
@@ -578,7 +677,21 @@ def _clean_visual(sm, spec, state, terrain, new_id):
                 state["warnings"].append(f"a luz do chão não pôde ser refeita ({e})")
         else:
             state["warnings"].append("terreno sem máscaras de luz conhecidas: a luz original foi mantida")
-    terrain.raw["terrain.win.bdf"] = sm.rebuild_bdf(tb, pl)
+        tb = sm.rebuild_bdf(tb, pl)
+    terrain.raw["terrain.win.bdf"] = tb
+
+
+def _regrid_collision(sm, state, terrain):
+    """Colisão nova para o relevo novo (sem ela, a câmera, os tiros e o cursor batem no chão antigo)."""
+    if not terrain.raw.get("collision2.win.bdf"):
+        return
+    try:
+        import cp_regrid
+        g = terrain.grid
+        terrain.raw["collision2.win.bdf"] = cp_regrid.regrid_collision(terrain.raw["collision2.win.bdf"], terrain.y, g, step=max(4.0, g / 128))
+        emit("progress", message="colisão do chão refeita para o relevo novo")
+    except Exception as e:  # noqa: BLE001
+        state["warnings"].append(f"a colisão do chão não pôde ser refeita ({e}); a câmera pode atravessar morros novos")
 
 
 def _apply_delta(sm, hfield_bytes, hd):

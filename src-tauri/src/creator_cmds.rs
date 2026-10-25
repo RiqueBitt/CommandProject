@@ -304,10 +304,11 @@ fn mix_parts(srcs: &[PathBuf], base: &str, new_id: &str, ms: &cp_core::unitmix::
         warnings: out.checks.iter().filter(|c| c.level == "warn" || c.level == "fix").map(|c| c.text.clone()).collect(),
     };
     let base_l = base.to_ascii_lowercase();
+    let base_dir = cp_core::units::unit_dir(srcs, &base_l).unwrap_or_else(|_| format!("/units/{base_l}/"));
     let extra = out
         .anims
         .iter()
-        .map(|(_, path, data)| (cp_core::units::rename(path.trim_start_matches('/'), &base_l, &new_id.to_ascii_lowercase()), data.clone()))
+        .map(|(_, path, data)| (cp_core::units::relocate(path.trim_start_matches('/'), &base_dir, &base_l, &new_id.to_ascii_lowercase()), data.clone()))
         .collect();
     // a arma vem da unidade da arma (ou da torre): copia a tabela inteira dela para a arma 1
     let mut copies = copies.to_vec();
@@ -634,12 +635,30 @@ pub(crate) fn map_custom_files(c: &Creations, srcs: &[PathBuf], spec: &Value) ->
         let files = baked_files(c, creation, &Default::default())?;
         out.extend(cp_core::units::prop_files(srcs, slug, name, &files)?);
     }
+    // texturas de chão importadas (PNG do projeto → _d/_n/_s em DDS)
+    for t in spec.get("custom_textures").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+        let creation = t.get("creation").and_then(|v| v.as_str()).unwrap_or_default();
+        let asset = t.get("asset").and_then(|v| v.as_str()).unwrap_or_default();
+        let stem = t.get("path").and_then(|v| v.as_str()).unwrap_or_default().trim_start_matches('/').to_ascii_lowercase();
+        let ok = stem.strip_prefix("textures/terrain/cp/").is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
+        if !ok {
+            return Err(cp_core::Error::Other(format!("caminho de textura inválido: {stem}")));
+        }
+        let png = c.asset_get(creation, asset)?;
+        let [d, n, sp] = cp_core::mapassets::custom_ground_dds(&png)?;
+        for (suffix, data) in [("_d", d), ("_n", n), ("_s", sp)] {
+            for name in cp_core::modelgen::both_names(&format!("/{stem}{suffix}.dds")) {
+                out.push((name, data.clone()));
+            }
+        }
+    }
     Ok(out)
 }
 
 /// Prepara (antes de gerar o mapa) os arquivos das decorações próprias.
 pub(crate) async fn custom_files_for(state: &State<'_, AppState>, spec: &Value) -> R<Vec<(String, Vec<u8>)>> {
-    if !spec.get("custom_models").and_then(|v| v.as_array()).is_some_and(|a| !a.is_empty()) {
+    let any = |k: &str| spec.get(k).and_then(|v| v.as_array()).is_some_and(|a| !a.is_empty());
+    if !any("custom_models") && !any("custom_textures") {
         return Ok(vec![]);
     }
     let srcs = sources(&state.ws).await?;

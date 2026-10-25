@@ -5,6 +5,7 @@
 // prévia e o mapa gerado são iguais.
 
 import type { PlacedProp, Pt } from "../studio/mapEdit";
+import { newPaint, type PaintLayer } from "../studio/biome.ts";
 
 // ------------------------------------------------------------------ aleatório e ruído
 
@@ -142,7 +143,7 @@ export const LINE_FEATURES: FeatureKind[] = ["ridge", "river", "canyon", "pass"]
 
 /** Caixa que a forma afeta (para não percorrer o mapa inteiro). */
 function featureBox(f: Feature): [number, number, number, number] {
-  const ext = f.r * (f.kind === "lake" || f.kind === "river" ? 1.7 : f.kind === "pad" ? 1.6 : f.kind === "crater" ? 1.4 : 1.25) + 4;
+  const ext = f.r * (f.kind === "lake" || f.kind === "river" ? 2.3 : f.kind === "pass" ? 2.1 : f.kind === "pad" ? 1.6 : f.kind === "crater" ? 1.4 : 1.25) + 4;
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (const [x, z] of f.pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
   return [x0 - ext, x1 + ext, z0 - ext, z1 + ext];
@@ -218,18 +219,18 @@ export function applyFeatures(g: Grid, H: Float32Array, features: Feature[], wat
           const prof = (1 - t * t) ** 2;
           H[idx] = cur + f.h * prof * lerp(1, crest, 0.4 + 0.6 * f.rough);
         } else if (f.kind === "river") {
-          if (t >= 1.6) continue;
+          if (t >= 2.2) continue;
           const bed = hasWater ? water - f.h * (1 - Math.min(1, t) ** 2) - 0.6 : cur - f.h * (1 - Math.min(1, t) ** 2);
           if (t < 1) H[idx] = Math.min(cur, bed);
-          else { const bank = hasWater ? water + 1.2 : cur; H[idx] = Math.min(cur, lerp(bank, cur, smooth(1, 1.6, t))); }
+          else { const bank = hasWater ? water + 0.9 : cur; H[idx] = Math.min(cur, bank + (cur - bank) * smooth(1.25, 2.2, t) ** 2); }
         } else if (f.kind === "canyon") {
           if (t >= 1) continue;
           const prof = 1 - smooth(0.55, 1, t);
           H[idx] = cur - f.h * prof * (1 + f.rough * 0.25 * n(along / 40, d0 / 40));
         } else if (f.kind === "pass") {
-          if (t >= 1.3) continue;
+          if (t >= 2) continue;
           const y = lerp(passA, passB, total ? along / total : 0) + 0.5;
-          H[idx] = lerp(y, cur, smooth(0.75, 1.3, t));
+          H[idx] = lerp(y, cur, smooth(0.6, 2, t) ** 0.8);
         }
         continue;
       }
@@ -243,9 +244,21 @@ export function applyFeatures(g: Grid, H: Float32Array, features: Feature[], wat
       switch (f.kind) {
         case "mountain": {
           if (t >= 1) break;
-          const prof = (1 - t * t) ** 2;
-          const crag = ridged(n, u / (f.r * 0.45), v / (f.r * 0.45));
-          H[idx] = cur + f.h * prof * (1 + f.rough * 0.9 * (crag - 0.45));
+          // dobra de domínio: cristas e vales tortos (não um cone); base larga e pico agudo
+          const k = f.r * 0.5;
+          const wu = u + f.r * 0.24 * n(u / k + 3.1, v / k - 1.7), wv = v + f.r * 0.24 * n(u / k - 4.2, v / k + 2.9);
+          const tw = Math.min(1, Math.hypot(wu, wv) / (f.r * warp));
+          if (tw >= 1) break;
+          const prof = (1 - tw) ** 1.8 * (1 + 0.9 * tw) * smooth(1, 0.85, t);
+          // multifractal com cristas: as dobras grandes carregam os detalhes
+          let rm = 0, amp = 1, fr = 1 / (f.r * 0.42), ws = 0;
+          for (let o = 0; o < 4; o++) {
+            const q = 1 - Math.abs(n(wu * fr + o * 13.1, wv * fr - o * 7.7));
+            rm += q * q * amp * (o ? 0.6 + 0.4 * rm / Math.max(0.001, ws) : 1);
+            ws += amp; amp *= 0.5; fr *= 2.1;
+          }
+          rm /= ws;
+          H[idx] = cur + f.h * prof * (0.62 + f.rough * 0.85 * (rm - 0.35));
           break;
         }
         case "hill": {
@@ -272,11 +285,16 @@ export function applyFeatures(g: Grid, H: Float32Array, features: Feature[], wat
           break;
         }
         case "lake": {
-          if (t >= 1.5) break;
+          const te = 1 + Math.min(0.8, 42 / f.r);
+          if (t >= te) break;
           const ref = hasWater ? water : local;
           const bed = ref - f.h * (1 - Math.min(1, t) ** 2) - (hasWater ? 0.8 : 0);
           if (t < 1) H[idx] = Math.min(cur, bed);
-          else { const shore = hasWater ? water + 1.3 : ref; H[idx] = Math.min(cur, lerp(shore, cur, smooth(1, 1.5, t))); }
+          else {
+            // margem suave: faixa de praia rente à água e subida devagar até o chão em volta
+            const shore = hasWater ? water + 0.9 : ref;
+            H[idx] = Math.min(cur, shore + (cur - shore) * smooth(1 + (te - 1) * 0.3, te, t) ** 2);
+          }
           break;
         }
         case "dunes": {
@@ -343,27 +361,36 @@ export interface WorldGen {
   center?: boolean;
   /** obstáculos: paredões rochosos que criam gargalos entre as bases */
   obstacles?: number;
+  /** vilas (casas em ruas, armazéns, postes, praça) por mapa */
+  settlements?: number;
+  /** estradas de terra ligando vilas e bases */
+  roads?: boolean;
+  /** plantações em volta das vilas (0 a 1) */
+  farms?: number;
+  /** detalhe fino do relevo (0 a 1) */
+  detail?: number;
 }
 
 /** Áreas estratégicas marcadas pelo gerador (aparecem na prévia e na análise). */
 export interface Strategic { kind: "center" | "safe" | "contested" | "choke"; pos: Pt; label: string }
 
 export const WORLD_PRESETS: { id: string; label: string; icon: string; desc: string; over: Partial<WorldGen> }[] = [
-  { id: "valleys", label: "Vales verdes", icon: "forest", desc: "Morros suaves, rios e muita floresta.", over: { blend: 1, hilliness: 9, scale: 260, mountains: 2, mountainHeight: 55, ridges: 1, hills: 6, plateaus: 1, craters: 0, canyons: 0, lakes: 2, rivers: 1, dunes: 0, islands: 0, edge: "mountains", forests: 0.75, rocks: 0.35, structures: 2, wrecks: 0.2, biome: "temperate" } },
-  { id: "highlands", label: "Montanhas", icon: "landscape", desc: "Cordilheiras altas, passagens e planaltos.", over: { blend: 1, hilliness: 14, scale: 220, mountains: 5, mountainHeight: 85, ridges: 3, hills: 4, plateaus: 3, craters: 0, canyons: 1, lakes: 1, rivers: 0, dunes: 0, islands: 0, edge: "mountains", forests: 0.45, rocks: 0.75, structures: 2, wrecks: 0.25, biome: "temperate" } },
-  { id: "lakes", label: "Terra dos lagos", icon: "water", desc: "Muitos lagos e rios entre as bases.", over: { blend: 1, hilliness: 7, scale: 240, mountains: 1, mountainHeight: 45, ridges: 0, hills: 5, plateaus: 0, craters: 0, canyons: 0, lakes: 6, rivers: 2, dunes: 0, islands: 1, edge: "none", forests: 0.6, rocks: 0.3, structures: 2, wrecks: 0.15, biome: "temperate" } },
-  { id: "archipelago", label: "Arquipélago", icon: "beach_access", desc: "Ilhas ligadas por passagens rasas.", over: { blend: 1, hilliness: 6, scale: 200, mountains: 2, mountainHeight: 40, ridges: 0, hills: 3, plateaus: 0, craters: 0, canyons: 0, lakes: 3, rivers: 2, dunes: 0, islands: 4, edge: "water", forests: 0.5, rocks: 0.3, structures: 1, wrecks: 0.2, biome: "temperate" } },
-  { id: "desert", label: "Deserto", icon: "wb_sunny", desc: "Dunas, cânions e ruínas.", over: { blend: 1, hilliness: 5, scale: 300, mountains: 1, mountainHeight: 45, ridges: 1, hills: 2, plateaus: 3, craters: 1, canyons: 2, lakes: 0, rivers: 0, dunes: 4, islands: 0, edge: "rugged", forests: 0.05, rocks: 0.55, structures: 4, wrecks: 0.6, biome: "desert" } },
-  { id: "wasteland", label: "Terra arrasada", icon: "local_fire_department", desc: "Crateras, destroços e bases em ruínas.", over: { blend: 1, hilliness: 8, scale: 180, mountains: 1, mountainHeight: 40, ridges: 1, hills: 3, plateaus: 1, craters: 6, canyons: 1, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "rugged", forests: 0.1, rocks: 0.6, structures: 5, wrecks: 1, biome: "volcanic" } },
-  { id: "frozen", label: "Gelo", icon: "ac_unit", desc: "Planaltos gelados e lagos.", over: { blend: 1, hilliness: 10, scale: 240, mountains: 3, mountainHeight: 70, ridges: 2, hills: 3, plateaus: 2, craters: 1, canyons: 1, lakes: 3, rivers: 0, dunes: 0, islands: 0, edge: "mountains", forests: 0.3, rocks: 0.6, structures: 2, wrecks: 0.3, biome: "snow" } },
-  { id: "open", label: "Campo aberto", icon: "grass", desc: "Plano e rápido, poucos obstáculos.", over: { blend: 1, hilliness: 4, scale: 320, mountains: 0, mountainHeight: 40, ridges: 0, hills: 4, plateaus: 1, craters: 0, canyons: 0, lakes: 1, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.35, rocks: 0.2, structures: 2, wrecks: 0.2, biome: "temperate" } },
+  { id: "valleys", label: "Vales verdes", icon: "forest", desc: "Morros suaves, rios e muita floresta.", over: { blend: 1, hilliness: 9, scale: 260, mountains: 2, mountainHeight: 55, ridges: 1, hills: 6, plateaus: 1, craters: 0, canyons: 0, lakes: 2, rivers: 1, dunes: 0, islands: 0, edge: "mountains", forests: 0.75, rocks: 0.35, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 3, farms: 0.75, roads: true, detail: 0.6 } },
+  { id: "highlands", label: "Montanhas", icon: "landscape", desc: "Cordilheiras altas, passagens e planaltos.", over: { blend: 1, hilliness: 14, scale: 220, mountains: 5, mountainHeight: 85, ridges: 3, hills: 4, plateaus: 3, craters: 0, canyons: 1, lakes: 1, rivers: 0, dunes: 0, islands: 0, edge: "mountains", forests: 0.45, rocks: 0.75, structures: 2, wrecks: 0.25, biome: "temperate", settlements: 2, farms: 0.3, roads: true, detail: 0.8 } },
+  { id: "lakes", label: "Terra dos lagos", icon: "water", desc: "Muitos lagos e rios entre as bases.", over: { blend: 1, hilliness: 7, scale: 240, mountains: 1, mountainHeight: 45, ridges: 0, hills: 5, plateaus: 0, craters: 0, canyons: 0, lakes: 6, rivers: 2, dunes: 0, islands: 1, edge: "none", forests: 0.6, rocks: 0.3, structures: 2, wrecks: 0.15, biome: "temperate", settlements: 3, farms: 0.6, roads: true, detail: 0.55 } },
+  { id: "archipelago", label: "Arquipélago", icon: "beach_access", desc: "Ilhas ligadas por passagens rasas.", over: { blend: 1, hilliness: 6, scale: 200, mountains: 2, mountainHeight: 40, ridges: 0, hills: 3, plateaus: 0, craters: 0, canyons: 0, lakes: 3, rivers: 2, dunes: 0, islands: 4, edge: "water", forests: 0.5, rocks: 0.3, structures: 1, wrecks: 0.2, biome: "temperate", settlements: 2, farms: 0.3, roads: true, detail: 0.5 } },
+  { id: "desert", label: "Deserto", icon: "wb_sunny", desc: "Dunas, cânions e ruínas.", over: { blend: 1, hilliness: 5, scale: 300, mountains: 1, mountainHeight: 45, ridges: 1, hills: 2, plateaus: 3, craters: 1, canyons: 2, lakes: 0, rivers: 0, dunes: 4, islands: 0, edge: "rugged", forests: 0.05, rocks: 0.55, structures: 4, wrecks: 0.6, biome: "desert", settlements: 2, farms: 0, roads: true, detail: 0.7 } },
+  { id: "wasteland", label: "Terra arrasada", icon: "local_fire_department", desc: "Crateras, destroços e bases em ruínas.", over: { blend: 1, hilliness: 8, scale: 180, mountains: 1, mountainHeight: 40, ridges: 1, hills: 3, plateaus: 1, craters: 6, canyons: 1, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "rugged", forests: 0.1, rocks: 0.6, structures: 5, wrecks: 1, biome: "volcanic", settlements: 2, farms: 0, roads: true, detail: 0.8 } },
+  { id: "frozen", label: "Gelo", icon: "ac_unit", desc: "Planaltos gelados e lagos.", over: { blend: 1, hilliness: 10, scale: 240, mountains: 3, mountainHeight: 70, ridges: 2, hills: 3, plateaus: 2, craters: 1, canyons: 1, lakes: 3, rivers: 0, dunes: 0, islands: 0, edge: "mountains", forests: 0.3, rocks: 0.6, structures: 2, wrecks: 0.3, biome: "snow", settlements: 1, farms: 0, roads: true, detail: 0.6 } },
+  { id: "open", label: "Campo aberto", icon: "grass", desc: "Plano e rápido, poucos obstáculos.", over: { blend: 1, hilliness: 4, scale: 320, mountains: 0, mountainHeight: 40, ridges: 0, hills: 4, plateaus: 1, craters: 0, canyons: 0, lakes: 1, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.35, rocks: 0.2, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 4, farms: 0.85, roads: true, detail: 0.45 } },
 ];
 
 export const newWorld = (over: Partial<WorldGen> = {}): WorldGen => ({
   seed: Math.floor(Math.random() * 999999), preset: "valleys", players: 2, symmetry: "rot2",
   blend: 1, elevation: 22, hilliness: 9, scale: 260, mountains: 2, mountainHeight: 55, ridges: 1, hills: 6, plateaus: 1, craters: 0,
   canyons: 0, lakes: 2, rivers: 1, dunes: 0, islands: 0, edge: "mountains", forests: 0.75, rocks: 0.35, structures: 2, wrecks: 0.2,
-  clearDonor: true, economy: "normal", biome: "temperate", resources: "generated", expansions: 2, center: true, obstacles: 0, ...over,
+  clearDonor: true, economy: "normal", biome: "temperate", resources: "generated", expansions: 2, center: true, obstacles: 0,
+  settlements: 3, roads: true, farms: 0.75, detail: 0.6, ...over,
 });
 
 /** simetrias possíveis para um número de jogadores */
@@ -380,7 +407,10 @@ export function symmetriesFor(players: number): Symmetry[] {
 export function baseHeights(g: Grid, donor: Float32Array, water: number, hasWater: boolean, wg: WorldGen): Float32Array {
   const s = g.size, w = s + 1, step = g.grid / s, G = g.grid;
   const ops = symmetryOps(wg.symmetry, G);
-  const n = simplex(wg.seed), n2 = simplex(wg.seed + 101);
+  const n = simplex(wg.seed), n2 = simplex(wg.seed + 101), n3 = simplex(wg.seed + 211);
+  // detalhe fino (ondulações de poucos metros, sulcos e lombadas): o chão deixa de ser liso
+  // mundos de versões antigas (sem `detail`) continuam iguais
+  const det = wg.detail ?? 0, detAmp = det * (1.4 + wg.hilliness * 0.08);
   let ref = water;
   if (!hasWater) { const sorted = Float32Array.from(donor).sort(); ref = sorted[sorted.length >> 1] - wg.elevation * 0.5; }
   const out = new Float32Array(w * w);
@@ -389,16 +419,17 @@ export function baseHeights(g: Grid, donor: Float32Array, water: number, hasWate
     const x = i * step, z = j * step;
     const e = Math.min(x, z, G - x, G - z);
     const edgy = (wg.edge === "mountains" && e < 160) || (wg.edge === "water" && hasWater && e < 220);
-    let v = 0, rv = 0, er = 0, en = 0;
+    let v = 0, rv = 0, er = 0, en = 0, dv = 0;
     for (const o of ops) {
       const [px, pz] = o.pt([x, z]);
       v += fbm(n, px / wg.scale, pz / wg.scale, 5);
       rv += ridged(n2, px / (wg.scale * 1.7), pz / (wg.scale * 1.7), 3);
+      if (det > 0) dv += fbm(n3, px / 46, pz / 46, 2) + 0.35 * n3(px / 14 + 5.3, pz / 14 - 2.1);
       if (edgy) { er += ridged(n2, px / 90, pz / 90); en += n(px / 150 + 9, pz / 150); }
     }
     v = (v / ops.length) * Math.min(1.6, amp);
-    rv /= ops.length; er /= ops.length; en /= ops.length;
-    let y = ref + wg.elevation + wg.hilliness * v + wg.hilliness * 0.6 * (rv - 0.35);
+    rv /= ops.length; er /= ops.length; en /= ops.length; dv /= ops.length;
+    let y = ref + wg.elevation + wg.hilliness * v + wg.hilliness * 0.6 * (rv - 0.35) + detAmp * dv;
     if (wg.edge === "mountains" && edgy) {
       y += smooth(150, 10, e) * (45 + 35 * er) * (0.7 + 0.3 * en);
     } else if (wg.edge === "water" && edgy) {
@@ -423,6 +454,10 @@ export interface WorldResult {
   /** pontos de massa gerados (simétricos) */
   mass: Pt[];
   strategic: Strategic[];
+  /** pintura do chão feita pelo gerador (estradas, vilas, plantações, chão das matas) */
+  paint?: PaintLayer | null;
+  /** vilas, estradas e plantações (para a prévia) */
+  life?: Life;
 }
 
 let idSeq = 0;
@@ -432,9 +467,85 @@ const fid = () => `f${Date.now().toString(36)}${(idSeq++).toString(36)}`;
 export function composeWorld(g: Grid, donor: Float32Array, water: number, hasWater: boolean, wg: WorldGen | null, features: Feature[], base?: Float32Array | null) {
   const H = base ? base.slice() : wg ? baseHeights(g, donor, water, hasWater, wg) : donor.slice();
   if (features.length) applyFeatures(g, H, features, water, hasWater);
-  // mundo gerado: erosão leve tira as agulhas e paredões de um ponto só (encostas naturais)
-  if (wg) erode(g, H, 10, 1.6);
+  if (wg) {
+    // mundo gerado: a chuva cava ravinas e leva terra para os vales; depois a erosão térmica tira
+    // agulhas e paredões de um ponto só. A simetria é refeita no fim (média das cópias).
+    rainErode(g, H, wg.seed, water, hasWater);
+    symmetrize(g, H, wg.symmetry);
+    erode(g, H, 10, 1.6);
+    // bases, passagens e áreas planas continuam planas depois da erosão
+    const flat = features.filter((f) => f.kind === "pad" || f.kind === "pass");
+    if (flat.length) applyFeatures(g, H, flat, water, hasWater);
+  }
   for (let k = 0; k < H.length; k++) H[k] = Math.max(0, Math.min(511, H[k]));
+  return H;
+}
+
+/** Erosão por chuva (gotas que descem a encosta levando e deixando terra). Determinística pela semente. */
+export function rainErode(g: Grid, H: Float32Array, seed: number, water: number, hasWater: boolean, drops = 0) {
+  const s = g.size, w = s + 1, step = g.grid / s;
+  const n = drops || Math.round(s * s * 0.45);
+  const r = rng(seed * 31 + 7);
+  const inertia = 0.06, capK = 4, dep = 0.3, ero = 0.3, evap = 0.02, grav = 4, minSlope = 0.01, maxLife = 40;
+  const lim = s - 1;
+  // altura bilinear sem criar objetos (o laço roda milhões de vezes)
+  const hAt = (x: number, z: number) => {
+    const i = x < 0 ? 0 : x >= lim ? lim - 1 : x | 0, j = z < 0 ? 0 : z >= lim ? lim - 1 : z | 0;
+    const u = x - i, v = z - j, k = j * w + i;
+    return (H[k] * (1 - u) + H[k + 1] * u) * (1 - v) + (H[k + w] * (1 - u) + H[k + w + 1] * u) * v;
+  };
+  for (let d = 0; d < n; d++) {
+    let x = 1 + r() * (s - 2), z = 1 + r() * (s - 2), dx = 0, dz = 0, vel = 1, wat = 1, sed = 0;
+    for (let life = 0; life < maxLife; life++) {
+      const i = x >= lim ? lim - 1 : x | 0, j = z >= lim ? lim - 1 : z | 0;
+      const u = x - i, v = z - j, k = j * w + i;
+      const a = H[k], b = H[k + 1], c = H[k + w], e = H[k + w + 1];
+      const h = (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + e * u) * v;
+      if (hasWater && h <= water) break;
+      const gx = (b - a) * (1 - v) + (e - c) * v, gz = (c - a) * (1 - u) + (e - b) * u;
+      dx = dx * inertia - gx * (1 - inertia);
+      dz = dz * inertia - gz * (1 - inertia);
+      const len = Math.sqrt(dx * dx + dz * dz);
+      if (len < 1e-6) break;
+      dx /= len; dz /= len;
+      const nx = x + dx, nz = z + dz;
+      if (nx < 1 || nz < 1 || nx > s - 1 || nz > s - 1) break;
+      const dh = hAt(nx, nz) - h;
+      const cap = Math.max(-dh / step, minSlope) * vel * wat * capK;
+      const w0 = (1 - u) * (1 - v), w1 = u * (1 - v), w2 = (1 - u) * v, w3 = u * v;
+      if (sed > cap || dh > 0) {
+        const amt = dh > 0 ? Math.min(dh, sed) : (sed - cap) * dep;
+        sed -= amt;
+        H[k] += amt * w0; H[k + 1] += amt * w1; H[k + w] += amt * w2; H[k + w + 1] += amt * w3;
+      } else {
+        const amt = Math.min((cap - sed) * ero, -dh);
+        H[k] -= amt * w0; H[k + 1] -= amt * w1; H[k + w] -= amt * w2; H[k + w + 1] -= amt * w3;
+        sed += amt;
+      }
+      vel = Math.sqrt(Math.max(0, vel * vel + (-dh / step) * grav));
+      wat *= 1 - evap;
+      x = nx; z = nz;
+    }
+  }
+  return H;
+}
+
+/** Refaz a simetria: cada ponto vira a média dele com as cópias. */
+export function symmetrize(g: Grid, H: Float32Array, sym: Symmetry) {
+  const ops = symmetryOps(sym, g.grid);
+  if (ops.length < 2) return H;
+  const s = g.size, w = s + 1, step = g.grid / s;
+  const out = new Float32Array(H.length);
+  for (let j = 0; j <= s; j++) for (let i = 0; i <= s; i++) {
+    let acc = 0;
+    for (const o of ops) {
+      const [x, z] = o.pt([i * step, j * step]);
+      const ii = Math.max(0, Math.min(s, Math.round(x / step))), jj = Math.max(0, Math.min(s, Math.round(z / step)));
+      acc += H[jj * w + ii];
+    }
+    out[j * w + i] = acc / ops.length;
+  }
+  H.set(out);
   return H;
 }
 
@@ -671,8 +782,29 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
 
   const strategic: Strategic[] = [];
   const mass = (wg.resources ?? "generated") === "generated" ? placeMass(g, H, water, hasWater, wg, spawns, canonSpawns, ops, r, centerOn, strategic, notes) : [];
-  const props = placeProps(g, H, water, hasWater, wg, cat, spawns, features, r, ops, mass);
-  return { features, spawns, props, heights: H, notes, mass, strategic };
+  // vida humana: vilas (chão plano), estradas ligando vilas e bases, plantações em volta
+  const villages = planVillages(g, H, water, hasWater, wg, spawns, ops, r, mass, features, centerOn);
+  if (villages.length) {
+    for (const v of villages) for (const o of ops) {
+      const q = o.pt(v.p);
+      features.push({ id: fid(), kind: "pad", pts: [[Math.round(q[0]), Math.round(q[1])]], r: v.r, h: 0, rough: 0, seed: 4, gen: true, name: "Vila" });
+    }
+    H = composeWorld(g, donor, water, hasWater, wg, features, base);
+  }
+  const vAll = villages.flatMap((v) => ops.map((o) => ({ ...v, p: o.pt(v.p) })));
+  const roads = wg.roads !== false && villages.length ? planRoads(g, H, water, hasWater, villages, vAll, spawns, r) : [];
+  const fields = planFields(g, H, water, hasWater, wg, villages, vAll, spawns, mass, features, ops, r);
+  const life = expandLife(G, villages, fields, roads, ops);
+  const paint = paintLife(G, life, wg.seed);
+  const sites: { p: Pt; r: number }[] = [];
+  const props = placeProps(g, H, water, hasWater, wg, cat, spawns, features, r, ops, mass, sites, life, { villages, roads }, paint);
+  if (villages.length) notes.push(`${life.villages.length} vila(s), ${life.roads.length} estrada(s) e ${life.fields.length} plantação(ões): o chão delas vem pintado (pincel de textura) e dá para repintar.`);
+  if (sites.length) {
+    // áreas planas sob as ruínas e postos: as estruturas assentam no chão
+    for (const st of sites) features.push({ id: fid(), kind: "pad", pts: [[Math.round(st.p[0]), Math.round(st.p[1])]], r: Math.round(Math.min(90, st.r)), h: 0, rough: 0, seed: 3, gen: true, name: "Estrutura" });
+    H = composeWorld(g, donor, water, hasWater, wg, features, base);
+  }
+  return { features, spawns, props, heights: H, notes, mass, strategic, paint: paint.power.some((v) => v) ? paint : null, life };
 }
 
 /** Massa simétrica: expansões seguras e disputadas por jogador e o centro, em chão plano, seco e alcançável. */
@@ -772,9 +904,10 @@ function biomesOf(bp: string): Biome[] {
   return ["temperate"];
 }
 
-/** Florestas, pedras, estruturas e destroços (na região fundamental, repetidos pela simetria). */
+/** Vilas, florestas, pedras, estruturas e destroços (na região fundamental, repetidos pela simetria). */
 function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, wg: WorldGen, cat: PropCatalog, spawns: Pt[], features: Feature[], r: () => number,
-  ops: ReturnType<typeof symmetryOps>, mass: Pt[] = []): PlacedProp[] {
+  ops: ReturnType<typeof symmetryOps>, mass: Pt[] = [], sites: { p: Pt; r: number }[] = [],
+  life: Life | null = null, canon: { villages: Village[]; roads: Pt[][] } = { villages: [], roads: [] }, paint: PaintLayer | null = null): PlacedProp[] {
   const G = g.grid, s = g.size, w = s + 1, step = G / s;
   const out: PlacedProp[] = [];
   const MAX = 4800;
@@ -798,16 +931,8 @@ function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, 
   const wet = (x: number, z: number) => hasWater && hAt(x, z) < water + 2.5;
   const nearSpawn = (x: number, z: number, d: number) => spawns.some((p) => Math.hypot(p[0] - x, p[1] - z) < d);
   const onLine = (x: number, z: number) => features.some((f) => (f.kind === "pass" || f.kind === "river") && f.pts.length > 1 && lineDist(f.pts, x, z)[0] < f.r * 1.2);
-  const inRegion = (x: number, z: number) => {
-    switch (wg.symmetry) {
-      case "mirror-x": return x <= G / 2;
-      case "mirror-z": return z <= G / 2;
-      case "diag": return z >= x;
-      case "rot2": return z >= G / 2;
-      case "rot4": return x <= G / 2 && z <= G / 2;
-      default: return true;
-    }
-  };
+  const human = (x: number, z: number) => lifeAt(life, x, z);
+  const inRegion = (x: number, z: number) => inFundamental(wg.symmetry, G, x, z);
   const meta = (bp: string): PropMeta => cat.meta?.[bp.toLowerCase()] ?? { bp, r: 1.5, h: 2, group: false, biomes: biomesOf(bp), local: false };
   /** coloca a decoração e as cópias da simetria; devolve false se não coube */
   const emit = (bp: string, x: number, z: number, yaw: number, scale: number, check = true): boolean => {
@@ -826,6 +951,20 @@ function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, 
     });
     return true;
   };
+  /** pinta um disco do chão em todas as cópias (chão das matas) */
+  const dab = (x: number, z: number, rad: number, role: number, pw: number) => {
+    if (!paint) return;
+    const n = paint.n, pw1 = n + 1, cs = G / n;
+    for (const o of ops) {
+      const [px, pz] = o.pt([x, z]);
+      for (let j = Math.max(0, Math.floor((pz - rad) / cs)); j <= Math.min(n, Math.ceil((pz + rad) / cs)); j++) for (let i = Math.max(0, Math.floor((px - rad) / cs)); i <= Math.min(n, Math.ceil((px + rad) / cs)); i++) {
+        const d = Math.hypot(i * cs - px, j * cs - pz) / rad;
+        if (d >= 1) continue;
+        const k = j * pw1 + i, v = Math.round(pw * (1 - d * d));
+        if (v > paint.power[k]) { paint.power[k] = v; paint.role[k] = role; }
+      }
+    }
+  };
   // só o que combina com o ambiente; o que já existe no terreno base tem preferência
   const choose = (list: string[]) => {
     const fit = list.filter((bp) => meta(bp).biomes.includes(wg.biome));
@@ -835,21 +974,118 @@ function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, 
     return { pool, local };
   };
   const pick = (c: { pool: string[]; local: string[] }) => { const src = c.local.length && r() < 0.7 ? c.local : c.pool; return src[Math.floor(r() * src.length)]; };
-  const forest = simplex(wg.seed + 977), rockN = simplex(wg.seed + 1931);
+  const forest = simplex(wg.seed + 977), rockN = simplex(wg.seed + 1931), species = simplex(wg.seed + 4111);
   const budget = (share: number) => Math.floor((MAX * share) / ops.length);
+  const catOf = (bp: string) => bp.toLowerCase().split("/")[2] ?? "";
+  const sub = (c: { pool: string[]; local: string[] }, f: (bp: string) => boolean) => ({ pool: c.pool.filter(f), local: c.local.filter(f) });
 
-  // estruturas primeiro (precisam de espaço plano)
-  const nSites = Math.max(0, Math.round(wg.structures / ops.length));
   const buildings = choose(cat.buildings), wrecks = choose(cat.wrecks), others = choose(cat.other.length ? cat.other : cat.rocks);
+  const trees = choose(cat.trees.filter((bp) => { const m = meta(bp); return m.h > 0.4 && m.r < 30 && !/kelp/i.test(bp); }));
+  const groups = sub(trees, (bp) => meta(bp).group), singles = sub(trees, (bp) => !meta(bp).group);
+  const rocks = choose(cat.rocks);
+  // peças das vilas
+  const houses = sub(buildings, (bp) => ["buildings", "structures"].includes(catOf(bp)) && meta(bp).r >= 2.5 && meta(bp).r <= 16);
+  const sheds = sub(buildings, (bp) => catOf(bp) === "warehouses" && meta(bp).r <= 26);
+  const lamps = sub(buildings, (bp) => catOf(bp) === "lights");
+  const crates = sub(others, (bp) => meta(bp).r <= 4);
+  const smallRocks = sub(rocks, (bp) => meta(bp).r <= 3.5);
+  const ruins = wg.biome === "volcanic";
+
+  // ---------------------------------------------------------------- vilas
+  for (const v of canon.villages) {
+    const ca = Math.cos(v.ang), sa = Math.sin(v.ang), deg = (v.ang * 180) / Math.PI;
+    const streets: { dir: Pt; L: number; yaw: number }[] = [{ dir: [ca, sa], L: v.r * 0.95, yaw: deg }];
+    if (v.cross) streets.push({ dir: [-sa, ca], L: v.r * 0.7, yaw: deg + 90 });
+    // ruas e praça livres de decoração
+    for (const st of streets) for (let t = -st.L; t <= st.L; t += 3) for (const o of ops) { const q = o.pt([v.p[0] + st.dir[0] * t, v.p[1] + st.dir[1] * t]); mark(q[0], q[1], 4.5); }
+    for (const o of ops) { const q = o.pt(v.p); mark(q[0], q[1], 12); }
+    const housePool = ruins && wrecks.pool.length ? wrecks : houses.pool.length ? houses : buildings;
+    if (!housePool.pool.length) continue;
+    for (const st of streets) {
+      const px = -st.dir[1], pz = st.dir[0];
+      for (const side of [-1, 1]) {
+        for (let t = -st.L + 6; t < st.L - 4;) {
+          if (Math.abs(t) < 14) { t += 8; continue; } // praça
+          const bp = pick(housePool), br = meta(bp).r;
+          const sc = lerp(0.9, 1.05, r());
+          const off = 4.2 + br * sc + 1.5;
+          const x = v.p[0] + st.dir[0] * (t + br) + px * side * off, z = v.p[1] + st.dir[1] * (t + br) + pz * side * off;
+          if (r() < 0.12 && singles.pool.length && !ruins) emit(pick(singles), x, z, r() * 360, lerp(0.7, 0.95, r())); // quintal com árvore
+          else if (!wet(x, z) && slope(x, z) < 0.6) emit(bp, x, z, st.yaw + (side > 0 ? 90 : 270), sc);
+          t += br * 2 * sc + lerp(2.5, 7, r());
+        }
+      }
+      // postes ao longo da rua
+      if (lamps.pool.length && !ruins) for (let t = -st.L + 8, k = 0; t <= st.L - 4; t += 22, k++) {
+        const side = k % 2 ? 1 : -1;
+        emit(pick(lamps), v.p[0] + st.dir[0] * t + px * side * 5.2, v.p[1] + st.dir[1] * t + pz * side * 5.2, st.yaw, 1);
+      }
+    }
+    // armazéns nas pontas da rua principal, com caixas em volta
+    for (const end of [-1, 1]) {
+      if (!sheds.pool.length || r() < 0.3) continue;
+      const bp = pick(sheds), br = meta(bp).r;
+      const d = v.r * 0.95 + br + 6;
+      const x = v.p[0] + ca * d * end + (-sa) * (br + 8), z = v.p[1] + sa * d * end + ca * (br + 8);
+      if (wet(x, z) || slope(x, z) > 0.5) continue;
+      if (emit(bp, x, z, deg + (end > 0 ? 0 : 180), lerp(0.9, 1.05, r())) && crates.pool.length) {
+        for (let q = 0; q < 2 + Math.floor(r() * 4); q++) {
+          const a = r() * Math.PI * 2, dd = br + lerp(3, 9, r());
+          emit(pick(crates), x + Math.cos(a) * dd, z + Math.sin(a) * dd, Math.round(r() * 4) * 90 + (r() - 0.5) * 16, lerp(0.85, 1.15, r()));
+        }
+      }
+    }
+    // caixas e pedrinhas soltas pelas ruas e árvores na volta da vila
+    for (let q = 0; q < 6; q++) {
+      const a = r() * Math.PI * 2, d = lerp(16, v.r * 0.9, r());
+      const list = crates.pool.length && r() < 0.6 ? crates : smallRocks;
+      if (list.pool.length) emit(pick(list), v.p[0] + Math.cos(a) * d, v.p[1] + Math.sin(a) * d, r() * 360, lerp(0.8, 1.1, r()));
+    }
+    if (singles.pool.length && !ruins) for (let q = 0; q < 10; q++) {
+      const a = r() * Math.PI * 2, d = v.r * lerp(0.95, 1.35, r());
+      const x = v.p[0] + Math.cos(a) * d, z = v.p[1] + Math.sin(a) * d;
+      if (!wet(x, z) && human(x, z) !== 3 && human(x, z) !== 2) emit(pick(singles), x, z, r() * 360, lerp(0.75, 1.1, r()));
+    }
+  }
+
+  // ---------------------------------------------------------------- beira das estradas
+  for (const path of canon.roads) {
+    let acc = 0, k = 0;
+    for (let q = 0; q < path.length - 1; q++) {
+      const [a, b] = [path[q], path[q + 1]], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (!L) continue;
+      const dx = (b[0] - a[0]) / L, dz = (b[1] - a[1]) / L;
+      for (let t = 0; t < L; t++) {
+        acc++;
+        if (acc < 30) continue;
+        acc = 0; k++;
+        const x = a[0] + dx * t, z = a[1] + dz * t;
+        if (nearSpawn(x, z, 85) || canon.villages.some((v) => Math.hypot(v.p[0] - x, v.p[1] - z) < v.r + 4)) continue;
+        const side = k % 2 ? 1 : -1, off = 8 + r() * 4;
+        const px = x - dz * side * off, pz = z + dx * side * off;
+        if (wet(px, pz) || human(px, pz) === 3) continue;
+        const nearVillage = canon.villages.some((v) => Math.hypot(v.p[0] - x, v.p[1] - z) < v.r * 1.8);
+        if (nearVillage && lamps.pool.length && !ruins && r() < 0.6) emit(pick(lamps), x - dz * side * 5.5, z + dx * side * 5.5, (Math.atan2(dz, dx) * 180) / Math.PI, 1);
+        else if (wg.biome === "temperate" && singles.pool.length && r() < 0.55) emit(pick(singles), px, pz, r() * 360, lerp(0.8, 1.1, r()));
+        else if (smallRocks.pool.length && r() < 0.35) emit(pick(smallRocks), px, pz, r() * 360, lerp(0.7, 1.2, r()));
+        else if (wrecks.pool.length && r() < wg.wrecks * 0.12) emit(pick(wrecks), px, pz, r() * 360, lerp(0.85, 1.1, r()));
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- estruturas soltas (ruínas e postos)
+  const nSites = Math.max(0, Math.round(wg.structures / ops.length));
   for (let k = 0, tries = 0; k < nSites && tries < 400; tries++) {
     const x = 90 + r() * (G - 180), z = 90 + r() * (G - 180);
-    if (!inRegion(x, z) || wet(x, z) || slope(x, z) > 0.45 || nearSpawn(x, z, 160) || onLine(x, z)) continue;
+    if (!inRegion(x, z) || wet(x, z) || slope(x, z) > 0.45 || nearSpawn(x, z, 160) || onLine(x, z) || human(x, z)) continue;
+    if (life?.villages.some((v) => Math.hypot(v.p[0] - x, v.p[1] - z) < v.r + 70)) continue;
     const center = buildings.pool.length ? pick(buildings) : wrecks.pool.length ? pick(wrecks) : null;
     if (!center) break;
     const cr = meta(center).r;
     if (!emit(center, x, z, Math.round(r() * 4) * 90, lerp(0.9, 1.1, r()))) continue;
     k++;
     const ring = 5 + Math.floor(r() * 6);
+    let reach = cr;
     for (let q = 0; q < ring; q++) {
       const list = r() < 0.45 && buildings.pool.length ? buildings : wrecks.pool.length && r() < 0.7 ? wrecks : others;
       if (!list.pool.length) continue;
@@ -857,26 +1093,36 @@ function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, 
       const a = (q / ring) * Math.PI * 2 + r() * 0.4, d = cr + meta(bp).r + lerp(3, 12, r());
       const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
       if (wet(px, pz) || slope(px, pz) > 0.7) continue;
-      emit(bp, px, pz, Math.round(r() * 4) * 90 + (r() - 0.5) * 20, lerp(0.85, 1.15, r()));
+      if (emit(bp, px, pz, Math.round(r() * 4) * 90 + (r() - 0.5) * 20, lerp(0.85, 1.15, r()))) reach = Math.max(reach, d + meta(bp).r);
     }
+    // o chão do conjunto fica plano (nada meio enterrado, meio flutuando)
+    for (const o of ops) sites.push({ p: o.pt([x, z]), r: reach + 6 });
+    dab(x, z, reach + 4, 2, 120);
   }
 
-  // florestas: manchas de ruído; o miolo usa bosques inteiros (modelos de grupo) e a borda árvores soltas
-  const trees = choose(cat.trees.filter((bp) => { const m = meta(bp); return m.h > 0.4 && m.r < 30 && !/kelp/i.test(bp); }));
-  const groups = { pool: trees.pool.filter((bp) => meta(bp).group), local: trees.local.filter((bp) => meta(bp).group) };
-  const singles = { pool: trees.pool.filter((bp) => !meta(bp).group), local: trees.local.filter((bp) => !meta(bp).group) };
+  // ---------------------------------------------------------------- florestas
+  // manchas de ruído; o miolo usa bosques inteiros (modelos de grupo), a borda árvores soltas e
+  // menores; cada mancha tende a uma espécie (bosques de uma árvore só, como na natureza)
+  const speciesOf = (x: number, z: number) => {
+    const list = singles.local.length && r() < 0.6 ? singles.local : singles.pool;
+    if (!list.length) return pick(groups);
+    if (r() < 0.25) return list[Math.floor(r() * list.length)];
+    const f = (species(x / 240, z / 240) + 1) / 2;
+    return list[Math.min(list.length - 1, Math.floor(f * list.length))];
+  };
+  const thr = lerp(0.45, -0.15, wg.forests);
+  const forestDepth = (x: number, z: number) => fbm(forest, x / 160, z / 160, 4) - thr;
   if (trees.pool.length && wg.forests > 0) {
-    const thr = lerp(0.45, -0.15, wg.forests);
     const inForest = (x: number, z: number) => {
       if (!inRegion(x, z) || x < 8 || z < 8 || x > G - 8 || z > G - 8) return -1;
-      const f = fbm(forest, x / 160, z / 160, 4);
-      if (f < thr || wet(x, z) || slope(x, z) > 1.0 || nearSpawn(x, z, 95) || onLine(x, z)) return -1;
-      return f - thr;
+      const f = forestDepth(x, z);
+      if (f < 0 || wet(x, z) || slope(x, z) > 1.0 || nearSpawn(x, z, 95) || onLine(x, z) || human(x, z)) return -1;
+      return f;
     };
     // área de floresta (amostrada) para caber no orçamento de decorações
     let area = 0;
     for (let z = 4; z < G; z += 8) for (let x = 4; x < G; x += 8) if (inForest(x, z) >= 0) area += 64;
-    const maxN = budget(0.62);
+    const maxN = budget(0.5);
     const single = singles.pool.length ? singles.pool.reduce((a, bp) => a + meta(bp).r, 0) / singles.pool.length : 2;
     let spacing = Math.max(single * 2.6, lerp(10, 4.5, wg.forests));
     const groupChance = groups.pool.length ? Math.min(0.85, Math.max(0.15, area / (spacing * spacing) / maxN - 0.6)) : 0;
@@ -886,41 +1132,73 @@ function placeProps(g: Grid, H: Float32Array, water: number, hasWater: boolean, 
       const jx = x + (r() - 0.5) * spacing * 0.9, jz = z + (r() - 0.5) * spacing * 0.9;
       const depth = inForest(jx, jz);
       if (depth < 0) continue;
-      const deep = depth > 0.12;
+      const deep = depth > 0.12, edge = depth < 0.05;
       const useGroup = deep && groups.pool.length > 0 && r() < groupChance;
-      const bp = useGroup ? pick(groups) : singles.pool.length ? pick(singles) : pick(groups);
-      if (emit(bp, jx, jz, r() * 360, lerp(0.8, 1.25, r()))) placed++;
+      const bp = useGroup ? pick(groups) : speciesOf(jx, jz);
+      // borda: árvores mais baixas (mata nova); miolo: as maiores
+      const sc = edge ? lerp(0.55, 0.85, r()) : deep ? lerp(0.95, 1.35, r()) : lerp(0.8, 1.2, r());
+      if (emit(bp, jx, jz, r() * 360, sc)) {
+        placed++;
+        // chão da mata: terra e folhas embaixo das árvores
+        if (!edge) dab(jx, jz, spacing * 0.9, 2, 55 + Math.min(70, depth * 260));
+      }
     }
   }
 
-  // pedras: grupos de 2 a 5 bem juntos, mais nas encostas e nas montanhas
-  const rocks = choose(cat.rocks);
+  // árvores na beira de rios e lagos, e árvores sozinhas nos campos
+  if (singles.pool.length && wg.forests > 0 && wg.biome !== "desert") {
+    const maxN = budget(0.06);
+    let placed = 0;
+    for (let z = 10; z < G && placed < maxN; z += 12) for (let x = 10; x < G && placed < maxN; x += 12) {
+      const jx = x + (r() - 0.5) * 10, jz = z + (r() - 0.5) * 10;
+      if (!inRegion(jx, jz) || jx < 10 || jz < 10 || jx > G - 10 || jz > G - 10 || human(jx, jz) || nearSpawn(jx, jz, 100) || onLine(jx, jz)) continue;
+      const h = hAt(jx, jz), sl = slope(jx, jz);
+      if (sl > 0.6) continue;
+      const shore = hasWater ? h > water + 1.2 && h < water + 5.5
+        : features.some((f) => (f.kind === "river" && f.pts.length > 1 && Math.abs(lineDist(f.pts, jx, jz)[0] - f.r * 1.6) < f.r * 0.5)
+          || (f.kind === "lake" && Math.abs(Math.hypot(f.pts[0][0] - jx, f.pts[0][1] - jz) - f.r * 1.15) < 10));
+      const meadow = !shore && forestDepth(jx, jz) < -0.08 && r() < 0.012 * (0.4 + wg.forests);
+      if (!(shore && r() < 0.32) && !meadow) continue;
+      if (emit(speciesOf(jx, jz), jx, jz, r() * 360, meadow ? lerp(1, 1.4, r()) : lerp(0.75, 1.15, r()))) placed++;
+    }
+  }
+
+  // ---------------------------------------------------------------- pedras
+  // grupos de 2 a 5 bem juntos, mais nas encostas, nas montanhas e no pé dos paredões
   if (rocks.pool.length && wg.rocks > 0) {
-    const spacing = lerp(70, 26, wg.rocks);
-    const maxN = budget(0.22);
+    const spacing = lerp(70, 24, wg.rocks);
+    const maxN = budget(0.2);
     let placed = 0;
     for (let z = spacing / 2; z < G && placed < maxN; z += spacing) for (let x = spacing / 2; x < G && placed < maxN; x += spacing) {
       const jx = x + (r() - 0.5) * spacing, jz = z + (r() - 0.5) * spacing;
-      if (!inRegion(jx, jz) || jx < 8 || jz < 8 || jx > G - 8 || jz > G - 8) continue;
+      if (!inRegion(jx, jz) || jx < 8 || jz < 8 || jx > G - 8 || jz > G - 8 || human(jx, jz)) continue;
       const sl = slope(jx, jz);
-      const chance = 0.18 + Math.min(0.6, sl * 0.5) + 0.2 * rockN(jx / 90, jz / 90);
+      let up = 0;
+      for (let a = 0; a < 6; a++) up = Math.max(up, slope(jx + Math.cos(a) * 14, jz + Math.sin(a) * 14));
+      const foot = up > 0.85 && sl < 0.5 ? 0.45 : 0;
+      const chance = 0.18 + Math.min(0.6, sl * 0.5) + foot + 0.2 * rockN(jx / 90, jz / 90);
       if (r() > chance * wg.rocks * 1.4 || wet(jx, jz) || nearSpawn(jx, jz, 85) || onLine(jx, jz)) continue;
       const kind = pick(rocks), rr = meta(kind).r;
-      const cluster = 2 + Math.floor(r() * 4);
+      const cluster = 2 + Math.floor(r() * (foot ? 6 : 4));
       for (let c = 0; c < cluster; c++) {
         const a = r() * Math.PI * 2, d = c === 0 ? 0 : rr * lerp(1.2, 2.6, r());
-        if (emit(kind, jx + Math.cos(a) * d, jz + Math.sin(a) * d, r() * 360, lerp(0.7, 1.5, r()))) placed++;
+        // pedras grandes no meio, pequenas em volta
+        const sc = c === 0 ? lerp(1, 1.6, r()) : lerp(0.5, 1.1, r());
+        if (emit(c && smallRocks.pool.length && r() < 0.5 ? pick(smallRocks) : kind, jx + Math.cos(a) * d, jz + Math.sin(a) * d, r() * 360, sc)) placed++;
       }
     }
   }
 
   // destroços espalhados (restos de batalha)
   if (wrecks.pool.length && wg.wrecks > 0) {
-    const n = Math.min(budget(0.1), Math.round((wg.wrecks * 30) / ops.length));
+    const n = Math.min(budget(0.08), Math.round((wg.wrecks * 30) / ops.length));
     for (let k = 0, tries = 0; k < n && tries < 600; tries++) {
       const x = 40 + r() * (G - 80), z = 40 + r() * (G - 80);
-      if (!inRegion(x, z) || wet(x, z) || nearSpawn(x, z, 120) || slope(x, z) > 0.8) continue;
-      if (emit(pick(wrecks), x, z, r() * 360, lerp(0.85, 1.15, r()))) k++;
+      if (!inRegion(x, z) || wet(x, z) || nearSpawn(x, z, 120) || slope(x, z) > 0.8 || human(x, z) === 1 || human(x, z) === 2) continue;
+      if (emit(pick(wrecks), x, z, r() * 360, lerp(0.85, 1.15, r()))) {
+        k++;
+        dab(x, z, 7, 2, 110); // chão revirado em volta
+      }
     }
   }
   return out;
@@ -1025,6 +1303,321 @@ export function decodeLayer(b64: string | null | undefined, n: number): Float32A
     out[k] = v / 32;
   }
   return out;
+}
+
+/** Reamostra uma grade (n+1)² para (m+1)² (bilinear): camadas salvas em outra resolução. */
+export function resampleGrid(src: Float32Array, n: number, m: number): Float32Array {
+  if (n === m) return src;
+  const out = new Float32Array((m + 1) ** 2), w = n + 1;
+  for (let j = 0; j <= m; j++) for (let i = 0; i <= m; i++) {
+    const fx = (i / m) * n, fz = (j / m) * n;
+    const i0 = Math.min(n - 1, Math.floor(fx)), j0 = Math.min(n - 1, Math.floor(fz));
+    const u = fx - i0, v = fz - j0, k = j0 * w + i0;
+    out[j * (m + 1) + i] = (src[k] * (1 - u) + src[k + 1] * u) * (1 - v) + (src[k + w] * (1 - u) + src[k + w + 1] * u) * v;
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------ vida humana: vilas, estradas, plantações
+
+/** Vila: centro, raio, direção da rua principal (radianos) e se tem rua cruzada. */
+export interface Village { p: Pt; r: number; ang: number; cross: boolean }
+/** Plantação: retângulo (centro, direção, comprimento a, largura b) e o tipo de faixa. */
+export interface FieldPlot { c: Pt; ang: number; a: number; b: number; kind: 0 | 1 | 2 }
+/** O que o gerador pôs de "humano" no mapa (todas as cópias da simetria). */
+export interface Life { villages: Village[]; fields: FieldPlot[]; roads: Pt[][]; mask: Uint8Array; cell: number }
+
+/** resolução da pintura do gerador (pontos por lado) — igual à do pincel nos mapas novos */
+export const WORLD_PAINT_N = 512;
+
+/** região fundamental da simetria (o resto é cópia) */
+export function inFundamental(sym: Symmetry, G: number, x: number, z: number) {
+  switch (sym) {
+    case "mirror-x": return x <= G / 2;
+    case "mirror-z": return z <= G / 2;
+    case "diag": return z >= x;
+    case "rot2": return z >= G / 2;
+    case "rot4": return x <= G / 2 && z <= G / 2;
+    default: return true;
+  }
+}
+const mapAng = (a: number, m: [number, number, number, number]) => {
+  const dx = Math.cos(a), dz = Math.sin(a);
+  return Math.atan2(m[2] * dx + m[3] * dz, m[0] * dx + m[1] * dz);
+};
+
+function heightReader(g: Grid, H: Float32Array) {
+  const s = g.size, w = s + 1, step = g.grid / s;
+  return (x: number, z: number) => {
+    const fx = Math.max(0, Math.min(s - 1e-6, x / step)), fz = Math.max(0, Math.min(s - 1e-6, z / step));
+    const i = Math.floor(fx), j = Math.floor(fz), u = fx - i, v = fz - j, k = j * w + i;
+    return (H[k] * (1 - u) + H[k + 1] * u) * (1 - v) + (H[k + w] * (1 - u) + H[k + w + 1] * u) * v;
+  };
+}
+
+/** Lugares para as vilas (só na região fundamental; as cópias vêm da simetria). */
+function planVillages(g: Grid, H: Float32Array, water: number, hasWater: boolean, wg: WorldGen, spawns: Pt[], ops: ReturnType<typeof symmetryOps>,
+  r: () => number, mass: Pt[], features: Feature[], centerOn: boolean): Village[] {
+  const want = wg.settlements ?? 0;
+  if (want <= 0) return [];
+  const G = g.grid, hAt = heightReader(g, H), big = Math.max(0.7, Math.min(1.3, G / 1024));
+  const n = Math.max(1, Math.round(want / ops.length));
+  const out: Village[] = [];
+  const all = () => out.flatMap((v) => ops.map((o) => ({ p: o.pt(v.p), r: v.r })));
+  for (let tries = 0; out.length < n && tries < 900; tries++) {
+    const R = lerp(46, 70, r()) * big;
+    const x = R + 50 + r() * (G - 2 * R - 100), z = R + 50 + r() * (G - 2 * R - 100);
+    if (!inFundamental(wg.symmetry, G, x, z)) continue;
+    const copies = ops.map((o) => o.pt([x, z]));
+    if (copies.some((c) => spawns.some((s0) => Math.hypot(s0[0] - c[0], s0[1] - c[1]) < 175 + R))) continue;
+    if (centerOn && copies.some((c) => Math.hypot(c[0] - G / 2, c[1] - G / 2) < 95 + R)) continue;
+    if (copies.some((c, k) => copies.some((c2, k2) => k2 > k && Math.hypot(c[0] - c2[0], c[1] - c2[1]) < 2 * R + 40))) continue;
+    if (copies.some((c) => all().some((v) => Math.hypot(v.p[0] - c[0], v.p[1] - c[1]) < (R + v.r) * 1.6 + 60))) continue;
+    if (copies.some((c) => mass.some((m) => Math.hypot(m[0] - c[0], m[1] - c[1]) < R + 14))) continue;
+    // longe de rios, lagos e montanhas
+    const blocked = features.some((f) => {
+      if (f.kind === "river" || f.kind === "canyon" || f.kind === "ridge") return f.pts.length > 1 && lineDist(f.pts, x, z)[0] < f.r * 2 + R;
+      if (f.kind === "lake" || f.kind === "mountain" || f.kind === "crater") return Math.hypot(f.pts[0][0] - x, f.pts[0][1] - z) < f.r * 1.25 + R;
+      return false;
+    });
+    if (blocked) continue;
+    // chão quase plano e seco
+    const h0 = hAt(x, z);
+    let ok = !(hasWater && h0 < water + 4);
+    for (let a = 0; ok && a < 12; a++) for (const d of [R * 0.5, R]) {
+      const px = x + Math.cos((a / 12) * Math.PI * 2) * d, pz = z + Math.sin((a / 12) * Math.PI * 2) * d;
+      const h = hAt(px, pz);
+      if (Math.abs(h - h0) > R * 0.2 || (hasWater && h < water + 3)) { ok = false; break; }
+    }
+    if (!ok) continue;
+    out.push({ p: [Math.round(x), Math.round(z)], r: Math.round(R), ang: Math.round(r() * 180) * Math.PI / 180, cross: r() < 0.6 });
+  }
+  return out;
+}
+
+/** Caminho de menor esforço (A* numa grade grossa): evita subidas, água e paredões. */
+function roadPath(g: Grid, H: Float32Array, water: number, hasWater: boolean, a: Pt, b: Pt): Pt[] | null {
+  const G = g.grid, C = Math.max(6, G / 160), N = Math.ceil(G / C), W = N + 1;
+  const hAt = heightReader(g, H);
+  const hs = new Float32Array(W * W);
+  for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) hs[j * W + i] = hAt(Math.min(G, i * C), Math.min(G, j * C));
+  const idx = (p: Pt) => Math.min(N, Math.max(0, Math.round(p[1] / C))) * W + Math.min(N, Math.max(0, Math.round(p[0] / C)));
+  const start = idx(a), goal = idx(b), gi = goal % W, gj = (goal - gi) / W;
+  const cost = new Float32Array(W * W).fill(Infinity), from = new Int32Array(W * W).fill(-1);
+  // fila de prioridade (heap binário)
+  const heap: number[] = [], pri: number[] = [];
+  const push = (k: number, p: number) => {
+    heap.push(k); pri.push(p);
+    let c = heap.length - 1;
+    while (c > 0) { const q = (c - 1) >> 1; if (pri[q] <= pri[c]) break; [heap[q], heap[c]] = [heap[c], heap[q]]; [pri[q], pri[c]] = [pri[c], pri[q]]; c = q; }
+  };
+  const pop = () => {
+    const top = heap[0], last = heap.pop()!, lp = pri.pop()!;
+    if (heap.length) {
+      heap[0] = last; pri[0] = lp;
+      let c = 0;
+      for (;;) {
+        const l = c * 2 + 1, rr = l + 1;
+        let m = c;
+        if (l < heap.length && pri[l] < pri[m]) m = l;
+        if (rr < heap.length && pri[rr] < pri[m]) m = rr;
+        if (m === c) break;
+        [heap[m], heap[c]] = [heap[c], heap[m]]; [pri[m], pri[c]] = [pri[c], pri[m]]; c = m;
+      }
+    }
+    return top;
+  };
+  cost[start] = 0;
+  push(start, 0);
+  const D = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+  let found = false;
+  for (let it = 0; heap.length && it < W * W * 4; it++) {
+    const k = pop();
+    if (k === goal) { found = true; break; }
+    const i = k % W, j = (k - i) / W, ck = cost[k];
+    for (const [di, dj] of D) {
+      const ni = i + di, nj = j + dj;
+      if (ni < 0 || nj < 0 || ni > N || nj > N) continue;
+      const nk = nj * W + ni, len = (di && dj ? Math.SQRT2 : 1) * C;
+      const sl = Math.abs(hs[nk] - hs[k]) / len;
+      let c = len * (1 + 34 * sl * sl + (sl > 0.45 ? 60 : 0));
+      if (hasWater && hs[nk] < water + 1.5) c += 2500; // vau: só se não houver volta
+      // bordas do mapa: estrada não corre colada na borda
+      const e = Math.min(ni, nj, N - ni, N - nj) * C;
+      if (e < 30) c += (30 - e) * 3;
+      const nc = ck + c;
+      if (nc < cost[nk]) { cost[nk] = nc; from[nk] = k; push(nk, nc + Math.hypot(ni - gi, nj - gj) * C); }
+    }
+  }
+  if (!found) return null;
+  const cells: Pt[] = [];
+  for (let k = goal; k >= 0; k = from[k]) { const i = k % W; cells.push([i * C, ((k - i) / W) * C]); if (k === start) break; }
+  cells.reverse();
+  cells[0] = a; cells[cells.length - 1] = b;
+  // curvas suaves (Chaikin)
+  let pts = cells;
+  for (let it = 0; it < 3; it++) {
+    const nx: Pt[] = [pts[0]];
+    for (let k = 0; k < pts.length - 1; k++) {
+      const p0 = pts[k], p1 = pts[k + 1];
+      nx.push([p0[0] * 0.75 + p1[0] * 0.25, p0[1] * 0.75 + p1[1] * 0.25], [p0[0] * 0.25 + p1[0] * 0.75, p0[1] * 0.25 + p1[1] * 0.75]);
+    }
+    nx.push(pts[pts.length - 1]);
+    pts = nx;
+  }
+  // menos pontos (um a cada ~6 unidades)
+  const out: Pt[] = [pts[0]];
+  for (const q of pts) { const l = out[out.length - 1]; if (Math.hypot(q[0] - l[0], q[1] - l[1]) >= 6) out.push(q); }
+  out.push(pts[pts.length - 1]);
+  return out.map((q) => [Math.round(q[0] * 10) / 10, Math.round(q[1] * 10) / 10] as Pt);
+}
+
+/** Estradas: cada vila liga na base mais perto e na vila vizinha (cópias pela simetria). */
+function planRoads(g: Grid, H: Float32Array, water: number, hasWater: boolean, villages: Village[], allVillages: Village[], spawns: Pt[], r: () => number): Pt[][] {
+  const out: Pt[][] = [];
+  const near = (p: Pt, list: Pt[]) => list.reduce((a, b) => (Math.hypot(b[0] - p[0], b[1] - p[1]) < Math.hypot(a[0] - p[0], a[1] - p[1]) ? b : a), list[0]);
+  for (const v of villages) {
+    const sp = near(v.p, spawns);
+    const path = roadPath(g, H, water, hasWater, v.p, sp);
+    if (path) out.push(path);
+    const others = allVillages.filter((o) => Math.hypot(o.p[0] - v.p[0], o.p[1] - v.p[1]) > 5).map((o) => o.p);
+    if (others.length && r() < 0.85) {
+      const o = near(v.p, others);
+      if (Math.hypot(o[0] - v.p[0], o[1] - v.p[1]) < g.grid * 0.62) {
+        const p2 = roadPath(g, H, water, hasWater, v.p, o);
+        if (p2) out.push(p2);
+      }
+    }
+  }
+  return out;
+}
+
+/** Plantações em volta das vilas (retângulos na direção das ruas). */
+function planFields(g: Grid, H: Float32Array, water: number, hasWater: boolean, wg: WorldGen, villages: Village[], allVillages: Village[], spawns: Pt[], mass: Pt[],
+  features: Feature[], ops: ReturnType<typeof symmetryOps>, r: () => number): FieldPlot[] {
+  const farms = wg.farms ?? 0;
+  if (farms <= 0 || wg.biome !== "temperate") return [];
+  const G = g.grid, hAt = heightReader(g, H);
+  const out: FieldPlot[] = [];
+  const all = () => out.flatMap((f) => ops.map((o) => ({ ...f, c: o.pt(f.c) })));
+  for (const v of villages) {
+    const want = Math.round(farms * lerp(3, 7, r()));
+    for (let k = 0, tries = 0; k < want && tries < 60; tries++) {
+      const a = lerp(34, 72, r()), b = lerp(22, 42, r());
+      const ang = v.ang + (r() < 0.5 ? 0 : Math.PI / 2) + (r() - 0.5) * 0.12;
+      const dirA = r() * Math.PI * 2, d = v.r + 14 + Math.max(a, b) * 0.5 + r() * 90;
+      const c: Pt = [v.p[0] + Math.cos(dirA) * d, v.p[1] + Math.sin(dirA) * d];
+      const ca = Math.cos(ang), sa = Math.sin(ang);
+      const corners: Pt[] = [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, 0]].map(([u, w2]) => [c[0] + ca * u * a / 2 - sa * w2 * b / 2, c[1] + sa * u * a / 2 + ca * w2 * b / 2]);
+      const h0 = hAt(c[0], c[1]);
+      const okGround = corners.every((q) => q[0] > 30 && q[1] > 30 && q[0] < G - 30 && q[1] < G - 30 && Math.abs(hAt(q[0], q[1]) - h0) < 7 && !(hasWater && hAt(q[0], q[1]) < water + 2.5));
+      if (!okGround) continue;
+      const copies = ops.map((o) => o.pt(c));
+      const rad = Math.hypot(a, b) / 2;
+      if (copies.some((q) => spawns.some((s0) => Math.hypot(s0[0] - q[0], s0[1] - q[1]) < 110 + rad))) continue;
+      if (copies.some((q) => mass.some((m) => Math.hypot(m[0] - q[0], m[1] - q[1]) < 18 + rad))) continue;
+      if (copies.some((q) => allVillages.some((o) => Math.hypot(o.p[0] - q[0], o.p[1] - q[1]) < o.r + rad + 4))) continue;
+      if (copies.some((q) => all().some((f) => Math.hypot(f.c[0] - q[0], f.c[1] - q[1]) < (Math.hypot(f.a, f.b) / 2 + rad) * 0.85))) continue;
+      if (copies.some((q, i) => copies.some((q2, i2) => i2 > i && Math.hypot(q[0] - q2[0], q[1] - q2[1]) < rad * 2 + 6))) continue;
+      if (features.some((f) => (f.kind === "lake" || f.kind === "mountain" || f.kind === "plateau" || f.kind === "crater") && Math.hypot(f.pts[0][0] - c[0], f.pts[0][1] - c[1]) < f.r * 1.2 + rad)) continue;
+      if (features.some((f) => (f.kind === "river" || f.kind === "ridge" || f.kind === "canyon") && f.pts.length > 1 && lineDist(f.pts, c[0], c[1])[0] < f.r * 2 + rad)) continue;
+      out.push({ c: [Math.round(c[0]), Math.round(c[1])], ang, a: Math.round(a), b: Math.round(b), kind: (Math.floor(r() * 3) as 0 | 1 | 2) });
+      k++;
+    }
+  }
+  return out;
+}
+
+/** Todas as cópias (simetria) das vilas, plantações e estradas, e a máscara de ocupação delas. */
+function expandLife(G: number, villages: Village[], fields: FieldPlot[], roads: Pt[][], ops: ReturnType<typeof symmetryOps>): Life {
+  const vs = villages.flatMap((v) => ops.map((o) => ({ ...v, p: o.pt(v.p), ang: mapAng(v.ang, o.m) })));
+  const fs = fields.flatMap((f) => ops.map((o) => ({ ...f, c: o.pt(f.c), ang: mapAng(f.ang, o.m) })));
+  const rs: Pt[][] = [];
+  for (const path of roads) for (const o of ops) {
+    const tp = path.map((q) => o.pt(q));
+    // a mesma estrada (nos dois sentidos) uma vez só
+    const same = (a: Pt[], b: Pt[]) => Math.hypot(a[0][0] - b[0][0], a[0][1] - b[0][1]) < 4 && Math.hypot(a[a.length - 1][0] - b[b.length - 1][0], a[a.length - 1][1] - b[b.length - 1][1]) < 4;
+    if (rs.some((q) => same(q, tp) || same(q, [...tp].reverse()))) continue;
+    rs.push(tp);
+  }
+  const cell = 4, n = Math.ceil(G / cell) + 1, mask = new Uint8Array(n * n);
+  const mark = (x: number, z: number, rad: number, v: number) => {
+    const i0 = Math.max(0, Math.floor((x - rad) / cell)), i1 = Math.min(n - 1, Math.ceil((x + rad) / cell));
+    const j0 = Math.max(0, Math.floor((z - rad) / cell)), j1 = Math.min(n - 1, Math.ceil((z + rad) / cell));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (Math.hypot(i * cell - x, j * cell - z) <= rad) mask[j * n + i] = Math.max(mask[j * n + i], v);
+  };
+  for (const v of vs) mark(v.p[0], v.p[1], v.r + 6, 1);
+  for (const f of fs) {
+    const ca = Math.cos(f.ang), sa = Math.sin(f.ang);
+    for (let u = -f.a / 2; u <= f.a / 2; u += 3) for (let w = -f.b / 2; w <= f.b / 2; w += 3) mark(f.c[0] + ca * u - sa * w, f.c[1] + sa * u + ca * w, 3, 2);
+  }
+  for (const path of rs) for (let k = 0; k < path.length - 1; k++) {
+    const [a, b] = [path[k], path[k + 1]], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    for (let t = 0; t <= L; t += 3) mark(a[0] + (b[0] - a[0]) * (t / L || 0), a[1] + (b[1] - a[1]) * (t / L || 0), 7, 3);
+  }
+  return { villages: vs, fields: fs, roads: rs, mask, cell };
+}
+
+/** 0 = livre, 1 = vila, 2 = plantação, 3 = estrada */
+export function lifeAt(life: Life | null | undefined, x: number, z: number) {
+  if (!life) return 0;
+  const n = Math.round(Math.sqrt(life.mask.length));
+  const i = Math.round(x / life.cell), j = Math.round(z / life.cell);
+  if (i < 0 || j < 0 || i >= n || j >= n) return 0;
+  return life.mask[j * n + i];
+}
+
+/** Pintura do chão do que é humano: estradas e ruas de terra, praça, chão batido e faixas das plantações. */
+function paintLife(G: number, life: Life, seed: number): PaintLayer {
+  const P = newPaint(WORLD_PAINT_N), n = P.n, w = n + 1, cs = G / n;
+  const noise = simplex(seed + 5501);
+  const put = (i: number, j: number, role: number, pw: number) => {
+    if (i < 0 || j < 0 || i > n || j > n || pw <= 0) return;
+    const k = j * w + i, v = Math.min(255, Math.round(pw));
+    if (v > P.power[k]) { P.power[k] = v; P.role[k] = role; }
+  };
+  /** traço (segmento) com miolo forte e borda suave */
+  const stroke = (a: Pt, b: Pt, core: number, edge: number, role: number, pw: number) => {
+    const x0 = Math.min(a[0], b[0]) - core - edge, x1 = Math.max(a[0], b[0]) + core + edge;
+    const z0 = Math.min(a[1], b[1]) - core - edge, z1 = Math.max(a[1], b[1]) + core + edge;
+    const dx = b[0] - a[0], dz = b[1] - a[1], L2 = dx * dx + dz * dz || 1;
+    for (let j = Math.max(0, Math.floor(z0 / cs)); j <= Math.min(n, Math.ceil(z1 / cs)); j++) for (let i = Math.max(0, Math.floor(x0 / cs)); i <= Math.min(n, Math.ceil(x1 / cs)); i++) {
+      const x = i * cs, z = j * cs;
+      const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L2));
+      const d = Math.hypot(x - (a[0] + dx * t), z - (a[1] + dz * t));
+      const wob = 0.8 * noise(x / 9, z / 9);
+      if (d > core + edge + wob) continue;
+      put(i, j, role, pw * (d <= core + wob ? 1 : 1 - (d - core - wob) / edge));
+    }
+  };
+  for (const path of life.roads) for (let k = 0; k < path.length - 1; k++) stroke(path[k], path[k + 1], 3.2, 3, 2, 225);
+  for (const v of life.villages) {
+    // chão batido da vila (manchas) e praça no centro
+    const R = v.r;
+    for (let j = Math.floor((v.p[1] - R) / cs); j <= Math.ceil((v.p[1] + R) / cs); j++) for (let i = Math.floor((v.p[0] - R) / cs); i <= Math.ceil((v.p[0] + R) / cs); i++) {
+      const d = Math.hypot(i * cs - v.p[0], j * cs - v.p[1]) / R;
+      if (d >= 1) continue;
+      put(i, j, 2, (70 + 70 * noise(i * cs / 22, j * cs / 22)) * (1 - d * d));
+      if (d * R < 13) put(i, j, 2, 215 * (1 - Math.max(0, d * R - 10) / 3));
+    }
+    const ca = Math.cos(v.ang), sa = Math.sin(v.ang), L = R * 0.95;
+    stroke([v.p[0] - ca * L, v.p[1] - sa * L], [v.p[0] + ca * L, v.p[1] + sa * L], 3.6, 2.5, 2, 235);
+    if (v.cross) stroke([v.p[0] + sa * L * 0.7, v.p[1] - ca * L * 0.7], [v.p[0] - sa * L * 0.7, v.p[1] + ca * L * 0.7], 3, 2.5, 2, 230);
+  }
+  for (const f of life.fields) {
+    const ca = Math.cos(f.ang), sa = Math.sin(f.ang), rad = Math.hypot(f.a, f.b) / 2;
+    const roles: [number, number] = f.kind === 0 ? [0, 2] : f.kind === 1 ? [0, 0] : [1, 2];
+    for (let j = Math.floor((f.c[1] - rad) / cs); j <= Math.ceil((f.c[1] + rad) / cs); j++) for (let i = Math.floor((f.c[0] - rad) / cs); i <= Math.ceil((f.c[0] + rad) / cs); i++) {
+      const dx = i * cs - f.c[0], dz = j * cs - f.c[1];
+      const u = dx * ca + dz * sa, vv = -dx * sa + dz * ca;
+      const eu = f.a / 2 - Math.abs(u), ev = f.b / 2 - Math.abs(vv);
+      if (eu < 0 || ev < 0) continue;
+      const fade = Math.min(1, eu / 2.5, ev / 2.5);
+      const stripe = Math.floor((vv + f.b / 2) / 4.5) % 2;
+      put(i, j, roles[stripe], (f.kind === 1 ? 165 : 190) * fade * (0.9 + 0.1 * noise(u / 6, vv / 6)));
+    }
+  }
+  return P;
 }
 
 // ------------------------------------------------------------------ cores (prévia e minimapa)

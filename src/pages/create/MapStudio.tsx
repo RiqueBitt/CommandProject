@@ -17,16 +17,18 @@ import { errorText, load, useStore } from "../../lib/store";
 import { useTabs } from "../../lib/tabs";
 import type { CreationMeta, MapAssets, MapBuildResult, MaptkStatus, Terrain, TerrainPreview } from "../../lib/types";
 import { useProject } from "../../lib/useProject";
-import { CleanGround, GroundTextures, PropPicker } from "../studio/MapDecor";
+import { GroundPaint, GroundTextures, PropPicker } from "../studio/MapDecor";
+import { biomeChain, combinePaint, decodePaint, encodePaint, groundBaseT, paintDab, paintT, resamplePaint, type PaintLayer } from "../studio/biome";
+import { customLayers, customStem, importTexture, isCustomPath, registerCustomTextures, texUrl } from "../studio/customTex";
 import {
-  applyRelief, BLANK_BASES, BLANK_LABEL, BLANK_Y, blankSizeOf, cutTester, decodeHeights, decorKind, groundCandidates, groundSpec, heightAt, meanInDisc,
+  applyRelief, BLANK_BASES, BLANK_LABEL, BLANK_WATER, BLANK_Y, blankSizeOf, cutTester, decodeHeights, decorKind, groundCandidates, groundSpec, heightAt, meanInDisc,
   RELIEF_LABEL, reliefShape, reskinPaths, round1, type BlankSize, type Edits, type GroundBiome, type GroundLayer, type PlacedProp, type Pt, type Relief, type Relief3D, type ReliefKind,
 } from "../studio/mapEdit";
 import { migrateMap, newMapDoc, type MapDoc } from "./docs";
 import { analyzeMap, type Analysis } from "./mapAnalysis";
 import { autoFixMap, checkMap, type MapIssue } from "./mapCheck";
 import {
-  baseHeights, BIOME_LABEL, brushDab, composeWorld, decodeLayer, encodeDelta, encodeLayer, FEATURE_COLOR, FEATURE_ICON, FEATURE_LABEL, fullCuts, invert,
+  baseHeights, BIOME_LABEL, brushDab, resampleGrid, composeWorld, decodeLayer, encodeDelta, encodeLayer, FEATURE_COLOR, FEATURE_ICON, FEATURE_LABEL, fullCuts, invert,
   LINE_FEATURES, mapYaw, propCatalog, WORLD_PRESETS, reliefImage, simplex, SYMMETRY_LABEL, symmetryOps,
   type BrushMode, type Feature, type FeatureKind, type Symmetry, type WorldGen, type WorldResult,
 } from "./worldgen";
@@ -36,7 +38,7 @@ const WorldGenModal = lazy(() => import("./WorldGenModal"));
 
 type BrushTool = `b-${BrushMode}`;
 type FeatTool = `f-${FeatureKind}`;
-type Tool = "select" | "orbit" | "spawn" | "mass" | ReliefKind | "bridge" | "decor" | "uncut" | "seed" | "erase" | BrushTool | FeatTool;
+type Tool = "select" | "orbit" | "spawn" | "mass" | ReliefKind | "bridge" | "decor" | "uncut" | "seed" | "erase" | "paint" | BrushTool | FeatTool;
 type M = [number, number, number, number];
 const TEAM_COLORS = ["#5aa9e6", "#e5534b", "#7bd88f", "#c78bff", "#f2b33d", "#ff8fab", "#9be7ff", "#eeeeee"];
 const RELIEF_COLOR: Record<ReliefKind, string> = { hill: "#e3a857", valley: "#4fa3e0", plateau: "#d97757", flatten: "#c9d1d9", ramp: "#f2b33d" };
@@ -54,9 +56,12 @@ const isBrush = (t: Tool): t is BrushTool => t.startsWith("b-");
 const isFeat = (t: Tool): t is FeatTool => t.startsWith("f-");
 const featOf = (t: FeatTool) => t.slice(2) as FeatureKind;
 const MAX_MASS = 200, MAX_PROPS = 5000, MAX_CUTS = 400;
+/** resolução do relevo no editor (pontos por lado): 512 = um ponto a cada 2 unidades num mapa 1024 */
+const RELIEF_RES = 512;
 type DonorProp = [number, number, number, number, number, number];
 
 const HINT: Record<string, string> = {
+  paint: "Pinte o chão com a textura escolhida na aba Chão (praia, grama, terra, rocha, topo). A borracha volta ao automático.",
   select: "Clique para selecionar (Shift soma à seleção). Arraste um objeto selecionado para movê-lo. Del apaga, Ctrl+D duplica.",
   orbit: "Arraste para girar a câmera. Botão do meio move, roda dá zoom.",
   spawn: "Clique para colocar a base inicial de cada jogador (até 8).",
@@ -155,6 +160,10 @@ export default function MapStudio({ id }: { id: string }) {
     if (p.doc.world || p.doc.base === "blank") { setExag(1); setSkin("relief"); }
   }, [p.status, p.doc.world, p.doc.base]);
   const [tool, setTool] = useState<Tool>("select");
+  /** papel pintado pelo pincel de textura (0 praia … 4 topo; -1 borracha) */
+  const [paintRole, setPaintRole] = useState(1);
+  const paintRoleRef = useRef(1);
+  paintRoleRef.current = paintRole;
   const [radius, setRadius] = useState(60);
   const [strength, setStrength] = useState(20);
   const [propBp, setPropBp] = useState<string | null>(null);
@@ -209,14 +218,15 @@ export default function MapStudio({ id }: { id: string }) {
     setPreview(null);
     setRelief3d(null);
     setDonor(null);
-    void Promise.all([blank ? Promise.resolve(null) : load(() => api.maptkPreview(t, 512)), load(() => api.maptkTerrain3d(t, 256))]).then(([pv, r]) => {
+    void Promise.all([blank ? Promise.resolve(null) : load(() => api.maptkPreview(t, 512)), load(() => api.maptkTerrain3d(t, RELIEF_RES))]).then(([pv, r]) => {
       if (loadedTerrain.current !== key) return;
       setPreview(pv ?? null);
       if (r) {
         // mapa em branco: o terreno do jogo é só o suporte — o chão começa liso, sem água nem decorações
         const h = decodeHeights(r.heights, r.heightScale);
         if (blank) h.fill(BLANK_Y);
-        setRelief3d({ size: r.size, grid: r.grid, heights: h, waterLevel: blank ? 0 : r.waterLevel, yMin: blank ? BLANK_Y : r.yMin, yMax: blank ? BLANK_Y : r.yMax, texture: blank ? null : r.texture });
+        const bw = blank ? BLANK_WATER[blankSizeOf(t) ?? 1024] ?? 0 : 0;
+        setRelief3d({ size: r.size, grid: r.grid, heights: h, waterLevel: blank ? bw : r.waterLevel, yMin: blank ? BLANK_Y : r.yMin, yMax: blank ? BLANK_Y : r.yMax, texture: blank ? null : r.texture });
         setDonor({ props: blank ? [] : r.props ?? [], kinds: blank ? [] : r.propKinds ?? [] });
       } else setView("2d");
     });
@@ -237,7 +247,12 @@ export default function MapStudio({ id }: { id: string }) {
   const featured = useMemo(() => (relief3d ? composeWorld(relief3d, relief3d.heights, water, hasWater, doc.world, activeFeatures, worldBase) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [relief3d, worldBase, activeFeatures, water, hasWater]);
-  const sculptLayer = useMemo(() => (relief3d && doc.sculpt && doc.sculptSize === relief3d.size ? decodeLayer(doc.sculpt, (relief3d.size + 1) ** 2) : null), [relief3d, doc.sculpt, doc.sculptSize]);
+  // escultura salva noutra resolução (versões antigas usavam 256): reamostra para a atual
+  const sculptLayer = useMemo(() => {
+    if (!relief3d || !doc.sculpt || !doc.sculptSize) return null;
+    const n = doc.sculptSize;
+    return resampleGrid(decodeLayer(doc.sculpt, (n + 1) ** 2), n, relief3d.size);
+  }, [relief3d, doc.sculpt, doc.sculptSize]);
   const layer = liveSculpt ?? sculptLayer;
   const composed = useMemo(() => {
     if (!featured) return null;
@@ -500,6 +515,34 @@ export default function MapStudio({ id }: { id: string }) {
       } else if (type === "up") moving.current = null;
       return;
     }
+    // pincel de textura
+    if (t === "paint") {
+      const r = ctxRef.current.relief3d;
+      if (!r) return;
+      if (type === "up" || !q) {
+        if (livePaint.current) {
+          const enc = encodePaint(livePaint.current);
+          const size = livePaint.current.n;
+          livePaint.current = null;
+          p.commit((d0) => ({ ...d0, paint: enc, paintSize: size }));
+        }
+        stroke.current = null;
+        return;
+      }
+      if (type === "down") {
+        const base = decodePaint(ctxRef.current.doc.paint, ctxRef.current.doc.paintSize || 256);
+        livePaint.current = base;
+        stroke.current = null;
+      }
+      const lp = livePaint.current;
+      if (!lp) return;
+      if (stroke.current && Math.hypot(q[0] - stroke.current[0], q[1] - stroke.current[1]) < rad * 0.2) return;
+      stroke.current = q;
+      let ch = false;
+      for (const mq of mirrors(q)) ch = paintDab(lp, r.grid, mq.p[0], mq.p[1], rad, paintRoleRef.current, Math.max(0.15, ctxRef.current.strength / 60)) || ch;
+      if (ch) setPaintRev((v) => v + 1);
+      return;
+    }
     // pincel de escultura
     if (isBrush(t)) {
       const mode = t.slice(2) as BrushMode;
@@ -597,15 +640,29 @@ export default function MapStudio({ id }: { id: string }) {
   const minSlot = useMemo(() => (groundLayers.length ? Math.min(...groundLayers.map((l) => l.slotD)) : 0), [groundLayers]);
   const cleanCands = useMemo(() => (doc.clean && assets ? groundCandidates(assets.layers, doc.groundBiome, doc.groundTex).filter((l) => !minSlot || l.d.length < minSlot) : []),
     [doc.clean, assets, doc.groundBiome, doc.groundTex, minSlot]);
-  const groundKey = doc.clean ? `clean:${cleanCands[0]?.d ?? ""}` : groundLayers.map((l) => edits.reskin[l.d]?.d ?? l.d).join("|") + `#${doc.world?.biome ?? ""}`;
+  // chão por biomas (visual limpo): 5 texturas em cadeia, como no jogo
+  // texturas importadas pelo usuário entram como camadas a mais
+  useEffect(() => { registerCustomTextures(id, doc.customTex); }, [id, doc.customTex]);
+  const allLayers = useMemo(() => (assets ? [...customLayers(doc.customTex), ...assets.layers] : null), [assets, doc.customTex]);
+  const chain = useMemo(() => (doc.clean && allLayers ? biomeChain(allLayers, doc.groundBiome, doc.groundRoles) : []), [doc.clean, allLayers, doc.groundBiome, doc.groundRoles]);
+  const [chainTex, setChainTex] = useState<string[] | null>(null);
+  const chainKey = chain.map((l) => l?.d ?? "").join("|");
+  const groundKey = doc.clean ? `chain:${chainKey}` : groundLayers.map((l) => edits.reskin[l.d]?.d ?? l.d).join("|") + `#${doc.world?.biome ?? ""}`;
   useEffect(() => {
     if (doc.clean) {
-      const d = cleanCands[0]?.d;
-      if (!d) { setGroundTex(null); return; }
+      const ds = chain.map((l) => l?.d);
+      if (!ds.some(Boolean)) { setChainTex(null); setGroundTex(null); return; }
       let alive = true;
-      void api.gameTexture(d, 512).then((u) => { if (alive) setGroundTex({ sand: u, grass: u, rock: u, snow: u, uniform: true }); }).catch(() => { if (alive) setGroundTex(null); });
+      void Promise.all(ds.map((d) => (d ? texUrl(d, 1024) : Promise.resolve(null)).catch(() => null).then((u) => u ?? null))).then((urls) => {
+        if (!alive) return;
+        // papel sem textura: usa o vizinho mais perto na cadeia
+        const fill = urls.map((u, k) => u ?? urls.slice(k).find(Boolean) ?? urls.slice(0, k).reverse().find(Boolean) ?? null);
+        setChainTex(fill.every(Boolean) ? (fill as string[]) : null);
+      });
+      setGroundTex(null);
       return () => { alive = false; };
     }
+    setChainTex(null);
     if (!groundLayers.length) { setGroundTex(null); return; }
     let alive = true;
     void (async () => {
@@ -630,6 +687,26 @@ export default function MapStudio({ id }: { id: string }) {
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groundKey]);
+  // pincel de textura: camada salva + cópia viva enquanto pinta
+  const paintSaved = useMemo(() => decodePaint(doc.paint, doc.paintSize || 256), [doc.paint, doc.paintSize]);
+  const livePaint = useRef<PaintLayer | null>(null);
+  const [paintRev, setPaintRev] = useState(0);
+  const paintNow = livePaint.current ?? paintSaved;
+  const worldPaint = useMemo(() => (doc.worldPaint ? decodePaint(doc.worldPaint, doc.paintSize || 256) : null), [doc.worldPaint, doc.paintSize]);
+  // t automático (caro: ruído em cada ponto) só muda com o relevo; o pincel vai por cima a cada pincelada
+  const baseT = useMemo(() => (doc.clean && relief3d && heights ? groundBaseT(relief3d.size, relief3d.grid, heights, hasWater ? water : null) : null),
+    [doc.clean, relief3d, heights, hasWater, water]);
+  const tField = useMemo(() => (baseT && relief3d ? paintT(baseT, relief3d.size, relief3d.grid, combinePaint(worldPaint, paintNow)) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [baseT, relief3d, worldPaint, paintNow, paintRev]);
+  const groundView: GroundTexSet | null = useMemo(() => {
+    if (doc.clean) {
+      if (!chainTex) return null;
+      return { sand: chainTex[0], grass: chainTex[1], dirt: chainTex[2], rock: chainTex[3], snow: chainTex[4], t: tField,
+        ring: doc.ring !== false ? { margin: grid <= 1024 ? 256 : 384, rise: 95, water: hasWater ? water : null } : null };
+    }
+    return groundTex;
+  }, [doc.clean, chainTex, tField, doc.ring, grid, hasWater, water, groundTex]);
   const allCuts = useMemo(() => (doc.clean || doc.world?.clearDonor ? [...edits.cuts, ...fullCuts(grid)] : edits.cuts), [edits.cuts, doc.clean, doc.world?.clearDonor, grid]);
   const [kept, removedCount] = useMemo(() => {
     const bps = donor?.kinds ?? [];
@@ -697,7 +774,18 @@ export default function MapStudio({ id }: { id: string }) {
     const mm = doc.minimap === "donor" && (blank || doc.clean) ? "natural" : doc.minimap;
     if (mm !== "donor") s.minimap = mm;
     if (blank) s.flat_base = BLANK_Y;
-    if (doc.clean) s.clean = { ground: groundSpec(cleanCands), relight: true, clear_props: true };
+    if (doc.clean) {
+      const ch = chain.map((l) => (l ? { d: l.d, ...(l.n ? { n: l.n } : {}), ...(l.s ? { s: l.s } : {}) } : null));
+      const full = ch.every(Boolean) ? (ch as { d: string }[]) : null;
+      const n = doc.paintSize || 256;
+      const enc = encodePaint(combinePaint(doc.worldPaint ? decodePaint(doc.worldPaint, n) : null, decodePaint(doc.paint, n)));
+      s.clean = {
+        ground: full ? [full[1], ...groundSpec(cleanCands)] : groundSpec(cleanCands), relight: true, clear_props: true,
+        ...(full ? { chain: full } : {}), ring: doc.ring !== false,
+        ...(enc ? { paint: { size: doc.paintSize || 256, data: enc } } : {}),
+      };
+    }
+    if (blank && hasWater) s.water_level = water;
     if (usePatch) s.strip_props = doc.strip === "none" ? false : doc.strip;
     if (props.length) s.props_add = props.map((q) => [q.bp, q.x, q.z, q.yaw, q.scale]);
     if (allCuts.length && !doc.clean) s.props_remove = allCuts;
@@ -710,9 +798,14 @@ export default function MapStudio({ id }: { id: string }) {
     const used = new Set(props.map((q) => q.bp.toLowerCase()));
     const custom = doc.models.filter((m) => used.has(m.bp.toLowerCase()));
     if (custom.length) s.custom_models = custom.map((m) => ({ creation: m.creation, slug: customSlug(m.creation), name: m.name }));
+    // texturas importadas em uso no chão: o app converte o PNG do projeto nas texturas do jogo
+    if (doc.clean) {
+      const inUse = doc.customTex.filter((t) => chain.some((l) => l && isCustomPath(l.d) && l.d.toLowerCase() === `${customStem(t)}_d.dds`.toLowerCase()));
+      if (inUse.length) s.custom_textures = inUse.map((t) => ({ creation: id, asset: t.asset, path: customStem(t) }));
+    }
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, edits, usePatch, grid, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands]);
+  }, [doc, edits, usePatch, grid, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands, chain, hasWater, water, id]);
 
   // ------------------------------------------------------------ ações
   const saveNow = useCallback(async () => {
@@ -792,8 +885,11 @@ export default function MapStudio({ id }: { id: string }) {
       const economy = genMass ? { ...eco, sites: 0 } : eco;
       const mass = genMass ? (replaceMass ? res.mass : [...d.edits.mass, ...res.mass]).slice(0, MAX_MASS) : d.edits.mass;
       const minimap: MapDoc["minimap"] = wg.biome === "desert" ? "desert" : wg.biome === "snow" ? "snow" : wg.biome === "volcanic" ? "dark" : "natural";
+      // pintura do gerador (estradas, vilas, plantações): na resolução do pincel do mapa
+      const paintSize = d.paint ? d.paintSize || 256 : res.paint?.n ?? d.paintSize;
+      const worldPaint = res.paint ? encodePaint(resamplePaint(res.paint, paintSize)) : null;
       return {
-        ...d, world: wg, features: [...d.features.filter((f) => !f.gen), ...res.features], economy, minimap, patch: true,
+        ...d, world: wg, features: [...d.features.filter((f) => !f.gen), ...res.features], economy, minimap, patch: true, paintSize, worldPaint,
         clean: d.base === "blank" || wg.clearDonor !== false, groundBiome: wg.biome, groundTex: wg.biome === d.groundBiome ? d.groundTex : null,
         teams: wg.players % 2 === 0 && wg.symmetry !== "none" ? "2" : "ffa", rugged: wg.edge === "rugged",
         edits: { ...d.edits, spawns: res.spawns, props, mass },
@@ -931,9 +1027,10 @@ export default function MapStudio({ id }: { id: string }) {
           ? { kind: "info", label: "Visual", value: "limpo: chão do bioma e luz refeita" }
           : { kind: "toggle", label: "Visual limpo", value: doc.clean, onChange: (v) => setDoc((d) => ({ ...d, clean: v })), hint: "O chão inteiro ganha as texturas do bioma, a luz e as sombras são refeitas para o relevo novo e as decorações originais saem. Sem isso, o desenho do mapa original aparece por baixo." },
         ...(doc.clean ? [
-          { kind: "select", label: "Bioma do chão", value: doc.groundBiome, onChange: (v: string) => setDoc((d) => ({ ...d, groundBiome: v as GroundBiome, groundTex: null })), options: (Object.keys(BIOME_LABEL) as GroundBiome[]).map((k) => ({ value: k, label: BIOME_LABEL[k] })) } as Prop,
-          { kind: "info", label: "Textura", value: cleanCands[0] ? `${cleanCands[0].name.replace(/_/g, " ")} · ${cleanCands[0].map.replace(/^SC2_/, "")}` : "nenhuma cabe neste terreno" } as Prop,
-          { kind: "custom", label: "", node: <button className="btn sm" onClick={() => { setLeft("ground"); }}><Icon name="texture" size={16} /> Escolher textura do chão</button> } as Prop,
+          { kind: "select", label: "Bioma do chão", value: doc.groundBiome, onChange: (v: string) => setDoc((d) => ({ ...d, groundBiome: v as GroundBiome, groundRoles: {}, groundTex: null })), options: (Object.keys(BIOME_LABEL) as GroundBiome[]).map((k) => ({ value: k, label: BIOME_LABEL[k] })) } as Prop,
+          { kind: "info", label: "Texturas", value: chain.filter(Boolean).length ? `${chain.filter(Boolean).length} (praia, chão, terra, rocha, topo)` : "carregando…" } as Prop,
+          { kind: "toggle", label: "Paisagem em volta", value: doc.ring !== false, onChange: (v: boolean) => setDoc((d) => ({ ...d, ring: v })), hint: "Montanhas além da borda do mapa, com as texturas do bioma." } as Prop,
+          { kind: "custom", label: "", node: <button className="btn sm" onClick={() => { setTool("paint"); setLeft("ground"); }}><Icon name="brush" size={16} /> Pincel de textura</button> } as Prop,
         ] : []),
       ] });
       sections.push({ title: "Gerador de mundo", props: doc.world ? [
@@ -1078,7 +1175,7 @@ export default function MapStudio({ id }: { id: string }) {
     }
     return sections;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel, edits, doc, terrains, grid, usePatch, editsTerrain, lobbyName, water, hasWater, scenarioId, waterNew, relief3d]);
+  }, [sel, edits, doc, terrains, grid, usePatch, editsTerrain, lobbyName, water, hasWater, scenarioId, waterNew, relief3d, chain]);
 
   // ------------------------------------------------------------ toolbox: meus modelos
   const useModel = async (m: CreationMeta) => {
@@ -1111,8 +1208,8 @@ export default function MapStudio({ id }: { id: string }) {
   if (p.status === "error") return <div className="studio-root"><Empty icon="error" title="Não deu para abrir o projeto">{p.error}</Empty></div>;
 
   const brushTool = isBrush(tool);
-  const circleBrush = (isRelief(tool) && tool !== "ramp") || tool === "uncut" || (tool === "decor" && density > 1) || brushTool || (isFeat(tool) && POINT_FEATS.includes(featOf(tool)));
-  const brushColor = isRelief(tool) ? RELIEF_COLOR[tool] : brushTool ? BRUSH[tool.slice(2) as BrushMode].color : isFeat(tool) ? FEATURE_COLOR[featOf(tool)] : tool === "erase" || tool === "uncut" ? "#e5534b" : tool === "select" ? "#ffd166" : "#a3e635";
+  const circleBrush = (isRelief(tool) && tool !== "ramp") || tool === "uncut" || tool === "paint" || (tool === "decor" && density > 1) || brushTool || (isFeat(tool) && POINT_FEATS.includes(featOf(tool)));
+  const brushColor = tool === "paint" ? (paintRole < 0 ? "#e5534b" : ["#e8d39a", "#7bd88f", "#c08a52", "#9aa7b4", "#f2f6fa"][paintRole]) : isRelief(tool) ? RELIEF_COLOR[tool] : brushTool ? BRUSH[tool.slice(2) as BrushMode].color : isFeat(tool) ? FEATURE_COLOR[featOf(tool)] : tool === "erase" || tool === "uncut" ? "#e5534b" : tool === "select" ? "#ffd166" : "#a3e635";
   const brush = tool === "orbit" ? null : circleBrush ? { shape: "circle" as const, radius, color: brushColor } : { shape: "point" as const, color: brushColor };
   const toolBtn = (t: Tool, icon: string, label: string, color?: string) => (
     <RibbonButton key={t} icon={icon} label={label} active={tool === t} onClick={() => setTool(t)} hint={hintOf(t)} color={color} />
@@ -1173,12 +1270,17 @@ export default function MapStudio({ id }: { id: string }) {
             <RibbonGroup label="Pincel">
               {(Object.keys(BRUSH) as BrushMode[]).map((m) => toolBtn(`b-${m}`, BRUSH[m].icon, BRUSH[m].label, BRUSH[m].color))}
             </RibbonGroup>
+            <RibbonGroup label="Textura">
+              <RibbonButton icon="brush" label="Pintar chão" active={tool === "paint"} disabled={!doc.clean} color="#a3e635"
+                hint={doc.clean ? hintOf("paint") : "Ligue o visual limpo (Propriedades → Chão e visual) para pintar o chão"}
+                onClick={() => { setTool("paint"); setLeft("ground"); }} />
+            </RibbonGroup>
             <RibbonGroup label="Tamanho">{sizeSliders}</RibbonGroup>
             <RibbonGroup label="Simetria">{symSelect}</RibbonGroup>
             <RibbonGroup label="Mapa inteiro">
               <RibbonButton icon="fence" label="Borda rochosa" active={doc.rugged} onClick={() => setDoc((d) => ({ ...d, rugged: !d.rugged }))} />
               <RibbonButton icon="horizontal_rule" label="Aplainar tudo" active={doc.smooth} onClick={() => setDoc((d) => ({ ...d, smooth: !d.smooth }))} />
-              <RibbonButton icon="format_paint" label="Texturas do chão" onClick={() => setLeft("ground")} />
+              <RibbonButton icon="format_paint" label={doc.clean ? "Chão e biomas" : "Texturas do chão"} onClick={() => setLeft("ground")} />
               <RibbonButton icon="clear_all" label="Limpar relevo" onClick={async () => {
                 if (!(await confirmDialog("Apagar o relevo simples, as formas, o que foi pintado e as passagens? (Ctrl+Z desfaz.)", "Limpar"))) return;
                 p.commit((d) => ({ ...d, features: d.features.filter((f) => f.kind === "pad"), sculpt: null, edits: { ...d.edits, relief: [], bridges: [] } }));
@@ -1300,8 +1402,24 @@ export default function MapStudio({ id }: { id: string }) {
                 )
               )}
               {left === "ground" && (assets === null ? <div className="bar indeterminate"><i /></div> : doc.clean ? (
-                <CleanGround all={assets.layers} minSlot={minSlot} biome={doc.groundBiome} chosen={doc.groundTex}
-                  onBiome={(b) => setDoc((d) => ({ ...d, groundBiome: b, groundTex: null }))} onPick={(t) => setDoc((d) => ({ ...d, groundTex: t }))} />
+                <GroundPaint all={allLayers} chain={chain} biome={doc.groundBiome} role={paintRole} painting={tool === "paint"}
+                  hasPaint={!!doc.paint || !!doc.worldPaint} ring={doc.ring !== false} radius={radius} strength={strength}
+                  onRole={(r) => { setPaintRole(r); setTool("paint"); }}
+                  onBiome={(b) => setDoc((d) => ({ ...d, groundBiome: b, groundRoles: {}, groundTex: null }))}
+                  onPick={(role, t) => setDoc((d) => { const g = { ...d.groundRoles }; if (t) g[role] = t; else delete g[role]; return { ...d, groundRoles: g }; })}
+                  onClearPaint={() => setDoc((d) => ({ ...d, paint: null, worldPaint: null }))}
+                  onRing={(v) => setDoc((d) => ({ ...d, ring: v }))} onRadius={setRadius} onStrength={setStrength}
+                  onImport={async (file, seamless) => {
+                    const t = await importTexture(id, file, seamless);
+                    setDoc((d) => ({ ...d, customTex: [...d.customTex.filter((x) => x.slug !== t.slug), t] }));
+                    toast("ok", `Textura "${t.name}" importada.`);
+                    return `${customStem(t)}_d.dds`;
+                  }}
+                  onForget={(dPath) => setDoc((d) => {
+                    const keep = d.customTex.filter((t) => `${customStem(t)}_d.dds`.toLowerCase() !== dPath.toLowerCase());
+                    const g = Object.fromEntries(Object.entries(d.groundRoles).filter(([, v]) => v?.toLowerCase() !== dPath.toLowerCase()));
+                    return { ...d, customTex: keep, groundRoles: g };
+                  })} />
               ) : (
                 <GroundTextures layers={groundLayers} all={assets.layers} reskin={edits.reskin}
                   onChange={(oldD, neo) => setEdits((e) => { const reskin = { ...e.reskin }; if (neo) reskin[oldD] = neo; else delete reskin[oldD]; return { ...e, reskin }; })} />
@@ -1330,7 +1448,7 @@ export default function MapStudio({ id }: { id: string }) {
             ) : view === "3d" && relief3d && heights ? (
               <Suspense fallback={<div className="bar indeterminate" style={{ margin: 20 }}><i /></div>}>
                 <MapView3D size={relief3d.size} grid={relief3d.grid} heights={heights} waterLevel={water}
-                  texture={texture3d} palette={skin === "relief" ? (doc.world?.biome ?? "temperate") : null} exaggeration={exag} ground={skin === "relief" ? groundTex : null}
+                  texture={texture3d} palette={skin === "relief" ? (doc.world?.biome ?? "temperate") : null} exaggeration={exag} ground={skin === "relief" ? groundView : null}
                   spawns={markers} mass={hidden.has("grp:mass") ? [] : edits.mass} bridges={edits.bridges} seed={edits.seed}
                   decor={decor} cuts={edits.cuts} highlights={highlights} lines={lines} snapshotRef={snapshot}
                   brush={brush} drag={drag} orbit={tool === "orbit"} onPointer={onPointer} />
