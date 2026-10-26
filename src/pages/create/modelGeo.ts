@@ -2,6 +2,7 @@
 // textura + ossos) e exportar OBJ/GLB.
 import * as THREE from "three";
 import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
+import { t } from "../../lib/i18n";
 import type { BakedModel } from "../../lib/types";
 import type { ModelDoc, ModelGroup, ModelPart, Vec3 } from "./docs";
 
@@ -156,7 +157,7 @@ export interface BakeStats { vertices: number; triangles: number; parts: number;
 export async function bake(doc: ModelDoc, resolve: TexResolver, scale = 1): Promise<{ baked: BakedModel; stats: BakeStats }> {
   const parts = doc.parts.filter((p) => !p.hidden && !doc.groups.find((g) => g.id === p.group)?.hidden);
   const warnings: string[] = [];
-  if (!parts.length) throw new Error("O modelo está vazio: adicione pelo menos uma peça.");
+  if (!parts.length) throw new Error(t("O modelo está vazio: adicione pelo menos uma peça."));
   const n = Math.ceil(Math.sqrt(parts.length));
   const atlas = n <= 2 ? 512 : n <= 4 ? 1024 : 2048;
   const tile = atlas / n;
@@ -195,7 +196,7 @@ export async function bake(doc: ModelDoc, resolve: TexResolver, scale = 1): Prom
           ga.globalCompositeOperation = "source-over";
         }
         ga.restore();
-      } else warnings.push(`textura da peça "${p.name}" não carregou; usei só a cor`);
+      } else warnings.push(t('textura da peça "{name}" não carregou; usei só a cor', { name: p.name }));
     }
     if (p.material.team) { gt.fillStyle = "#fff"; gt.fillRect(tx, ty, tile, tile); }
     if (p.material.emissive) { gg.fillStyle = p.material.emissive; gg.fillRect(tx, ty, tile, tile); }
@@ -221,14 +222,14 @@ export async function bake(doc: ModelDoc, resolve: TexResolver, scale = 1): Prom
     g.dispose();
   }
   const vertices = pos.length / 3;
-  if (vertices > 65536) warnings.push(`O modelo tem ${vertices} vértices; o jogo aceita até 65536. Use menos segmentos nas peças redondas.`);
+  if (vertices > 65536) warnings.push(t("O modelo tem {n} vértices; o jogo aceita até 65536. Use menos segmentos nas peças redondas.", { n: vertices }));
   const b64 = (c: HTMLCanvasElement) => c.toDataURL("image/png");
   const boneOut = bones.map((b) => {
     const parent = b.parent >= 0 ? bones[b.parent].world : [0, 0, 0];
     return { name: b.name, parent: b.parent, pos: [(b.world[0] - parent[0]) * scale, (b.world[1] - parent[1]) * scale, (b.world[2] - parent[2]) * scale] as Vec3, rot: [1, 0, 0, 0] as [number, number, number, number] };
   });
   const names = new Set<string>();
-  for (const b of boneOut) { if (names.has(b.name.toLowerCase())) warnings.push(`Dois grupos com o nome "${b.name}": renomeie (cada osso precisa de um nome único).`); names.add(b.name.toLowerCase()); }
+  for (const b of boneOut) { if (names.has(b.name.toLowerCase())) warnings.push(t('Dois grupos com o nome "{name}": renomeie (cada osso precisa de um nome único).', { name: b.name })); names.add(b.name.toLowerCase()); }
   return {
     baked: {
       positions: pos, normals: nor, uvs, indices: idx, boneIndex: bi, bones: boneOut,
@@ -263,7 +264,7 @@ export async function importMesh(file: File): Promise<{ positions: number[]; ind
     const buf = await file.arrayBuffer();
     const gltf = await new GLTFLoader().parseAsync(name.endsWith(".gltf") ? new TextDecoder().decode(buf) : buf, "");
     root.add(gltf.scene);
-  } else throw new Error("Formato não suportado: use .obj, .glb ou .gltf");
+  } else throw new Error(t("Formato não suportado: use .obj, .glb ou .gltf"));
   root.updateMatrixWorld(true);
   const pos: number[] = [], uv: number[] = [], idx: number[] = [];
   let hasUv = true;
@@ -279,7 +280,7 @@ export async function importMesh(file: File): Promise<{ positions: number[]; ind
     else for (let i = 0; i < P.count; i++) idx.push(base + i);
     g.dispose();
   });
-  if (!pos.length) throw new Error("O arquivo não tem malhas.");
+  if (!pos.length) throw new Error(t("O arquivo não tem malhas."));
   // centraliza no chão e limita o tamanho a ~6 unidades
   const bb = new THREE.Box3().setFromArray(pos);
   const size = bb.getSize(new THREE.Vector3());

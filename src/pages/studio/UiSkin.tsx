@@ -75,7 +75,7 @@ export default function UiSkin() {
         </Field>
         {busy ? <TaskProgress task="skin" label={t("Recolorindo texturas…")} /> : (
           <button className="btn primary" disabled={!targets?.count || !opts.name.trim()} onClick={async () => {
-            await run("skin", () => api.buildUiSkin(opts, true), (m) => t("\"{name}\" criada e ativada na biblioteca.", { name: m.name }));
+            await run("skin", () => api.buildUiSkin(opts, true), (m) => t('"{name}" criada e ativada na biblioteca.', { name: m.name }));
             await refreshMods();
           }}><Icon name="brush" size={19} /> {t("Gerar skin ({n} texturas)", { n: targets?.count.toLocaleString(locale()) ?? "…" })}</button>
         )}

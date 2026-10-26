@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { locale, t } from "../lib/i18n";
 import type { MeshView } from "../lib/types";
 
 interface Stage {
@@ -151,9 +152,9 @@ export default function ModelViewer({ mesh, texture }: { mesh: MeshView; texture
     <div style={{ position: "relative" }}>
       <div ref={host} className="model-stage" />
       <div className="row small" style={{ position: "absolute", left: 12, bottom: 10, gap: 14 }}>
-        <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={wire} onChange={(e) => setWire(e.target.checked)} /> Malha</label>
-        <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={bones} onChange={(e) => setBones(e.target.checked)} /> Ossos ({mesh.bones.length})</label>
-        <span className="faint">{mesh.triangles.toLocaleString("pt-BR")} triângulos, versão {mesh.version}</span>
+        <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={wire} onChange={(e) => setWire(e.target.checked)} /> {t("Malha")}</label>
+        <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={bones} onChange={(e) => setBones(e.target.checked)} /> {t("Ossos ({n})", { n: mesh.bones.length })}</label>
+        <span className="faint">{t("{n} triângulos, versão {v}", { n: mesh.triangles.toLocaleString(locale()), v: mesh.version })}</span>
       </div>
     </div>
   );

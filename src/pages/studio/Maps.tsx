@@ -347,7 +347,7 @@ export default function Maps() {
     if (!spec) return;
     setLog([]);
     setLastBuild(null);
-    const r = await run("map", () => api.maptkBuild(spec), (x) => t("\"{name}\" gerado, verificado e ativado na biblioteca.", { name: x.manifest.name }));
+    const r = await run("map", () => api.maptkBuild(spec), (x) => t('"{name}" gerado, verificado e ativado na biblioteca.', { name: x.manifest.name }));
     if (r) {
       setLastBuild(r.result);
       await refreshMods();
@@ -370,7 +370,7 @@ export default function Maps() {
   if (!status.ready) {
     return (
       <div className="card">
-        <Empty icon="map" title={t("O Estúdio de Mapas precisa do Python")}>{tr(status.message)}</Empty>
+        <Empty icon="map" title={t("O Estúdio de Mapas precisa do Python")}>{tr(status.message ?? "")}</Empty>
       </div>
     );
   }

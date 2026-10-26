@@ -64,7 +64,7 @@ export default function TextureLab({ projectId, name, model, modelKey, value, on
       const v: TexVersion = { id: `${Date.now().toString(36)}${n}`, name: t("Versão {n}", { n }), asset, at: Date.now(), spec: { ...spec, view: "final" }, modelKey };
       onChange({ ...doc, versions: [v, ...doc.versions].slice(0, 30) });
       onApply(asset);
-      toast("ok", t("Textura aplicada ({size}×{size}) e guardada como \"{name}\".", { size: r.size, name: v.name }));
+      toast("ok", t('Textura aplicada ({size}×{size}) e guardada como "{name}".', { size: r.size, name: v.name }));
     } catch (e) { toast("error", errorText(e)); } finally { setSaving(false); }
   };
   const exportPng = async () => {
@@ -177,7 +177,7 @@ export default function TextureLab({ projectId, name, model, modelKey, value, on
             <button className="btn sm text" title={t("Usar esta versão (e os ajustes dela)")} onClick={() => { onApply(v.asset); onChange({ ...doc, spec: v.spec }); }}><Icon name="check" size={15} /></button>
             <button className="btn sm text" title={t("Comparar com a anterior (ou com o original)")} onClick={() => void openCompare(doc.versions[k + 1] ?? null, v)}><Icon name="compare" size={15} /></button>
             <button className="btn sm text" title={t("Exportar PNG")} onClick={async () => { try { const u = await api.creationAsset(projectId, v.asset); const p = await saveGenerated(`${slug(name)}-${slug(v.name)}.png`, u, [{ name: t("Imagem PNG"), extensions: ["png"] }]); if (p) toast("ok", t("Exportada para {path}", { path: p })); } catch (e) { toast("error", errorText(e)); } }}><Icon name="download" size={15} /></button>
-            <button className="btn sm text" title={t("Tirar da lista")} onClick={async () => { if (await confirmDialog(t("Tirar \"{name}\" da lista de versões? O arquivo continua no projeto.", { name: v.name }), t("Tirar"))) onChange({ ...doc, versions: doc.versions.filter((x) => x.id !== v.id) }); }}><Icon name="close" size={15} /></button>
+            <button className="btn sm text" title={t("Tirar da lista")} onClick={async () => { if (await confirmDialog(t('Tirar "{name}" da lista de versões? O arquivo continua no projeto.', { name: v.name }), t("Tirar"))) onChange({ ...doc, versions: doc.versions.filter((x) => x.id !== v.id) }); }}><Icon name="close" size={15} /></button>
           </div>
         ))}
       </div>}

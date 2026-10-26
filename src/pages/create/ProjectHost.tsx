@@ -5,6 +5,7 @@ import { ActiveEditor } from "../../components/studio/kit";
 import { useTabs } from "../../lib/tabs";
 import { UNITS_ENABLED } from "../../lib/features";
 import { Empty } from "../../components/ui";
+import { t } from "../../lib/i18n";
 
 const MapStudio = lazy(() => import("./MapStudio"));
 const ModelStudio = lazy(() => import("./ModelStudio"));
@@ -15,14 +16,14 @@ export default function ProjectHost() {
   const active = useTabs((s) => s.active);
   return (
     <>
-      {tabs.map((t) => (
-        <div key={t.id} className="project-host" hidden={t.id !== active}>
-          <ActiveEditor.Provider value={t.id === active}>
-            <Suspense fallback={<div className="page muted">Abrindo o editor…</div>}>
-              {t.kind === "map" && <MapStudio id={t.id} />}
-              {t.kind === "model" && <ModelStudio id={t.id} />}
-              {t.kind === "unit" && (UNITS_ENABLED ? <UnitStudio id={t.id} /> : (
-                <div className="page"><Empty icon="pause_circle" title="Editor de tropas pausado">O editor de tropas está desligado por enquanto: o foco agora é o gerador e o editor de mapas. Seu projeto continua salvo e abre normalmente quando o editor voltar.</Empty></div>
+      {tabs.map((tab) => (
+        <div key={tab.id} className="project-host" hidden={tab.id !== active}>
+          <ActiveEditor.Provider value={tab.id === active}>
+            <Suspense fallback={<div className="page muted">{t("Abrindo o editor…")}</div>}>
+              {tab.kind === "map" && <MapStudio id={tab.id} />}
+              {tab.kind === "model" && <ModelStudio id={tab.id} />}
+              {tab.kind === "unit" && (UNITS_ENABLED ? <UnitStudio id={tab.id} /> : (
+                <div className="page"><Empty icon="pause_circle" title={t("Editor de tropas pausado")}>{t("O editor de tropas está desligado por enquanto: o foco agora é o gerador e o editor de mapas. Seu projeto continua salvo e abre normalmente quando o editor voltar.")}</Empty></div>
               ))}
             </Suspense>
           </ActiveEditor.Provider>

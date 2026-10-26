@@ -3,6 +3,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Empty, Icon } from "../components/ui";
 import { api, confirmDialog, pickFile } from "../lib/api";
+import { t } from "../lib/i18n";
 import { errorText, load, useStore } from "../lib/store";
 import { KIND_META, useTabs } from "../lib/tabs";
 import type { CreationMeta, UnitInfo } from "../lib/types";
@@ -80,12 +81,12 @@ export default function Icons() {
           const path = joinPath(dir, `${id}_icone_${s}.png`);
           try { await api.exportData(path, r.url, overwrite === true); n++; } catch (e) {
             if (!String(e).includes("EXISTE")) throw e;
-            if (overwrite === null) overwrite = await confirmDialog("Alguns ícones já existem nessa pasta. Substituir os que já existem?", "Substituir", "Manter os antigos");
+            if (overwrite === null) overwrite = await confirmDialog(t("Alguns ícones já existem nessa pasta. Substituir os que já existem?"), t("Substituir"), t("Manter os antigos"));
             if (overwrite) { await api.exportData(path, r.url, true); n++; } else skipped++;
           }
         }
       }
-      toast("ok", `${n} ícone(s) salvos em ${dir}${skipped ? ` (${skipped} mantidos/pulados)` : ""}.`);
+      toast("ok", skipped ? t("{n} ícone(s) salvos em {dir} ({skipped} mantidos/pulados).", { n, dir, skipped }) : t("{n} ícone(s) salvos em {dir}.", { n, dir }));
     } catch (e) { toast("error", errorText(e)); } finally { setProgress(null); }
   };
 
@@ -93,23 +94,23 @@ export default function Icons() {
     <div className="page icons-page">
       <header className="page-head">
         <div>
-          <span className="overline"><Icon name="photo_camera" size={15} /> Ícones</span>
-          <h1 className="page-title">Gerador de ícones de tropas</h1>
-          <p className="muted">Ícones feitos a partir dos modelos 3D: enquadramento automático, luz, fundo, contorno e símbolo da função. O mesmo estilo vale para todas as tropas, para ficarem consistentes nos menus, listas e no minimapa.</p>
+          <span className="overline"><Icon name="photo_camera" size={15} /> {t("Ícones")}</span>
+          <h1 className="page-title">{t("Gerador de ícones de tropas")}</h1>
+          <p className="muted">{t("Ícones feitos a partir dos modelos 3D: enquadramento automático, luz, fundo, contorno e símbolo da função. O mesmo estilo vale para todas as tropas, para ficarem consistentes nos menus, listas e no minimapa.")}</p>
         </div>
       </header>
 
       <div className="icons-grid">
         <section className="card pad">
-          <div className="card-title"><Icon name="smart_toy" /><h3>Tropas do jogo</h3><small className="faint">{picked.length} escolhida(s)</small></div>
-          <div className="search-bar" style={{ marginBottom: 8 }}><Icon name="search" /><input className="input dense" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar: tanque, uel0101, Cybran…" /></div>
-          {units === null ? <div className="bar indeterminate"><i /></div> : !units.length ? <Empty icon="smart_toy" title="Nenhuma tropa encontrada">Confira a pasta do jogo em Configurações.</Empty> : (
+          <div className="card-title"><Icon name="smart_toy" /><h3>{t("Tropas do jogo")}</h3><small className="faint">{t("{n} escolhida(s)", { n: picked.length })}</small></div>
+          <div className="search-bar" style={{ marginBottom: 8 }}><Icon name="search" /><input className="input dense" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("Buscar: tanque, uel0101, Cybran…")} /></div>
+          {units === null ? <div className="bar indeterminate"><i /></div> : !units.length ? <Empty icon="smart_toy" title={t("Nenhuma tropa encontrada")}>{t("Confira a pasta do jogo em Configurações.")}</Empty> : (
             <div className="icon-unit-list">{list.map((u) => (
               <div key={u.id} className={`file-row ${picked.includes(u.id) ? "on" : ""}`}>
-                <input type="checkbox" checked={picked.includes(u.id)} onChange={() => toggle(u.id)} aria-label={`Escolher ${u.name}`} />
+                <input type="checkbox" checked={picked.includes(u.id)} onChange={() => toggle(u.id)} aria-label={t("Escolher {name}", { name: u.name })} />
                 <span className={`fac fac-${u.faction.toLowerCase()}`}>{u.faction.slice(0, 1)}</span>
                 <span className="grow"><b>{u.name}</b> <small className="faint">{u.id} · {u.role}</small></span>
-                <button className="btn sm" onClick={async () => { setOpen({ unit: u, model: null }); const m = await modelOf(u.id); setOpen((o) => (o && o.unit.id === u.id ? { ...o, model: m } : o)); }}><Icon name="tune" size={15} /> Editar ícone</button>
+                <button className="btn sm" onClick={async () => { setOpen({ unit: u, model: null }); const m = await modelOf(u.id); setOpen((o) => (o && o.unit.id === u.id ? { ...o, model: m } : o)); }}><Icon name="tune" size={15} /> {t("Editar ícone")}</button>
               </div>
             ))}</div>
           )}
@@ -117,29 +118,29 @@ export default function Icons() {
 
         <section className="col" style={{ gap: 16 }}>
           <div className="card pad">
-            <div className="card-title"><Icon name="grid_view" /><h3>Lado a lado (64 px)</h3>
-              <button className="btn sm text" onClick={() => setStyleRev((v) => v + 1)} title="Atualizar com o estilo salvo"><Icon name="refresh" size={16} /></button></div>
-            {picked.length === 0 ? <p className="faint small">Marque tropas na lista para ver os ícones juntos e exportar de uma vez.</p> : (
+            <div className="card-title"><Icon name="grid_view" /><h3>{t("Lado a lado (64 px)")}</h3>
+              <button className="btn sm text" onClick={() => setStyleRev((v) => v + 1)} title={t("Atualizar com o estilo salvo")}><Icon name="refresh" size={16} /></button></div>
+            {picked.length === 0 ? <p className="faint small">{t("Marque tropas na lista para ver os ícones juntos e exportar de uma vez.")}</p> : (
               <div className="icon-sheet">{picked.slice(0, 12).map((id) => (
                 <figure key={id}>{thumbs[id] ? <img src={thumbs[id]} alt={byId.get(id)?.name} /> : <span className="bar indeterminate"><i /></span>}<figcaption>{byId.get(id)?.name}</figcaption></figure>
               ))}</div>
             )}
-            <label className="row small" style={{ gap: 8, marginTop: 10 }}><input type="checkbox" checked={autoSymbol} onChange={(e) => setAutoSymbol(e.target.checked)} /> Símbolo pela função de cada tropa</label>
+            <label className="row small" style={{ gap: 8, marginTop: 10 }}><input type="checkbox" checked={autoSymbol} onChange={(e) => setAutoSymbol(e.target.checked)} /> {t("Símbolo pela função de cada tropa")}</label>
           </div>
           <div className="card pad">
-            <div className="card-title"><Icon name="download" /><h3>Exportar</h3></div>
+            <div className="card-title"><Icon name="download" /><h3>{t("Exportar")}</h3></div>
             <div className="chips" style={{ padding: 0, marginBottom: 10 }}>{ICON_SIZES.map((s) => (
               <button key={s} className="chip" aria-pressed={sizes.includes(s)} onClick={() => setSizes((v) => (v.includes(s) ? v.filter((x) => x !== s) : [...v, s].sort((a, b) => a - b)))}>{s} px</button>
             ))}</div>
-            <button className="btn primary" disabled={!picked.length || !sizes.length || !!progress} onClick={() => void exportAll()}><Icon name="folder" size={18} /> {progress ? `Gerando ${progress}` : `Exportar ${picked.length * sizes.length} ícone(s) para uma pasta`}</button>
-            <p className="faint small" style={{ marginTop: 8 }}>Arquivos PNG com fundo conforme o estilo (dá para usar transparente). Nada é sobrescrito sem perguntar.</p>
+            <button className="btn primary" disabled={!picked.length || !sizes.length || !!progress} onClick={() => void exportAll()}><Icon name="folder" size={18} /> {progress ? t("Gerando {progress}", { progress }) : t("Exportar {n} ícone(s) para uma pasta", { n: picked.length * sizes.length })}</button>
+            <p className="faint small" style={{ marginTop: 8 }}>{t("Arquivos PNG com fundo conforme o estilo (dá para usar transparente). Nada é sobrescrito sem perguntar.")}</p>
           </div>
           {mine.length > 0 && <div className="card pad">
-            <div className="card-title"><Icon name="draw" /><h3>Minhas tropas</h3></div>
-            <p className="faint small" style={{ marginBottom: 8 }}>O ícone de uma tropa criada aqui é feito dentro do projeto (Aparência → Gerador de ícones) e vai junto no mod.</p>
+            <div className="card-title"><Icon name="draw" /><h3>{t("Minhas tropas")}</h3></div>
+            <p className="faint small" style={{ marginBottom: 8 }}>{t("O ícone de uma tropa criada aqui é feito dentro do projeto (Aparência → Gerador de ícones) e vai junto no mod.")}</p>
             <div className="file-list">{mine.map((m) => (
               <div key={m.id} className="file-row"><Icon name={KIND_META.unit.icon} size={18} /><span className="grow">{m.name}</span>
-                <button className="btn sm" onClick={() => useTabs.getState().open(m)}><Icon name="open_in_new" size={15} /> Abrir</button></div>
+                <button className="btn sm" onClick={() => useTabs.getState().open(m)}><Icon name="open_in_new" size={15} /> {t("Abrir")}</button></div>
             ))}</div>
           </div>}
         </section>

@@ -66,7 +66,7 @@ export default function Projects({ projects, current, setCurrent, reload, openEx
           if (dest) await run("export", () => api.exportProjectPackage(project.id, dest), t("Pacote exportado — pronto para publicar no hub."));
         }} disabled={!project}><Icon name="inventory_2" size={19} /> {t("Exportar pacote")}</button>
         <button className="btn primary" disabled={!project || !files.length || busy.build} onClick={async () => {
-          await run("build", () => api.buildProject(project!.id, true), (m) => t("\"{name}\" {version} gerado e ativado na biblioteca.", { name: m.name, version: m.version }));
+          await run("build", () => api.buildProject(project!.id, true), (m) => t('"{name}" {version} gerado e ativado na biblioteca.', { name: m.name, version: m.version }));
           await refreshMods();
         }}><Icon name="construction" size={19} /> {busy.build ? t("Gerando…") : t("Gerar mod")}</button>
       </div>
@@ -321,7 +321,7 @@ function ProjectMeta({ project, onClose, onSaved }: { project: Project; onClose:
         <Field label={t("Descrição")}><textarea className="textarea" rows={3} value={p.description} onChange={(e) => setP({ ...p, description: e.target.value })} /></Field>
         <footer>
           <button type="button" className="btn danger" onClick={async () => {
-            if (!(await confirmDialog(t("Apagar o projeto \"{name}\"? O mod já gerado continua na biblioteca.", { name: project.name })))) return;
+            if (!(await confirmDialog(t('Apagar o projeto "{name}"? O mod já gerado continua na biblioteca.', { name: project.name })))) return;
             await run("delproj", () => api.deleteProject(project.id), t("Projeto apagado."));
             await onSaved();
             onClose();

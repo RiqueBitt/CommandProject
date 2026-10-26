@@ -7,6 +7,7 @@ import {
 } from "../../components/studio/kit";
 import { Empty, Icon, Modal } from "../../components/ui";
 import { api, pickFile, pickSave } from "../../lib/api";
+import { locale, t, tr } from "../../lib/i18n";
 import { errorText, useStore } from "../../lib/store";
 import type { LayerSet } from "../../lib/types";
 import { useProject } from "../../lib/useProject";
@@ -141,11 +142,11 @@ export default function ModelStudio({ id }: { id: string }) {
   }, [p]);
 
   const startVertexMode = () => {
-    if (!one) { toast("info", "Selecione uma peça para editar os vértices."); return; }
+    if (!one) { toast("info", t("Selecione uma peça para editar os vértices.")); return; }
     if (one.type !== "mesh") {
       const edited = toEditableMesh(one);
       patchParts([one.id], () => edited);
-      toast("info", `"${one.name}" virou uma malha editável. Clique num ponto e arraste o gizmo.`);
+      toast("info", t('"{name}" virou uma malha editável. Clique num ponto e arraste o gizmo.', { name: one.name }));
     }
     setMode("vertex");
   };
@@ -156,14 +157,14 @@ export default function ModelStudio({ id }: { id: string }) {
       const q: ModelPart = { ...newPart("box"), type: "mesh", name: file.name.replace(/\.[^.]+$/, ""), params: {}, mesh: { positions: m.positions, indices: m.indices, uvs: m.uvs }, pos: [0, 0, 0] };
       update((d) => ({ ...d, parts: [...d.parts, q] }));
       setSel([q.id]);
-      toast("ok", `${file.name} importado (${m.triangles.toLocaleString("pt-BR")} triângulos).`);
-      if (m.triangles > 20000) toast("info", "Modelo pesado: o jogo aceita até 65536 vértices por modelo. Prefira versões simplificadas.");
+      toast("ok", t("{file} importado ({n} triângulos).", { file: file.name, n: m.triangles.toLocaleString(locale()) }));
+      if (m.triangles > 20000) toast("info", t("Modelo pesado: o jogo aceita até 65536 vértices por modelo. Prefira versões simplificadas."));
     } catch (e) { toast("error", errorText(e)); }
   };
 
   const importImage = async (file: File) => {
-    if (!partIds.length) { toast("info", "Selecione as peças que vão receber a textura."); return; }
-    if (file.size > 16 << 20) { toast("error", "Imagem grande demais (máximo 16 MB)."); return; }
+    if (!partIds.length) { toast("info", t("Selecione as peças que vão receber a textura.")); return; }
+    if (file.size > 16 << 20) { toast("error", t("Imagem grande demais (máximo 16 MB).")); return; }
     const data = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(file); });
     const name = await api.creationAssetPut(id, file.name, data);
     patchParts(partIds, (q) => ({ ...q, material: { ...q.material, texture: { source: "asset", ref: name }, color: "#ffffff" } }));
@@ -178,7 +179,7 @@ export default function ModelStudio({ id }: { id: string }) {
     try {
       const { baked, stats } = await doBake();
       setReport(stats);
-      const r = await run(`model:${id}`, () => api.modelPrepare(id, baked), "Modelo pronto para o jogo: já dá para usar em mapas e tropas.");
+      const r = await run(`model:${id}`, () => api.modelPrepare(id, baked), t("Modelo pronto para o jogo: já dá para usar em mapas e tropas."));
       if (r?.warnings.length) setReport({ ...stats, warnings: [...stats.warnings, ...r.warnings] });
       await save();
     } catch (e) { toast("error", errorText(e)); }
@@ -194,7 +195,7 @@ export default function ModelStudio({ id }: { id: string }) {
         const data = await blobToDataUrl(blob);
         await api.creationAssetPut(id, name, data);
         await api.creationAssetCopy(id, name, dest);
-        toast("ok", `Exportado: ${dest}`);
+        toast("ok", t("Exportado: {path}", { path: dest }));
       } else if (!("__TAURI_INTERNALS__" in window)) {
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -209,7 +210,7 @@ export default function ModelStudio({ id }: { id: string }) {
       if (!dir) return;
       const { baked } = await doBake();
       const files = await run(`model:${id}`, () => api.modelExportGame(baked, dir, p.meta?.name ?? "modelo"));
-      if (files) toast("ok", `${files.length} arquivos gravados em ${dir}`);
+      if (files) toast("ok", t("{n} arquivos gravados em {dir}", { n: files.length, dir }));
     } catch (e) { toast("error", errorText(e)); }
   };
   const validate = async () => {
@@ -232,13 +233,13 @@ export default function ModelStudio({ id }: { id: string }) {
 
   // ------------------------------------------------------------ explorador
   const nodes = useMemo<TreeNode[]>(() => {
-    const partNode = (q: ModelPart): TreeNode => ({ id: q.id, label: q.name, icon: PART_ICON[q.type], color: q.material.color, hidden: !!q.hidden, locked: !!q.locked, detail: q.material.team ? "time" : undefined });
+    const partNode = (q: ModelPart): TreeNode => ({ id: q.id, label: q.name, icon: PART_ICON[q.type], color: q.material.color, hidden: !!q.hidden, locked: !!q.locked, detail: q.material.team ? t("time") : undefined });
     const groupNode = (g: ModelGroup): TreeNode => ({
-      id: `g:${g.id}`, label: g.name, icon: "folder_special", color: "#f2b33d", hidden: !!g.hidden, detail: `osso ${boneName(g.name)}`,
+      id: `g:${g.id}`, label: g.name, icon: "folder_special", color: "#f2b33d", hidden: !!g.hidden, detail: t("osso {name}", { name: boneName(g.name) }),
       children: [...doc.groups.filter((x) => x.parent === g.id).map(groupNode), ...doc.parts.filter((q) => q.group === g.id).map(partNode)],
     });
     return [{
-      id: "root", label: p.meta?.name ?? "Modelo", icon: "view_in_ar", color: "#5aa9e6", detail: `${doc.parts.length} peças`,
+      id: "root", label: p.meta?.name ?? t("Modelo"), icon: "view_in_ar", color: "#5aa9e6", detail: t("{n} peças", { n: doc.parts.length }),
       children: [...doc.groups.filter((g) => !g.parent || !doc.groups.some((x) => x.id === g.parent)).map(groupNode), ...doc.parts.filter((q) => !q.group || !doc.groups.some((g) => g.id === q.group)).map(partNode)],
     }];
   }, [doc, p.meta?.name]);
@@ -262,72 +263,72 @@ export default function ModelStudio({ id }: { id: string }) {
     const out: { title: string; props: Prop[] }[] = [];
     if (one) {
       const set = (fn: (q: ModelPart) => ModelPart) => patchParts([one.id], fn);
-      out.push({ title: "Peça", props: [
-        { kind: "text", label: "Nome", value: one.name, onChange: (v) => set((q) => ({ ...q, name: v })) },
-        { kind: "info", label: "Forma", value: PART_LABEL[one.type] },
-        { kind: "select", label: "Grupo (osso)", value: one.group ?? "", onChange: (v) => set((q) => ({ ...q, group: v || null })), options: [{ value: "", label: "— nenhum (raiz) —" }, ...doc.groups.map((g) => ({ value: g.id, label: g.name }))] },
-        { kind: "toggle", label: "Visível", value: !one.hidden, onChange: (v) => set((q) => ({ ...q, hidden: !v })) },
+      out.push({ title: t("Peça"), props: [
+        { kind: "text", label: t("Nome"), value: one.name, onChange: (v) => set((q) => ({ ...q, name: v })) },
+        { kind: "info", label: t("Forma"), value: t(PART_LABEL[one.type]) },
+        { kind: "select", label: t("Grupo (osso)"), value: one.group ?? "", onChange: (v) => set((q) => ({ ...q, group: v || null })), options: [{ value: "", label: t("— nenhum (raiz) —") }, ...doc.groups.map((g) => ({ value: g.id, label: g.name }))] },
+        { kind: "toggle", label: t("Visível"), value: !one.hidden, onChange: (v) => set((q) => ({ ...q, hidden: !v })) },
       ] });
-      out.push({ title: "Transformação", props: [
-        { kind: "vec3", label: "Posição", value: one.pos, step: 0.25, onChange: (v) => set((q) => ({ ...q, pos: v })) },
-        { kind: "vec3", label: "Rotação (°)", value: one.rot, step: 15, onChange: (v) => set((q) => ({ ...q, rot: v })) },
-        { kind: "vec3", label: "Escala", value: one.scale, step: 0.1, onChange: (v) => set((q) => ({ ...q, scale: v.map((x) => Math.max(0.01, x)) as Vec3 })) },
+      out.push({ title: t("Transformação"), props: [
+        { kind: "vec3", label: t("Posição"), value: one.pos, step: 0.25, onChange: (v) => set((q) => ({ ...q, pos: v })) },
+        { kind: "vec3", label: t("Rotação (°)"), value: one.rot, step: 15, onChange: (v) => set((q) => ({ ...q, rot: v })) },
+        { kind: "vec3", label: t("Escala"), value: one.scale, step: 0.1, onChange: (v) => set((q) => ({ ...q, scale: v.map((x) => Math.max(0.01, x)) as Vec3 })) },
       ] });
       if (one.type !== "mesh") {
-        out.push({ title: "Forma", props: Object.keys(PART_DEFAULTS[one.type]).map((k): Prop => ({
-          kind: "number", label: PARAM_LABEL[k] ?? k, value: one.params[k] ?? 1, step: k === "seg" ? 1 : 0.1, min: k === "seg" ? 3 : 0.01, max: k === "seg" ? 64 : 500,
+        out.push({ title: t("Forma"), props: Object.keys(PART_DEFAULTS[one.type]).map((k): Prop => ({
+          kind: "number", label: PARAM_LABEL[k] ? t(PARAM_LABEL[k]) : k, value: one.params[k] ?? 1, step: k === "seg" ? 1 : 0.1, min: k === "seg" ? 3 : 0.01, max: k === "seg" ? 64 : 500,
           onChange: (v) => set((q) => ({ ...q, params: { ...q.params, [k]: k === "seg" ? Math.round(v) : v } })),
         })) });
       } else {
-        out.push({ title: "Malha", props: [
-          { kind: "info", label: "Vértices", value: (one.mesh?.positions.length ?? 0) / 3 },
-          { kind: "info", label: "Triângulos", value: (one.mesh?.indices.length ?? 0) / 3 },
-          { kind: "custom", label: "Vértices", node: <button className="btn sm" onClick={startVertexMode}><Icon name="scatter_plot" size={16} /> Editar vértices</button> },
-          ...(vertex !== null && one.mesh ? [{ kind: "vec3", label: `Vértice ${vertex}`, value: [one.mesh.positions[vertex * 3], one.mesh.positions[vertex * 3 + 1], one.mesh.positions[vertex * 3 + 2]] as Vec3, step: 0.05, onChange: (v: Vec3) => onVertexMove(one.id, vertex, v, "end") } as Prop] : []),
+        out.push({ title: t("Malha"), props: [
+          { kind: "info", label: t("Vértices"), value: (one.mesh?.positions.length ?? 0) / 3 },
+          { kind: "info", label: t("Triângulos"), value: (one.mesh?.indices.length ?? 0) / 3 },
+          { kind: "custom", label: t("Vértices"), node: <button className="btn sm" onClick={startVertexMode}><Icon name="scatter_plot" size={16} /> {t("Editar vértices")}</button> },
+          ...(vertex !== null && one.mesh ? [{ kind: "vec3", label: t("Vértice {n}", { n: vertex }), value: [one.mesh.positions[vertex * 3], one.mesh.positions[vertex * 3 + 1], one.mesh.positions[vertex * 3 + 2]] as Vec3, step: 0.05, onChange: (v: Vec3) => onVertexMove(one.id, vertex, v, "end") } as Prop] : []),
         ] });
       }
       const mt = one.material;
-      out.push({ title: "Material", props: [
-        { kind: "color", label: "Cor", value: mt.color, onChange: (v) => set((q) => ({ ...q, material: { ...q.material, color: v } })) },
-        { kind: "custom", label: "Paleta", node: <span className="swatches">{SWATCHES.map((c) => <button key={c} style={{ background: c }} aria-label={c} onClick={() => set((q) => ({ ...q, material: { ...q.material, color: c } }))} />)}</span> },
-        { kind: "custom", label: "Textura", node: (
+      out.push({ title: t("Material"), props: [
+        { kind: "color", label: t("Cor"), value: mt.color, onChange: (v) => set((q) => ({ ...q, material: { ...q.material, color: v } })) },
+        { kind: "custom", label: t("Paleta"), node: <span className="swatches">{SWATCHES.map((c) => <button key={c} style={{ background: c }} aria-label={c} onClick={() => set((q) => ({ ...q, material: { ...q.material, color: c } }))} />)}</span> },
+        { kind: "custom", label: t("Textura"), node: (
           <span className="row" style={{ gap: 4, flexWrap: "wrap" }}>
-            <button className="btn sm" onClick={() => imageInput.current?.click()}><Icon name="upload" size={15} /> Imagem</button>
-            <button className="btn sm" onClick={() => { setTexPick(true); if (!gameTex) void api.mapAssets().then((a) => setGameTex(a.layers)).catch(() => setGameTex([])); }}><Icon name="texture" size={15} /> Do jogo</button>
+            <button className="btn sm" onClick={() => imageInput.current?.click()}><Icon name="upload" size={15} /> {t("Imagem")}</button>
+            <button className="btn sm" onClick={() => { setTexPick(true); if (!gameTex) void api.mapAssets().then((a) => setGameTex(a.layers)).catch(() => setGameTex([])); }}><Icon name="texture" size={15} /> {t("Do jogo")}</button>
             {mt.texture && <button className="btn sm text" onClick={() => set((q) => ({ ...q, material: { ...q.material, texture: null } }))}><Icon name="close" size={15} /></button>}
           </span>
         ) },
-        ...(mt.texture ? [{ kind: "info", label: "Arquivo", value: mt.texture.ref.split("/").pop() } as Prop, { kind: "slider", label: "Repetição", value: mt.uvScale, min: 1, max: 16, onChange: (v: number) => set((q) => ({ ...q, material: { ...q.material, uvScale: v } })) } as Prop] : []),
-        { kind: "slider", label: "Rugosidade", value: mt.roughness, min: 0, max: 1, step: 0.05, onChange: (v) => set((q) => ({ ...q, material: { ...q.material, roughness: v } })) },
-        { kind: "slider", label: "Metal", value: mt.metalness, min: 0, max: 1, step: 0.05, onChange: (v) => set((q) => ({ ...q, material: { ...q.material, metalness: v } })) },
-        { kind: "toggle", label: "Brilha no escuro", value: !!mt.emissive, onChange: (v) => set((q) => ({ ...q, material: { ...q.material, emissive: v ? q.material.color : null } })) },
-        ...(mt.emissive ? [{ kind: "color", label: "Cor do brilho", value: mt.emissive, onChange: (v: string) => set((q) => ({ ...q, material: { ...q.material, emissive: v } })) } as Prop] : []),
-        { kind: "toggle", label: "Cor do time", value: !!mt.team, onChange: (v) => set((q) => ({ ...q, material: { ...q.material, team: v } })), hint: "No jogo, esta peça recebe a cor do jogador (azul, vermelho…)." },
+        ...(mt.texture ? [{ kind: "info", label: t("Arquivo"), value: mt.texture.ref.split("/").pop() } as Prop, { kind: "slider", label: t("Repetição"), value: mt.uvScale, min: 1, max: 16, onChange: (v: number) => set((q) => ({ ...q, material: { ...q.material, uvScale: v } })) } as Prop] : []),
+        { kind: "slider", label: t("Rugosidade"), value: mt.roughness, min: 0, max: 1, step: 0.05, onChange: (v) => set((q) => ({ ...q, material: { ...q.material, roughness: v } })) },
+        { kind: "slider", label: t("Metal"), value: mt.metalness, min: 0, max: 1, step: 0.05, onChange: (v) => set((q) => ({ ...q, material: { ...q.material, metalness: v } })) },
+        { kind: "toggle", label: t("Brilha no escuro"), value: !!mt.emissive, onChange: (v) => set((q) => ({ ...q, material: { ...q.material, emissive: v ? q.material.color : null } })) },
+        ...(mt.emissive ? [{ kind: "color", label: t("Cor do brilho"), value: mt.emissive, onChange: (v: string) => set((q) => ({ ...q, material: { ...q.material, emissive: v } })) } as Prop] : []),
+        { kind: "toggle", label: t("Cor do time"), value: !!mt.team, onChange: (v) => set((q) => ({ ...q, material: { ...q.material, team: v } })), hint: t("No jogo, esta peça recebe a cor do jogador (azul, vermelho…).") },
       ] });
     } else if (selGroup) {
       const set = (fn: (g: ModelGroup) => ModelGroup) => update((d) => ({ ...d, groups: d.groups.map((g) => (g.id === selGroup.id ? fn(g) : g)) }));
       const piv = groupPivot(doc, selGroup);
-      out.push({ title: "Grupo (osso)", props: [
-        { kind: "text", label: "Nome", value: selGroup.name, onChange: (v) => set((g) => ({ ...g, name: v })), hint: "Vira o nome do osso no jogo. Tropas usam nomes como Turret, Barrel, Muzzle01." },
-        { kind: "info", label: "Nome do osso", value: boneName(selGroup.name) },
-        { kind: "select", label: "Dentro de", value: selGroup.parent ?? "", onChange: (v) => set((g) => ({ ...g, parent: v || null })), options: [{ value: "", label: "— raiz —" }, ...doc.groups.filter((g) => g.id !== selGroup.id).map((g) => ({ value: g.id, label: g.name }))] },
-        { kind: "vec3", label: "Pivô", value: piv, step: 0.25, onChange: (v) => set((g) => ({ ...g, pivot: v })), hint: "Ponto em volta do qual o grupo gira nas animações (ex.: o centro da torre)." },
-        { kind: "custom", label: "", node: <span className="row" style={{ gap: 6 }}>{selGroup.pivot && <button className="btn sm text" onClick={() => set((g) => ({ ...g, pivot: undefined }))}>Pivô automático</button>}<button className="btn sm" onClick={ungroup}><Icon name="call_split" size={15} /> Desagrupar</button></span> },
-        { kind: "toggle", label: "Visível", value: !selGroup.hidden, onChange: (v) => set((g) => ({ ...g, hidden: !v })) },
-        { kind: "info", label: "Peças", value: doc.parts.filter((q) => q.group === selGroup.id).length },
+      out.push({ title: t("Grupo (osso)"), props: [
+        { kind: "text", label: t("Nome"), value: selGroup.name, onChange: (v) => set((g) => ({ ...g, name: v })), hint: t("Vira o nome do osso no jogo. Tropas usam nomes como Turret, Barrel, Muzzle01.") },
+        { kind: "info", label: t("Nome do osso"), value: boneName(selGroup.name) },
+        { kind: "select", label: t("Dentro de"), value: selGroup.parent ?? "", onChange: (v) => set((g) => ({ ...g, parent: v || null })), options: [{ value: "", label: t("— raiz —") }, ...doc.groups.filter((g) => g.id !== selGroup.id).map((g) => ({ value: g.id, label: g.name }))] },
+        { kind: "vec3", label: t("Pivô"), value: piv, step: 0.25, onChange: (v) => set((g) => ({ ...g, pivot: v })), hint: t("Ponto em volta do qual o grupo gira nas animações (ex.: o centro da torre).") },
+        { kind: "custom", label: "", node: <span className="row" style={{ gap: 6 }}>{selGroup.pivot && <button className="btn sm text" onClick={() => set((g) => ({ ...g, pivot: undefined }))}>{t("Pivô automático")}</button>}<button className="btn sm" onClick={ungroup}><Icon name="call_split" size={15} /> {t("Desagrupar")}</button></span> },
+        { kind: "toggle", label: t("Visível"), value: !selGroup.hidden, onChange: (v) => set((g) => ({ ...g, hidden: !v })) },
+        { kind: "info", label: t("Peças"), value: doc.parts.filter((q) => q.group === selGroup.id).length },
       ] });
     } else if (selParts.length > 1) {
-      out.push({ title: `${selParts.length} peças`, props: [
-        { kind: "color", label: "Cor de todas", value: selParts[0].material.color, onChange: (v) => patchParts(partIds, (q) => ({ ...q, material: { ...q.material, color: v } })) },
-        { kind: "toggle", label: "Cor do time", value: selParts.every((q) => q.material.team), onChange: (v) => patchParts(partIds, (q) => ({ ...q, material: { ...q.material, team: v } })) },
-        { kind: "custom", label: "Ações", node: <span className="row" style={{ gap: 6, flexWrap: "wrap" }}><button className="btn sm" onClick={group}><Icon name="folder" size={15} /> Agrupar</button><button className="btn sm" onClick={duplicate}><Icon name="content_copy" size={15} /> Duplicar</button><button className="btn sm" onClick={remove}><Icon name="delete" size={15} /> Excluir</button></span> },
+      out.push({ title: t("{n} peças", { n: selParts.length }), props: [
+        { kind: "color", label: t("Cor de todas"), value: selParts[0].material.color, onChange: (v) => patchParts(partIds, (q) => ({ ...q, material: { ...q.material, color: v } })) },
+        { kind: "toggle", label: t("Cor do time"), value: selParts.every((q) => q.material.team), onChange: (v) => patchParts(partIds, (q) => ({ ...q, material: { ...q.material, team: v } })) },
+        { kind: "custom", label: t("Ações"), node: <span className="row" style={{ gap: 6, flexWrap: "wrap" }}><button className="btn sm" onClick={group}><Icon name="folder" size={15} /> {t("Agrupar")}</button><button className="btn sm" onClick={duplicate}><Icon name="content_copy" size={15} /> {t("Duplicar")}</button><button className="btn sm" onClick={remove}><Icon name="delete" size={15} /> {t("Excluir")}</button></span> },
       ] });
     } else {
-      out.push({ title: "Modelo", props: [
-        { kind: "info", label: "Peças", value: doc.parts.length },
-        { kind: "info", label: "Grupos (ossos)", value: doc.groups.length + 1 },
-        { kind: "text", label: "Anotações", value: doc.notes, multiline: true, onChange: (v) => update((d) => ({ ...d, notes: v })) },
-        { kind: "info", label: "Dica", value: "Insira formas pela faixa \"Inserir\". Agrupe peças que se movem juntas (ex.: torre + canhão)." },
+      out.push({ title: t("Modelo"), props: [
+        { kind: "info", label: t("Peças"), value: doc.parts.length },
+        { kind: "info", label: t("Grupos (ossos)"), value: doc.groups.length + 1 },
+        { kind: "text", label: t("Anotações"), value: doc.notes, multiline: true, onChange: (v) => update((d) => ({ ...d, notes: v })) },
+        { kind: "info", label: t("Dica"), value: t('Insira formas pela faixa "Inserir". Agrupe peças que se movem juntas (ex.: torre + canhão).') },
       ] });
     }
     return out;
@@ -335,84 +336,84 @@ export default function ModelStudio({ id }: { id: string }) {
   }, [one, selGroup, selParts, doc, vertex, gameTex]);
 
   if (p.status === "loading") return <div className="studio-root"><div className="bar indeterminate" style={{ margin: 30 }}><i /></div></div>;
-  if (p.status === "error") return <div className="studio-root"><Empty icon="error" title="Não deu para abrir o projeto">{p.error}</Empty></div>;
+  if (p.status === "error") return <div className="studio-root"><Empty icon="error" title={t("Não deu para abrir o projeto")}>{p.error}</Empty></div>;
 
   const modeBtn = (m: GizmoMode, icon: string, label: string, key: string) => <RibbonButton icon={icon} label={label} active={mode === m} onClick={() => (m === "vertex" ? startVertexMode() : setMode(m))} hint={`${label} (${key})`} />;
-  const insertBtn = (t: Exclude<PartType, "mesh">) => <RibbonButton key={t} icon={PART_ICON[t]} label={PART_LABEL[t]} onClick={() => addPart(t)} color="#5aa9e6" />;
+  const insertBtn = (pt: Exclude<PartType, "mesh">) => <RibbonButton key={pt} icon={PART_ICON[pt]} label={t(PART_LABEL[pt])} onClick={() => addPart(pt)} color="#5aa9e6" />;
   const tris = doc.parts.reduce((n, q) => n + (q.type === "mesh" ? (q.mesh?.indices.length ?? 0) / 3 : 0), 0);
 
   return (
     <div className="studio-root">
       <div className="studio-top">
-        <Ribbon active={ribbon} onTab={setRibbon} tabs={[{ id: "home", label: "Início" }, { id: "insert", label: "Inserir" }, { id: "material", label: "Material" }, { id: "view", label: "Exibir" }, { id: "export", label: "Exportar" }]}>
+        <Ribbon active={ribbon} onTab={setRibbon} tabs={[{ id: "home", label: t("Início") }, { id: "insert", label: t("Inserir") }, { id: "material", label: t("Material") }, { id: "view", label: t("Exibir") }, { id: "export", label: t("Exportar") }]}>
           {ribbon === "home" && <>
-            <RibbonGroup label="Ferramentas">
-              {modeBtn("select", "near_me", "Selecionar", "Q")}
-              {modeBtn("translate", "open_with", "Mover", "W")}
-              {modeBtn("rotate", "rotate_90_degrees_ccw", "Girar", "E")}
-              {modeBtn("scale", "open_in_full", "Escalar", "R")}
-              {modeBtn("vertex", "scatter_plot", "Vértices", "V")}
+            <RibbonGroup label={t("Ferramentas")}>
+              {modeBtn("select", "near_me", t("Selecionar"), "Q")}
+              {modeBtn("translate", "open_with", t("Mover"), "W")}
+              {modeBtn("rotate", "rotate_90_degrees_ccw", t("Girar"), "E")}
+              {modeBtn("scale", "open_in_full", t("Escalar"), "R")}
+              {modeBtn("vertex", "scatter_plot", t("Vértices"), "V")}
             </RibbonGroup>
-            <RibbonGroup label="Encaixe">
+            <RibbonGroup label={t("Encaixe")}>
               <div className="ribbon-stack" style={{ width: 170 }}>
-                <label className="row small" style={{ gap: 6 }}><span style={{ width: 52 }}>Mover</span>
+                <label className="row small" style={{ gap: 6 }}><span style={{ width: 52 }}>{t("Mover")}</span>
                   <select className="pinput" value={snapMove ?? 0} onChange={(e) => setSnapMove(Number(e.target.value) || null)}>
-                    <option value={0}>livre</option><option value={0.1}>0,1</option><option value={0.25}>0,25</option><option value={0.5}>0,5</option><option value={1}>1</option>
+                    <option value={0}>{t("livre")}</option><option value={0.1}>{t("0,1")}</option><option value={0.25}>{t("0,25")}</option><option value={0.5}>{t("0,5")}</option><option value={1}>1</option>
                   </select></label>
-                <label className="row small" style={{ gap: 6 }}><span style={{ width: 52 }}>Girar</span>
+                <label className="row small" style={{ gap: 6 }}><span style={{ width: 52 }}>{t("Girar")}</span>
                   <select className="pinput" value={snapRot ?? 0} onChange={(e) => setSnapRot(Number(e.target.value) || null)}>
-                    <option value={0}>livre</option><option value={5}>5°</option><option value={15}>15°</option><option value={45}>45°</option><option value={90}>90°</option>
+                    <option value={0}>{t("livre")}</option><option value={5}>5°</option><option value={15}>15°</option><option value={45}>45°</option><option value={90}>90°</option>
                   </select></label>
               </div>
-              <RibbonButton icon={space === "world" ? "public" : "my_location"} label={space === "world" ? "Mundo" : "Local"} onClick={() => setSpace((s) => (s === "world" ? "local" : "world"))} hint="Eixos do gizmo: do mundo ou da peça" />
+              <RibbonButton icon={space === "world" ? "public" : "my_location"} label={space === "world" ? t("Mundo") : t("Local")} onClick={() => setSpace((s) => (s === "world" ? "local" : "world"))} hint={t("Eixos do gizmo: do mundo ou da peça")} />
             </RibbonGroup>
-            <RibbonGroup label="Editar">
-              <RibbonButton icon="content_copy" label="Duplicar" onClick={duplicate} disabled={!selParts.length} hint="Ctrl+D" />
-              <RibbonButton icon="folder" label="Agrupar" onClick={group} disabled={!selParts.length} hint="Ctrl+G" />
-              <RibbonButton icon="call_split" label="Desagrupar" onClick={ungroup} disabled={!selGroup && !one?.group} hint="Ctrl+Shift+G" />
-              <RibbonButton icon="delete" label="Excluir" onClick={remove} disabled={!selParts.length && !selGroup} hint="Del" />
+            <RibbonGroup label={t("Editar")}>
+              <RibbonButton icon="content_copy" label={t("Duplicar")} onClick={duplicate} disabled={!selParts.length} hint="Ctrl+D" />
+              <RibbonButton icon="folder" label={t("Agrupar")} onClick={group} disabled={!selParts.length} hint="Ctrl+G" />
+              <RibbonButton icon="call_split" label={t("Desagrupar")} onClick={ungroup} disabled={!selGroup && !one?.group} hint="Ctrl+Shift+G" />
+              <RibbonButton icon="delete" label={t("Excluir")} onClick={remove} disabled={!selParts.length && !selGroup} hint="Del" />
             </RibbonGroup>
-            <RibbonGroup label="Vista">
-              <RibbonButton icon="center_focus_strong" label="Focar" onClick={() => focus.current?.()} hint="F" />
+            <RibbonGroup label={t("Vista")}>
+              <RibbonButton icon="center_focus_strong" label={t("Focar")} onClick={() => focus.current?.()} hint="F" />
             </RibbonGroup>
           </>}
           {ribbon === "insert" && <>
-            <RibbonGroup label="Formas">{(["box", "cylinder", "sphere", "cone", "wedge", "torus", "plane", "capsule"] as const).map(insertBtn)}</RibbonGroup>
-            <RibbonGroup label="Importar">
-              <RibbonButton icon="file_upload" label="OBJ / GLB" onClick={() => fileInput.current?.click()} hint="Modelos de outros programas (Blender, etc.)" />
+            <RibbonGroup label={t("Formas")}>{(["box", "cylinder", "sphere", "cone", "wedge", "torus", "plane", "capsule"] as const).map(insertBtn)}</RibbonGroup>
+            <RibbonGroup label={t("Importar")}>
+              <RibbonButton icon="file_upload" label="OBJ / GLB" onClick={() => fileInput.current?.click()} hint={t("Modelos de outros programas (Blender, etc.)")} />
             </RibbonGroup>
           </>}
           {ribbon === "material" && <>
-            <RibbonGroup label="Cor rápida">
+            <RibbonGroup label={t("Cor rápida")}>
               <span className="swatches big">{SWATCHES.map((c) => <button key={c} style={{ background: c }} aria-label={c} disabled={!partIds.length} onClick={() => patchParts(partIds, (q) => ({ ...q, material: { ...q.material, color: c } }))} />)}</span>
             </RibbonGroup>
-            <RibbonGroup label="Textura">
-              <RibbonButton icon="upload" label="Imagem" onClick={() => imageInput.current?.click()} disabled={!partIds.length} />
-              <RibbonButton icon="texture" label="Do jogo" onClick={() => { setTexPick(true); if (!gameTex) void api.mapAssets().then((a) => setGameTex(a.layers)).catch(() => setGameTex([])); }} disabled={!partIds.length} />
-              <RibbonButton icon="format_color_reset" label="Sem textura" onClick={() => patchParts(partIds, (q) => ({ ...q, material: { ...q.material, texture: null } }))} disabled={!partIds.length} />
+            <RibbonGroup label={t("Textura")}>
+              <RibbonButton icon="upload" label={t("Imagem")} onClick={() => imageInput.current?.click()} disabled={!partIds.length} />
+              <RibbonButton icon="texture" label={t("Do jogo")} onClick={() => { setTexPick(true); if (!gameTex) void api.mapAssets().then((a) => setGameTex(a.layers)).catch(() => setGameTex([])); }} disabled={!partIds.length} />
+              <RibbonButton icon="format_color_reset" label={t("Sem textura")} onClick={() => patchParts(partIds, (q) => ({ ...q, material: { ...q.material, texture: null } }))} disabled={!partIds.length} />
             </RibbonGroup>
-            <RibbonGroup label="Acabamento">
-              <RibbonButton icon="flag" label="Cor do time" active={selParts.length > 0 && selParts.every((q) => q.material.team)} disabled={!partIds.length} onClick={() => { const on = !selParts.every((q) => q.material.team); patchParts(partIds, (q) => ({ ...q, material: { ...q.material, team: on } })); }} />
-              <RibbonButton icon="light_mode" label="Brilho" active={selParts.length > 0 && selParts.every((q) => !!q.material.emissive)} disabled={!partIds.length} onClick={() => { const on = !selParts.every((q) => q.material.emissive); patchParts(partIds, (q) => ({ ...q, material: { ...q.material, emissive: on ? q.material.color : null } })); }} />
-              <RibbonButton icon="restart_alt" label="Material padrão" disabled={!partIds.length} onClick={() => patchParts(partIds, (q) => ({ ...q, material: defaultMaterial() }))} />
+            <RibbonGroup label={t("Acabamento")}>
+              <RibbonButton icon="flag" label={t("Cor do time")} active={selParts.length > 0 && selParts.every((q) => q.material.team)} disabled={!partIds.length} onClick={() => { const on = !selParts.every((q) => q.material.team); patchParts(partIds, (q) => ({ ...q, material: { ...q.material, team: on } })); }} />
+              <RibbonButton icon="light_mode" label={t("Brilho")} active={selParts.length > 0 && selParts.every((q) => !!q.material.emissive)} disabled={!partIds.length} onClick={() => { const on = !selParts.every((q) => q.material.emissive); patchParts(partIds, (q) => ({ ...q, material: { ...q.material, emissive: on ? q.material.color : null } })); }} />
+              <RibbonButton icon="restart_alt" label={t("Material padrão")} disabled={!partIds.length} onClick={() => patchParts(partIds, (q) => ({ ...q, material: defaultMaterial() }))} />
             </RibbonGroup>
           </>}
           {ribbon === "view" && <>
-            <RibbonGroup label="Exibir">
-              <RibbonButton icon="grid_4x4" label="Aramado" active={wire} onClick={() => setWire((w) => !w)} />
-              <RibbonButton icon="center_focus_strong" label="Focar" onClick={() => focus.current?.()} />
+            <RibbonGroup label={t("Exibir")}>
+              <RibbonButton icon="grid_4x4" label={t("Aramado")} active={wire} onClick={() => setWire((w) => !w)} />
+              <RibbonButton icon="center_focus_strong" label={t("Focar")} onClick={() => focus.current?.()} />
             </RibbonGroup>
-            <RibbonGroup label="Prévia da cor do time">
+            <RibbonGroup label={t("Prévia da cor do time")}>
               <span className="swatches big">{["#2f6fd6", "#c8352b", "#d9a227", "#3fa34d", "#8e44ad", "#e67e22"].map((c) => <button key={c} style={{ background: c, outline: teamColor === c ? "2px solid #fff" : undefined }} aria-label={c} onClick={() => setTeamColor(c)} />)}</span>
             </RibbonGroup>
           </>}
           {ribbon === "export" && <>
-            <RibbonGroup label="Jogo">
-              <RibbonButton icon="rocket_launch" label={busy === "bake" ? "Preparando…" : "Preparar para o jogo"} onClick={() => void prepare()} color="#a3e635" hint="Converte para os formatos do jogo e deixa disponível para mapas e tropas" disabled={!!busy} />
-              <RibbonButton icon="fact_check" label="Validar" onClick={() => void validate()} disabled={!!busy} />
-              <RibbonButton icon="folder_open" label="Arquivos .scm/.dds" onClick={() => void exportGame()} disabled={!!busy} />
+            <RibbonGroup label={t("Jogo")}>
+              <RibbonButton icon="rocket_launch" label={busy === "bake" ? t("Preparando…") : t("Preparar para o jogo")} onClick={() => void prepare()} color="#a3e635" hint={t("Converte para os formatos do jogo e deixa disponível para mapas e tropas")} disabled={!!busy} />
+              <RibbonButton icon="fact_check" label={t("Validar")} onClick={() => void validate()} disabled={!!busy} />
+              <RibbonButton icon="folder_open" label={t("Arquivos .scm/.dds")} onClick={() => void exportGame()} disabled={!!busy} />
             </RibbonGroup>
-            <RibbonGroup label="Outros programas">
+            <RibbonGroup label={t("Outros programas")}>
               <RibbonButton icon="download" label="OBJ" onClick={() => void exportAs("obj")} disabled={!!busy} />
               <RibbonButton icon="download" label="GLB" onClick={() => void exportAs("glb")} disabled={!!busy} />
             </RibbonGroup>
@@ -422,16 +423,16 @@ export default function ModelStudio({ id }: { id: string }) {
       </div>
       <StudioLayout id="model"
         left={
-          <Panel title="Caixa de formas" icon="category" grow collapsible={false} id="model-toolbox">
+          <Panel title={t("Caixa de formas")} icon="category" grow collapsible={false} id="model-toolbox">
             <div className="toolbox-grid">
-              {(["box", "cylinder", "sphere", "cone", "wedge", "torus", "plane", "capsule"] as const).map((t) => (
-                <button key={t} className="tool-tile" onClick={() => addPart(t)}><Icon name={PART_ICON[t]} /><span>{PART_LABEL[t]}</span></button>
+              {(["box", "cylinder", "sphere", "cone", "wedge", "torus", "plane", "capsule"] as const).map((pt) => (
+                <button key={pt} className="tool-tile" onClick={() => addPart(pt)}><Icon name={PART_ICON[pt]} /><span>{t(PART_LABEL[pt])}</span></button>
               ))}
-              <button className="tool-tile" onClick={() => fileInput.current?.click()}><Icon name="file_upload" /><span>Importar</span></button>
+              <button className="tool-tile" onClick={() => fileInput.current?.click()}><Icon name="file_upload" /><span>{t("Importar")}</span></button>
             </div>
             <div className="spanel-pad">
-              <p className="faint small"><b>Grupos viram ossos</b> no jogo: para uma tropa, agrupe a torre (nome <code>Turret</code>) e o cano (<code>Barrel</code>, com a ponta <code>Muzzle01</code>) como no modelo original.</p>
-              <p className="faint small">Atalhos: Q selecionar · W mover · E girar · R escalar · V vértices · F focar · Ctrl+D duplicar · Ctrl+G agrupar.</p>
+              <p className="faint small"><b>{t("Grupos viram ossos")}</b> {t("no jogo: para uma tropa, agrupe a torre (nome")} <code>Turret</code>{t(") e o cano (")}<code>Barrel</code>{t(", com a ponta")} <code>Muzzle01</code>{t(") como no modelo original.")}</p>
+              <p className="faint small">{t("Atalhos: Q selecionar · W mover · E girar · R escalar · V vértices · F focar · Ctrl+D duplicar · Ctrl+G agrupar.")}</p>
             </div>
           </Panel>
         }
@@ -446,44 +447,44 @@ export default function ModelStudio({ id }: { id: string }) {
             </Suspense>
             <div className="viewport-overlay">
               <span className="vp-chip"><Icon name={mode === "vertex" ? "scatter_plot" : mode === "rotate" ? "rotate_90_degrees_ccw" : mode === "scale" ? "open_in_full" : mode === "select" ? "near_me" : "open_with"} size={15} />
-                {mode === "vertex" ? (vertex === null ? "Clique num ponto para escolher o vértice" : `Vértice ${vertex}: arraste o gizmo`) : "Clique numa peça para selecionar; Shift soma"}</span>
+                {mode === "vertex" ? (vertex === null ? t("Clique num ponto para escolher o vértice") : t("Vértice {n}: arraste o gizmo", { n: vertex })) : t("Clique numa peça para selecionar; Shift soma")}</span>
             </div>
-            {doc.parts.length === 0 && <div className="vp-hint">Comece inserindo uma forma (Inserir → Bloco) ou importe um OBJ/GLB.</div>}
+            {doc.parts.length === 0 && <div className="vp-hint">{t("Comece inserindo uma forma (Inserir → Bloco) ou importe um OBJ/GLB.")}</div>}
           </div>
         }
         right={<>
-          <Panel title="Explorador" icon="account_tree" grow id="model-explorer">
-            <div className="tree-filter"><input placeholder="Filtrar peças…" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filtrar peças" /></div>
+          <Panel title={t("Explorador")} icon="account_tree" grow id="model-explorer">
+            <div className="tree-filter"><input placeholder={t("Filtrar peças…")} value={filter} onChange={(e) => setFilter(e.target.value)} aria-label={t("Filtrar peças")} /></div>
             <Tree nodes={nodes} selected={new Set(sel)} filter={filter} onSelect={onTreeSelect}
               onToggleHidden={(nid) => nid.startsWith("g:") ? update((d) => ({ ...d, groups: d.groups.map((g) => (`g:${g.id}` === nid ? { ...g, hidden: !g.hidden } : g)) })) : patchParts([nid], (q) => ({ ...q, hidden: !q.hidden }))}
               onToggleLocked={(nid) => { if (!nid.startsWith("g:")) patchParts([nid], (q) => ({ ...q, locked: !q.locked })); }}
               onContext={(nid, x, y) => { if (nid === "root") return; if (!sel.includes(nid)) setSel([nid]); setCtx({ x, y }); }} />
           </Panel>
-          <Panel title="Propriedades" icon="tune" grow id="model-props"><PropertyGrid sections={sections} /></Panel>
+          <Panel title={t("Propriedades")} icon="tune" grow id="model-props"><PropertyGrid sections={sections} /></Panel>
         </>}
       />
       <StatusBar>
-        <span><b>{doc.parts.length}</b> peças · <b>{doc.groups.length}</b> grupos{tris ? ` · ${tris.toLocaleString("pt-BR")} triângulos importados` : ""}</span>
+        <span><b>{doc.parts.length}</b> {t("peças")} · <b>{doc.groups.length}</b> {t("grupos")}{tris ? ` · ${t("{n} triângulos importados", { n: tris.toLocaleString(locale()) })}` : ""}</span>
         <span className="grow" />
-        {selParts.length > 0 && <span>{selParts.length} selecionada{selParts.length > 1 ? "s" : ""}</span>}
-        <span>encaixe {snapMove ?? "livre"} · {snapRot ? `${snapRot}°` : "livre"}</span>
+        {selParts.length > 0 && <span>{selParts.length > 1 ? t("{n} selecionadas", { n: selParts.length }) : t("{n} selecionada", { n: selParts.length })}</span>}
+        <span>{t("encaixe")} {snapMove ?? t("livre")} · {snapRot ? `${snapRot}°` : t("livre")}</span>
       </StatusBar>
 
       <input ref={fileInput} type="file" accept=".obj,.glb,.gltf" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importModel(f); e.target.value = ""; }} />
       <input ref={imageInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importImage(f); e.target.value = ""; }} />
 
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} onClose={() => setCtx(null)} items={[
-        { icon: "content_copy", label: "Duplicar", shortcut: "Ctrl+D", onClick: duplicate, disabled: !selParts.length },
-        { icon: "folder", label: "Agrupar", shortcut: "Ctrl+G", onClick: group, disabled: !selParts.length },
-        { icon: "call_split", label: "Desagrupar", onClick: ungroup, disabled: !selGroup && !one?.group },
-        { icon: "center_focus_strong", label: "Focar", shortcut: "F", onClick: () => focus.current?.() },
+        { icon: "content_copy", label: t("Duplicar"), shortcut: "Ctrl+D", onClick: duplicate, disabled: !selParts.length },
+        { icon: "folder", label: t("Agrupar"), shortcut: "Ctrl+G", onClick: group, disabled: !selParts.length },
+        { icon: "call_split", label: t("Desagrupar"), onClick: ungroup, disabled: !selGroup && !one?.group },
+        { icon: "center_focus_strong", label: t("Focar"), shortcut: "F", onClick: () => focus.current?.() },
         "-",
-        { icon: "delete", label: "Excluir", shortcut: "Del", danger: true, onClick: remove },
+        { icon: "delete", label: t("Excluir"), shortcut: "Del", danger: true, onClick: remove },
       ] as (CtxItem | "-")[]} />}
 
       {texPick && (
-        <Modal title="Textura do jogo" icon="texture" onClose={() => setTexPick(false)} wide>
-          <p className="muted small">Texturas de chão dos mapas do jogo (repetem bem). A cor da peça tinge a textura: use branco para a cor original.</p>
+        <Modal title={t("Textura do jogo")} icon="texture" onClose={() => setTexPick(false)} wide>
+          <p className="muted small">{t("Texturas de chão dos mapas do jogo (repetem bem). A cor da peça tinge a textura: use branco para a cor original.")}</p>
           <div className="layer-grid">
             {gameTex === null ? <div className="bar indeterminate"><i /></div> : gameTex.slice(0, 200).map((l) => (
               <button key={l.d} className="layer-tile" onClick={() => { patchParts(partIds, (q) => ({ ...q, material: { ...q.material, texture: { source: "game", ref: l.d }, color: "#ffffff", uvScale: Math.max(2, q.material.uvScale) } })); setTexPick(false); }}>
@@ -497,16 +498,16 @@ export default function ModelStudio({ id }: { id: string }) {
       )}
 
       {report && (
-        <Modal title="Validação do modelo" icon="fact_check" onClose={() => setReport(null)}>
+        <Modal title={t("Validação do modelo")} icon="fact_check" onClose={() => setReport(null)}>
           <div className="col" style={{ gap: 10 }}>
             <div className="stat-row">
-              <span><b>{report.vertices.toLocaleString("pt-BR")}</b><small>vértices (máx. 65536)</small></span>
-              <span><b>{report.triangles.toLocaleString("pt-BR")}</b><small>triângulos</small></span>
-              <span><b>{report.bones}</b><small>ossos</small></span>
-              <span><b>{report.atlas}px</b><small>atlas de textura</small></span>
+              <span><b>{report.vertices.toLocaleString(locale())}</b><small>{t("vértices (máx. 65536)")}</small></span>
+              <span><b>{report.triangles.toLocaleString(locale())}</b><small>{t("triângulos")}</small></span>
+              <span><b>{report.bones}</b><small>{t("ossos")}</small></span>
+              <span><b>{report.atlas}px</b><small>{t("atlas de textura")}</small></span>
             </div>
-            {report.warnings.length ? <ul className="small warn-list">{report.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul> : <p className="small" style={{ color: "var(--ok)" }}><Icon name="check_circle" size={16} /> Tudo certo para o jogo.</p>}
-            <footer><button className="btn primary" onClick={() => setReport(null)}>Fechar</button></footer>
+            {report.warnings.length ? <ul className="small warn-list">{report.warnings.map((w, i) => <li key={i}>{tr(w)}</li>)}</ul> : <p className="small" style={{ color: "var(--ok)" }}><Icon name="check_circle" size={16} /> {t("Tudo certo para o jogo.")}</p>}
+            <footer><button className="btn primary" onClick={() => setReport(null)}>{t("Fechar")}</button></footer>
           </div>
         </Modal>
       )}

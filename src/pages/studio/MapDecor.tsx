@@ -155,7 +155,7 @@ function LayerChooser({ target, all, onPick, onClose }: { target: GroundLayer; a
   }, [all, target, q]);
   const tooLong = (all ?? []).filter((l) => l.d !== target.d && !layerFits(target, l)).length;
   return (
-    <Modal title={t("Trocar \"{name}\"", { name: nice(target.name) })} icon="format_paint" onClose={onClose} wide>
+    <Modal title={t('Trocar "{name}"', { name: nice(target.name) })} icon="format_paint" onClose={onClose} wide>
       <div className="col" style={{ gap: 12 }}>
         <div className="search-bar">
           <Icon name="search" />
@@ -225,7 +225,7 @@ export function GroundPaint({ all, chain, deck, onDeck, biome, role, painting, h
               <TextureThumb path={chain[k]?.d} size={46} />
               <span>{t(ROLE_LABEL[r])}</span>
             </button>
-            <button className="paint-swap" title={t("Trocar a textura de \"{name}\" (qualquer textura do jogo ou uma imagem sua)", { name: t(ROLE_LABEL[r]) })} aria-label={t("Trocar textura {name}", { name: t(ROLE_LABEL[r]) })} onClick={() => setSwap(r)}><Icon name="swap_horiz" size={14} /></button>
+            <button className="paint-swap" title={t('Trocar a textura de "{name}" (qualquer textura do jogo ou uma imagem sua)', { name: t(ROLE_LABEL[r]) })} aria-label={t("Trocar textura {name}", { name: t(ROLE_LABEL[r]) })} onClick={() => setSwap(r)}><Icon name="swap_horiz" size={14} /></button>
           </div>
         ))}
         <button className="paint-role eraser" aria-pressed={painting && role < 0} onClick={() => onRole(-1)} title={t("Borracha: volta ao automático")}>

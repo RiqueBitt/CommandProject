@@ -600,10 +600,10 @@ export default function MapStudio({ id }: { id: string }) {
   };
 
   const onPointer = useCallback((type: "down" | "move" | "up", q: Pt | null) => {
-    const { tool: t, radius: rad, drag: d, doc: dc } = ctxRef.current;
-    if (t === "orbit") return;
+    const { tool: tl, radius: rad, drag: d, doc: dc } = ctxRef.current;
+    if (tl === "orbit") return;
     if (q) setCursor(q);
-    if (t === "select") {
+    if (tl === "select") {
       if (type === "down" && q) {
         const s = ctxRef.current.sel;
         let hit = pick(q, dc);
@@ -675,7 +675,7 @@ export default function MapStudio({ id }: { id: string }) {
       return;
     }
     // pincel de passagem das tropas
-    if (isNav(t)) {
+    if (isNav(tl)) {
       const r = ctxRef.current.relief3d;
       if (!r) return;
       if (type === "up" || !q) {
@@ -693,13 +693,13 @@ export default function MapStudio({ id }: { id: string }) {
       if (stroke.current && Math.hypot(q[0] - stroke.current[0], q[1] - stroke.current[1]) < rad * 0.25) return;
       stroke.current = q;
       let ch = false;
-      const role = t === "nav-block" ? 1 : t === "nav-allow" ? 2 : -1;
+      const role = tl === "nav-block" ? 1 : tl === "nav-allow" ? 2 : -1;
       for (const mq of mirrors(q)) ch = paintDab(ln, r.grid, mq.p[0], mq.p[1], rad, role, 1) || ch;
       if (ch) setNavRev((v) => v + 1);
       return;
     }
     // pincel de textura
-    if (t === "paint") {
+    if (tl === "paint") {
       const r = ctxRef.current.relief3d;
       if (!r) return;
       if (type === "up" || !q) {
@@ -727,8 +727,8 @@ export default function MapStudio({ id }: { id: string }) {
       return;
     }
     // pincel de escultura
-    if (isBrush(t)) {
-      const mode = t.slice(2) as BrushMode;
+    if (isBrush(tl)) {
+      const mode = tl.slice(2) as BrushMode;
       const r = ctxRef.current.relief3d, cur = ctxRef.current.composed;
       if (!r || !cur) return;
       if (type === "up" || !q) {
@@ -749,20 +749,20 @@ export default function MapStudio({ id }: { id: string }) {
       return;
     }
     // formas em linha e retângulos (arrastar)
-    if (t === "ramp" || t === "bridge" || (isFeat(t) && LINE_FEATURES.includes(featOf(t)))) {
+    if (tl === "ramp" || tl === "bridge" || (isFeat(tl) && LINE_FEATURES.includes(featOf(tl)))) {
       if (type === "down" && q) setDrag({ a: q, b: q });
       else if (type === "move" && q && d) setDrag({ ...d, b: q });
       else if (type === "up" && d) {
         const b = q ?? d.b;
         setDrag(null);
-        if (isFeat(t)) {
+        if (isFeat(tl)) {
           if (Math.hypot(b[0] - d.a[0], b[1] - d.a[1]) < 24) return;
-          const fs = newFeatures(featOf(t), linePts(featOf(t), d.a, b));
+          const fs = newFeatures(featOf(tl), linePts(featOf(tl), d.a, b));
           p.commit((doc0) => ({ ...doc0, features: [...doc0.features, ...fs] }));
           setSel(new Set(fs.map((f) => `feat:${f.id}`)));
           return;
         }
-        if (t === "bridge") {
+        if (tl === "bridge") {
           const rects = mirrors(d.a).map((ma, k) => {
             const mb = mirrors(b)[k] ?? mirrors(b)[0];
             const [x0, x1] = [ma.p[0], mb.p[0]].sort((u, v) => u - v), [z0, z1] = [ma.p[1], mb.p[1]].sort((u, v) => u - v);
@@ -778,20 +778,20 @@ export default function MapStudio({ id }: { id: string }) {
       return;
     }
     if (!q || type === "up") { stroke.current = null; return; }
-    if (isFeat(t) && type === "down") {
-      const fs = newFeatures(featOf(t), [q]);
+    if (isFeat(tl) && type === "down") {
+      const fs = newFeatures(featOf(tl), [q]);
       p.commit((doc0) => ({ ...doc0, features: [...doc0.features, ...fs] }));
       setSel(new Set(fs.map((f) => `feat:${f.id}`)));
       return;
     }
     const pts = mirrors(q).map((m) => m.p);
-    if (t === "spawn" && type === "down") setEdits((ed) => (ed.spawns.length >= MAX_SPAWNS ? ed : { ...ed, spawns: [...ed.spawns, ...pts].slice(0, MAX_SPAWNS) }));
-    else if (t === "mass" && type === "down") setEdits((ed) => (ed.mass.length >= MAX_MASS ? ed : { ...ed, mass: [...ed.mass, ...pts].slice(0, MAX_MASS) }));
-    else if (t === "seed" && type === "down") setEdits((ed) => ({ ...ed, seed: q }));
-    else if (t === "erase" && type === "down") { const hit = pick(q, dc); if (hit) p.commit((doc0) => removeAll(doc0, [hit])); }
-    else if (t === "decor" || t === "uncut") {
+    if (tl === "spawn" && type === "down") setEdits((ed) => (ed.spawns.length >= MAX_SPAWNS ? ed : { ...ed, spawns: [...ed.spawns, ...pts].slice(0, MAX_SPAWNS) }));
+    else if (tl === "mass" && type === "down") setEdits((ed) => (ed.mass.length >= MAX_MASS ? ed : { ...ed, mass: [...ed.mass, ...pts].slice(0, MAX_MASS) }));
+    else if (tl === "seed" && type === "down") setEdits((ed) => ({ ...ed, seed: q }));
+    else if (tl === "erase" && type === "down") { const hit = pick(q, dc); if (hit) p.commit((doc0) => removeAll(doc0, [hit])); }
+    else if (tl === "decor" || tl === "uncut") {
       const apply = (ed: Edits): Edits => {
-        if (t === "decor") {
+        if (tl === "decor") {
           const list = scatter(q);
           return list.length && ed.props.length < MAX_PROPS ? { ...ed, props: [...ed.props, ...list.slice(0, MAX_PROPS - ed.props.length)] } : ed;
         }
@@ -800,12 +800,12 @@ export default function MapStudio({ id }: { id: string }) {
         const cuts = ed.cuts.length + pts.length <= MAX_CUTS ? [...ed.cuts, ...pts.map((c) => [c[0], c[1], r] as [number, number, number])] : ed.cuts;
         return { ...ed, props: ed.props.filter((x) => !near(x)), cuts };
       };
-      const gap = t === "decor" ? (ctxRef.current.density === 1 ? 8 : rad * 0.8) : rad * 0.6;
+      const gap = tl === "decor" ? (ctxRef.current.density === 1 ? 8 : rad * 0.8) : rad * 0.6;
       if (type === "down") { stroke.current = q; setEdits(apply); }
       else if (stroke.current && Math.hypot(q[0] - stroke.current[0], q[1] - stroke.current[1]) > gap) { stroke.current = q; setEdits(apply, true); }
-    } else if (isRelief(t)) {
+    } else if (isRelief(tl)) {
       const add = (ed: Edits) => {
-        const ops = pts.map((c) => reliefOp(t, c)).filter((x): x is Relief => !!x);
+        const ops = pts.map((c) => reliefOp(tl, c)).filter((x): x is Relief => !!x);
         return ed.relief.length + ops.length > 400 ? ed : { ...ed, relief: [...ed.relief, ...ops] };
       };
       if (type === "down") { stroke.current = q; setEdits(add); }
@@ -1842,7 +1842,7 @@ export default function MapStudio({ id }: { id: string }) {
         <span>{t("{b} bases · {m} massa · {f} formas · {p} decorações novas", { b: edits.spawns.length, m: edits.mass.length, f: doc.features.length, p: edits.props.length })}{removedCount ? ` · ${t("{n} retiradas", { n: removedCount })}` : ""}</span>
         <span className="grow" />
         {cursor && <span>x {Math.round(cursor[0])} · z {Math.round(cursor[1])} · {t("altura")} {round1(hAt(cursor))}</span>}
-        {status && !status.ready && <span style={{ color: "var(--warn)" }}>{tr(status.message)}</span>}
+        {status && !status.ready && <span style={{ color: "var(--warn)" }}>{tr(status.message ?? "")}</span>}
         {edits.spawns.length < 2 && <span style={{ color: "var(--warn)" }}>{t("coloque pelo menos 2 bases para gerar")}</span>}
       </StatusBar>
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} onClose={() => setCtx(null)} items={[

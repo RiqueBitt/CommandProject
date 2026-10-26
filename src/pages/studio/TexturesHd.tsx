@@ -190,7 +190,7 @@ export default function TexturesHd() {
           )}
           {busy ? <TaskProgress task="hd" label={t("Preparando…")} /> : (
             <button className="btn primary" disabled={!totals.count || !opts.name.trim()} onClick={async () => {
-              const m = await run("hd", () => api.buildEnhance(full, true), (mm) => t("\"{name}\" gerado e ativado na biblioteca.", { name: mm.name }));
+              const m = await run("hd", () => api.buildEnhance(full, true), (mm) => t('"{name}" gerado e ativado na biblioteca.', { name: mm.name }));
               if (m) await refreshMods();
             }}><Icon name="hd" /> {t("Gerar Texturas HD")}</button>
           )}

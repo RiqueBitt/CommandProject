@@ -2,6 +2,7 @@
 // O enquadramento é automático (recorta pela silhueta), então ícones de tropas diferentes ficam
 // do mesmo tamanho e consistentes entre si.
 import * as THREE from "three";
+import { t } from "../../lib/i18n";
 import type { ViewModel } from "./UnitViewport";
 
 export type IconBg = "transparent" | "solid" | "gradient" | "tactical";
@@ -228,13 +229,13 @@ export async function renderIcon(model: ViewModel, spec: IconSpec, size: number,
   if (amt > 0.01) sharpen(fg, S, amt);
   // verificações de legibilidade
   const checks: IconResult["checks"] = [];
-  if (!box) checks.push({ level: "warn", text: "Nada apareceu na foto: confira se o modelo carregou." });
+  if (!box) checks.push({ level: "warn", text: t("Nada apareceu na foto: confira se o modelo carregou.") });
   else {
-    if (cover < 0.18) checks.push({ level: "warn", text: "A tropa ocupa pouco do ícone: aumente o preenchimento ou mude o ângulo." });
+    if (cover < 0.18) checks.push({ level: "warn", text: t("A tropa ocupa pouco do ícone: aumente o preenchimento ou mude o ângulo.") });
     const ct = silhouetteContrast(fg, S);
-    if (ct !== null && ct < 0.12 && spec.outline < 1) checks.push({ level: "warn", text: "Pouco contraste entre a tropa e o fundo: ligue o contorno ou troque o fundo." });
-    if (S <= 32 && spec.symbol !== "none") checks.push({ level: "ok", text: "Em 32 px ou menos, o símbolo ajuda mais que o modelo a reconhecer a função." });
-    checks.push({ level: "ok", text: `Tropa ocupa ${Math.round(cover * 100)}% do ícone${ct !== null ? `, contraste ${Math.round(ct * 100)}%` : ""}.` });
+    if (ct !== null && ct < 0.12 && spec.outline < 1) checks.push({ level: "warn", text: t("Pouco contraste entre a tropa e o fundo: ligue o contorno ou troque o fundo.") });
+    if (S <= 32 && spec.symbol !== "none") checks.push({ level: "ok", text: t("Em 32 px ou menos, o símbolo ajuda mais que o modelo a reconhecer a função.") });
+    checks.push({ level: "ok", text: ct !== null ? t("Tropa ocupa {n}% do ícone, contraste {c}%.", { n: Math.round(cover * 100), c: Math.round(ct * 100) }) : t("Tropa ocupa {n}% do ícone.", { n: Math.round(cover * 100) }) });
   }
   return { url: fin.toDataURL("image/png"), checks };
 }
