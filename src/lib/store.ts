@@ -1,3 +1,5 @@
+import { visibleMods } from "./features";
+import { tr } from "./i18n";
 import { create } from "zustand";
 import { api, onProgress } from "./api";
 import type * as T from "./types";
@@ -76,11 +78,11 @@ export const useStore = create<State>((set, get) => ({
   refresh: async () => {
     // uma rodada só, em paralelo (o painel é a consulta mais cara: não pedir duas vezes)
     const [dashboard, profiles, settings, mods] = await Promise.all([api.dashboard(), api.getProfiles(), api.getSettings(), api.listMods()]);
-    set({ dashboard, profiles, settings, mods });
+    set({ dashboard, profiles, settings, mods: visibleMods(mods) });
   },
   refreshMods: async () => {
     const [mods, dashboard] = await Promise.all([api.listMods(), api.dashboard()]);
-    set({ mods, dashboard });
+    set({ mods: visibleMods(mods), dashboard });
   },
   toast: (kind, text) => {
     const id = ++toastId;
@@ -133,9 +135,9 @@ export async function load<R>(fn: () => Promise<R>): Promise<R | undefined> {
 }
 
 export function errorText(e: unknown): string {
-  if (typeof e === "string") return e;
-  if (e instanceof Error) return e.message;
-  return String(e);
+  if (typeof e === "string") return tr(e);
+  if (e instanceof Error) return tr(e.message);
+  return tr(String(e));
 }
 
 // liga os eventos de progresso do backend ao estado

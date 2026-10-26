@@ -16,6 +16,7 @@ pub mod firstperson;
 pub mod error;
 pub mod fsutil;
 pub mod game;
+pub mod gamelang;
 pub mod hashcache;
 pub mod hub;
 pub mod hubbuild;

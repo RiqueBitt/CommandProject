@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Icon, Modal } from "../../components/ui";
 import { api } from "../../lib/api";
+import { t, tr } from "../../lib/i18n";
 import type { PropInfo, PropPreview } from "../../lib/types";
 import { layerFits, type GroundBiome, type GroundLayer } from "./mapEdit";
 import { isDeckLayer, isGroundLayer, ROLE_LABEL, ROLES, type GroundRole } from "./biome";
@@ -12,7 +13,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   Trees: "Árvores", Rocks: "Pedras", Buildings: "Prédios", Structures: "Estruturas", Warehouses: "Armazéns",
   Crates: "Caixas", Lights: "Luzes", Debris: "Destroços", Wreckage: "Restos de unidades", Cranes: "Guindastes", Barges: "Barcaças",
 };
-const catLabel = (c: string) => CATEGORY_LABEL[c] ?? c;
+const catLabel = (c: string) => (CATEGORY_LABEL[c] ? t(CATEGORY_LABEL[c]) : c);
 const nice = (n: string) => n.replace(/_/g, " ").replace(/(\d+)$/, " $1").replace(/\s+/g, " ").trim();
 
 // miniaturas de textura em memória (cada uma é lida do jogo uma vez)
@@ -79,14 +80,14 @@ export function PropPicker({ props, used, selected, onSelect }: {
       <div className="decor-list">
         <div className="search-bar">
           <Icon name="search" />
-          <input className="input dense" placeholder="Buscar: spruce, rock, crate…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar decoração" />
+          <input className="input dense" placeholder={t("Buscar: spruce, rock, crate…")} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t("Buscar decoração")} />
         </div>
         <div className="chips">
-          <button className="chip" aria-pressed={cat === "used"} onClick={() => setCat("used")}>Deste terreno ({used.length})</button>
+          <button className="chip" aria-pressed={cat === "used"} onClick={() => setCat("used")}>{t("Deste terreno ({n})", { n: used.length })}</button>
           {cats.map(([c, n]) => <button key={c} className="chip" aria-pressed={cat === c} onClick={() => setCat(c)}>{catLabel(c)} ({n})</button>)}
-          <button className="chip" aria-pressed={cat === "all"} onClick={() => setCat("all")}>Todas</button>
+          <button className="chip" aria-pressed={cat === "all"} onClick={() => setCat("all")}>{t("Todas")}</button>
         </div>
-        <div className="decor-items" role="listbox" aria-label="Decorações">
+        <div className="decor-items" role="listbox" aria-label={t("Decorações")}>
           {list.slice(0, 300).map((p) => (
             <button key={p.bp} role="option" aria-selected={p.bp === selected} className="decor-item" onClick={() => onSelect(p.bp)}>
               <Icon name={p.category === "Trees" ? "park" : p.category === "Rocks" ? "landslide" : p.category === "Wreckage" ? "precision_manufacturing" : "domain"} size={18} />
@@ -94,18 +95,18 @@ export function PropPicker({ props, used, selected, onSelect }: {
               <span className="faint small">{catLabel(p.category)}</span>
             </button>
           ))}
-          {list.length === 0 && <p className="faint small" style={{ padding: 10 }}>{cat === "used" ? "Este terreno não tem decorações: escolha uma categoria." : "Nada com esse nome."}</p>}
+          {list.length === 0 && <p className="faint small" style={{ padding: 10 }}>{cat === "used" ? t("Este terreno não tem decorações: escolha uma categoria.") : t("Nada com esse nome.")}</p>}
         </div>
       </div>
       <div className="decor-preview">
         {!selected ? (
-          <div className="empty-preview"><Icon name="park" /><span className="faint small">Escolha uma decoração para ver em 3D e colocar no mapa.</span></div>
+          <div className="empty-preview"><Icon name="park" /><span className="faint small">{t("Escolha uma decoração para ver em 3D e colocar no mapa.")}</span></div>
         ) : preview === undefined ? (
           <div className="bar indeterminate" style={{ margin: 20 }}><i /></div>
         ) : (
           <div style={{ position: "relative" }}>
             {preview === null
-              ? <div className="empty-preview"><Icon name="view_in_ar" /><span className="faint small">Sem prévia 3D para esta, mas dá para colocar.</span></div>
+              ? <div className="empty-preview"><Icon name="view_in_ar" /><span className="faint small">{t("Sem prévia 3D para esta, mas dá para colocar.")}</span></div>
               : <Suspense fallback={null}><ModelViewer mesh={preview.mesh} texture={preview.texture} /></Suspense>}
             {loadingPrev && <div className="bar indeterminate" style={{ position: "absolute", left: 0, right: 0, top: 0 }}><i /></div>}
           </div>
@@ -124,7 +125,7 @@ export function GroundTextures({ layers, all, reskin, onChange }: {
   onChange: (oldD: string, neo: GroundLayer | null) => void;
 }) {
   const [swap, setSwap] = useState<GroundLayer | null>(null);
-  if (!layers.length) return <p className="faint small">Este terreno não lista camadas de textura (alguns terrenos de campanha usam outro formato).</p>;
+  if (!layers.length) return <p className="faint small">{t("Este terreno não lista camadas de textura (alguns terrenos de campanha usam outro formato).")}</p>;
   return (
     <div className="ground-layers">
       {layers.map((l) => {
@@ -134,10 +135,10 @@ export function GroundTextures({ layers, all, reskin, onChange }: {
             <TextureThumb path={(now ?? l).d} size={52} />
             <div className="grow">
               <b>{nice(l.name)}</b>
-              <span className="faint small" title={now ? `${now.name} de ${now.map}` : undefined}>{now ? `→ ${nice(now.name)} · ${now.map.replace(/^SC2_/, "")}` : "original"}</span>
+              <span className="faint small" title={now ? t("{name} de {map}", { name: now.name, map: now.map }) : undefined}>{now ? `→ ${nice(now.name)} · ${now.map.replace(/^SC2_/, "")}` : t("original")}</span>
             </div>
-            {now && <button className="btn icon-btn sm" aria-label={`Voltar ${l.name} ao original`} title="Voltar ao original" onClick={() => onChange(l.d, null)}><Icon name="undo" size={18} /></button>}
-            <button className="btn icon-btn sm" aria-label={`Trocar ${nice(l.name)}`} title="Trocar textura" onClick={() => setSwap(l)}><Icon name="format_paint" size={18} /></button>
+            {now && <button className="btn icon-btn sm" aria-label={t("Voltar {name} ao original", { name: l.name })} title={t("Voltar ao original")} onClick={() => onChange(l.d, null)}><Icon name="undo" size={18} /></button>}
+            <button className="btn icon-btn sm" aria-label={t("Trocar {name}", { name: nice(l.name) })} title={t("Trocar textura")} onClick={() => setSwap(l)}><Icon name="format_paint" size={18} /></button>
           </div>
         );
       })}
@@ -154,15 +155,15 @@ function LayerChooser({ target, all, onPick, onClose }: { target: GroundLayer; a
   }, [all, target, q]);
   const tooLong = (all ?? []).filter((l) => l.d !== target.d && !layerFits(target, l)).length;
   return (
-    <Modal title={`Trocar "${nice(target.name)}"`} icon="format_paint" onClose={onClose} wide>
+    <Modal title={t("Trocar \"{name}\"", { name: nice(target.name) })} icon="format_paint" onClose={onClose} wide>
       <div className="col" style={{ gap: 12 }}>
         <div className="search-bar">
           <Icon name="search" />
-          <input className="input dense" autoFocus placeholder="Buscar: snow, grass, rock, sand, MP_302…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar textura" />
+          <input className="input dense" autoFocus placeholder={t("Buscar: snow, grass, rock, sand, MP_302…")} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t("Buscar textura")} />
         </div>
         <p className="faint small">
-          Texturas do chão de todos os mapas do jogo. Ela entra no lugar da camada inteira (diffuse, relevo e brilho).
-          {tooLong > 0 && ` ${tooLong} não aparecem porque o nome do arquivo não cabe no espaço deste terreno.`}
+          {t("Texturas do chão de todos os mapas do jogo. Ela entra no lugar da camada inteira (diffuse, relevo e brilho).")}
+          {tooLong > 0 && ` ${t("{n} não aparecem porque o nome do arquivo não cabe no espaço deste terreno.", { n: tooLong })}`}
         </p>
         <div className="layer-grid">
           {all === null ? <div className="bar indeterminate"><i /></div> : options.slice(0, 240).map((l) => (
@@ -172,7 +173,7 @@ function LayerChooser({ target, all, onPick, onClose }: { target: GroundLayer; a
               <span className="faint small">{l.map.replace(/^SC2_/, "")}</span>
             </button>
           ))}
-          {all !== null && options.length === 0 && <p className="faint small">Nenhuma textura com esse nome cabe aqui.</p>}
+          {all !== null && options.length === 0 && <p className="faint small">{t("Nenhuma textura com esse nome cabe aqui.")}</p>}
         </div>
       </div>
     </Modal>
@@ -214,32 +215,32 @@ export function GroundPaint({ all, chain, deck, onDeck, biome, role, painting, h
   const [swap, setSwap] = useState<GroundRole | "deck" | null>(null);
   return (
     <div className="col ground-paint" style={{ gap: 10 }}>
-      <div className="card-title" style={{ margin: 0 }}><Icon name="brush" size={18} /><b>Pincel de textura</b></div>
-      <p className="faint small" style={{ margin: 0 }}>Escolha a textura e pinte partes do chão. Cada pincel pode usar <b>qualquer textura</b> (do jogo ou uma imagem sua): clique em <Icon name="swap_horiz" size={13} /> ou dê duplo clique. O resto fica automático: praia na água, terra nas encostas, rocha nos paredões e neve no alto.</p>
+      <div className="card-title" style={{ margin: 0 }}><Icon name="brush" size={18} /><b>{t("Pincel de textura")}</b></div>
+      <p className="faint small" style={{ margin: 0 }}>{t("Escolha a textura e pinte partes do chão. Cada pincel pode usar")} <b>{t("qualquer textura")}</b> {t("(do jogo ou uma imagem sua): clique em")} <Icon name="swap_horiz" size={13} /> {t("ou dê duplo clique. O resto fica automático: praia na água, terra nas encostas, rocha nos paredões e neve no alto.")}</p>
       <div className="paint-roles">
         {ROLES.map((r, k) => (
           <div key={r} className="paint-role-wrap">
             <button className="paint-role" aria-pressed={painting && role === k} onClick={() => onRole(k)} onDoubleClick={() => setSwap(r)}
-              onContextMenu={(e) => { e.preventDefault(); setSwap(r); }} title={`Pintar: ${ROLE_LABEL[r]}${chain[k] ? ` (${nice(chain[k]!.name)})` : ""}. Duplo clique: trocar a textura`}>
+              onContextMenu={(e) => { e.preventDefault(); setSwap(r); }} title={t("Pintar: {name}{tex}. Duplo clique: trocar a textura", { name: t(ROLE_LABEL[r]), tex: chain[k] ? ` (${nice(chain[k]!.name)})` : "" })}>
               <TextureThumb path={chain[k]?.d} size={46} />
-              <span>{ROLE_LABEL[r]}</span>
+              <span>{t(ROLE_LABEL[r])}</span>
             </button>
-            <button className="paint-swap" title={`Trocar a textura de "${ROLE_LABEL[r]}" (qualquer textura do jogo ou uma imagem sua)`} aria-label={`Trocar textura ${ROLE_LABEL[r]}`} onClick={() => setSwap(r)}><Icon name="swap_horiz" size={14} /></button>
+            <button className="paint-swap" title={t("Trocar a textura de \"{name}\" (qualquer textura do jogo ou uma imagem sua)", { name: t(ROLE_LABEL[r]) })} aria-label={t("Trocar textura {name}", { name: t(ROLE_LABEL[r]) })} onClick={() => setSwap(r)}><Icon name="swap_horiz" size={14} /></button>
           </div>
         ))}
-        <button className="paint-role eraser" aria-pressed={painting && role < 0} onClick={() => onRole(-1)} title="Borracha: volta ao automático">
+        <button className="paint-role eraser" aria-pressed={painting && role < 0} onClick={() => onRole(-1)} title={t("Borracha: volta ao automático")}>
           <span className="paint-eraser-icon"><Icon name="auto_fix_high" size={24} /></span>
-          <span>Automático</span>
+          <span>{t("Automático")}</span>
         </button>
       </div>
-      <label className="row small" style={{ gap: 8 }}>Tamanho<input type="range" min={8} max={260} value={radius} onChange={(e) => onRadius(Number(e.target.value))} className="grow" /><b style={{ width: 34, textAlign: "right" }}>{radius}</b></label>
-      <label className="row small" style={{ gap: 8 }}>Força<input type="range" min={5} max={60} value={strength} onChange={(e) => onStrength(Number(e.target.value))} className="grow" /><b style={{ width: 34, textAlign: "right" }}>{strength}</b></label>
-      {hasPaint && <button className="btn sm text" onClick={onClearPaint}><Icon name="layers_clear" size={16} /> Apagar toda a pintura</button>}
+      <label className="row small" style={{ gap: 8 }}>{t("Tamanho")}<input type="range" min={8} max={260} value={radius} onChange={(e) => onRadius(Number(e.target.value))} className="grow" /><b style={{ width: 34, textAlign: "right" }}>{radius}</b></label>
+      <label className="row small" style={{ gap: 8 }}>{t("Força")}<input type="range" min={5} max={60} value={strength} onChange={(e) => onStrength(Number(e.target.value))} className="grow" /><b style={{ width: 34, textAlign: "right" }}>{strength}</b></label>
+      {hasPaint && <button className="btn sm text" onClick={onClearPaint}><Icon name="layers_clear" size={16} /> {t("Apagar toda a pintura")}</button>}
 
-      <div className="card-title" style={{ margin: "6px 0 0" }}><Icon name="public" size={18} /><b>Bioma</b></div>
+      <div className="card-title" style={{ margin: "6px 0 0" }}><Icon name="public" size={18} /><b>{t("Bioma")}</b></div>
       <div className="chips" style={{ padding: 0 }}>
         {BIOMES.map((b) => (
-          <button key={b.id} className="chip" aria-pressed={biome === b.id} onClick={() => onBiome(b.id)}><Icon name={b.icon} size={15} /> {b.label}</button>
+          <button key={b.id} className="chip" aria-pressed={biome === b.id} onClick={() => onBiome(b.id)}><Icon name={b.icon} size={15} /> {t(b.label)}</button>
         ))}
       </div>
       <div className="ground-layers">
@@ -247,10 +248,10 @@ export function GroundPaint({ all, chain, deck, onDeck, biome, role, painting, h
           <div key={r} className="ground-layer">
             <TextureThumb path={chain[k]?.d} size={40} />
             <div className="grow">
-              <b>{ROLE_LABEL[r]}</b>
-              <span className="faint small" style={{ textTransform: "none" }}>{chain[k] ? `${nice(chain[k]!.name)} · ${chain[k]!.map.replace(/^SC2_/, "")}` : "sem textura"}</span>
+              <b>{t(ROLE_LABEL[r])}</b>
+              <span className="faint small" style={{ textTransform: "none" }}>{chain[k] ? `${nice(chain[k]!.name)} · ${chain[k]!.map.replace(/^SC2_/, "")}` : t("sem textura")}</span>
             </div>
-            <button className="btn icon-btn sm" title="Trocar textura" aria-label={`Trocar ${ROLE_LABEL[r]}`} onClick={() => setSwap(r)}><Icon name="format_paint" size={18} /></button>
+            <button className="btn icon-btn sm" title={t("Trocar textura")} aria-label={t("Trocar {name}", { name: t(ROLE_LABEL[r]) })} onClick={() => setSwap(r)}><Icon name="format_paint" size={18} /></button>
           </div>
         ))}
       </div>
@@ -259,14 +260,14 @@ export function GroundPaint({ all, chain, deck, onDeck, biome, role, painting, h
           <div className="ground-layer">
             <TextureThumb path={deck?.d} size={40} />
             <div className="grow">
-              <b>Pontes</b>
-              <span className="faint small" style={{ textTransform: "none" }}>{deck ? `${nice(deck.name)} · ${deck.map.replace(/^SC2_/, "")}` : "sem textura de metal no jogo"}</span>
+              <b>{t("Pontes")}</b>
+              <span className="faint small" style={{ textTransform: "none" }}>{deck ? `${nice(deck.name)} · ${deck.map.replace(/^SC2_/, "")}` : t("sem textura de metal no jogo")}</span>
             </div>
-            <button className="btn icon-btn sm" title="Trocar textura das pontes" aria-label="Trocar textura das pontes" onClick={() => setSwap("deck")}><Icon name="format_paint" size={18} /></button>
+            <button className="btn icon-btn sm" title={t("Trocar textura das pontes")} aria-label={t("Trocar textura das pontes")} onClick={() => setSwap("deck")}><Icon name="format_paint" size={18} /></button>
           </div>
         </div>
       )}
-      <label className="check small"><input type="checkbox" checked={ring} onChange={(e) => onRing(e.target.checked)} /> Paisagem em volta do mapa (montanhas além da borda)</label>
+      <label className="check small"><input type="checkbox" checked={ring} onChange={(e) => onRing(e.target.checked)} /> {t("Paisagem em volta do mapa (montanhas além da borda)")}</label>
       {swap && <RoleChooser role={swap} all={all} onPick={(d) => { if (swap === "deck") onDeck(d); else onPick(swap, d); setSwap(null); }} onClose={() => setSwap(null)} onImport={onImport} onForget={onForget} />}
     </div>
   );
@@ -295,12 +296,12 @@ function RoleChooser({ role, all, onPick, onClose, onImport, onForget }: {
   }, [all, q, role]);
   const take = async (f: File | undefined | null) => {
     if (!f) return;
-    if (!/^image\/(png|jpe?g|webp|bmp|gif)$/i.test(f.type) && !/\.(png|jpe?g|webp|bmp)$/i.test(f.name)) { setErr("Use uma imagem .png, .jpg, .webp ou .bmp."); return; }
+    if (!/^image\/(png|jpe?g|webp|bmp|gif)$/i.test(f.type) && !/\.(png|jpe?g|webp|bmp)$/i.test(f.name)) { setErr(t("Use uma imagem .png, .jpg, .webp ou .bmp.")); return; }
     setBusy(true); setErr(null);
-    try { onPick(await onImport(f, seamless)); } catch (e) { setErr(String((e as Error)?.message ?? e)); } finally { setBusy(false); }
+    try { onPick(await onImport(f, seamless)); } catch (e) { setErr(tr(String((e as Error)?.message ?? e))); } finally { setBusy(false); }
   };
   return (
-    <Modal title={`Textura: ${role === "deck" ? "Pontes" : ROLE_LABEL[role]}`} icon="format_paint" onClose={onClose} wide>
+    <Modal title={t("Textura: {name}", { name: role === "deck" ? t("Pontes") : t(ROLE_LABEL[role]) })} icon="format_paint" onClose={onClose} wide>
       <div className="col" style={{ gap: 12 }}>
         <label className={`tex-drop${drag ? " over" : ""}${busy ? " busy" : ""}`}
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
@@ -309,26 +310,26 @@ function RoleChooser({ role, all, onPick, onClose, onImport, onForget }: {
             onChange={(e) => { void take(e.target.files?.[0]); e.target.value = ""; }} />
           <Icon name={busy ? "hourglass_top" : "add_photo_alternate"} size={28} />
           <div className="col" style={{ gap: 2 }}>
-            <b>{busy ? "Preparando a textura…" : "Importar imagem como textura"}</b>
-            <span className="faint small">Arraste ou clique: .png, .jpg, .webp ou .bmp. Vira um quadrado de até 1024 px; relevo e brilho saem da própria imagem.</span>
+            <b>{busy ? t("Preparando a textura…") : t("Importar imagem como textura")}</b>
+            <span className="faint small">{t("Arraste ou clique: .png, .jpg, .webp ou .bmp. Vira um quadrado de até 1024 px; relevo e brilho saem da própria imagem.")}</span>
           </div>
         </label>
-        <label className="check small" style={{ marginTop: -4 }}><input type="checkbox" checked={seamless} onChange={(e) => setSeamless(e.target.checked)} /> Deixar contínua (sem emenda ao repetir no chão)</label>
+        <label className="check small" style={{ marginTop: -4 }}><input type="checkbox" checked={seamless} onChange={(e) => setSeamless(e.target.checked)} /> {t("Deixar contínua (sem emenda ao repetir no chão)")}</label>
         {err && <div className="notice err small"><Icon name="error" size={16} /> {err}</div>}
         {mine.length > 0 && <>
-          <b className="small">Minhas texturas</b>
+          <b className="small">{t("Minhas texturas")}</b>
           <div className="layer-grid compact">
             {mine.map((l) => (
               <div key={l.d} className="layer-tile mine">
-                <button className="layer-pick" onClick={() => onPick(l.d)} title={`Usar ${l.name}`}><TextureThumb path={l.d} size={72} /><b>{l.name}</b></button>
-                <button className="btn icon-btn sm forget" title="Tirar da lista do mapa" aria-label={`Tirar ${l.name}`} onClick={() => onForget(l.d)}><Icon name="close" size={14} /></button>
+                <button className="layer-pick" onClick={() => onPick(l.d)} title={t("Usar {name}", { name: l.name })}><TextureThumb path={l.d} size={72} /><b>{l.name}</b></button>
+                <button className="btn icon-btn sm forget" title={t("Tirar da lista do mapa")} aria-label={t("Tirar {name}", { name: l.name })} onClick={() => onForget(l.d)}><Icon name="close" size={14} /></button>
               </div>
             ))}
           </div>
         </>}
         <div className="row" style={{ gap: 8 }}>
-          <div className="search-bar grow"><Icon name="search" /><input className="input dense" autoFocus placeholder="Buscar no jogo: grass, sand, snow, rock, MP_007…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar textura" /></div>
-          <button className="btn sm" onClick={() => onPick(null)}><Icon name="undo" size={16} /> Automática do bioma</button>
+          <div className="search-bar grow"><Icon name="search" /><input className="input dense" autoFocus placeholder={t("Buscar no jogo: grass, sand, snow, rock, MP_007…")} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t("Buscar textura")} /></div>
+          <button className="btn sm" onClick={() => onPick(null)}><Icon name="undo" size={16} /> {t("Automática do bioma")}</button>
         </div>
         <div className="layer-grid">
           {all === null ? <div className="bar indeterminate"><i /></div> : options.slice(0, 300).map((l) => (

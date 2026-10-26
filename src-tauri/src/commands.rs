@@ -402,6 +402,44 @@ pub async fn big_match_maps(state: State<'_, AppState>) -> R<Vec<cp_core::bigmat
     .await
 }
 
+/// Liga o mod do jogo em português quando o idioma do launcher (`ui_prefs.lang`) é português e o
+/// desliga nos outros idiomas. Monta o mod de novo quando a tradução muda de versão.
+fn apply_game_language(ws: &mut Workspace) -> cp_core::Result<()> {
+    use cp_core::gamelang;
+    let lang = ws.settings.ui_prefs.get("lang").and_then(|v| v.as_str()).unwrap_or("en").to_string();
+    let want = gamelang::PT_LANGS.contains(&lang.as_str());
+    let installed = ws.mods()?.into_iter().find(|m| m.manifest.id == gamelang::MOD_ID);
+    let active = ws.profiles.active().clone();
+    let enabled = active.mods.iter().any(|m| m.id == gamelang::MOD_ID && m.enabled);
+    if !want {
+        if enabled {
+            ws.profiles.set_enabled(&active.id, gamelang::MOD_ID, false)?;
+        }
+        return Ok(());
+    }
+    if installed.as_ref().map(|m| m.manifest.version.as_str()) != Some(gamelang::MOD_VERSION) {
+        let dir = ws.data_dir.join("cache").join("gamelang");
+        std::fs::create_dir_all(&dir).map_err(|e| cp_core::Error::io(&dir, e))?;
+        let archive = gamelang::build(&ws.stock_sources()?, &dir.join(gamelang::ARCHIVE))?;
+        let count = gamelang::translations()?.len();
+        let import = ImportOptions {
+            id: Some(gamelang::MOD_ID.into()),
+            name: Some("Jogo em português (Brasil)".into()),
+            version: Some(gamelang::MOD_VERSION.into()),
+            category: Some(Category::Ui),
+            description: Some(gamelang::describe(count)),
+            replace: true,
+            move_source: true,
+            ..Default::default()
+        };
+        ws.import_mod(&archive, &import, true)?;
+        let _ = std::fs::remove_file(&archive);
+    } else if !enabled {
+        ws.profiles.set_enabled(&active.id, gamelang::MOD_ID, true)?;
+    }
+    Ok(())
+}
+
 /// Começa uma partida grande: monta o mod (uma vez), aplica o perfil e abre o jogo direto com as vagas.
 #[tauri::command]
 pub async fn launch_big_match(app: AppHandle, state: State<'_, AppState>, spec: cp_core::bigmatch::BigMatch) -> R<LaunchResult> {
@@ -478,6 +516,10 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             let mut args = cp_core::bigmatch::clean_user_args(&ws.settings.launch_args);
             args.extend(cp_core::bigmatch::launch_args(b)?);
             plan = Some(cp_core::game::launch_plan(&game, cp_core::game::LaunchMode::Direct, &args)?);
+        }
+        // jogo em português quando o launcher está em português (Brasil); em inglês, o jogo original
+        if let Err(e) = apply_game_language(ws) {
+            eprintln!("tradução do jogo não aplicada: {e}");
         }
         if big.is_none() {
             // o mod da partida grande só serve para ela: nas partidas comuns (pelo lobby do jogo) fica de fora

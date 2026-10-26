@@ -1,5 +1,7 @@
-import { lazy, Suspense, useEffect } from "react";
+import { Fragment, lazy, Suspense, useEffect } from "react";
+import { useLang } from "./lib/i18n";
 import { FP_VERSION, loadFirstPerson } from "./components/dialogs";
+import { FEATURES } from "./lib/features";
 import { CommandPalette, Rail, SystemBar } from "./components/Shell";
 import { Toasts } from "./components/ui";
 import { api, onEvent } from "./lib/api";
@@ -23,6 +25,7 @@ const BigMatch = lazy(() => import("./pages/BigMatch"));
 
 export default function App() {
   const page = useStore((s) => s.page);
+  const lang = useLang((s) => s.lang);
   const refresh = useStore((s) => s.refresh);
   const activeTab = useTabs((s) => s.active);
   const hasTabs = useTabs((s) => s.tabs.length > 0);
@@ -46,10 +49,15 @@ export default function App() {
           await refresh();
           toast("info", "Desliguei o Menu moderno antigo, que fazia o jogo fechar ao abrir. Gere de novo na Biblioteca para usar a versão corrigida.");
         }
-        // Primeira Pessoa montada por um launcher antigo (a 1.0 fechava o jogo no F5): monta de novo
-        // com as opções salvas, mantendo ligado ou desligado como estava
-        const fp = useStore.getState().mods.find((m) => m.manifest.id === "cp-primeira-pessoa");
-        if (fp && fp.manifest.version !== FP_VERSION) {
+        // Primeira Pessoa: desligada por enquanto (FEATURES.firstPerson); com ela ligada, a cópia montada
+        // por um launcher antigo é montada de novo com as opções salvas
+        const fp = (await api.listMods()).find((m) => m.manifest.id === "cp-primeira-pessoa");
+        if (fp && !FEATURES.firstPerson) {
+          if (fp.enabled) {
+            await api.setModEnabled(fp.manifest.id, false).catch(() => {});
+            await refresh();
+          }
+        } else if (fp && fp.manifest.version !== FP_VERSION) {
           try {
             await api.buildFirstPerson(loadFirstPerson(), fp.enabled);
             await refresh();
@@ -93,6 +101,8 @@ export default function App() {
 
   return (
     <div className={`app ${activeTab ? "in-project" : ""}`} data-skin={skin} data-fac={fac} data-motion={prefs?.reduceMotion ? "off" : "on"}>
+      {/* trocar o idioma remonta a interface: tudo que usa t() muda na hora */}
+      <Fragment key={lang}>
       <SystemBar />
       {hasTabs && (
         <div className="project-area" hidden={!activeTab}>
@@ -136,6 +146,7 @@ export default function App() {
       </main>
       <CommandPalette />
       <Toasts />
+      </Fragment>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { type Page, useStore } from "../lib/store";
 import type { ModView } from "../lib/types";
 import { AiModal, CheatsModal, FirstPersonModal, loadAi, loadCheats, loadFirstPerson, OptimizeModal } from "./dialogs";
 import { hueOf, Icon, Switch } from "./ui";
+import { FEATURES } from "../lib/features";
 
 type ModalId = "ai" | "cheats" | "opt" | "fp";
 interface Entry {
@@ -22,10 +23,12 @@ interface Entry {
   /** liga e desliga sozinho (não tem chave manual) */
   auto?: string;
   isNew?: boolean;
+  /** só aparece com o recurso ligado */
+  feature?: keyof typeof FEATURES;
 }
 
-export const CP_MODS: Entry[] = [
-  { ids: ["cp-primeira-pessoa"], name: "Primeira Pessoa", icon: "videocam", modal: "fp", isNew: true, tags: ["Câmera", "Controle"],
+const ALL_MODS: Entry[] = [
+  { ids: ["cp-primeira-pessoa"], name: "Primeira Pessoa", icon: "videocam", modal: "fp", isNew: true, feature: "firstPerson", tags: ["Câmera", "Controle"],
     desc: "Selecione uma unidade e aperte F5: câmera em primeira pessoa presa nela, depois em terceira pessoa; com um grupo, câmera de comando. W A S D andam, botão do meio + mouse olha, F atira, construtores constroem pelo menu normal." },
   { ids: ["cp-ia-esperta"], name: "IA esperta", icon: "psychology", modal: "ai", tags: ["IA", "Escaramuça"],
     desc: "Comandante estratégico para a IA: navios, economia, mini-bases, personalidades e um painel (F4) que mostra o que ela pensa." },
@@ -41,6 +44,8 @@ export const CP_MODS: Entry[] = [
     desc: "Tema novo para os menus do jogo, montado com as imagens do próprio jogo." },
 ];
 
+export const CP_MODS: Entry[] = ALL_MODS.filter((e) => !e.feature || FEATURES[e.feature]);
+
 const banner = (name: string) => {
   const h = hueOf(name);
   return `radial-gradient(120% 140% at 20% 10%, hsl(${h} 55% 40%), hsl(${(h + 50) % 360} 45% 13%))`;
@@ -53,7 +58,7 @@ export default function CpModsHub() {
   const { run, refreshMods, go } = useStore.getState();
   const [modal, setModal] = useState<ModalId | null>(null);
   const find = (e: Entry): ModView | undefined => e.ids.map((id) => mods.find((m) => m.manifest.id === id)).find(Boolean);
-  const installedOf = (id: ModalId) => !!find(CP_MODS.find((e) => e.modal === id)!);
+  const installedOf = (id: ModalId) => { const e = CP_MODS.find((x) => x.modal === id); return !!e && !!find(e); };
 
   const open = (e: Entry) => {
     if (e.modal) setModal(e.modal);

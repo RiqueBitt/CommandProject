@@ -6,6 +6,7 @@
 // /textures/terrain/cp/<slug>_*.dds dentro do pacote do mapa.
 import { api } from "../../lib/api";
 import type { LayerSet } from "../../lib/types";
+import { t } from "../../lib/i18n";
 import type { CustomTex } from "../create/docs";
 
 export const CUSTOM_DIR = "/textures/terrain/cp/";
@@ -14,7 +15,7 @@ export const isCustomPath = (p: string | null | undefined) => !!p && p.toLowerCa
 
 /** As importadas como camadas (para escolher num papel do bioma, igual às do jogo). */
 export function customLayers(list: CustomTex[] | undefined): LayerSet[] {
-  return (list ?? []).map((t) => ({ map: "Importada", name: t.name, d: `${customStem(t)}_d.dds`, n: `${customStem(t)}_n.dds`, s: `${customStem(t)}_s.dds`, slotD: 0, slotN: 0, slotS: 0 }));
+  return (list ?? []).map((c) => ({ map: t("Importada"), name: c.name, d: `${customStem(c)}_d.dds`, n: `${customStem(c)}_n.dds`, s: `${customStem(c)}_s.dds`, slotD: 0, slotN: 0, slotS: 0 }));
 }
 
 // caminho da difusa → imagem (data URL) do projeto
@@ -67,12 +68,12 @@ export interface PreparedTexture { png: string; side: number; preview: string }
 export async function prepareTexture(file: Blob, opts: { seamless: boolean; max?: number }): Promise<PreparedTexture> {
   const bmp = await createImageBitmap(file);
   const short = Math.min(bmp.width, bmp.height);
-  if (short < 64) throw new Error("imagem pequena demais (mínimo 64 × 64)");
+  if (short < 64) throw new Error(t("imagem pequena demais (mínimo 64 × 64)"));
   const side = Math.min(opts.max ?? 1024, pow2Below(short));
   const cv = document.createElement("canvas");
   cv.width = cv.height = side;
   const g = cv.getContext("2d", { willReadFrequently: true });
-  if (!g) throw new Error("não deu para preparar a imagem");
+  if (!g) throw new Error(t("não deu para preparar a imagem"));
   g.imageSmoothingQuality = "high";
   g.drawImage(bmp, (bmp.width - short) / 2, (bmp.height - short) / 2, short, short, 0, 0, side, side);
   bmp.close?.();

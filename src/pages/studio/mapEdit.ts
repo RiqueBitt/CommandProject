@@ -1,6 +1,7 @@
 // Edição do mapa no cliente: as mesmas operações que o toolkit aplica ao heightfield
 // (sc2maps.reshape_hfield), refeitas sobre o relevo amostrado para a prévia 2D/3D.
 import type { LayerSet } from "../../lib/types";
+import { t } from "../../lib/i18n";
 
 export type Pt = [number, number];
 export type Rect = [number, number, number, number]; // x0, x1, z0, z1 (formato das passagens)
@@ -209,8 +210,8 @@ export const blankWater = (size: number) => (size <= 512 ? 0 : 40);
 /** Quilômetros de lado no jogo (1024 unidades = 20 km). */
 export const mapKm = (size: number) => Math.round((size * 20) / 1024);
 export function blankLabel(size: number) {
-  const name = size <= 512 ? "Pequeno" : size <= 1024 ? "Padrão" : size <= 2048 ? "Grande" : "Gigante";
-  return `${name} (${size} × ${size} · ${mapKm(size)} km)`;
+  const name = size <= 512 ? t("Pequeno") : size <= 1024 ? t("Padrão") : size <= 2048 ? t("Grande") : t("Gigante");
+  return t("{name} ({size} × {size} · {km} km)", { name, size, km: mapKm(size) });
 }
 /** Tamanho de um mapa em branco pelo terreno base (projetos sem `mapSize`). */
 export function blankSizeOf(terrain: string | null): BlankSize | null {

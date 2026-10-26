@@ -1166,3 +1166,6 @@ textarea.pinput { height: auto; padding: 4px 6px; resize: vertical; }
 .store-card.cp-mod { cursor: default; }
 .store-card.cp-mod .desc { -webkit-line-clamp: 4; }
 .store-card.cp-mod .foot { color: var(--muted); }
+
+/* seletor de idioma */
+.lang-flag { font-size: 10px; letter-spacing: .06em; padding: 1px 4px; border-radius: 3px; background: color-mix(in srgb, var(--primary) 22%, transparent); }

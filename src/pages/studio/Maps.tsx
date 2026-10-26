@@ -3,6 +3,7 @@ import { Empty, Field, Notice, Switch, Icon } from "../../components/ui";
 import type { DecorPoint, Marker } from "../../components/MapView3D";
 import { api, onProgress } from "../../lib/api";
 import { load, useStore } from "../../lib/store";
+import { locale, t, tr } from "../../lib/i18n";
 import type { MapAssets, MapBuildResult, MaptkStatus, Terrain, TerrainPreview } from "../../lib/types";
 import {
   applyRelief, cutTester, decodeHeights, decorKind, EMPTY_EDITS, heightAt, meanInDisc, RELIEF_LABEL, reliefShape, reskinPaths, round1,
@@ -17,7 +18,9 @@ type Tool = "orbit" | "spawn" | "mass" | ReliefKind | "bridge" | "decor" | "uncu
 const TEAM_COLORS = ["#5aa9e6", "#e5534b", "#7bd88f", "#c78bff", "#f2b33d", "#ff8fab", "#9be7ff", "#eeeeee"];
 const RELIEF_COLOR: Record<ReliefKind, string> = { hill: "#e3a857", valley: "#4fa3e0", plateau: "#d97757", flatten: "#c9d1d9", ramp: "#f2b33d" };
 const RELIEF_ICON: Record<ReliefKind, string> = { hill: "filter_hdr", valley: "water", plateau: "landscape", flatten: "straighten", ramp: "stairs" };
-const isRelief = (t: Tool): t is ReliefKind => t in RELIEF_LABEL;
+const isRelief = (k: Tool): k is ReliefKind => k in RELIEF_LABEL;
+/** número com a vírgula decimal do português (o inglês usa ponto) */
+const dec = (n: number) => (locale() === "pt-BR" ? n.toString().replace(".", ",") : n.toString());
 const MAX_MASS = 200;
 const MAX_PROPS = 5000;
 const MAX_CUTS = 400;
@@ -63,7 +66,7 @@ export default function Maps() {
   const edits = hist.cur;
   const [drag, setDrag] = useState<{ a: Pt; b: Pt } | null>(null);
   const [cursor2d, setCursor2d] = useState<Pt | null>(null);
-  const [name, setName] = useState("Meu mapa");
+  const [name, setName] = useState(() => t("Meu mapa"));
   const [teams, setTeams] = useState<MapTeams>("2");
   const [baseMass, setBaseMass] = useState(4);
   const [sites, setSites] = useState(8);
@@ -344,7 +347,7 @@ export default function Maps() {
     if (!spec) return;
     setLog([]);
     setLastBuild(null);
-    const r = await run("map", () => api.maptkBuild(spec), (x) => `"${x.manifest.name}" gerado, verificado e ativado na biblioteca.`);
+    const r = await run("map", () => api.maptkBuild(spec), (x) => t("\"{name}\" gerado, verificado e ativado na biblioteca.", { name: x.manifest.name }));
     if (r) {
       setLastBuild(r.result);
       await refreshMods();
@@ -367,7 +370,7 @@ export default function Maps() {
   if (!status.ready) {
     return (
       <div className="card">
-        <Empty icon="map" title="O Estúdio de Mapas precisa do Python">{status.message}</Empty>
+        <Empty icon="map" title={t("O Estúdio de Mapas precisa do Python")}>{tr(status.message)}</Empty>
       </div>
     );
   }
@@ -380,88 +383,88 @@ export default function Maps() {
   return (
     <div className="col" style={{ gap: 16 }}>
       <Notice kind="info">
-        Feito com o <b>SC2 Map Toolkit</b> (plutonics72, MIT): ele monta o mapa sobre um terreno do jogo, posiciona massa só em chão construível e
-        <b> recusa gerar</b> se algum ponto ficar inalcançável. Esculpir o relevo refaz a navegação automaticamente.
+        {t("Feito com o")} <b>SC2 Map Toolkit</b> {t("(plutonics72, MIT): ele monta o mapa sobre um terreno do jogo, posiciona massa só em chão construível e")}
+        {" "}<b>{t("recusa gerar")}</b> {t("se algum ponto ficar inalcançável. Esculpir o relevo refaz a navegação automaticamente.")}
       </Notice>
       <div className="studio" style={{ gridTemplateColumns: "260px 1fr" }}>
         <div className="card">
           <div className="chips" style={{ padding: 12 }}>
             {(["skirmish", "campaign", "all"] as const).map((k) => (
-              <button key={k} className="chip" aria-pressed={kind === k} onClick={() => setKind(k)}>{k === "skirmish" ? "Escaramuça" : k === "campaign" ? "Campanha" : "Todos"}</button>
+              <button key={k} className="chip" aria-pressed={kind === k} onClick={() => setKind(k)}>{k === "skirmish" ? t("Escaramuça") : k === "campaign" ? t("Campanha") : t("Todos")}</button>
             ))}
           </div>
-          <div className="tree" role="listbox" aria-label="Terrenos">
-            {terrains === null ? <p className="muted small" style={{ padding: 12 }}>Lendo terrenos do jogo…</p> : list.map((t) => (
-              <button key={t.id} role="option" className="tree-item wrap" aria-selected={terrain?.id === t.id} onClick={() => pickTerrain(t)} style={{ flexDirection: "column", alignItems: "flex-start", gap: 0, padding: "8px 14px" }}>
-                <span><b>{t.name ?? t.id}</b></span>
-                <span className="faint small">{t.id}{t.players ? `, até ${t.players} jogadores` : ""}{t.navmesh === "pocket" ? ", precisa abrir terreno" : ""}</span>
+          <div className="tree" role="listbox" aria-label={t("Terrenos")}>
+            {terrains === null ? <p className="muted small" style={{ padding: 12 }}>{t("Lendo terrenos do jogo…")}</p> : list.map((ter) => (
+              <button key={ter.id} role="option" className="tree-item wrap" aria-selected={terrain?.id === ter.id} onClick={() => pickTerrain(ter)} style={{ flexDirection: "column", alignItems: "flex-start", gap: 0, padding: "8px 14px" }}>
+                <span><b>{ter.name ?? ter.id}</b></span>
+                <span className="faint small">{ter.id}{ter.players ? t(", até {n} jogadores", { n: ter.players }) : ""}{ter.navmesh === "pocket" ? t(", precisa abrir terreno") : ""}</span>
               </button>
             ))}
           </div>
         </div>
 
         {!terrain ? (
-          <div className="card"><Empty icon="terrain" title="Escolha um terreno">Ele vira a base do seu mapa: relevo, água e texturas vêm do jogo. Depois é só esculpir, colocar bases e massa.</Empty></div>
+          <div className="card"><Empty icon="terrain" title={t("Escolha um terreno")}>{t("Ele vira a base do seu mapa: relevo, água e texturas vêm do jogo. Depois é só esculpir, colocar bases e massa.")}</Empty></div>
         ) : (
           <div className="map-editor">
             <div className="col" style={{ gap: 10, minWidth: 0 }}>
-              <div className="map-tools" role="toolbar" aria-label="Ferramentas">
-                {TOOLS.filter((t) => t.id !== "orbit" || view === "3d").map((t) => (
-                  <button key={t.id} className="map-tool" aria-pressed={tool === t.id} title={t.hint} onClick={() => setTool(t.id)}
-                    style={isRelief(t.id) ? { ["--tc" as string]: RELIEF_COLOR[t.id] } : undefined}>
-                    <Icon name={t.icon} size={19} />
-                    <span>{t.label}{t.id === "spawn" ? ` ${edits.spawns.length}` : t.id === "mass" && edits.mass.length ? ` ${edits.mass.length}` : ""}</span>
+              <div className="map-tools" role="toolbar" aria-label={t("Ferramentas")}>
+                {TOOLS.filter((tl) => tl.id !== "orbit" || view === "3d").map((tl) => (
+                  <button key={tl.id} className="map-tool" aria-pressed={tool === tl.id} title={t(tl.hint)} onClick={() => setTool(tl.id)}
+                    style={isRelief(tl.id) ? { ["--tc" as string]: RELIEF_COLOR[tl.id] } : undefined}>
+                    <Icon name={tl.icon} size={19} />
+                    <span>{t(tl.label)}{tl.id === "spawn" ? ` ${edits.spawns.length}` : tl.id === "mass" && edits.mass.length ? ` ${edits.mass.length}` : ""}</span>
                   </button>
                 ))}
                 <span className="map-tools-sep" />
-                <button className="btn icon-btn sm-icon" title="Desfazer (Ctrl+Z)" aria-label="Desfazer" disabled={!hist.past.length} onClick={undo}><Icon name="undo" /></button>
-                <button className="btn icon-btn sm-icon" title="Refazer (Ctrl+Y)" aria-label="Refazer" disabled={!hist.future.length} onClick={redo}><Icon name="redo" /></button>
+                <button className="btn icon-btn sm-icon" title={t("Desfazer (Ctrl+Z)")} aria-label={t("Desfazer")} disabled={!hist.past.length} onClick={undo}><Icon name="undo" /></button>
+                <button className="btn icon-btn sm-icon" title={t("Refazer (Ctrl+Y)")} aria-label={t("Refazer")} disabled={!hist.future.length} onClick={redo}><Icon name="redo" /></button>
               </div>
 
               <div className="map-brush">
                 <Icon name={active.icon} style={{ color: isRelief(tool) ? RELIEF_COLOR[tool] : "var(--primary)" }} />
-                <span className="muted small" style={{ flex: 1, minWidth: 200 }}>{active.hint}</span>
+                <span className="muted small" style={{ flex: 1, minWidth: 200 }}>{t(active.hint)}</span>
                 {isRelief(tool) && tool !== "ramp" && (
-                  <label className="range" style={{ gridTemplateColumns: "44px 120px 36px" }}><span>Raio</span>
+                  <label className="range" style={{ gridTemplateColumns: "44px 120px 36px" }}><span>{t("Raio")}</span>
                     <input type="range" min={12} max={200} value={radius} onChange={(e) => setRadius(Number(e.target.value))} /><output>{radius}</output></label>
                 )}
                 {(tool === "uncut" || (tool === "decor" && density > 1)) && (
-                  <label className="range" style={{ gridTemplateColumns: "44px 120px 36px" }}><span>Raio</span>
+                  <label className="range" style={{ gridTemplateColumns: "44px 120px 36px" }}><span>{t("Raio")}</span>
                     <input type="range" min={8} max={200} value={radius} onChange={(e) => setRadius(Number(e.target.value))} /><output>{radius}</output></label>
                 )}
                 {tool === "decor" && (
                   <>
-                    <label className="range" style={{ gridTemplateColumns: "60px 110px 30px" }}><span>Por clique</span>
+                    <label className="range" style={{ gridTemplateColumns: "60px 110px 30px" }}><span>{t("Por clique")}</span>
                       <input type="range" min={1} max={30} value={density} onChange={(e) => setDensity(Number(e.target.value))} /><output>{density}</output></label>
-                    <label className="range" style={{ gridTemplateColumns: "62px 100px 40px" }}><span>Variação</span>
+                    <label className="range" style={{ gridTemplateColumns: "62px 100px 40px" }}><span>{t("Variação")}</span>
                       <input type="range" min={0} max={60} step={5} value={sizeVar} onChange={(e) => setSizeVar(Number(e.target.value))} /><output>±{sizeVar}%</output></label>
                   </>
                 )}
                 {tool === "ramp" && (
-                  <label className="range" style={{ gridTemplateColumns: "56px 120px 36px" }}><span>Largura</span>
+                  <label className="range" style={{ gridTemplateColumns: "56px 120px 36px" }}><span>{t("Largura")}</span>
                     <input type="range" min={24} max={200} value={radius} onChange={(e) => setRadius(Number(e.target.value))} /><output>{Math.max(24, Math.round(radius / 2))}</output></label>
                 )}
                 {hasDepth && (
-                  <label className="range" style={{ gridTemplateColumns: "48px 120px 36px" }}><span>{tool === "valley" ? "Fundo" : "Altura"}</span>
+                  <label className="range" style={{ gridTemplateColumns: "48px 120px 36px" }}><span>{tool === "valley" ? t("Fundo") : t("Altura")}</span>
                     <input type="range" min={2} max={80} value={strength} onChange={(e) => setStrength(Number(e.target.value))} /><output>{strength}</output></label>
                 )}
               </div>
 
               <div className="map-view">
                 <div className="map-view-bar">
-                  <div className="seg" role="group" aria-label="Visualização">
+                  <div className="seg" role="group" aria-label={t("Visualização")}>
                     <button className="btn" aria-pressed={view === "3d"} disabled={!relief3d} onClick={() => setView("3d")}><Icon name="view_in_ar" size={17} /> 3D</button>
                     <button className="btn" aria-pressed={view === "2d"} onClick={() => { setView("2d"); if (tool === "orbit") setTool("spawn"); }}><Icon name="map" size={17} /> 2D</button>
                   </div>
-                  <div className="seg" role="group" aria-label="Textura">
-                    <button className="btn" aria-pressed={skin === "game"} disabled={!relief3d?.texture} onClick={() => setSkin("game")}><Icon name="texture" size={17} /> Textura do jogo</button>
-                    <button className="btn" aria-pressed={skin === "nav"} onClick={() => setSkin("nav")}><Icon name="grid_on" size={17} /> Navegação</button>
+                  <div className="seg" role="group" aria-label={t("Textura")}>
+                    <button className="btn" aria-pressed={skin === "game"} disabled={!relief3d?.texture} onClick={() => setSkin("game")}><Icon name="texture" size={17} /> {t("Textura do jogo")}</button>
+                    <button className="btn" aria-pressed={skin === "nav"} onClick={() => setSkin("nav")}><Icon name="grid_on" size={17} /> {t("Navegação")}</button>
                   </div>
-                  <button className="btn sm" aria-pressed={showDecor} onClick={() => setShowDecor((v) => !v)} title="Mostrar ou esconder árvores, pedras e prédios na prévia">
-                    <Icon name={showDecor ? "park" : "visibility_off"} size={17} /> Decorações
+                  <button className="btn sm" aria-pressed={showDecor} onClick={() => setShowDecor((v) => !v)} title={t("Mostrar ou esconder árvores, pedras e prédios na prévia")}>
+                    <Icon name={showDecor ? "park" : "visibility_off"} size={17} /> {t("Decorações")}
                   </button>
                   {view === "3d" && (
-                    <label className="range" style={{ gridTemplateColumns: "54px 90px 34px", marginLeft: "auto" }}><span>Relevo</span>
+                    <label className="range" style={{ gridTemplateColumns: "54px 90px 34px", marginLeft: "auto" }}><span>{t("Relevo")}</span>
                       <input type="range" min={1} max={4} step={0.25} value={exag} onChange={(e) => setExag(Number(e.target.value))} /><output>{exag}×</output></label>
                   )}
                 </div>
@@ -484,8 +487,8 @@ export default function Maps() {
                     onPointerMove={(e) => { const p = toWorld(e); setCursor2d(p); if (down2d.current) onPointer("move", p); }}
                     onPointerUp={(e) => { if (!down2d.current) return; down2d.current = false; onPointer("up", toWorld(e)); }}
                     onPointerLeave={() => setCursor2d(null)}
-                    role="application" aria-label="Mapa: clique para editar">
-                    {image2d ? <img src={image2d} alt={`Terreno ${terrain.id}`} draggable={false} /> : <div className="bar indeterminate" style={{ margin: 20 }}><i /></div>}
+                    role="application" aria-label={t("Mapa: clique para editar")}>
+                    {image2d ? <img src={image2d} alt={t("Terreno {id}", { id: terrain.id })} draggable={false} /> : <div className="bar indeterminate" style={{ margin: 20 }}><i /></div>}
                     <svg viewBox={`0 0 ${grid} ${grid}`}>
                       {edits.relief.map((r, i) => {
                         const sh = reliefShape(r.op), c = RELIEF_COLOR[r.kind];
@@ -512,17 +515,17 @@ export default function Maps() {
                 <div className="legend">
                   {skin === "nav" ? (
                     <>
-                      <span><i style={{ background: "#7f9a6f" }} />chão onde unidades andam</span>
-                      <span><i style={{ background: "#9c5450" }} />bloqueado</span>
-                      <span><i style={{ background: "#2f5f8c" }} />água</span>
-                      {preview && <span>{preview.navigablePct.toString().replace(".", ",")}% navegável no original</span>}
+                      <span><i style={{ background: "#7f9a6f" }} />{t("chão onde unidades andam")}</span>
+                      <span><i style={{ background: "#9c5450" }} />{t("bloqueado")}</span>
+                      <span><i style={{ background: "#2f5f8c" }} />{t("água")}</span>
+                      {preview && <span>{t("{pct}% navegável no original", { pct: dec(preview.navigablePct) })}</span>}
                     </>
                   ) : (
                     <>
-                      <span><i style={{ background: "#7bd88f", transform: "rotate(45deg) scale(.8)" }} />massa manual</span>
-                      <span><i style={{ background: TEAM_COLORS[0], borderRadius: 99 }} />bases</span>
-                      <span>água no nível {round1(water).toString().replace(".", ",")}</span>
-                      {edits.relief.length > 0 && <span>a prévia do relevo é aproximada; o jogo usa a malha completa</span>}
+                      <span><i style={{ background: "#7bd88f", transform: "rotate(45deg) scale(.8)" }} />{t("massa manual")}</span>
+                      <span><i style={{ background: TEAM_COLORS[0], borderRadius: 99 }} />{t("bases")}</span>
+                      <span>{t("água no nível {n}", { n: dec(round1(water)) })}</span>
+                      {edits.relief.length > 0 && <span>{t("a prévia do relevo é aproximada; o jogo usa a malha completa")}</span>}
                     </>
                   )}
                 </div>
@@ -531,8 +534,8 @@ export default function Maps() {
               {edits.relief.length > 0 && (
                 <section className="card pad col" style={{ gap: 8 }}>
                   <div className="row" style={{ justifyContent: "space-between" }}>
-                    <b>Relevo esculpido ({edits.relief.length})</b>
-                    <button className="btn text sm" onClick={() => commit((e) => ({ ...e, relief: [] }))}><Icon name="clear_all" size={17} /> Limpar relevo</button>
+                    <b>{t("Relevo esculpido ({n})", { n: edits.relief.length })}</b>
+                    <button className="btn text sm" onClick={() => commit((e) => ({ ...e, relief: [] }))}><Icon name="clear_all" size={17} /> {t("Limpar relevo")}</button>
                   </div>
                   <div className="relief-list">
                     {edits.relief.map((r, i) => {
@@ -540,8 +543,8 @@ export default function Maps() {
                       return (
                         <span key={i} className="relief-chip" style={{ ["--tc" as string]: RELIEF_COLOR[r.kind] }}>
                           <Icon name={RELIEF_ICON[r.kind]} size={15} />
-                          {RELIEF_LABEL[r.kind]} <span className="faint">{Math.round(sh.c[0])}, {Math.round(sh.c[1])}</span>
-                          <button aria-label={`Remover ${RELIEF_LABEL[r.kind]}`} onClick={() => commit((e) => ({ ...e, relief: e.relief.filter((_, j) => j !== i) }))}><Icon name="close" size={14} /></button>
+                          {t(RELIEF_LABEL[r.kind])} <span className="faint">{Math.round(sh.c[0])}, {Math.round(sh.c[1])}</span>
+                          <button aria-label={t("Remover {name}", { name: t(RELIEF_LABEL[r.kind]) })} onClick={() => commit((e) => ({ ...e, relief: e.relief.filter((_, j) => j !== i) }))}><Icon name="close" size={14} /></button>
                         </span>
                       );
                     })}
@@ -551,28 +554,28 @@ export default function Maps() {
               {(tool === "decor" || edits.props.length > 0 || edits.cuts.length > 0) && (
                 <section className="card pad col" style={{ gap: 10 }}>
                   <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-                    <b><Icon name="park" size={18} /> Decorações</b>
+                    <b><Icon name="park" size={18} /> {t("Decorações")}</b>
                     <span className="faint small">
-                      {edits.props.length} nova{edits.props.length === 1 ? "" : "s"}{removedCount ? `, ${removedCount} do terreno retirada${removedCount === 1 ? "" : "s"}` : ""}
-                      {donor ? `, ${donor.props.length} no terreno original` : ""}
+                      {edits.props.length === 1 ? t("1 nova") : t("{n} novas", { n: edits.props.length })}{removedCount ? (removedCount === 1 ? t(", 1 do terreno retirada") : t(", {n} do terreno retiradas", { n: removedCount })) : ""}
+                      {donor ? t(", {n} no terreno original", { n: donor.props.length }) : ""}
                     </span>
                     <div className="row" style={{ gap: 6 }}>
-                      {edits.props.length > 0 && <button className="btn text sm" onClick={() => commit((e) => ({ ...e, props: [] }))}><Icon name="delete_sweep" size={17} /> Tirar as novas</button>}
-                      {edits.cuts.length > 0 && <button className="btn text sm" onClick={() => commit((e) => ({ ...e, cuts: [] }))}><Icon name="restore" size={17} /> Devolver as do terreno</button>}
+                      {edits.props.length > 0 && <button className="btn text sm" onClick={() => commit((e) => ({ ...e, props: [] }))}><Icon name="delete_sweep" size={17} /> {t("Tirar as novas")}</button>}
+                      {edits.cuts.length > 0 && <button className="btn text sm" onClick={() => commit((e) => ({ ...e, cuts: [] }))}><Icon name="restore" size={17} /> {t("Devolver as do terreno")}</button>}
                     </div>
                   </div>
-                  {tool !== "decor" && <p className="faint small">Use a ferramenta <b>Decorar</b> para escolher árvores, pedras, prédios e restos de unidades de qualquer mapa do jogo.</p>}
+                  {tool !== "decor" && <p className="faint small">{t("Use a ferramenta")} <b>{t("Decorar")}</b> {t("para escolher árvores, pedras, prédios e restos de unidades de qualquer mapa do jogo.")}</p>}
                   {tool === "decor" && <PropPicker props={assets?.props ?? null} used={usedProps} selected={propBp} onSelect={setPropBp} />}
-                  <p className="faint small">Decorações são visuais: não bloqueiam a passagem das unidades no jogo.</p>
+                  <p className="faint small">{t("Decorações são visuais: não bloqueiam a passagem das unidades no jogo.")}</p>
                 </section>
               )}
 
               <section className="card pad col" style={{ gap: 10 }}>
                 <div className="row" style={{ justifyContent: "space-between" }}>
-                  <b><Icon name="format_paint" size={18} /> Texturas do chão</b>
-                  {Object.keys(edits.reskin).length > 0 && <button className="btn text sm" onClick={() => commit((e) => ({ ...e, reskin: {} }))}><Icon name="restore" size={17} /> Voltar todas</button>}
+                  <b><Icon name="format_paint" size={18} /> {t("Texturas do chão")}</b>
+                  {Object.keys(edits.reskin).length > 0 && <button className="btn text sm" onClick={() => commit((e) => ({ ...e, reskin: {} }))}><Icon name="restore" size={17} /> {t("Voltar todas")}</button>}
                 </div>
-                <p className="faint small">Pinte o mapa trocando cada camada do chão (grama, terra, rocha…) por uma de outro mapa do jogo, como neve ou deserto. A troca vale em todo lugar onde a camada aparece.</p>
+                <p className="faint small">{t("Pinte o mapa trocando cada camada do chão (grama, terra, rocha…) por uma de outro mapa do jogo, como neve ou deserto. A troca vale em todo lugar onde a camada aparece.")}</p>
                 {assets === null ? <div className="bar indeterminate"><i /></div> : (
                   <GroundTextures layers={groundLayers} all={assets.layers} reskin={edits.reskin}
                     onChange={(oldD, neo) => commit((e) => {
@@ -581,84 +584,85 @@ export default function Maps() {
                       return { ...e, reskin };
                     })} />
                 )}
-                {Object.keys(edits.reskin).length > 0 && <p className="faint small">A prévia mostra a textura original; a troca aparece no jogo.</p>}
+                {Object.keys(edits.reskin).length > 0 && <p className="faint small">{t("A prévia mostra a textura original; a troca aparece no jogo.")}</p>}
               </section>
             </div>
 
             <section className="card pad col map-side">
-              <Field label="Nome no lobby" hint={`Aparece como “${lobbyName}”. Id: ${slugId(name)}`}>
+              <Field label={t("Nome no lobby")} hint={t("Aparece como “{name}”. Id: {id}", { name: lobbyName, id: slugId(name) })}>
                 <input className="input" value={name} maxLength={48} onChange={(e) => setName(e.target.value)} />
               </Field>
-              <Field label="Times">
+              <Field label={t("Times")}>
                 <select className="select" value={teams} onChange={(e) => setTeams(e.target.value as MapTeams)}>
-                  {TEAM_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  {TEAM_OPTIONS.map((o) => <option key={o.value} value={o.value}>{t(o.label)}</option>)}
                 </select>
               </Field>
 
               <div className="side-group">
-                <span className="overline"><Icon name="diamond" size={15} /> Economia</span>
+                <span className="overline"><Icon name="diamond" size={15} /> {t("Economia")}</span>
                 <div className="grid-2" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                  <Field label="Na base"><input className="input" type="number" min={0} max={8} value={baseMass} onChange={(e) => setBaseMass(Number(e.target.value))} /></Field>
-                  <Field label="Expansões"><input className="input" type="number" min={0} max={20} value={sites} onChange={(e) => setSites(Number(e.target.value))} /></Field>
-                  <Field label="Por expansão"><input className="input" type="number" min={1} max={6} value={perSite} onChange={(e) => setPerSite(Number(e.target.value))} /></Field>
+                  <Field label={t("Na base")}><input className="input" type="number" min={0} max={8} value={baseMass} onChange={(e) => setBaseMass(Number(e.target.value))} /></Field>
+                  <Field label={t("Expansões")}><input className="input" type="number" min={0} max={20} value={sites} onChange={(e) => setSites(Number(e.target.value))} /></Field>
+                  <Field label={t("Por expansão")}><input className="input" type="number" min={1} max={6} value={perSite} onChange={(e) => setPerSite(Number(e.target.value))} /></Field>
                 </div>
                 <p className="faint small">
-                  Massa automática: {baseMass} por base e {sites}×{perSite} nas expansões. Manual: {edits.mass.length} ponto{edits.mass.length === 1 ? "" : "s"} (ferramenta Massa).
+                  {t("Massa automática: {base} por base e {sites}×{per} nas expansões.", { base: baseMass, sites, per: perSite })}{" "}
+                  {edits.mass.length === 1 ? t("Manual: 1 ponto (ferramenta Massa).") : t("Manual: {n} pontos (ferramenta Massa).", { n: edits.mass.length })}
                 </p>
               </div>
-              <Field label="Raio sem ataque inicial"><input className="input" type="number" min={0} max={200} value={norush} onChange={(e) => setNorush(Number(e.target.value))} /></Field>
+              <Field label={t("Raio sem ataque inicial")}><input className="input" type="number" min={0} max={200} value={norush} onChange={(e) => setNorush(Number(e.target.value))} /></Field>
 
               <div className="side-group">
-                <span className="overline"><Icon name="terrain" size={15} /> Terreno</span>
+                <span className="overline"><Icon name="terrain" size={15} /> {t("Terreno")}</span>
                 <div className="setting-row">
-                  <div className="txt"><b>Borda rochosa</b><span className="muted small">Fecha o mapa com uma faixa de rochas intransponível (visível em mapas de escaramuça).</span></div>
-                  <Switch checked={rugged} onChange={setRugged} label="Borda rochosa" />
+                  <div className="txt"><b>{t("Borda rochosa")}</b><span className="muted small">{t("Fecha o mapa com uma faixa de rochas intransponível (visível em mapas de escaramuça).")}</span></div>
+                  <Switch checked={rugged} onChange={setRugged} label={t("Borda rochosa")} />
                 </div>
                 <div className="setting-row">
-                  <div className="txt"><b>Aplainar para construir</b><span className="muted small">Nivela o chão suave do mapa inteiro; mantém penhascos e água.</span></div>
-                  <Switch checked={smooth} onChange={setSmooth} label="Aplainar terreno" />
+                  <div className="txt"><b>{t("Aplainar para construir")}</b><span className="muted small">{t("Nivela o chão suave do mapa inteiro; mantém penhascos e água.")}</span></div>
+                  <Switch checked={smooth} onChange={setSmooth} label={t("Aplainar terreno")} />
                 </div>
                 <div className="setting-row">
                   <div className="txt">
-                    <b>Abrir terreno</b>
-                    <span className="muted small">{editsTerrain ? "Ligado automaticamente: o relevo mudou, então a navegação é refeita." : "Reescreve a navegação para todo o chão firme virar área jogável. Obrigatório em mapas de campanha."}</span>
+                    <b>{t("Abrir terreno")}</b>
+                    <span className="muted small">{editsTerrain ? t("Ligado automaticamente: o relevo mudou, então a navegação é refeita.") : t("Reescreve a navegação para todo o chão firme virar área jogável. Obrigatório em mapas de campanha.")}</span>
                   </div>
-                  <Switch checked={usePatch} onChange={setPatch} disabled={editsTerrain} label="Abrir terreno" />
+                  <Switch checked={usePatch} onChange={setPatch} disabled={editsTerrain} label={t("Abrir terreno")} />
                 </div>
                 {usePatch && (
                   <>
                     <div className="grid-2" style={{ gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <Field label="Inclinação máxima"><input className="input" type="number" step={0.5} min={1} max={20} value={maxSlope} onChange={(e) => setMaxSlope(Number(e.target.value))} /></Field>
-                      <Field label="Margem da água"><input className="input" type="number" step={0.5} min={0} max={20} value={waterMargin} onChange={(e) => setWaterMargin(Number(e.target.value))} /></Field>
+                      <Field label={t("Inclinação máxima")}><input className="input" type="number" step={0.5} min={1} max={20} value={maxSlope} onChange={(e) => setMaxSlope(Number(e.target.value))} /></Field>
+                      <Field label={t("Margem da água")}><input className="input" type="number" step={0.5} min={0} max={20} value={waterMargin} onChange={(e) => setWaterMargin(Number(e.target.value))} /></Field>
                     </div>
-                    <Field label="Objetos animados do cenário">
+                    <Field label={t("Objetos animados do cenário")}>
                       <select className="select" value={strip} onChange={(e) => setStrip(e.target.value as typeof strip)}>
-                        <option value="moving">Parar os que se movem</option>
-                        <option value="all">Remover todos</option>
-                        <option value="none">Manter como estão</option>
+                        <option value="moving">{t("Parar os que se movem")}</option>
+                        <option value="all">{t("Remover todos")}</option>
+                        <option value="none">{t("Manter como estão")}</option>
                       </select>
                     </Field>
                   </>
                 )}
               </div>
-              <Field label="Minimapa do lobby">
+              <Field label={t("Minimapa do lobby")}>
                 <select className="select" value={minimap} onChange={(e) => setMinimap(e.target.value as typeof minimap)}>
-                  <option value="donor">Original do terreno</option>
-                  <option value="desert">Gerar: deserto</option>
-                  <option value="snow">Gerar: neve</option>
-                  <option value="dark">Gerar: rocha escura</option>
+                  <option value="donor">{t("Original do terreno")}</option>
+                  <option value="desert">{t("Gerar: deserto")}</option>
+                  <option value="snow">{t("Gerar: neve")}</option>
+                  <option value="dark">{t("Gerar: rocha escura")}</option>
                 </select>
               </Field>
-              {edits.spawns.length < 2 && <Notice kind="info">Coloque pelo menos duas bases com a ferramenta Bases.</Notice>}
+              {edits.spawns.length < 2 && <Notice kind="info">{t("Coloque pelo menos duas bases com a ferramenta Bases.")}</Notice>}
               <button className="btn primary" disabled={edits.spawns.length < 2 || !name.trim() || busy.map} onClick={build}>
-                <Icon name="construction" size={19} /> {busy.map ? "Gerando e verificando…" : "Gerar mapa"}
+                <Icon name="construction" size={19} /> {busy.map ? t("Gerando e verificando…") : t("Gerar mapa")}
               </button>
               {lastBuild && (
                 <Notice kind={lastBuild.warnings?.length ? "warn" : "ok"}>
-                  {typeof lastBuild.mass === "number" ? <><b>{lastBuild.mass + (lastBuild.extraMass ?? 0)}</b> pontos de massa no total{lastBuild.extraMass ? `, ${lastBuild.extraMass} colocados por você` : ""}. </> : null}
-                  {lastBuild.propsAdded || lastBuild.propsRemoved ? <>{lastBuild.propsAdded ?? 0} decorações novas, {lastBuild.propsRemoved ?? 0} retiradas. </> : null}
-                  {lastBuild.reskinned ? <>{lastBuild.reskinned} textura{lastBuild.reskinned === 1 ? "" : "s"} do chão trocada{lastBuild.reskinned === 1 ? "" : "s"}. </> : null}
-                  {lastBuild.warnings?.length ? <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>{lastBuild.warnings.slice(0, 8).map((w, i) => <li key={i}>{w}</li>)}</ul> : "Tudo verificado e alcançável."}
+                  {typeof lastBuild.mass === "number" ? <><b>{lastBuild.mass + (lastBuild.extraMass ?? 0)}</b> {t("pontos de massa no total")}{lastBuild.extraMass ? t(", {n} colocados por você", { n: lastBuild.extraMass }) : ""}. </> : null}
+                  {lastBuild.propsAdded || lastBuild.propsRemoved ? <>{t("{added} decorações novas, {removed} retiradas.", { added: lastBuild.propsAdded ?? 0, removed: lastBuild.propsRemoved ?? 0 })} </> : null}
+                  {lastBuild.reskinned ? <>{lastBuild.reskinned === 1 ? t("1 textura do chão trocada.") : t("{n} texturas do chão trocadas.", { n: lastBuild.reskinned })} </> : null}
+                  {lastBuild.warnings?.length ? <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>{lastBuild.warnings.slice(0, 8).map((w, i) => <li key={i}>{tr(w)}</li>)}</ul> : t("Tudo verificado e alcançável.")}
                 </Notice>
               )}
               {log.length > 0 && <div className="log mono small">{log.map((l, i) => <div key={i}>{l}</div>)}</div>}
