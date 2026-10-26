@@ -101,7 +101,7 @@ export default function IconStudio({ title, unitId, model, albedo = null, tint, 
             <div className="iconlab-small dark">
               {SMALL.slice(0, 3).map((s) => <figure key={s}>{small[s] && <img src={small[s]} alt="" style={{ width: s, height: s }} />}<figcaption>{t("fundo escuro")}</figcaption></figure>)}
             </div>
-            {main?.checks.map((c, k) => <span key={k} className={`check-item ${c.level}`}>{tr(c.text)}</span>)}
+            {main?.checks.map((c, k) => <span key={k} className={`check-item ${c.level}`}>{c.text}</span>)}
           </div>
           <div className="iconlab-controls">
             <div className="texlab-group"><h4>{t("Estilo")}</h4>
