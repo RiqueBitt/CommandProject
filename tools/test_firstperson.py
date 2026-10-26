@@ -51,8 +51,14 @@ function cam:MoveTo(p, hpr, zoom, t) W.cam.focus = p; W.cam.heading = hpr[1]; W.
 function cam:SnapTo(p, hpr, zoom) W.cam.focus = p; W.cam.heading = hpr[1]; W.cam.pitch = hpr[2]; W.cam.zoom = zoom; W.cam.nose = nil; table.insert(W.calls, 'snap') end
 function cam:NoseCam(u, pitch, zoom, s, t) if type(u) ~= 'table' then error('quer a unidade') end W.cam.nose = u; table.insert(W.calls, 'nose') end
 function cam:Reset() table.insert(W.calls, 'reset') end
+function cam:GetMinZoom() return 5 end
 function GetCamera(name) return cam end
-function GetCameraPositionAndZoom() return W.cam.eye[1], W.cam.eye[2], W.cam.eye[3], W.cam.zoom end
+function GetCameraPositionAndZoom()
+    -- olho atrás do foco, na direção oposta ao rumo (rumo 0 = olhando para -z)
+    local h = W.cam.heading
+    local dx, dz = -math.sin(h), -math.cos(h)
+    return W.cam.focus[1] - dx * 50, W.cam.focus[2] + 50, W.cam.focus[3] - dz * 50, W.cam.zoom
+end
 function CurrentTime() return W.time end
 function IsKeyDown(k) return W.held[k] == true end
 function IN_AddKeyMapTable(t) for k, v in pairs(t) do W.map[k] = v end end
@@ -66,6 +72,7 @@ function GetRolloverInfo() return W.rollover end
 function GetMouseWorldPos() return W.mouse end
 function ConExecute(c) table.insert(W.calls, 'con:' .. c) end
 function LOC(s) return s end
+function LOG(s) end
 function ForkThread(f) local co = coroutine.create(f); table.insert(W.threads, co); return co end
 function WaitFrames(n) coroutine.yield() end
 function WaitSeconds(n) coroutine.yield() end
@@ -154,14 +161,26 @@ def test_ui(code):
     tank = g.Unit(7, 300, 400)
     g.W.selected = lua.table_from([tank])
     g.CPFirstPersonToggle()
-    check(g.W.cam.nose is not None and g.W.cam.nose.id == 7, "1ª pessoa: câmera presa na unidade (NoseCam)")
+    g.Step(3)
+    check(g.W.cam.nose is None and abs(g.W.cam.focus[1] - 300) < 8 and abs(g.W.cam.focus[3] - 400) < 8 and g.W.cam.zoom >= 5, f"1ª pessoa: câmera colada na unidade, sem NoseCam ({list(g.W.cam.focus.values())}, zoom {g.W.cam.zoom})")
+    calls = list(g.W.calls.values())
+    check("nose" not in calls and "snap" in calls, "1ª pessoa usa SnapTo (o NoseCam do motor fecha o jogo)")
     check("CPFirstPersonKey" in g.W.map.W.action and "CPFirstPersonKey" in g.W.map.Esc.action, "W e Esc controlam a unidade enquanto a câmera está ligada")
     # W segurado: anda para onde a câmera olha (foco − olho, no chão)
     g.W.held.W = True
     g.Step(4)
     a = last_cmd(g)
     check(a is not None and a.Cmd == "drive" and a.F == 1 and a.S == 0, f"W anda para a frente ({a and a.Cmd})")
-    check(a is not None and abs(a.DX - 0) < 1e-6 and abs(a.DZ - (-1)) < 1e-6, f"na direção em que a câmera olha ({a and (a.DX, a.DZ)})")
+    import math
+    h = g.W.cam.heading
+    check(a is not None and abs(a.DX - (-math.sin(h))) < 1e-6 and abs(a.DZ - (-math.cos(h))) < 1e-6, f"na direção em que a câmera olha ({a and (a.DX, a.DZ)}, rumo {h})")
+    # andando, a câmera vira para onde a unidade vai (aqui: para +x)
+    for k in range(30):
+        tank.pos = lua.table_from([300 + k * 2, 5, 400])
+        g.Step(1)
+    fx, fz = -math.sin(g.W.cam.heading), -math.cos(g.W.cam.heading)
+    check(fx > 0.9, f"1ª pessoa vira com o movimento da unidade (direção {fx:.2f}, {fz:.2f})")
+    check(abs(g.W.cam.focus[1] - (358 + fx * 6)) < 3, f"foco à frente da unidade ({g.W.cam.focus[1]:.1f})")
     g.W.held.W = None
     g.Step(4)
     check(last_cmd(g).Cmd == "halt", "soltar a tecla para a unidade")

@@ -20,6 +20,9 @@ local FIRST_ZOOM = @FIRST_ZOOM@
 local THIRD_ZOOM = @THIRD_ZOOM@
 local GROUP_PITCH = 0.75
 local THIRD_PITCH = 0.42
+local FIRST_PITCH = 0.14
+local EYE_HEIGHT = 2.5
+local LOOK_AHEAD = 6
 local SEND_EVERY = 0.25
 
 local C_PANEL = 'C80E161E'
@@ -39,7 +42,6 @@ local Pressed = {}
 local KeyWorks = {}
 local Driving = false
 local Ready = false
-local NoseOk = false
 
 local function Notify(text, color)
     pcall(function()
@@ -294,19 +296,126 @@ end
 
 -- ------------------------------------------------------------------ cameras
 
-local function TryNose(u)
-    local cam = Cam()
-    local ok = pcall(function() cam:NoseCam(u, 0, FIRST_ZOOM, 0, 0.6) end)
-    if not ok then
-        ok = pcall(function() cam:NoseCam(u:GetEntityId(), 0, FIRST_ZOOM, 0, 0.6) end)
-    end
+-- The game's camera is an orbit camera: a focus point, a heading, a pitch and a distance (zoom).
+-- Every frame the focus goes to the unit; first person puts it just ahead of the unit at eye height,
+-- with the shortest distance the engine allows and a low pitch, turning with the unit as it moves.
+-- (Camera:NoseCam is not used: it is unfinished in the engine and closes the game.)
+local DIRS = {
+    function(h) return -math.sin(h), -math.cos(h) end,
+    function(h) return math.sin(h), -math.cos(h) end,
+    function(h) return -math.sin(h), math.cos(h) end,
+    function(h) return math.sin(h), math.cos(h) end,
+}
+local Calib = 1
+local Calibrated = false
+local CalibStep = false
+local Look = { h = false, set = false, last = false }
+
+local function DirOf(h)
+    return DIRS[Calib](h)
+end
+
+local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
+
+local function HeadingOf(dx, dz)
+    if Calib == 1 then return atan2(-dx, -dz)
+    elseif Calib == 2 then return atan2(dx, -dz)
+    elseif Calib == 3 then return atan2(-dx, dz) end
+    return atan2(dx, dz)
+end
+
+local function Finite(v)
+    return type(v) == 'number' and v == v and v > -1e9 and v < 1e9
+end
+
+local function LerpAngle(a, b, t)
+    local d = b - a
+    while d > math.pi do d = d - 2 * math.pi end
+    while d < -math.pi do d = d + 2 * math.pi end
+    return a + d * t
+end
+
+local function MinZoom(cam)
+    local z = 5
+    pcall(function() z = cam:GetMinZoom() or z end)
+    if not Finite(z) or z <= 0 then z = 5 end
+    return z
+end
+
+local function Snap(cam, focus, h, pitch, zoom)
+    if not (Finite(focus[1]) and Finite(focus[2]) and Finite(focus[3]) and Finite(h) and Finite(pitch) and Finite(zoom)) then return false end
+    zoom = math.max(MinZoom(cam), zoom)
+    local ok = pcall(function() cam:SnapTo(focus, { h, pitch, 0 }, zoom) end)
     return ok
 end
 
-local function Follow(dt)
+-- which way heading turns the view: measured once (focus minus eye after a known heading)
+local function Calibrate(cam)
+    if Calibrated then return end
+    if not CalibStep then
+        local s = cam:SaveSettings()
+        CalibStep = (s.Heading or 0) + 0.8
+        Snap(cam, s.Focus, CalibStep, s.Pitch or 0.8, s.Zoom or 60)
+        return
+    end
+    local ok = pcall(function()
+        local s = cam:SaveSettings()
+        local ex, ey, ez = GetCameraPositionAndZoom()
+        local mx, mz = s.Focus[1] - ex, s.Focus[3] - ez
+        local len = math.sqrt(mx * mx + mz * mz)
+        if len < 0.001 then error('sem direção') end
+        mx, mz = mx / len, mz / len
+        local best, bd = 1, 99
+        for k, f in DIRS do
+            local dx, dz = f(CalibStep)
+            local d = (dx - mx) * (dx - mx) + (dz - mz) * (dz - mz)
+            if d < bd then best, bd = k, d end
+        end
+        Calib = best
+    end)
+    Calibrated = true
+    LOG('*CPFP: camera calibrada (' .. tostring(Calib) .. ', ' .. tostring(ok) .. ')')
+end
+
+local function FollowFirst(cam)
+    local u = Units[1]
+    local p = Pos(u)
+    if not p then return end
+    local s = cam:SaveSettings()
+    -- the player turned the camera with the game's own controls: keep that direction
+    if Look.set and Finite(s.Heading) and math.abs(s.Heading - Look.set) > 0.02 then
+        Look.h = s.Heading
+    end
+    if Look.last then
+        local dx, dz = p[1] - Look.last[1], p[3] - Look.last[3]
+        local d = math.sqrt(dx * dx + dz * dz)
+        if d > 0.04 then
+            local target = HeadingOf(dx / d, dz / d)
+            Look.h = LerpAngle(Look.h or target, target, 0.12)
+        end
+    end
+    Look.last = { p[1], p[2], p[3] }
+    local h = Look.h or s.Heading or 0
+    local fx, fz = DirOf(h)
+    local focus = { p[1] + fx * LOOK_AHEAD, p[2] + EYE_HEIGHT, p[3] + fz * LOOK_AHEAD }
+    if Snap(cam, focus, h, FIRST_PITCH, FIRST_ZOOM) then
+        Look.h = h
+        Look.set = h
+    end
+end
+
+local function Follow()
+    local cam = Cam()
+    if not Calibrated then
+        Calibrate(cam)
+        return
+    end
+    if Mode == 'first' then
+        FollowFirst(cam)
+        return
+    end
     local c = Center(Units)
     if not c then return end
-    local cam = Cam()
     local s = cam:SaveSettings()
     local zoom = s.Zoom
     local pitch = s.Pitch
@@ -317,7 +426,7 @@ local function Follow(dt)
     elseif Mode == 'third' then
         if pitch < 0.12 then pitch = 0.12 end
     end
-    cam:SnapTo({ c[1], c[2] + 2, c[3] }, { s.Heading, pitch, 0 }, zoom)
+    Snap(cam, { c[1], c[2] + 2, c[3] }, s.Heading, pitch, zoom)
 end
 
 local function Exit(quiet)
@@ -338,6 +447,7 @@ local function Exit(quiet)
         pcall(function() cam:Reset() end)
     end
     Saved = false
+    LOG('*CPFP: camera estrategica')
     if not quiet then Notify('Camera estrategica') end
 end
 
@@ -349,21 +459,16 @@ local function Start(mode, units)
     end
     Units = units
     pcall(SelectUnits, units)
-    if mode == 'first' then
-        NoseOk = TryNose(units[1])
-        if not NoseOk then
-            mode = 'third'
-            Notify('Primeira pessoa nao disponivel para esta unidade: camera atras dela')
-        end
-    end
+    LOG('*CPFP: modo ' .. mode .. ' com ' .. table.getn(units) .. ' unidade(s)')
+    Look = { h = false, set = false, last = false }
     if mode == 'third' or mode == 'group' then
         local c = Center(units)
         if c then
             local h = 0
-            pcall(function() h = cam:SaveSettings().Heading end)
+            pcall(function() h = cam:SaveSettings().Heading or 0 end)
             local zoom = mode == 'group' and math.max(60, Spread(units, c) * 2.4 + 40) or THIRD_ZOOM
             local pitch = mode == 'group' and GROUP_PITCH or THIRD_PITCH
-            pcall(function() cam:MoveTo({ c[1], c[2] + 2, c[3] }, { h, pitch, 0 }, zoom, 0.5) end)
+            Snap(cam, { c[1], c[2] + 2, c[3] }, h, pitch, zoom)
         end
     end
     Mode = mode
@@ -403,9 +508,8 @@ local function Tick()
             Exit(true)
             break
         end
-        if Mode == 'third' or Mode == 'group' then
-            pcall(Follow)
-        end
+        local okF, errF = pcall(Follow)
+        if not okF then LOG('*CPFP: camera: ' .. tostring(errF)) end
         local t = Now()
         if DRIVE_KEYS and t - lastSend >= SEND_EVERY then
             lastSend = t

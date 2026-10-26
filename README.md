@@ -118,7 +118,7 @@ disponível em Sistema → Visual.
   depois de atualizar o jogo ou o launcher). Eles são montados no seu PC com os arquivos do próprio
   jogo: nada é baixado de servidor e o hub funciona sem internet.
 - **Primeira Pessoa** (novo): selecione uma unidade e aperte **F5** — a câmera do motor do jogo
-  (`NoseCam`) fica presa nela e acompanha o movimento e as animações; F5 de novo, terceira pessoa
+  fica colada nela, na altura dela, e vira junto quando ela anda; F5 de novo, terceira pessoa
   atrás da unidade, seguindo pelo terreno (gira e dá zoom com os controles normais); com várias
   unidades, **câmera de comando** acima e atrás da formação. Enquanto a câmera está ligada,
   **W A S D** andam para onde a câmera olha (a unidade ou o grupo todo), **E** atira no que está sob

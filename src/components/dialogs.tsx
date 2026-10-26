@@ -384,7 +384,7 @@ export function OptimizeModal({ onClose }: { onClose: () => void }) {
 // ------------------------------------------------------------------ primeira pessoa
 
 const FP_KEY = "cp-fp";
-export const FP_DEFAULT: FirstPersonOptions = { key: "F5", hud: true, drive: true, firstZoom: 0, thirdZoom: 38 };
+export const FP_DEFAULT: FirstPersonOptions = { key: "F5", hud: true, drive: true, firstZoom: 14, thirdZoom: 38 };
 const FP_KEYS = ["F5", "F6", "F7", "F8", "F11", "Home", "Insert"];
 
 export function loadFirstPerson(): FirstPersonOptions {
@@ -402,7 +402,7 @@ export function FirstPersonModal({ installed, onClose }: { installed: boolean; o
   const [o, setO] = useState<FirstPersonOptions>(loadFirstPerson);
   const set = (patch: Partial<FirstPersonOptions>) => setO((v) => ({ ...v, ...patch }));
   const modes: { icon: string; title: string; text: string }[] = [
-    { icon: "visibility", title: "Primeira pessoa", text: `Uma unidade selecionada + ${o.key}: a câmera do jogo fica presa na unidade (robô, tanque, avião, navio ou construtor) e acompanha o movimento e as animações dela.` },
+    { icon: "visibility", title: "Primeira pessoa", text: `Uma unidade selecionada + ${o.key}: a câmera do jogo fica colada na unidade (robô, tanque, avião, navio ou construtor), na altura dela, e vira junto quando ela anda. Gire com os controles normais do jogo para olhar em volta.` },
     { icon: "3d_rotation", title: "Terceira pessoa", text: `${o.key} de novo: a câmera fica atrás da unidade e a segue pelo terreno; gire e dê zoom com os controles normais do jogo.` },
     { icon: "groups", title: "Câmera de comando", text: "Várias unidades selecionadas: câmera acima e atrás da formação, acompanhando o grupo, e as ordens vão para todos." },
     { icon: "construction", title: "Construtores", text: "O menu de construção, o posicionamento dos prédios e as habilidades funcionam em qualquer câmera, como no jogo." },

@@ -3,9 +3,10 @@
 //! Montado na hora com os arquivos do próprio jogo do usuário (texto, de `uncompiled_lua.scd`):
 //! - `/lua/ui/game/worldview.lua` (a vista do mundo da partida) leva o código da interface no fim e
 //!   `CreateMainWorldView` chama `CPFirstPersonInit`: a tecla escolhida (F5) alterna a câmera
-//!   estratégica, a primeira pessoa (`Camera:NoseCam` do motor, presa na unidade e acompanhando o
-//!   movimento e as animações dela), a terceira pessoa (atrás da unidade, girando com os controles
-//!   do próprio jogo) e a câmera de comando de um grupo (acima e atrás da formação);
+//!   estratégica, a primeira pessoa (a câmera do jogo colada na unidade, na altura dos olhos, virando
+//!   com ela), a terceira pessoa (atrás da unidade, girando com os controles do próprio jogo) e a
+//!   câmera de comando de um grupo (acima e atrás da formação). Tudo com `Camera:SnapTo` a cada
+//!   quadro; o `Camera:NoseCam` do motor não é usado (está inacabado e fecha o jogo);
 //! - `/lua/SimSync.lua` (simulação) leva `CPFirstPersonSim`: andar na direção da câmera, parar e
 //!   atirar, só com unidades do exército que mandou o comando (vale em multiplayer);
 //! - `/lua/sim/SimCallbacks.lua` com os comandos de todos os mods do CommandProject
@@ -41,7 +42,7 @@ pub struct FirstPersonOptions {
     pub hud: bool,
     /// W A S D, E, Q e R controlam a unidade enquanto a câmera está ligada
     pub drive: bool,
-    /// distância da câmera em primeira pessoa (0 = no "nariz" da unidade)
+    /// distância da câmera em primeira pessoa (o motor tem uma distância mínima)
     pub first_zoom: f32,
     /// distância da câmera em terceira pessoa
     pub third_zoom: f32,
@@ -49,7 +50,7 @@ pub struct FirstPersonOptions {
 
 impl Default for FirstPersonOptions {
     fn default() -> Self {
-        FirstPersonOptions { key: "F5".into(), hud: true, drive: true, first_zoom: 0.0, third_zoom: 38.0 }
+        FirstPersonOptions { key: "F5".into(), hud: true, drive: true, first_zoom: 14.0, third_zoom: 38.0 }
     }
 }
 
@@ -67,7 +68,7 @@ pub fn ui_lua(o: &FirstPersonOptions) -> Result<String> {
         .replace("@KEY@", &o.key)
         .replace("@HUD@", if o.hud { "true" } else { "false" })
         .replace("@DRIVE@", if o.drive { "true" } else { "false" })
-        .replace("@FIRST_ZOOM@", &lua_num(o.first_zoom.clamp(0.0, 30.0)))
+        .replace("@FIRST_ZOOM@", &lua_num(o.first_zoom.clamp(4.0, 60.0)))
         .replace("@THIRD_ZOOM@", &lua_num(o.third_zoom.clamp(10.0, 200.0))))
 }
 
@@ -156,7 +157,7 @@ mod tests {
     fn options_go_into_the_code() {
         let lua = ui_lua(&FirstPersonOptions { key: "F6".into(), hud: false, ..Default::default() }).unwrap();
         assert!(lua.contains("local KEY = 'F6'") && lua.contains("local SHOW_HUD = false") && lua.contains("local DRIVE_KEYS = true"));
-        assert!(lua.contains("local FIRST_ZOOM = 0.0") && lua.contains("local THIRD_ZOOM = 38.0"));
+        assert!(lua.contains("local FIRST_ZOOM = 14.0") && lua.contains("local THIRD_ZOOM = 38.0"));
         assert!(!lua.contains('@'), "marcador sobrando");
         assert!(ui_lua(&FirstPersonOptions { key: "F10".into(), ..Default::default() }).is_err());
         let sim = patch_sim_sync("function ResetSyncTable()\nend\n").unwrap();

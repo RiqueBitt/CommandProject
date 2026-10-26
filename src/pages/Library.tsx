@@ -90,11 +90,7 @@ export default function Library() {
           </div>
           <div className="row">
             <button className="btn text" disabled={busyConflicts} onClick={async () => setConflicts((await run("conflicts", () => api.conflicts())) ?? null)}><Icon name={busyConflicts ? "hourglass_top" : "compare_arrows"} /> {busyConflicts ? "Analisando…" : "Conflitos"}</button>
-            <button className="btn text" onClick={() => setAi(true)} title="Navios, economia, mini-bases e um comandante estratégico para a IA"><Icon name="psychology" /> IA esperta</button>
-            <button className="btn text" onClick={() => setCheats(true)} title="Massa, energia e pesquisa infinitas, modo deus"><Icon name="auto_fix_high" /> Trapaças</button>
-            <button className="btn text" onClick={() => setOpt(true)} title="Limite de FPS, placa de vídeo dedicada e ajustes do Windows para o jogo"><Icon name="speed" /> Otimização</button>
-            <button className="btn text" onClick={() => setFp(true)} title="Câmera em primeira e terceira pessoa e controle direto das unidades (F5)"><Icon name="videocam" /> Primeira Pessoa</button>
-            <button className="btn tonal" onClick={() => go("hub")} title="Todos os mods do CommandProject num lugar só"><Icon name="store" /> Hub de mods</button>
+            <button className="btn tonal" onClick={() => go("hub")} title="IA esperta, Trapaças, Otimização, Primeira Pessoa e os outros mods do CommandProject"><Icon name="store" /> Hub de mods</button>
             <button className="btn text" onClick={() => setLink(true)}><Icon name="link" /> De um link</button>
             <button className="btn" onClick={() => importFrom(true)}><Icon name="folder_open" /> Pasta</button>
             <button className="btn primary" onClick={() => importFrom(false)}><Icon name="add" /> Importar .scd ou .zip</button>

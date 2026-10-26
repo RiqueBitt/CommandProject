@@ -136,8 +136,9 @@ p { margin: 0; }
 .nav-link[aria-current="page"] { background: rgba(var(--primary-rgb), .12); color: var(--primary); }
 
 /* ---------- cabeçalho de página (Início) ---------- */
-.head { display: flex; align-items: flex-start; gap: 16px; }
-.head .grow { flex: 1; min-width: 0; }
+.head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.head .grow { flex: 1 1 320px; min-width: 280px; }
+.head > .row { flex-wrap: wrap; justify-content: flex-end; }
 .head h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .meta-row { display: flex; align-items: stretch; flex-wrap: wrap; margin-top: 14px; }
 .meta { display: flex; align-items: center; gap: 10px; padding: 0 16px; border-left: 1px solid var(--border); }
