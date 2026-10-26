@@ -1,5 +1,5 @@
 import { Fragment, lazy, Suspense, useEffect } from "react";
-import { locale, t, tr, useLang } from "./lib/i18n";
+import { locale, setLang, t, tr, useLang } from "./lib/i18n";
 import { FP_VERSION, loadFirstPerson } from "./components/dialogs";
 import { FEATURES } from "./lib/features";
 import { CommandPalette, Rail, SystemBar } from "./components/Shell";
@@ -42,6 +42,9 @@ export default function App() {
         const info = await api.appInfo();
         useStore.setState({ info });
         await refresh();
+        // o idioma salvo nas configurações vale mais que o do navegador (é ele que liga o jogo em português)
+        const saved = useStore.getState().settings?.uiPrefs?.lang;
+        if (saved === "en" || saved === "pt-BR") setLang(saved);
         // o Menu moderno 1.x trocava a fonte de um jeito que fazia o jogo fechar ao abrir
         const oldTheme = useStore.getState().mods.find((m) => m.manifest.id === "menu-moderno" && m.enabled && m.manifest.version.startsWith("1."));
         if (oldTheme) {

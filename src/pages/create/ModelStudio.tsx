@@ -265,7 +265,7 @@ export default function ModelStudio({ id }: { id: string }) {
       const set = (fn: (q: ModelPart) => ModelPart) => patchParts([one.id], fn);
       out.push({ title: t("Peça"), props: [
         { kind: "text", label: t("Nome"), value: one.name, onChange: (v) => set((q) => ({ ...q, name: v })) },
-        { kind: "info", label: t("Forma"), value: t(PART_LABEL[one.type]) },
+        { kind: "info", label: t("Forma"), value: t(PART_LABEL[one.type], undefined, "forma") },
         { kind: "select", label: t("Grupo (osso)"), value: one.group ?? "", onChange: (v) => set((q) => ({ ...q, group: v || null })), options: [{ value: "", label: t("— nenhum (raiz) —") }, ...doc.groups.map((g) => ({ value: g.id, label: g.name }))] },
         { kind: "toggle", label: t("Visível"), value: !one.hidden, onChange: (v) => set((q) => ({ ...q, hidden: !v })) },
       ] });
@@ -339,7 +339,7 @@ export default function ModelStudio({ id }: { id: string }) {
   if (p.status === "error") return <div className="studio-root"><Empty icon="error" title={t("Não deu para abrir o projeto")}>{p.error}</Empty></div>;
 
   const modeBtn = (m: GizmoMode, icon: string, label: string, key: string) => <RibbonButton icon={icon} label={label} active={mode === m} onClick={() => (m === "vertex" ? startVertexMode() : setMode(m))} hint={`${label} (${key})`} />;
-  const insertBtn = (pt: Exclude<PartType, "mesh">) => <RibbonButton key={pt} icon={PART_ICON[pt]} label={t(PART_LABEL[pt])} onClick={() => addPart(pt)} color="#5aa9e6" />;
+  const insertBtn = (pt: Exclude<PartType, "mesh">) => <RibbonButton key={pt} icon={PART_ICON[pt]} label={t(PART_LABEL[pt], undefined, "forma")} onClick={() => addPart(pt)} color="#5aa9e6" />;
   const tris = doc.parts.reduce((n, q) => n + (q.type === "mesh" ? (q.mesh?.indices.length ?? 0) / 3 : 0), 0);
 
   return (
@@ -426,7 +426,7 @@ export default function ModelStudio({ id }: { id: string }) {
           <Panel title={t("Caixa de formas")} icon="category" grow collapsible={false} id="model-toolbox">
             <div className="toolbox-grid">
               {(["box", "cylinder", "sphere", "cone", "wedge", "torus", "plane", "capsule"] as const).map((pt) => (
-                <button key={pt} className="tool-tile" onClick={() => addPart(pt)}><Icon name={PART_ICON[pt]} /><span>{t(PART_LABEL[pt])}</span></button>
+                <button key={pt} className="tool-tile" onClick={() => addPart(pt)}><Icon name={PART_ICON[pt]} /><span>{t(PART_LABEL[pt], undefined, "forma")}</span></button>
               ))}
               <button className="tool-tile" onClick={() => fileInput.current?.click()}><Icon name="file_upload" /><span>{t("Importar")}</span></button>
             </div>

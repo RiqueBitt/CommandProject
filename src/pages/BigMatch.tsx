@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Empty, Field, Icon, Notice, Switch, TaskProgress } from "../components/ui";
 import { api } from "../lib/api";
-import { t } from "../lib/i18n";
+import { t, tr } from "../lib/i18n";
 import { load, useStore } from "../lib/store";
 import { shuffleSpawns } from "../lib/matchSpawn";
 import { assignColors, GAME_COLORS, groupOf, type ColorMode } from "../lib/teamColors";
@@ -228,7 +228,7 @@ export default function BigMatch() {
               {list.map((m) => (
                 <button key={m.path} role="option" aria-selected={m.path === path} className={`bm-map ${m.path === path ? "on" : ""}`} onClick={() => setPath(m.path)}>
                   <span className={`bm-count ${m.armies.length > 8 ? "big" : ""}`}>{m.armies.length}</span>
-                  <span className="grow"><span className="title">{m.name}</span><span className="sub">{m.source} · {m.size[0]}×{m.size[1]}</span></span>
+                  <span className="grow"><span className="title">{m.name}</span><span className="sub">{tr(m.source)} · {m.size[0]}×{m.size[1]}</span></span>
                 </button>
               ))}
               {!list.length && <p className="faint small">{t("Nenhum mapa com esse filtro.")}</p>}
@@ -279,7 +279,7 @@ export default function BigMatch() {
                       </div>
                     </Field>
                     <p className="faint small">{t("Clique numa base da prévia para jogar nela.")}</p>
-                    {colorPlan.note && <Notice kind="info">{colorPlan.note}</Notice>}
+                    {colorPlan.note && <Notice kind="info">{tr(colorPlan.note)}</Notice>}
                     {map.lobbyRisk && <Notice kind="warn">{t("Este mapa foi feito numa versão antiga e também aparece no lobby do jogo, que fecha o jogo com mais de 8 bases. Aqui ele funciona; para o lobby não mostrar, gere o mapa de novo no editor.")}</Notice>}
                   </div>
                 </div>
@@ -393,7 +393,7 @@ export default function BigMatch() {
               {sum.players > 8 && <Notice kind="info">{t("O jogo foi feito para até 8 jogadores. Com mais, a partida fica mais pesada (cada IA pensa sozinha) e ainda não foi testada com tantos: se o jogo não abrir ou fechar ao carregar, tente com menos bases ou um limite de unidades menor e me conte quantos jogadores deram certo.")}</Notice>}
               {busy && <TaskProgress task="apply" label={t("Preparando a partida…")} />}
               <div className="row bm-launch">
-                <span className="grow">{error ? <span className="chip warn"><Icon name="error_outline" size={14} /> {error}</span> : <span className="muted">{sum.text} · {map.name}</span>}</span>
+                <span className="grow">{error ? <span className="chip warn"><Icon name="error_outline" size={14} /> {tr(error)}</span> : <span className="muted">{sum.text} · {map.name}</span>}</span>
                 {running && (
                   <button className="btn" onClick={async () => {
                     const n = await run("kill", () => api.killGame(), (k) => (k ? t("Jogo fechado.") : t("O jogo já tinha fechado.")));

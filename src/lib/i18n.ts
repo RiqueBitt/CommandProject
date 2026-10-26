@@ -64,10 +64,12 @@ function compiled(): Pattern[] {
 const fill = (s: string, vars?: Record<string, string | number | undefined | null>) =>
   vars ? s.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars && vars[k] != null ? String(vars[k]) : m)) : s;
 
-/** Texto da interface no idioma atual. `src` é o texto em português (a chave). */
-export function t(src: string, vars?: Record<string, string | number | undefined | null>): string {
+/** Texto da interface no idioma atual. `src` é o texto em português (a chave). Quando a mesma
+ *  palavra muda de sentido conforme o lugar ("Padrão" = Default/Pattern), `ctx` escolhe a tradução
+ *  "ctx|texto" do dicionário. */
+export function t(src: string, vars?: Record<string, string | number | undefined | null>, ctx?: string): string {
   if (current === "pt-BR") return fill(src, vars);
-  return fill(EN[src] ?? src, vars);
+  return fill((ctx ? EN[`${ctx}|${src}`] : undefined) ?? EN[src] ?? src, vars);
 }
 
 /** Traduz uma mensagem que veio pronta (do backend ou de um erro), com valores no meio. */

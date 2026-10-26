@@ -1,5 +1,10 @@
 {
-  "Idioma": "Language",
-  "Inglês": "English",
-  "Português (Brasil)": "Portuguese (Brazil)"
+ "Idioma": "Language",
+ "Inglês": "English",
+ "Português (Brasil)": "Portuguese (Brazil)",
+ "forma|Placa": "Plane",
+ "forma|Rampa": "Wedge",
+ "textura|Padrão": "Pattern",
+ "vale|Fundo": "Depth",
+ "vitrine|Girar": "Spin"
 }

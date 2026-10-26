@@ -3,10 +3,9 @@
 // As cores vêm na ordem do jogo (índice 0 a 31); quem recebe primeiro pega as mais diferentes
 // entre si (azul, vermelho, verde, amarelo...).
 
-import { t } from "./i18n";
-
 /** As cores de exército na ordem do jogo: as 10 originais e as 22 que a partida grande acrescenta.
- * `name` fica em português (chave): traduza onde mostrar, com t(c.name). */
+ * `name` fica em português (chave): traduza onde mostrar, com t(c.name). Os avisos também ficam em
+ * português (este arquivo roda fora do app nos testes): mostre com tr(). */
 export const GAME_COLORS: { hex: string; name: string }[] = [
   { hex: "#146fcd", name: "Azul" }, { hex: "#1bdd1b", name: "Verde" }, { hex: "#ff2a2a", name: "Vermelho" }, { hex: "#b061fa", name: "Roxo" },
   { hex: "#a26b25", name: "Bege" }, { hex: "#deddd1", name: "Cinza" }, { hex: "#92b220", name: "Oliva" }, { hex: "#00ffcc", name: "Ciano" },
@@ -42,7 +41,7 @@ export function assignColors(slots: ColorSlot[], mode: ColorMode): { colors: num
   const perPlayer = mode === "player";
   const groups: string[] = [];
   for (const { s, i } of on) { const g = groupOf(s, i); if (!groups.includes(g)) groups.push(g); }
-  if (!perPlayer && groups.length > n) return { colors: out, error: t("Há {teams} times e só {colors} cores: junte alguns times.", { teams: groups.length, colors: n }), note: null };
+  if (!perPlayer && groups.length > n) return { colors: out, error: `Há ${groups.length} times e só ${n} cores: junte alguns times.`, note: null };
   const unitOf = (i: number) => (perPlayer ? `p${i}` : groupOf(slots[i], i));
   const units = perPlayer ? on.map(({ i }) => `p${i}`) : groups;
 
@@ -85,7 +84,7 @@ export function assignColors(slots: ColorSlot[], mode: ColorMode): { colors: num
       chosen.set(u, best);
       count[best]++;
     }
-    note = t("Há {players} jogadores e {colors} cores: {n} jogador(es) repetem a cor de alguém de outro time.", { players: units.length, colors: n, n: left.length });
+    note = `Há ${units.length} jogadores e ${n} cores: ${left.length} jogador(es) repetem a cor de alguém de outro time.`;
   }
   for (const { i } of on) out[i] = chosen.get(unitOf(i)) ?? 0;
   return { colors: out, error: null, note };

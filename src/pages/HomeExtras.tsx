@@ -76,7 +76,7 @@ export function HomeShowcase() {
           <span className="overline">{data ? t("Do seu jogo") : t("Modelo de demonstração")}</span>
           <b>{data ? unitLabel(data.unit) : t("Robô CommandProject")}</b>
         </div>
-        <button className="btn icon-btn sm-icon" title={paused ? t("Girar") : t("Pausar")} aria-label={paused ? t("Girar") : t("Pausar")} onClick={() => setPaused((p) => !p)}><Icon name={paused ? "play_arrow" : "pause"} /></button>
+        <button className="btn icon-btn sm-icon" title={paused ? t("Girar", undefined, "vitrine") : t("Pausar")} aria-label={paused ? t("Girar", undefined, "vitrine") : t("Pausar")} onClick={() => setPaused((p) => !p)}><Icon name={paused ? "play_arrow" : "pause"} /></button>
         {data && <button className="btn icon-btn sm-icon" title={t("Trocar unidade")} aria-label={t("Trocar unidade")} onClick={() => setPicker(true)}><Icon name="swap_horiz" /></button>}
         {data?.team && (
           <button className="btn icon-btn sm-icon" title={t("Cor do time")} aria-label={t("Cor do time")} aria-expanded={colors} onClick={() => setColors((c) => !c)}>

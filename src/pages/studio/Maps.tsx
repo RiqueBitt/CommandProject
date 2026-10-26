@@ -445,7 +445,7 @@ export default function Maps() {
                     <input type="range" min={24} max={200} value={radius} onChange={(e) => setRadius(Number(e.target.value))} /><output>{Math.max(24, Math.round(radius / 2))}</output></label>
                 )}
                 {hasDepth && (
-                  <label className="range" style={{ gridTemplateColumns: "48px 120px 36px" }}><span>{tool === "valley" ? t("Fundo") : t("Altura")}</span>
+                  <label className="range" style={{ gridTemplateColumns: "48px 120px 36px" }}><span>{tool === "valley" ? t("Fundo", undefined, "vale") : t("Altura")}</span>
                     <input type="range" min={2} max={80} value={strength} onChange={(e) => setStrength(Number(e.target.value))} /><output>{strength}</output></label>
                 )}
               </div>

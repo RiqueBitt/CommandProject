@@ -182,3 +182,6 @@ export function setUiPref(key: string, value: unknown) {
     if (cur) void api.saveSettings(cur).catch(() => {});
   }, 600);
 }
+
+// testes de tela no navegador (só no modo de desenvolvimento)
+if (import.meta.env.DEV) (window as unknown as { __cpGo?: (p: Page) => void }).__cpGo = (p) => useStore.getState().go(p);

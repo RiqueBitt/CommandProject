@@ -43,6 +43,9 @@ const ALL_MODS: Entry[] = [
     desc: "Texturas maiores e mais nítidas geradas a partir das do jogo, no tamanho que a memória aguenta." },
   { ids: ["menu-moderno"], name: "Menu moderno", icon: "dashboard_customize", page: "library", tags: ["Visual", "Interface"],
     desc: "Tema novo para os menus do jogo, montado com as imagens do próprio jogo." },
+  { ids: ["cp-jogo-ptbr"], name: "Jogo em português (Brasil)", icon: "translate", page: "settings", tags: ["Idioma", "Tradução"],
+    auto: "Liga sozinho com o launcher em português (Brasil) e desliga em inglês (Configurações → Idioma).",
+    desc: "Tradução de fã dos textos do jogo: menus, unidades, pesquisa, dicas e a campanha inteira. Textos dentro de imagens e dos vídeos continuam como no jogo." },
 ];
 
 export const CP_MODS: Entry[] = ALL_MODS.filter((e) => !e.feature || FEATURES[e.feature]);

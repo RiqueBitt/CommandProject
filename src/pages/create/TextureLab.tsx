@@ -114,7 +114,7 @@ export default function TextureLab({ projectId, name, model, modelKey, value, on
       </div>
 
       <Layer title={t("Pintura e camuflagem")} icon="format_paint" onDice={() => set((s) => { s.base.seed = newSeed(); return s; })}>
-        <label className="range sel"><span>{t("Padrão")}</span>
+        <label className="range sel"><span>{t("Padrão", undefined, "textura")}</span>
           <select className="pinput" value={spec.base.pattern} onChange={(e) => set((s) => { s.base.pattern = e.target.value as CamoKind; if (s.base.keepColor > 0.5) s.base.keepColor = 0.15; return s; })}>
             {Object.entries(CAMO_LABEL).map(([k, l]) => <option key={k} value={k}>{t(l)}</option>)}
           </select>

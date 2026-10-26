@@ -7,6 +7,7 @@ Uso: python3 tools/i18n_check.py [arquivos...]   (sem argumentos: todo o src)
 Sai com erro se faltar tradução.
 """
 import glob
+import os
 import json
 import re
 import sys
@@ -24,7 +25,11 @@ ATTR = re.compile(r"""\b(?:title|placeholder|aria-label|label|alt)=\s*"([^"]*[A-
 
 
 def unescape(s: str) -> str:
-    return json.loads('"' + s.replace('"', '\\"').replace("\\'", "'").replace("\\`", "`") + '"') if "\\" in s else s
+    if "\\" not in s:
+        return s
+    # aspas e crases escapadas viram o caractere; o resto segue as regras do JSON
+    s = s.replace("\\'", "'").replace("\\`", "`").replace('\\"', '"')
+    return json.loads('"' + s.replace('"', '\\"') + '"')
 
 
 files = sys.argv[1:] or [f for f in glob.glob(str(ROOT / "src/**/*.ts*"), recursive=True) if not f.endswith(("mock.ts", ".d.ts", "i18n.ts"))]
@@ -36,12 +41,12 @@ for f in files:
         s = unescape(next(g for g in m.groups() if g is not None))
         if s not in EN:
             missing += 1
-            print(f"FALTA  {Path(f).relative_to(ROOT)}: {s!r}")
+            print(f"FALTA  {os.path.relpath(f, ROOT)}: {s!r}")
     for rx in (JSX_TEXT, ATTR):
         for m in rx.finditer(text):
             s = m.group(1).strip()
             if PT.search(s):
                 loose += 1
-                print(f"SOLTO  {Path(f).relative_to(ROOT)}: {s[:90]!r}")
+                print(f"SOLTO  {os.path.relpath(f, ROOT)}: {s[:90]!r}")
 print(f"\nfaltando no inglês: {missing} · textos em português sem t(): {loose}")
 sys.exit(1 if missing else 0)

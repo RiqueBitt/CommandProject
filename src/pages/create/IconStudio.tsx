@@ -46,7 +46,7 @@ export default function IconStudio({ title, unitId, model, albedo = null, tint, 
   useEffect(() => {
     if (!model) return;
     let alive = true;
-    const t = window.setTimeout(async () => {
+    const timer = window.setTimeout(async () => {
       try {
         const m = await renderIcon(model, spec, 256, albedo, tint);
         if (!alive) return;
@@ -56,7 +56,7 @@ export default function IconStudio({ title, unitId, model, albedo = null, tint, 
         if (alive) setSmall(out);
       } catch (e) { if (alive) toast("error", t("Ícone: {error}", { error: errorText(e) })); }
     }, 180);
-    return () => { alive = false; window.clearTimeout(t); };
+    return () => { alive = false; window.clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, model, albedo]);
 
