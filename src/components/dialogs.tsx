@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
-import type { AiMemoryReport, AiOptions, AiPersonality, CheatOptions, ConflictReport } from "../lib/types";
+import type { AiMemoryReport, AiOptions, AiPersonality, CheatOptions, ConflictReport, OptimizeOptions, OptimizeState } from "../lib/types";
 import { Field, Icon, Modal, Notice, Switch, TaskProgress } from "./ui";
 
 export function ConflictsModal({ report, onClose }: { report: ConflictReport; onClose: () => void }) {
@@ -294,5 +294,89 @@ export function AiMemoryCard() {
         </>
       )}
     </div>
+  );
+}
+
+// ------------------------------------------------------------------ otimização
+
+const fpsLabel = (f: number) => (f === 0 ? "100 FPS (o do jogo)" : `${f} FPS`);
+
+/** Monta o mod de otimização: limite de FPS no jogo e ajustes do Windows para o executável. */
+export function OptimizeModal({ onClose }: { onClose: () => void }) {
+  const { run, refreshMods } = useStore.getState();
+  const busy = useStore((s) => s.busy.optimize);
+  const [st, setSt] = useState<OptimizeState | null>(null);
+  const [o, setO] = useState<OptimizeOptions | null>(null);
+  useEffect(() => {
+    api.optimizeStatus().then((s) => { setSt(s); setO(s.options); }).catch(() => setSt(null));
+  }, []);
+  const set = (patch: Partial<OptimizeOptions>) => setO((v) => (v ? { ...v, ...patch } : v));
+  const win = st?.windows.supported !== false;
+  const rows: { key: "gpu" | "fullscreenFix" | "noThrottle" | "largeAddress"; icon: string; label: string; hint: string; win?: boolean; now?: boolean }[] = [
+    { key: "gpu", icon: "developer_board", label: "Usar a placa de vídeo dedicada", hint: "Em notebooks e PCs com duas placas (integrada + dedicada), o Windows passa a abrir o jogo sempre na mais forte. É a mesma opção de Configurações → Sistema → Tela → Gráficos.", win: true, now: st?.windows.gpu },
+    { key: "fullscreenFix", icon: "fullscreen", label: "Desligar as \"otimizações de tela cheia\" do Windows", hint: "Jogos DirectX 9 costumam rodar mais lisos e com menos atraso no mouse assim. É a caixa de Propriedades → Compatibilidade do executável.", win: true, now: st?.windows.fullscreenFix },
+    { key: "noThrottle", icon: "bolt", label: "Sem economia de energia no jogo", hint: "O Windows não reduz a velocidade do jogo quando acha que ele está em segundo plano (Windows 10/11, principalmente em notebooks).", win: true, now: st?.noThrottle },
+    { key: "largeAddress", icon: "memory", label: "Modo 4 GB", hint: "O jogo (32 bits) passa a poder usar até 4 GB de memória em vez de 2 GB: menos travamentos em mapas grandes e partidas com muitos jogadores.", now: st?.largeAddress },
+  ];
+  return (
+    <Modal title="Otimização" icon="speed" onClose={onClose}>
+      {!st || !o ? <div className="bar indeterminate"><i /></div> : (
+        <form className="col" style={{ gap: 14 }} onSubmit={async (e) => {
+          e.preventDefault();
+          const r = await run("optimize", () => api.buildOptimize(o, true), () => st.installed ? "Otimização atualizada." : "Otimização instalada e ativada.");
+          if (r) {
+            setSt(r);
+            await refreshMods();
+            onClose();
+          }
+        }}>
+          <p className="muted small">Ajustes que deixam o jogo mais leve sem tirar nada dele: nenhuma unidade, efeito ou textura é removida. O ganho depende do seu PC; compare no monitor do Otimizador.</p>
+          <Field label="Limite de FPS nas partidas" hint="O jogo vem travado em 100 FPS. Com monitor de 120/144 Hz ou mais, um limite maior deixa a imagem mais lisa; um limite menor alivia a placa de vídeo e o processador.">
+            <select className="select" value={o.fps} onChange={(e) => set({ fps: Number(e.target.value) })}>
+              {st.fpsChoices.map((f) => <option key={f} value={f}>{fpsLabel(f)}</option>)}
+            </select>
+          </Field>
+          <Field label="Limite nas partidas grandes (mais de 8 jogadores)" hint="Com muitas IAs quem pesa é a simulação: menos quadros desenhados sobram processador para ela e a partida fica mais estável.">
+            <select className="select" value={o.bigFps} onChange={(e) => set({ bigFps: Number(e.target.value) })}>
+              <option value={0}>O mesmo das outras partidas</option>
+              {st.fpsChoices.filter((f) => f > 0).map((f) => <option key={f} value={f}>{f} FPS</option>)}
+            </select>
+          </Field>
+          <Field label="Prioridade do jogo" hint="O Windows dá mais tempo de processador ao jogo do que a programas em segundo plano. “Alta” pode deixar o resto do PC lento enquanto joga.">
+            <div className="seg" role="group" aria-label="Prioridade do jogo">
+              {[["normal", "Normal"], ["above_normal", "Acima do normal"], ["high", "Alta"]].map(([k, l]) => <button type="button" key={k} className="btn" aria-pressed={o.priority === k} onClick={() => set({ priority: k })}>{l}</button>)}
+            </div>
+          </Field>
+          <div className="col" style={{ gap: 10 }}>
+            {rows.map((r) => {
+              const off = !!r.win && !win;
+              return (
+                <div key={r.key} className="row" style={{ gap: 12, opacity: off ? 0.5 : 1 }}>
+                  <Icon name={r.icon} size={20} />
+                  <div className="grow">
+                    <div>{r.label} {r.now && <span className="chip ok">ligado</span>}</div>
+                    <div className="small faint">{off ? "Só no Windows." : r.hint}</div>
+                  </div>
+                  <Switch label={r.label} checked={o[r.key]} disabled={off} onChange={(v) => set({ [r.key]: v } as Partial<OptimizeOptions>)} />
+                </div>
+              );
+            })}
+          </div>
+          <Notice kind="info">O limite de FPS vai num mod pequeno montado com o arquivo de interface do seu jogo (vale só no seu PC, não muda a simulação). Os ajustes do Windows valem só para o executável do Supreme Commander 2 e podem ser desfeitos aqui.</Notice>
+          {busy && <TaskProgress task="optimize" label="Montando a otimização…" />}
+          <footer>
+            {st.installed && win && (st.windows.gpu || st.windows.fullscreenFix || st.noThrottle) && (
+              <button type="button" className="btn text" onClick={async () => {
+                const r = await run("optimize", () => api.optimizeUndoWindows(), "Ajustes do Windows desfeitos.");
+                if (r) { setSt(r); set({ gpu: false, fullscreenFix: false, noThrottle: false }); }
+              }}>Desfazer ajustes do Windows</button>
+            )}
+            <span className="grow" />
+            <button type="button" className="btn text" onClick={onClose}>Cancelar</button>
+            <button className="btn primary" disabled={busy}>{st.installed ? "Atualizar otimização" : "Instalar e ativar"}</button>
+          </footer>
+        </form>
+      )}
+    </Modal>
   );
 }

@@ -148,6 +148,12 @@ export interface Project {
 export interface ProjectFile { path: string; size: number; kind: "lua" | "texture" | "model" | "blueprint" | "audio" | "other" }
 
 /** Mod de trapaças para jogar sozinho (montado com os arquivos do jogo). */
+export interface OptimizeOptions { fps: number; bigFps: number; gpu: boolean; fullscreenFix: boolean; priority: string; noThrottle: boolean; largeAddress: boolean }
+export interface OptimizeState {
+  options: OptimizeOptions; installed: boolean; enabled: boolean;
+  windows: { supported: boolean; gpu: boolean; fullscreenFix: boolean };
+  largeAddress: boolean; priority: string; noThrottle: boolean; fpsChoices: number[];
+}
 export interface CheatOptions { mass: boolean; energy: boolean; research: boolean; unlockAll: boolean; god: boolean; buildSpeed: number; aiToo: boolean; menu: boolean; key: string; tab: boolean }
 /** Mod "IA mais esperta". */
 export type AiPersonality = "mixed" | "balanced" | "aggressive" | "defensive" | "raider" | "naval" | "airborne";
@@ -303,6 +309,16 @@ export interface PrefsWriteReport { backup: string | null; changed: number; skip
 // ---------------------------------------------------------------- partida grande
 export type SlotKind = "you" | "ai" | "empty";
 export interface MatchSlot { kind: SlotKind; team: number; faction: number; ai: string; color: number }
-export interface MatchOptions { victory: string; unitCap: number; fog: string; speed: string; noRush: number; prebuilt: boolean; civilians: string }
+export interface MatchOptions {
+  victory: string; unitCap: number; fog: string; speed: string; noRush: number; prebuilt: boolean; civilians: string;
+  /** restrições de unidades do lobby do jogo (EXPERIMENTALS, AIR, ...) */
+  restrictions: string[];
+  /** trapaças do console do jogo liberadas */
+  cheats: boolean;
+  /** o limite de unidades de quem morre passa para os aliados */
+  shareUnitCap: boolean;
+  /** posições: fixas, sorteadas dentro de cada time ou sorteadas entre todos (só o launcher usa) */
+  spawn: "fixed" | "team" | "all";
+}
 export interface BigMatch { map: string; slots: MatchSlot[]; options: MatchOptions }
 export interface MatchMap { path: string; id: string; name: string; armies: string[]; starts: [number, number][]; size: [number, number]; source: string; lobbyRisk: boolean }

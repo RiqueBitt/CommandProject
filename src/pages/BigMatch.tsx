@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Empty, Field, Icon, Notice, Switch, TaskProgress } from "../components/ui";
 import { api } from "../lib/api";
 import { load, useStore } from "../lib/store";
+import { shuffleSpawns } from "../lib/matchSpawn";
 import { assignColors, GAME_COLORS, groupOf, type ColorMode } from "../lib/teamColors";
 import type { MatchMap, MatchOptions, MatchSlot, SlotKind } from "../lib/types";
 
@@ -12,7 +13,27 @@ let mapCache: MatchMap[] | null = null;
 
 const FACTIONS = ["Aleatória", "UEF", "Cybran", "Illuminate"];
 const AI_LEVELS = [{ key: "Easy", label: "Fácil" }, { key: "Normal", label: "Normal" }, { key: "Hard", label: "Difícil" }, { key: "Cheat", label: "Trapaceira" }];
-const DEFAULT_OPTIONS: MatchOptions = { victory: "demoralization", unitCap: 500, fog: "explored", speed: "normal", noRush: 0, prebuilt: false, civilians: "enemy" };
+const DEFAULT_OPTIONS: MatchOptions = {
+  victory: "demoralization", unitCap: 500, fog: "explored", speed: "normal", noRush: 0, prebuilt: false, civilians: "enemy",
+  restrictions: [], cheats: false, shareUnitCap: false, spawn: "fixed",
+};
+/** Restrições de unidades do lobby do jogo (mesmas chaves e efeito). */
+const RESTRICTIONS: { key: string; label: string; hint: string }[] = [
+  { key: "EXPERIMENTALS", label: "Sem experimentais", hint: "Nenhuma unidade nem fábrica experimental." },
+  { key: "AIR", label: "Sem unidades aéreas", hint: "Sem aviões, fábricas aéreas e cápsulas de fuga." },
+  { key: "LAND", label: "Sem unidades terrestres", hint: "Sem tanques, robôs e fábricas terrestres." },
+  { key: "NAVAL", label: "Sem unidades navais", hint: "Sem navios e estaleiros." },
+  { key: "NUKE", label: "Sem bombas nucleares", hint: "Sem silos de mísseis nucleares." },
+  { key: "ARTILLERY", label: "Sem artilharia fixa", hint: "Sem estruturas de artilharia de longo alcance." },
+  { key: "SHIELDS", label: "Sem escudos fixos", hint: "Sem estruturas de escudo." },
+  { key: "INTEL", label: "Sem radar fixo", hint: "Sem estruturas de inteligência (radar, sonar)." },
+  { key: "ADDONS", label: "Sem acessórios de estruturas", hint: "Sem os módulos que se encaixam nas estruturas." },
+  { key: "MASSCONVERT", label: "Sem conversores de massa", hint: "Massa só das jazidas e da recuperação." },
+  { key: "NO_DLC", label: "Sem unidades da expansão", hint: "Só as unidades do jogo original." },
+  { key: "SLOW_RESEARCH", label: "Pesquisa lenta", hint: "Sem estações de pesquisa." },
+  { key: "ALL_RESEARCH_UNITS", label: "Sem pesquisa: unidades liberadas", hint: "Todas as unidades liberadas desde o começo; as melhorias continuam a pesquisar." },
+  { key: "ALL_RESEARCH", label: "Sem pesquisa: tudo liberado", hint: "Todas as unidades e melhorias liberadas desde o começo." },
+];
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -82,7 +103,7 @@ export default function BigMatch() {
   const [onlyBig, setOnlyBig] = useState(false);
   const [path, setPath] = useState<string>(() => { try { return localStorage.getItem("cp-bigmatch-map") ?? ""; } catch { return ""; } });
   const [slots, setSlots] = useState<MatchSlot[]>([]);
-  const [options, setOptions] = useState<MatchOptions>(() => read("cp-bigmatch-options", DEFAULT_OPTIONS));
+  const [options, setOptions] = useState<MatchOptions>(() => ({ ...DEFAULT_OPTIONS, ...read<Partial<MatchOptions>>("cp-bigmatch-options", {}) }));
   const [teamCount, setTeamCount] = useState(2);
   const [splitBy, setSplitBy] = useState<"side" | "order">("side");
   const [colorMode, setColorMode] = useState<ColorMode>(() => { try { return (localStorage.getItem("cp-bigmatch-colors2") as ColorMode) || "player"; } catch { return "player"; } });
@@ -153,7 +174,9 @@ export default function BigMatch() {
 
   const play = async () => {
     if (!map || error) return;
-    const r = await run("launch", () => api.launchBigMatch({ map: map.path, slots: slots.map((x, i) => ({ ...x, color: colors[i] })), options }), `Abrindo o jogo: ${sum.text} em ${map.name}.`);
+    // posições sorteadas: cada vaga leva junto a cor dela
+    const placed = shuffleSpawns(slots.map((x, i) => ({ ...x, color: colors[i] })), options.spawn);
+    const r = await run("launch", () => api.launchBigMatch({ map: map.path, slots: placed, options }), `Abrindo o jogo: ${sum.text} em ${map.name}${options.spawn !== "fixed" ? " (posições sorteadas)" : ""}.`);
     if (r) await refresh();
   };
 
@@ -303,12 +326,21 @@ export default function BigMatch() {
                   </Field>
                   <Field label="Limite de unidades por jogador" hint={sum.players > 12 && options.unitCap > 500 ? "Com muitos jogadores, um limite alto pesa no computador." : undefined}>
                     <select className="select" value={options.unitCap} onChange={(e) => setOpt({ unitCap: Number(e.target.value) })}>
-                      {[100, 150, 250, 350, 500, 750, 1000].map((n) => <option key={n} value={n}>{n}</option>)}
+                      {[100, 150, 250, 350, 500, 750, 1000, 1500, 2000].map((n) => <option key={n} value={n}>{n}{n === 500 ? " (padrão)" : ""}</option>)}
                     </select>
                   </Field>
-                  <Field label="Névoa de guerra">
+                  <Field label="Visão do mapa (névoa de guerra)" hint={options.fog === "none" ? "Todos veem o mapa e todas as unidades o tempo todo." : options.fog === "explored" ? "O terreno aparece; as unidades inimigas só com visão ou radar." : "Terreno e unidades só aparecem depois de explorar."}>
                     <select className="select" value={options.fog} onChange={(e) => setOpt({ fog: e.target.value })}>
-                      <option value="explored">Explorada</option><option value="unexplored">Inexplorada</option><option value="none">Sem névoa</option>
+                      <option value="explored">Terreno visível (padrão)</option>
+                      <option value="unexplored">Escondido até explorar</option>
+                      <option value="none">Visão total (sem névoa)</option>
+                    </select>
+                  </Field>
+                  <Field label="Posições iniciais">
+                    <select className="select" value={options.spawn} onChange={(e) => setOpt({ spawn: e.target.value as MatchOptions["spawn"] })}>
+                      <option value="fixed">Fixas, como na prévia</option>
+                      <option value="team">Sorteadas dentro de cada time</option>
+                      <option value="all">Sorteadas entre todas as bases</option>
                     </select>
                   </Field>
                   <Field label="Velocidade">
@@ -327,6 +359,33 @@ export default function BigMatch() {
                     </select>
                   </Field>
                   <label className="row" style={{ gap: 10 }}><Switch label="Começar com a base montada" checked={options.prebuilt} onChange={(v) => setOpt({ prebuilt: v })} /> Começar com a base montada</label>
+                  <label className="row" style={{ gap: 10 }} title="Quando um jogador é derrotado, o limite de unidades dele passa para os aliados."><Switch label="Dividir o limite de unidades com o time" checked={options.shareUnitCap} onChange={(v) => setOpt({ shareUnitCap: v })} /> Limite de quem morre passa para o time</label>
+                  <label className="row" style={{ gap: 10 }} title="Libera os comandos de trapaça do console do próprio jogo. O mod de Trapaças do launcher funciona com ou sem isto."><Switch label="Trapaças do console do jogo" checked={options.cheats} onChange={(v) => setOpt({ cheats: v })} /> Trapaças do console do jogo</label>
+                </div>
+                <div className="bm-restrict">
+                  <div className="row" style={{ gap: 8 }}>
+                    <span className="label grow">Restrições de unidades {options.restrictions.length > 0 && <span className="chip">{options.restrictions.length}</span>}</span>
+                    {options.restrictions.length > 0 && <button type="button" className="btn sm text" onClick={() => setOpt({ restrictions: [] })}>Limpar</button>}
+                  </div>
+                  <div className="bm-restrict-grid">
+                    {RESTRICTIONS.map((r) => {
+                      const on = options.restrictions.includes(r.key);
+                      return (
+                        <label key={r.key} className={`check ${on ? "on" : ""}`} title={r.hint}>
+                          <input type="checkbox" checked={on} onChange={(e) => {
+                            let next = options.restrictions.filter((k) => k !== r.key);
+                            if (e.target.checked) {
+                              next.push(r.key);
+                              // as duas "sem pesquisa" não vão juntas
+                              if (r.key === "ALL_RESEARCH") next = next.filter((k) => k !== "ALL_RESEARCH_UNITS");
+                              if (r.key === "ALL_RESEARCH_UNITS") next = next.filter((k) => k !== "ALL_RESEARCH");
+                            }
+                            setOpt({ restrictions: next });
+                          }} /> {r.label}
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               </section>
 

@@ -49,6 +49,7 @@ jobs:
           python -m pip install --quiet lupa
           python tools/test_ai_commander.py
           python tools/test_bigmatch.py
+          python tools/test_optimize.py
       - name: Interface
         run: |
           npm ci
@@ -59,6 +60,8 @@ jobs:
         run: node --experimental-strip-types tools/test_texgen.ts
       - name: Cores da Partida grande (times nunca com a mesma cor)
         run: node --experimental-strip-types tools/test_teamcolors.ts
+      - name: Posições sorteadas da Partida grande
+        run: node --experimental-strip-types tools/test_matchspawn.ts
 
   shaders-dx9:
     needs: test

@@ -27,6 +27,7 @@ pub mod maptk;
 pub mod memory;
 pub mod perf;
 pub mod menu_theme;
+pub mod optimize;
 pub mod modelgen;
 pub mod net;
 pub mod profile;

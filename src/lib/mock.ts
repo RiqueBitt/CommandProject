@@ -791,6 +791,14 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     case "perf_profile_delete": { const db = perfDb(); db.profiles = db.profiles.filter((x) => x.id !== a.id); return r(undefined); }
     case "perf_dumps_delete": { const db = perfDb(); const names = a.names as string[]; db.dumps = db.dumps.filter((d) => !names.includes(d.name)); return r(names.length); }
     case "perf_set_priority": { perfDb().priority = String(a.level); return r(String(a.level)); }
+    case "optimize_status": return r(optDb());
+    case "build_optimize": {
+      const o = a.opts as T.OptimizeOptions, db = optDb();
+      await progress("optimize", ["Montando o mod de otimização", "Pronto"]);
+      Object.assign(db, { options: o, installed: true, enabled: true, windows: { supported: true, gpu: o.gpu, fullscreenFix: o.fullscreenFix }, largeAddress: o.largeAddress || db.largeAddress, priority: o.priority, noThrottle: o.noThrottle });
+      return r(db);
+    }
+    case "optimize_undo_windows": { const db = optDb(); db.windows = { supported: true, gpu: false, fullscreenFix: false }; db.noThrottle = false; return r(db); }
     default:
       throw new Error(`mock: comando não simulado: ${cmd}`);
   }
@@ -878,3 +886,14 @@ const mockBackups: T.BackupEntry[] = [
 const mockTrash: T.TrashItem[] = [
   { entry: "mapa-velho-261001-20261012", id: "mapa-velho-261001", name: "Mapa velho", kind: "map", deletedAt: "2026-10-12T18:00:00Z", size: 1_200_000 },
 ];
+
+// ------------------------------------------------------------------ mod de otimização simulado
+let optState: T.OptimizeState | null = null;
+function optDb(): T.OptimizeState {
+  optState ??= {
+    options: { fps: 0, bigFps: 60, gpu: true, fullscreenFix: true, priority: "above_normal", noThrottle: true, largeAddress: true },
+    installed: false, enabled: false, windows: { supported: true, gpu: false, fullscreenFix: false },
+    largeAddress: true, priority: "normal", noThrottle: false, fpsChoices: [0, 30, 45, 60, 75, 90, 120, 144, 165, 240],
+  };
+  return optState;
+}

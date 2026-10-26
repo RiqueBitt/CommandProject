@@ -17,6 +17,20 @@ tela tem um **monitor** para você medir antes e depois de cada mudança, sempre
 | **Conflitos entre mods** | nada; mostra arquivos disputados e quem vence | mudar a ordem na biblioteca |
 | **Versão do jogo** | nada; lê a versão do executável e compara com a final (1.26) | — |
 
+## Mod de otimização (Biblioteca → Otimização, ou Desempenho → Mod de otimização)
+
+Um mod pequeno, montado com o `uimain.lua` do seu jogo, mais ajustes do Windows só para o
+executável do SC2. Não remove nada do jogo (unidades, efeitos e texturas continuam iguais).
+
+| Ajuste | O que muda | Como desfazer |
+|---|---|---|
+| **Limite de FPS** | no começo de cada partida, `sc_FrameTimeClamp` (tempo mínimo entre quadros, em ms) recebe o limite escolhido. O padrão do jogo é 10 ms = 100 FPS (valor lido do executável); 144 FPS = 7 ms, 60 FPS = 17 ms | escolher "100 FPS (o do jogo)" ou desligar o mod |
+| **Limite nas partidas grandes** | com mais de 8 exércitos, troca para um limite menor (padrão 60 FPS): sobra processador para a simulação | escolher "o mesmo das outras partidas" |
+| **Placa de vídeo dedicada** | `HKCU\Software\Microsoft\DirectX\UserGpuPreferences`, valor = caminho do `.exe`, `GpuPreference=2;` (o mesmo da tela Gráficos do Windows) | *Desfazer ajustes do Windows* |
+| **Sem "otimizações de tela cheia"** | `HKCU\...\AppCompatFlags\Layers`, flag `DISABLEDXMAXIMIZEDWINDOWEDMODE` (outras flags do usuário ficam) | *Desfazer ajustes do Windows* |
+| **Sem economia de energia** | `SetProcessInformation(ProcessPowerThrottling)` no processo do jogo depois que ele abre | *Desfazer ajustes do Windows* |
+| **Prioridade e modo 4 GB** | as mesmas ferramentas da tabela acima, ligadas pelo mod | escolher Normal / 2 GB |
+
 ## O que ele **não** faz, de propósito
 
 - Não aplica parâmetros de inicialização inventados.

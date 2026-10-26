@@ -6,6 +6,7 @@ import { api, confirmDialog } from "../lib/api";
 import { errorText, useStore } from "../lib/store";
 import type { ConflictReport, CrashDump, PerfReport, PrefValue, ProcessStats } from "../lib/types";
 import { MemoryLimit } from "./Settings";
+import { OptimizeModal } from "../components/dialogs";
 
 const PRIORITY: Record<string, { label: string; text: string }> = {
   normal: { label: "Normal", text: "Como o Windows decide. Recomendado." },
@@ -22,6 +23,7 @@ export default function Performance() {
   const { toast, go } = useStore.getState();
   const [rep, setRep] = useState<PerfReport | null | undefined>(undefined);
   const [conf, setConf] = useState<ConflictReport | null>(null);
+  const [opt, setOpt] = useState(false);
   const reload = async () => {
     try { setRep(await api.perfReport()); } catch (e) { setRep(null); toast("error", errorText(e)); }
   };
@@ -61,6 +63,7 @@ export default function Performance() {
           <section className="card pad col">
             <div className="card-title"><Icon name="auto_awesome" /><h3>Mais melhorias</h3></div>
             <div className="perf-links">
+              <button className="perf-link" onClick={() => setOpt(true)}><Icon name="speed" size={26} /><b>Mod de otimização</b><span>Limite de FPS (até 240), placa de vídeo dedicada e ajustes do Windows para o jogo. Não remove nada.</span></button>
               <button className="perf-link" onClick={() => go("studio")}><Icon name="hd" size={26} /><b>Texturas HD</b><span>Gera um mod com texturas maiores e mais nítidas. Usa mais memória de vídeo.</span></button>
               <button className="perf-link" onClick={() => go("studio")}><Icon name="auto_fix_high" size={26} /><b>Shaders (ReShade)</b><span>Cor e nitidez melhores. Custa um pouco de desempenho; dá para desligar.</span></button>
               <button className="perf-link" onClick={() => go("library")}><Icon name="extension" size={26} /><b>Mods ligados ({rep.modsEnabled})</b><span>Menos mods = carregamento mais rápido e menos chance de conflito.</span></button>
@@ -68,6 +71,7 @@ export default function Performance() {
           </section>
         </>
       )}
+      {opt && <OptimizeModal onClose={() => { setOpt(false); void reload(); }} />}
     </div>
   );
 }

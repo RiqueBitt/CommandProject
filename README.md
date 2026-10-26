@@ -101,8 +101,11 @@ disponível em Sistema → Visual.
   Até um time por base (24 bases, até 24 times) e **32 cores de exército** (as 10 do jogo e mais 22
   só nas partidas grandes): **cada jogador com uma cor diferente, mesmo no mesmo time** (padrão), ou
   uma cor por time; cores já usadas por outra base aparecem bloqueadas na escolha à mão.
-  Regras: tipo de vitória, limite de unidades, névoa, velocidade, tempo sem ataques, civis e base
-  montada. O lobby do jogo é em Flash e só tem 8 vagas, então o launcher abre o jogo direto na
+  Regras: todas as da escaramuça normal — tipo de vitória, limite de unidades (até 2000), visão do
+  mapa (inclusive **visão total, sem névoa**), velocidade, tempo sem ataques, civis, base montada,
+  posições fixas ou sorteadas (dentro de cada time ou entre todos), limite de quem morre passando
+  para o time, trapaças do console do jogo e as **14 restrições de unidades** do lobby (sem aviões,
+  sem nucleares, sem experimentais, sem pesquisa com tudo liberado…). O lobby do jogo é em Flash e só tem 8 vagas, então o launcher abre o jogo direto na
   partida (`/map` + `/cpmatch`); o mod que faz isso é montado na hora com o `SinglePlayerLaunch.lua`
   e o `GameSessionManager.lua` do seu jogo; ele só fica ligado nas partidas grandes (o Jogar comum
   o desliga), então o lobby do jogo continua igual.
@@ -235,6 +238,10 @@ disponível em Sistema → Visual.
 - Monitor de memória/CPU do jogo, prioridade do processo, perfis das opções gráficas do jogo com
   backup, análise dos relatórios de travamento (módulo culpado e dica), conflitos de mods e versão
   do jogo. Opcional, reversível e sem promessa de FPS: você mede antes e depois.
+- **Mod de otimização**: limite de FPS escolhido (o jogo vem travado em 100; dá para subir até 240
+  em monitores rápidos) e um limite menor nas partidas grandes para sobrar processador para a
+  simulação; placa de vídeo dedicada, sem as "otimizações de tela cheia" e sem economia de energia
+  do Windows para o jogo; prioridade e modo 4 GB. Não remove nada do jogo e tudo se desfaz.
 
 **Memória do jogo (2 a 4 GB)**
 - O SC2 é um programa de 32 bits: sozinho usa até 2 GB, e o máximo possível para ele é 4 GB.

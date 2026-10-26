@@ -3,7 +3,8 @@
 -- started by the launcher with  /map <scenario> /cpmatch <spec>  skips it and takes every start
 -- position of the map, each one human, AI or empty, on any team.
 --   spec = <options>|<slot 1>|<slot 2>|...
---   options = key=value;key=value   (Victory, UnitCap, FogOfWar, GameSpeed, NoRushOption, ...)
+--   options = key=value;key=value   (Victory, UnitCap, FogOfWar, GameSpeed, NoRushOption, ...;
+--             RestrictedCategories=AIR,NUKE is a list, DoNotShareUnitCap=true|false a boolean)
 --   slot = kind,team,faction,ai,color   kind H (you), A (AI) or X (empty); team 1 = alone, 2+ = allies;
 --                                   faction 0 = random, 1 UEF, 2 Cybran, 3 Illuminate;
 --                                   color = index in GameColors (0-based, as the engine reads it)
@@ -55,6 +56,17 @@ function CPBigMatchSession(mapName, spec)
         local eq = string.find(kv, '=', 1, true)
         if eq and eq > 1 then options[string.sub(kv, 1, eq - 1)] = string.sub(kv, eq + 1) end
     end
+    -- values that are not plain text for the game: the unit restrictions are a list and the
+    -- unit cap sharing is read as true/false by the simulation
+    if type(options.RestrictedCategories) == 'string' then
+        local list = {}
+        for _, key in CPSplit(options.RestrictedCategories, ',') do
+            if key ~= '' then table.insert(list, key) end
+        end
+        options.RestrictedCategories = list
+    end
+    if options.DoNotShareUnitCap == 'false' then options.DoNotShareUnitCap = false
+    elseif options.DoNotShareUnitCap == 'true' then options.DoNotShareUnitCap = true end
     scenario.Options = options
 
     local sessionInfo = {}

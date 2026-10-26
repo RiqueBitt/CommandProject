@@ -24,7 +24,7 @@ function GetRandomName(faction, aiKey) return 'IA' .. faction .. ' (' .. tostrin
 function GetRandomFaction() return 2 end
 function VerifyScenarioConfiguration(s) if not s.Configurations then error('sem configuração') end end
 function FixupMapName(m) return m end
-local defaultOptions = { FogOfWar = 'explored', UnitCap = '500', Victory = 'sandbox', CheatsEnabled = 'true', GameSpeed = 'normal' }
+local defaultOptions = { FogOfWar = 'explored', UnitCap = '500', Victory = 'sandbox', CheatsEnabled = 'true', GameSpeed = 'normal', DoNotShareUnitCap = true }
 function StartCommandLineSession(mapName, isPerfTest)
     World.normal = true
     LaunchSinglePlayerSession({ normal = true })
@@ -127,6 +127,15 @@ def run(source: str, label: str, real: bool):
     check(g.World.prefs.LoadingFaction == 1, f"{label}: tela de carregamento com a sua facção")
     check(len(list(info.scenarioMods.values())) == 1 and list(info.scenarioMods.values())[0].uid == "dlc", f"{label}: partida com o mod oficial da expansão, como o lobby do jogo")
     check(o.PreBuiltUnits == "Off" and o.TeamSpawn == "fixed" and o.AllowObservers is False, f"{label}: opções iguais às do lobby do jogo")
+    check(len(list(o.RestrictedCategories.values())) == 0 and o.DoNotShareUnitCap is True, f"{label}: sem restrições e limite que não passa para o time")
+
+    # restrições, trapaças do jogo, limite dividido e base montada (as duas grafias)
+    g, info = session("Victory=sandbox;CheatsEnabled=true;DoNotShareUnitCap=false;PreBuiltUnits=On;PrebuiltUnits=On;"
+                      "RestrictedCategories=AIR,NUKE,ALL_RESEARCH|H,1,1,,|A,1,0,Normal," + "|X" * 22)
+    o = info.scenarioInfo.Options
+    check(list(o.RestrictedCategories.values()) == ["AIR", "NUKE", "ALL_RESEARCH"], f"{label}: restrições viram uma lista ({list(o.RestrictedCategories.values())})")
+    check(o.DoNotShareUnitCap is False and o.CheatsEnabled == "true", f"{label}: limite dividido e trapaças do jogo")
+    check(o.PreBuiltUnits == "On" and o.PrebuiltUnits == "On", f"{label}: base montada nas duas grafias")
 
     # vagas vazias e você no meio
     g, info = session("Victory=demoralization|A,1,0,Easy|X|H,1,2,|X|A,1,0,Normal" + "|X" * 19)

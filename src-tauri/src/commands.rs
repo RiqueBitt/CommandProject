@@ -165,6 +165,7 @@ pub async fn save_settings(state: State<'_, AppState>, settings: Settings) -> R<
         settings.keep_large_address = ws.settings.keep_large_address;
         settings.memory_limit_mb = ws.settings.memory_limit_mb;
         settings.game_priority = ws.settings.game_priority.clone();
+        settings.game_no_throttle = ws.settings.game_no_throttle;
         ws.settings = settings;
         ws.save_settings()?;
         ws.refresh_game();
@@ -428,7 +429,7 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
     })
     .await
     .ok();
-    let (plan, applied, restore, memory_mb, priority) = with_ws(&state.ws, move |ws| {
+    let (plan, applied, restore, memory_mb, priority, no_throttle) = with_ws(&state.ws, move |ws| {
         if let Err(e) = ws.ensure_large_address() {
             eprintln!("modo 4 GB não reaplicado: {e}");
         }
@@ -495,7 +496,7 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             Some(p) => p,
             None => ws.launch_plan()?,
         };
-        Ok((plan, applied, ws.settings.restore_on_exit, ws.settings.memory_mb(), ws.settings.game_priority.clone()))
+        Ok((plan, applied, ws.settings.restore_on_exit, ws.settings.memory_mb(), ws.settings.game_priority.clone(), ws.settings.game_no_throttle))
     })
     .await?;
     match &plan {
@@ -547,6 +548,18 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
                         return;
                     }
                     Err(_) => return,
+                }
+            }
+        });
+    }
+    if no_throttle {
+        // mod de otimização: o Windows não economiza energia no processo do jogo
+        tauri::async_runtime::spawn(async move {
+            for _ in 0..120 {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                match tauri::async_runtime::spawn_blocking(cp_core::perf::set_game_no_throttle).await {
+                    Ok(Err(cp_core::Error::Other(m))) if m.contains("não está aberto") => continue,
+                    _ => return,
                 }
             }
         });
@@ -1321,6 +1334,115 @@ pub async fn build_cheats(state: State<'_, AppState>, opts: cp_core::cheats::Che
         let m = ws.import_mod(&archive, &import, enable)?;
         let _ = std::fs::remove_file(&archive);
         Ok(m)
+    })
+    .await
+}
+
+/// Estado do mod de otimização: opções salvas, se está instalado e os ajustes do Windows.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizeState {
+    pub options: cp_core::optimize::OptimizeOptions,
+    pub installed: bool,
+    pub enabled: bool,
+    pub windows: cp_core::optimize::WindowsTweaks,
+    pub large_address: bool,
+    pub priority: String,
+    pub no_throttle: bool,
+    pub fps_choices: Vec<u32>,
+}
+
+const OPT_ID: &str = "cp-otimizacao";
+
+fn game_exe(ws: &cp_core::workspace::Workspace) -> Option<std::path::PathBuf> {
+    ws.game().ok().and_then(|g| g.exe.clone())
+}
+
+fn optimize_options_path(ws: &cp_core::workspace::Workspace) -> std::path::PathBuf {
+    ws.data_dir.join("optimize.json")
+}
+
+fn optimize_state(ws: &cp_core::workspace::Workspace) -> OptimizeState {
+    let options: cp_core::optimize::OptimizeOptions = std::fs::read(optimize_options_path(ws))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    let installed = ws.mods().map(|l| l.iter().any(|m| m.manifest.id == OPT_ID)).unwrap_or(false);
+    let enabled = ws.profiles.active().mods.iter().any(|e| e.id == OPT_ID && e.enabled);
+    let windows = game_exe(ws).map(|e| cp_core::optimize::windows_status(&e)).unwrap_or_default();
+    OptimizeState {
+        options,
+        installed,
+        enabled,
+        windows,
+        large_address: ws.settings.keep_large_address,
+        priority: ws.settings.game_priority.clone(),
+        no_throttle: ws.settings.game_no_throttle,
+        fps_choices: cp_core::optimize::FPS_CHOICES.to_vec(),
+    }
+}
+
+#[tauri::command]
+pub async fn optimize_status(state: State<'_, AppState>) -> R<OptimizeState> {
+    with_ws(&state.ws, |ws| Ok(optimize_state(ws))).await
+}
+
+/// Mod de otimização: monta o .scd (limite de FPS), aplica os ajustes do Windows e guarda
+/// prioridade, energia e modo 4 GB nas configurações (valem ao abrir o jogo).
+#[tauri::command]
+pub async fn build_optimize(state: State<'_, AppState>, opts: cp_core::optimize::OptimizeOptions, enable: bool) -> R<OptimizeState> {
+    with_ws(&state.ws, move |ws| {
+        let mut o = opts;
+        if !["normal", "above_normal", "high"].contains(&o.priority.as_str()) {
+            o.priority = "normal".into();
+        }
+        let dir = ws.data_dir.join("cache").join("optimize");
+        std::fs::create_dir_all(&dir).map_err(|e| cp_core::Error::io(&dir, e))?;
+        let archive = cp_core::optimize::build(&ws.stock_sources()?, &o, &dir.join("zz_cp_otimizacao.scd"))?;
+        let import = ImportOptions {
+            id: Some(OPT_ID.into()),
+            name: Some("Otimização".into()),
+            category: Some(Category::Fixes),
+            description: Some(cp_core::optimize::describe(&o)),
+            replace: true,
+            move_source: true,
+            ..Default::default()
+        };
+        ws.import_mod(&archive, &import, enable)?;
+        let _ = std::fs::remove_file(&archive);
+        if let Some(exe) = game_exe(ws) {
+            cp_core::optimize::apply_windows(&exe, o.gpu, o.fullscreen_fix)?;
+        }
+        ws.settings.game_priority = o.priority.clone();
+        ws.settings.game_no_throttle = o.no_throttle;
+        if o.large_address && !ws.settings.keep_large_address {
+            // o mesmo que ligar o modo 4 GB no Otimizador (com cópia do executável)
+            match ws.laa().and_then(|l| l.enable()) {
+                Ok(_) => {
+                    ws.settings.keep_large_address = true;
+                    ws.settings.memory_limit_mb = Some(cp_core::memory::MAX_MB);
+                }
+                Err(e) => eprintln!("modo 4 GB não aplicado agora: {e}"),
+            }
+        }
+        ws.save_settings()?;
+        let bytes = serde_json::to_vec_pretty(&o).map_err(|e| cp_core::Error::Other(e.to_string()))?;
+        cp_core::fsutil::write_atomic(&optimize_options_path(ws), &bytes)?;
+        Ok(optimize_state(ws))
+    })
+    .await
+}
+
+/// Desfaz os ajustes do Windows do mod de otimização (o mod continua na biblioteca).
+#[tauri::command]
+pub async fn optimize_undo_windows(state: State<'_, AppState>) -> R<OptimizeState> {
+    with_ws(&state.ws, move |ws| {
+        if let Some(exe) = game_exe(ws) {
+            cp_core::optimize::apply_windows(&exe, false, false)?;
+        }
+        ws.settings.game_no_throttle = false;
+        ws.save_settings()?;
+        Ok(optimize_state(ws))
     })
     .await
 }

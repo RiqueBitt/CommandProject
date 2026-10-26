@@ -47,6 +47,8 @@ pub struct Settings {
     pub showcase_team_color: Option<String>,
     /// Prioridade do processo do jogo ao abrir pelo launcher: `normal`, `above_normal` ou `high`.
     pub game_priority: String,
+    /// Ao abrir pelo launcher, o Windows não põe o jogo em modo de economia de energia.
+    pub game_no_throttle: bool,
     /// Modo local: nada de rede (hub de mods, servidor da comunidade e busca de atualizações).
     pub offline: bool,
     /// Cópia de segurança automática dos projetos a cada N dias (0 = desligada).
@@ -78,6 +80,7 @@ impl Default for Settings {
             memory_limit_mb: None,
             showcase_team_color: None,
             game_priority: "normal".into(),
+            game_no_throttle: false,
             offline: false,
             auto_backup_days: 7,
             ui_prefs: Default::default(),

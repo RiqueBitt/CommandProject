@@ -20,7 +20,7 @@ const ENTRY: &str = "function StartCommandLineSession(mapName, isPerfTest)\n";
 const HOOK: &str = "\tif CPBigMatchStart and CPBigMatchStart(mapName) then return end -- CommandProject big match\n";
 
 /// Versão do código do mod: quando muda, o launcher monta o mod de novo.
-pub const MOD_VERSION: &str = "1.6.0";
+pub const MOD_VERSION: &str = "1.7.0";
 /// Cores de exército na partida grande: as 10 do jogo e mais 14 (o mod acrescenta só com `/cpmatch`).
 pub const COLORS: i32 = 32;
 /// Mapas com mais de 8 bases são gravados com este tipo: o lobby do jogo (8 posições, que trava com
@@ -80,7 +80,19 @@ pub struct MatchOptions {
     pub prebuilt: bool,
     /// civis do mapa: `enemy`, `neutral` ou `removed`
     pub civilians: String,
+    /// restrições de unidades do lobby do jogo (chaves de [`RESTRICTIONS`])
+    pub restrictions: Vec<String>,
+    /// trapaças do console do jogo liberadas (`CheatsEnabled`)
+    pub cheats: bool,
+    /// quando um jogador morre, o limite de unidades dele passa para os aliados
+    pub share_unit_cap: bool,
 }
+
+/// Restrições de unidades do lobby do jogo (`/lua/ui/lobby/restrictedUnitsData.lua`), na ordem da tela.
+pub const RESTRICTIONS: &[&str] = &[
+    "EXPERIMENTALS", "AIR", "LAND", "NAVAL", "NUKE", "ARTILLERY", "SHIELDS", "INTEL", "ADDONS", "MASSCONVERT",
+    "NO_DLC", "SLOW_RESEARCH", "ALL_RESEARCH_UNITS", "ALL_RESEARCH",
+];
 
 impl Default for MatchOptions {
     fn default() -> Self {
@@ -92,6 +104,9 @@ impl Default for MatchOptions {
             no_rush: 0,
             prebuilt: false,
             civilians: "enemy".into(),
+            restrictions: Vec::new(),
+            cheats: false,
+            share_unit_cap: false,
         }
     }
 }
@@ -138,16 +153,32 @@ pub fn encode(m: &BigMatch) -> Result<String> {
     if teams.len() == 1 && !teams.contains(&0) {
         return Err(Error::Other("todos estão no mesmo time: separe em pelo menos dois".into()));
     }
+    let mut restrictions: Vec<&str> = Vec::new();
+    for r in &o.restrictions {
+        let key = pick(r, RESTRICTIONS, "restrição")?;
+        if !restrictions.contains(&key) {
+            restrictions.push(key);
+        }
+    }
+    // "sem pesquisa" tem duas versões: fica a mais ampla (tudo liberado)
+    if restrictions.contains(&"ALL_RESEARCH") {
+        restrictions.retain(|r| *r != "ALL_RESEARCH_UNITS");
+    }
+    let prebuilt = if o.prebuilt { "On" } else { "Off" };
     let mut out = format!(
-        "Victory={};UnitCap={};FogOfWar={};GameSpeed={};NoRushOption={};PreBuiltUnits={};CivilianAlliance={}",
+        "Victory={};UnitCap={};FogOfWar={};GameSpeed={};NoRushOption={};PreBuiltUnits={prebuilt};PrebuiltUnits={prebuilt};CivilianAlliance={};CheatsEnabled={};DoNotShareUnitCap={}",
         pick(&o.victory, &["demoralization", "domination", "sandbox"], "tipo de vitória")?,
         o.unit_cap.clamp(50, 5000),
         pick(&o.fog, &["explored", "unexplored", "none"], "névoa")?,
         pick(&o.speed, &["normal", "fast", "adjustable"], "velocidade")?,
         if o.no_rush == 0 { "Off".to_string() } else { o.no_rush.min(60).to_string() },
-        if o.prebuilt { "On" } else { "Off" },
         pick(&o.civilians, &["enemy", "neutral", "removed"], "civis")?,
+        o.cheats,
+        !o.share_unit_cap,
     );
+    if !restrictions.is_empty() {
+        out.push_str(&format!(";RestrictedCategories={}", restrictions.join(",")));
+    }
     for s in &m.slots {
         // no jogo o time 1 é "sozinho" e os times de verdade começam no 2
         let team = if s.team == 0 { 1 } else { s.team.min(MAX_SLOTS as u32) + 1 };
@@ -420,6 +451,17 @@ mod tests {
         };
         let s = encode(&m).unwrap();
         assert!(s.starts_with("Victory=demoralization;UnitCap=500;FogOfWar=explored;GameSpeed=normal;NoRushOption=5;"));
+        // a base montada vai nas duas grafias (o jogo lê uma na tela e outra na simulação)
+        assert!(s.contains(";PreBuiltUnits=Off;PrebuiltUnits=Off;") && s.contains(";CheatsEnabled=false;DoNotShareUnitCap=true|"), "{s}");
+        assert!(!s.contains("RestrictedCategories"));
+        let mut r = m.clone();
+        r.options.restrictions = vec!["air".into(), "NUKE".into(), "AIR".into(), "ALL_RESEARCH_UNITS".into(), "ALL_RESEARCH".into()];
+        r.options.cheats = true;
+        r.options.share_unit_cap = true;
+        let rs = encode(&r).unwrap();
+        assert!(rs.contains(";CheatsEnabled=true;DoNotShareUnitCap=false;RestrictedCategories=AIR,NUKE,ALL_RESEARCH|"), "{rs}");
+        r.options.restrictions = vec!["NO_SUCH".into()];
+        assert!(encode(&r).is_err());
         assert!(s.ends_with("|H,2,0,,|A,2,0,Normal,|A,3,0,Normal,|X|A,3,0,Normal,"), "{s}");
         assert!(!s.contains(' '));
         let args = launch_args(&m).unwrap();

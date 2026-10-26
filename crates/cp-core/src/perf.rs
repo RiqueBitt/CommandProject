@@ -523,6 +523,47 @@ pub fn set_game_priority(level: &str) -> Result<Option<u32>> {
     Ok(Some(pid))
 }
 
+/// Tira o jogo do modo de economia de energia do Windows (EcoQoS / "power throttling"): o Windows
+/// não reduz a velocidade do processo quando ele parece estar em segundo plano.
+#[cfg(windows)]
+pub fn set_game_no_throttle() -> Result<Option<u32>> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, ProcessPowerThrottling, SetProcessInformation, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE, PROCESS_SET_INFORMATION,
+    };
+    let Some(pid) = game_pid() else { return Err(Error::Other("o jogo não está aberto".into())) };
+    // controle ligado e estado desligado = "nunca economizar" para este processo
+    let state = PROCESS_POWER_THROTTLING_STATE {
+        Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+        StateMask: 0,
+    };
+    // SAFETY: handle verificado e fechado logo depois; a estrutura vive até o fim da chamada.
+    unsafe {
+        let h = OpenProcess(PROCESS_SET_INFORMATION, 0, pid);
+        if h.is_null() {
+            return Err(Error::Other("sem permissão para mudar o modo de energia do jogo".into()));
+        }
+        let ok = SetProcessInformation(
+            h,
+            ProcessPowerThrottling,
+            &state as *const PROCESS_POWER_THROTTLING_STATE as *const core::ffi::c_void,
+            std::mem::size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
+        ) != 0;
+        CloseHandle(h);
+        if !ok {
+            return Err(Error::Other("o Windows recusou o modo de energia".into()));
+        }
+    }
+    Ok(Some(pid))
+}
+
+#[cfg(not(windows))]
+pub fn set_game_no_throttle() -> Result<Option<u32>> {
+    Err(Error::Other("o modo de energia só é aplicado no Windows".into()))
+}
+
 #[cfg(not(windows))]
 pub fn set_game_priority(level: &str) -> Result<Option<u32>> {
     if level == "normal" {

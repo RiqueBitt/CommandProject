@@ -179,6 +179,9 @@ export const api = {
   aiMemory: () => call<T.AiMemoryReport>("ai_memory"),
   buildAi: (opts: T.AiOptions, enable = true) => call<T.AiInstall>("build_ai", { opts, enable }),
   buildCheats: (opts: T.CheatOptions, enable = true) => call<T.Manifest>("build_cheats", { opts, enable }),
+  optimizeStatus: () => call<T.OptimizeState>("optimize_status"),
+  buildOptimize: (opts: T.OptimizeOptions, enable = true) => call<T.OptimizeState>("build_optimize", { opts, enable }),
+  optimizeUndoWindows: () => call<T.OptimizeState>("optimize_undo_windows"),
   buildUiSkin: (opts: T.UiSkinOptions, enable = true) => call<T.Manifest>("build_ui_skin", { opts, enable }),
 
   enhanceGroups: () => call<T.EnhanceGroup[]>("enhance_groups"),

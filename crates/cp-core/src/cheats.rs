@@ -195,12 +195,17 @@ pub fn patch_user_sync(text: &str) -> Result<String> {
 }
 
 fn game_text(sources: &[PathBuf], path: &str) -> Result<String> {
+    game_text_for(sources, path, "as trapaças")
+}
+
+/// Texto de um arquivo Lua do jogo (de `uncompiled_lua.scd`); `what` entra na mensagem de erro.
+pub fn game_text_for(sources: &[PathBuf], path: &str, what: &str) -> Result<String> {
     let name = path.rsplit('/').next().unwrap_or(path);
     let raw = read_game_file(sources, &format!("/uncompiled{path}")).map_err(|_| {
-        Error::Other(format!("o jogo não tem o {name} em texto (uncompiled_lua.scd): não dá para montar as trapaças"))
+        Error::Other(format!("o jogo não tem o {name} em texto (uncompiled_lua.scd): não dá para montar {what}"))
     })?;
     if crate::lua::inspect(&raw).compiled {
-        return Err(Error::Other(format!("o {name} do jogo está compilado: não dá para montar as trapaças")));
+        return Err(Error::Other(format!("o {name} do jogo está compilado: não dá para montar {what}")));
     }
     Ok(String::from_utf8_lossy(&raw).replace("\r\n", "\n"))
 }
