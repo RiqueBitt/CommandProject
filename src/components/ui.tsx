@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { t, tr } from "../lib/i18n";
 import { useStore } from "../lib/store";
 
 /** Ícone do Material Icons (mesmo conjunto do ProjectMC). */
@@ -60,7 +61,7 @@ export function TaskProgress({ task, label }: { task: string; label?: string }) 
   return (
     <div className="col" style={{ gap: 6 }} aria-live="polite">
       <div className="row small">
-        <span className="muted" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p?.message || label || "Trabalhando…"}</span>
+        <span className="muted" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(p?.message ? tr(p.message) : "") || label || t("Trabalhando…")}</span>
         {pct !== null && <span className="faint">{Math.round(pct)}%</span>}
       </div>
       <div className={`bar ${pct === null ? "indeterminate" : ""}`}><i style={{ width: `${pct ?? 30}%` }} /></div>
@@ -83,7 +84,7 @@ export function Drawer({ onClose, children, label }: { onClose: () => void; chil
       <aside className="drawer" role="dialog" aria-modal="true" aria-label={label}>
         <div className="row">
           <h2 style={{ flex: 1 }}>{label}</h2>
-          <button className="btn icon-btn sm" onClick={onClose} aria-label="Fechar"><Icon name="close" /></button>
+          <button className="btn icon-btn sm" onClick={onClose} aria-label={t("Fechar")}><Icon name="close" /></button>
         </div>
         {children}
       </aside>
@@ -103,7 +104,7 @@ export function Modal({ onClose, children, title, icon = "tune", wide }: { onClo
         <div className="modal-head">
           <span className="ico"><Icon name={icon} size={20} /></span>
           <h2>{title}</h2>
-          <button className="btn icon-btn sm" onClick={onClose} aria-label="Fechar"><Icon name="close" size={20} /></button>
+          <button className="btn icon-btn sm" onClick={onClose} aria-label={t("Fechar")}><Icon name="close" size={20} /></button>
         </div>
         {children}
       </div>
@@ -164,11 +165,11 @@ export function Toasts() {
   const dismiss = useStore((s) => s.dismiss);
   return (
     <div className="toasts" aria-live="polite">
-      {toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.kind}`}>
-          <Icon name={t.kind === "ok" ? "check_circle" : t.kind === "error" ? "error" : "info"} />
-          <span>{t.text}</span>
-          <button className="btn icon-btn sm x" style={{ width: 24, height: 24 }} onClick={() => dismiss(t.id)} aria-label="Fechar aviso"><Icon name="close" size={16} /></button>
+      {toasts.map((x) => (
+        <div key={x.id} className={`toast ${x.kind}`}>
+          <Icon name={x.kind === "ok" ? "check_circle" : x.kind === "error" ? "error" : "info"} />
+          <span>{x.text}</span>
+          <button className="btn icon-btn sm x" style={{ width: 24, height: 24 }} onClick={() => dismiss(x.id)} aria-label={t("Fechar aviso")}><Icon name="close" size={16} /></button>
         </div>
       ))}
     </div>
@@ -195,7 +196,7 @@ export function ModThumb({ name, icon, size = 40 }: { name: string; icon?: strin
   );
 }
 
-export function CopyButton({ text, label = "Copiar" }: { text: string; label?: string }) {
+export function CopyButton({ text, label }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
   return (
     <button className="btn sm" onClick={async () => {
@@ -204,9 +205,9 @@ export function CopyButton({ text, label = "Copiar" }: { text: string; label?: s
         setDone(true);
         setTimeout(() => setDone(false), 1600);
       } catch {
-        useStore.getState().toast("error", "Não deu para copiar. Selecione o texto e use Ctrl+C.");
+        useStore.getState().toast("error", t("Não deu para copiar. Selecione o texto e use Ctrl+C."));
       }
-    }}><Icon name={done ? "check" : "content_copy"} /> {done ? "Copiado" : label}</button>
+    }}><Icon name={done ? "check" : "content_copy"} /> {done ? t("Copiado") : label ?? t("Copiar")}</button>
   );
 }
 
@@ -220,7 +221,7 @@ export function Compare({ before, after, beforeLabel, afterLabel, pixelated, rat
       <span className="divider" aria-hidden="true"><Icon name="code" /></span>
       <span className="chip dark tag-l">{beforeLabel}</span>
       <span className="chip dark tag-r">{afterLabel}</span>
-      <input type="range" min={0} max={100} value={pos} onChange={(e) => setPos(Number(e.target.value))} aria-label="Comparar antes e depois" />
+      <input type="range" min={0} max={100} value={pos} onChange={(e) => setPos(Number(e.target.value))} aria-label={t("Comparar antes e depois")} />
     </div>
   );
 }

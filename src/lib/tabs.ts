@@ -68,6 +68,7 @@ export const useTabs = create<TabsState>((set, get) => ({
   }),
 }));
 
+// label e noun ficam em português (chaves): traduza onde mostrar, com t(KIND_META[k].label)
 export const KIND_META: Record<CreationKind, { label: string; icon: string; color: string; noun: string }> = {
   map: { label: "Mapa", icon: "map", color: "#7bd88f", noun: "mapa" },
   unit: { label: "Tropa", icon: "smart_toy", color: "#f2b33d", noun: "tropa" },

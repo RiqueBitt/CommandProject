@@ -2,6 +2,7 @@
 // backend simulado, para dar para trabalhar na interface sem o jogo instalado.
 
 import type * as T from "./types";
+import { t } from "./i18n";
 
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -34,19 +35,19 @@ export async function onEvent<P>(name: string, cb: (p: P) => void): Promise<() =
 
 // ---- seleção de arquivos (diálogos nativos) ----
 export async function pickFile(filters: { name: string; extensions: string[] }[], directory = false): Promise<string | null> {
-  if (!isTauri) return window.prompt("Caminho (modo navegador):") || null;
+  if (!isTauri) return window.prompt(t("Caminho (modo navegador):")) || null;
   const { open } = await import("@tauri-apps/plugin-dialog");
   const r = await open({ multiple: false, directory, filters: directory ? undefined : filters });
   return typeof r === "string" ? r : null;
 }
 
 export async function pickSave(defaultPath: string, filters: { name: string; extensions: string[] }[]): Promise<string | null> {
-  if (!isTauri) return window.prompt("Salvar em (modo navegador):", defaultPath) || null;
+  if (!isTauri) return window.prompt(t("Salvar em (modo navegador):"), defaultPath) || null;
   const { save } = await import("@tauri-apps/plugin-dialog");
   return (await save({ defaultPath, filters })) ?? null;
 }
 
-export async function confirmDialog(message: string, okLabel = "Confirmar", cancelLabel = "Cancelar"): Promise<boolean> {
+export async function confirmDialog(message: string, okLabel = t("Confirmar"), cancelLabel = t("Cancelar")): Promise<boolean> {
   if (!isTauri) return window.confirm(message);
   const { ask } = await import("@tauri-apps/plugin-dialog");
   return ask(message, { title: "CommandProject", kind: "warning", okLabel, cancelLabel });
@@ -64,7 +65,7 @@ export async function writeGenerated(path: string, dataUrl: string, askedAll = f
     await api.exportData(path, dataUrl, askedAll);
   } catch (e) {
     if (String(e).includes("EXISTE")) {
-      if (!(await confirmDialog(`O arquivo já existe:\n${path}\n\nSubstituir?`, "Substituir"))) return false;
+      if (!(await confirmDialog(t("O arquivo já existe:\n{path}\n\nSubstituir?", { path }), t("Substituir")))) return false;
       await api.exportData(path, dataUrl, true);
     } else throw e;
   }
@@ -75,7 +76,7 @@ export async function writeGenerated(path: string, dataUrl: string, askedAll = f
 /** Abre um link no navegador. Erros viram aviso na tela (antes o clique "não fazia nada"). */
 export async function openUrl(url: string) {
   try {
-    if (!/^(https?:|mailto:)/i.test(url)) throw new Error(`endereço inválido: ${url || "(vazio)"}`);
+    if (!/^(https?:|mailto:)/i.test(url)) throw new Error(t("endereço inválido: {url}", { url: url || t("(vazio)") }));
     if (!isTauri) {
       window.open(url, "_blank", "noopener");
       return;
@@ -84,7 +85,7 @@ export async function openUrl(url: string) {
     await open(url);
   } catch (e) {
     const { useStore, errorText } = await import("./store");
-    useStore.getState().toast("error", `Não deu para abrir o link: ${errorText(e)}`);
+    useStore.getState().toast("error", t("Não deu para abrir o link: {error}", { error: errorText(e) }));
   }
 }
 

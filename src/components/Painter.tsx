@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../lib/i18n";
 import { Icon } from "./ui";
 
 type Tool = "brush" | "eraser" | "fill" | "picker";
@@ -153,10 +154,10 @@ export default function Painter({ src, onSave, onCancel, saving }: { src: string
   const onUp = () => { last.current = null; };
 
   const tools: { id: Tool; icon: string; label: string }[] = [
-    { id: "brush", icon: "brush", label: "Pincel (B)" },
-    { id: "eraser", icon: "layers_clear", label: "Borracha (E)" },
-    { id: "fill", icon: "format_color_fill", label: "Balde de tinta (G)" },
-    { id: "picker", icon: "colorize", label: "Conta-gotas (I)" },
+    { id: "brush", icon: "brush", label: t("Pincel (B)") },
+    { id: "eraser", icon: "layers_clear", label: t("Borracha (E)") },
+    { id: "fill", icon: "format_color_fill", label: t("Balde de tinta (G)") },
+    { id: "picker", icon: "colorize", label: t("Conta-gotas (I)") },
   ];
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -173,34 +174,34 @@ export default function Painter({ src, onSave, onCancel, saving }: { src: string
 
   return (
     <div className="paint">
-      <div className="tools" role="toolbar" aria-label="Ferramentas de pintura">
+      <div className="tools" role="toolbar" aria-label={t("Ferramentas de pintura")}>
         {tools.map((t) => (
           <button key={t.id} className="btn icon-btn" style={{ borderRadius: 8 }} title={t.label} aria-label={t.label} aria-pressed={tool === t.id} onClick={() => setTool(t.id)}><Icon name={t.icon} /></button>
         ))}
         <hr className="sep" />
-        <button className="btn icon-btn" style={{ borderRadius: 8 }} title="Desfazer (Ctrl+Z)" aria-label="Desfazer" disabled={!undo.current.length} onClick={doUndo}><Icon name="undo" /></button>
-        <button className="btn icon-btn" style={{ borderRadius: 8 }} title="Refazer (Ctrl+Y)" aria-label="Refazer" disabled={!redo.current.length} onClick={doRedo}><Icon name="redo" /></button>
+        <button className="btn icon-btn" style={{ borderRadius: 8 }} title={t("Desfazer (Ctrl+Z)")} aria-label={t("Desfazer")} disabled={!undo.current.length} onClick={doUndo}><Icon name="undo" /></button>
+        <button className="btn icon-btn" style={{ borderRadius: 8 }} title={t("Refazer (Ctrl+Y)")} aria-label={t("Refazer")} disabled={!redo.current.length} onClick={doRedo}><Icon name="redo" /></button>
         <hr className="sep" />
-        <button className="btn icon-btn" style={{ borderRadius: 8 }} title="Aproximar" aria-label="Aproximar" onClick={() => setZoom((z) => Math.min(16, z * 2))}><Icon name="zoom_in" /></button>
-        <button className="btn icon-btn" style={{ borderRadius: 8 }} title="Afastar" aria-label="Afastar" onClick={() => setZoom((z) => Math.max(0.25, z / 2))}><Icon name="zoom_out" /></button>
+        <button className="btn icon-btn" style={{ borderRadius: 8 }} title={t("Aproximar")} aria-label={t("Aproximar")} onClick={() => setZoom((z) => Math.min(16, z * 2))}><Icon name="zoom_in" /></button>
+        <button className="btn icon-btn" style={{ borderRadius: 8 }} title={t("Afastar")} aria-label={t("Afastar")} onClick={() => setZoom((z) => Math.max(0.25, z / 2))}><Icon name="zoom_out" /></button>
       </div>
       <div className="canvas-wrap checker">
         <canvas ref={canvas} style={{ width: dims[0] * zoom, height: dims[1] * zoom }} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
       </div>
       <div className="props">
-        <div className="overline">Cor</div>
+        <div className="overline">{t("Cor")}</div>
         <div className="row">
-          <input type="color" value={color} onChange={(e) => setColor(e.target.value)} aria-label="Cor" style={{ width: 48, height: 36, border: 0, background: "none", padding: 0 }} />
+          <input type="color" value={color} onChange={(e) => setColor(e.target.value)} aria-label={t("Cor")} style={{ width: 48, height: 36, border: 0, background: "none", padding: 0 }} />
           <span className="mono">{color}</span>
         </div>
         <div className="swatches">{SWATCHES.map((c) => <button key={c} style={{ background: c }} aria-label={c} onClick={() => setColor(c)} />)}</div>
-        <label className="range" style={{ gridTemplateColumns: "70px 1fr 40px" }}><span>Tamanho</span><input type="range" min={1} max={96} value={size} onChange={(e) => setSize(Number(e.target.value))} /><output>{size}</output></label>
-        <label className="range" style={{ gridTemplateColumns: "70px 1fr 40px" }}><span>Opacidade</span><input type="range" min={0.05} max={1} step={0.05} value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} /><output>{Math.round(alpha * 100)}%</output></label>
-        {tool === "fill" && <label className="range" style={{ gridTemplateColumns: "70px 1fr 40px" }}><span>Tolerância</span><input type="range" min={0} max={128} value={tolerance} onChange={(e) => setTolerance(Number(e.target.value))} /><output>{tolerance}</output></label>}
-        <p className="small faint">{dims[0]}×{dims[1]} px, zoom {zoom}×. Atalhos: B, E, G, I, [ e ], Ctrl+Z.</p>
+        <label className="range" style={{ gridTemplateColumns: "70px 1fr 40px" }}><span>{t("Tamanho")}</span><input type="range" min={1} max={96} value={size} onChange={(e) => setSize(Number(e.target.value))} /><output>{size}</output></label>
+        <label className="range" style={{ gridTemplateColumns: "70px 1fr 40px" }}><span>{t("Opacidade")}</span><input type="range" min={0.05} max={1} step={0.05} value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} /><output>{Math.round(alpha * 100)}%</output></label>
+        {tool === "fill" && <label className="range" style={{ gridTemplateColumns: "70px 1fr 40px" }}><span>{t("Tolerância")}</span><input type="range" min={0} max={128} value={tolerance} onChange={(e) => setTolerance(Number(e.target.value))} /><output>{tolerance}</output></label>}
+        <p className="small faint">{t("{w}×{h} px, zoom {z}×. Atalhos: B, E, G, I, [ e ], Ctrl+Z.", { w: dims[0], h: dims[1], z: zoom })}</p>
         <span className="spacer" />
-        <button className="btn primary" disabled={saving} onClick={() => onSave(canvas.current!.toDataURL("image/png"))}><Icon name="save" /> {saving ? "Salvando…" : "Salvar na textura"}</button>
-        <button className="btn text" onClick={onCancel}>Cancelar</button>
+        <button className="btn primary" disabled={saving} onClick={() => onSave(canvas.current!.toDataURL("image/png"))}><Icon name="save" /> {saving ? t("Salvando…") : t("Salvar na textura")}</button>
+        <button className="btn text" onClick={onCancel}>{t("Cancelar")}</button>
       </div>
     </div>
   );

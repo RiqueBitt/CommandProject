@@ -317,7 +317,7 @@ export default function UnitStudio({ id }: { id: string }) {
     const errs = problems.filter((x) => x.level === "err");
     if (errs.length) { setSection("check"); toast("error", errs[0].text); return; }
     await save();
-    const r = await run(`unit:${id}`, () => api.unitBuild(id, request()), (x) => (doc.pack ? t("Tropa \"{name}\" gerada no pacote \"{pack}\" ({mod}).", { name: doc.name, pack: doc.pack, mod: x.manifest.name }) : t("Tropa \"{name}\" gerada ({mod}).", { name: doc.name, mod: x.manifest.name })));
+    const r = await run(`unit:${id}`, () => api.unitBuild(id, request()), (x) => (doc.pack ? t('Tropa "{name}" gerada no pacote "{pack}" ({mod}).', { name: doc.name, pack: doc.pack, mod: x.manifest.name }) : t('Tropa "{name}" gerada ({mod}).', { name: doc.name, mod: x.manifest.name })));
     if (!r) return;
     setResult(r);
     await refreshMods();
@@ -425,7 +425,7 @@ export default function UnitStudio({ id }: { id: string }) {
       if (draft.index !== null && list[draft.index]) list[draft.index] = entry; else list.push(entry);
       return { ...d, customAnims: list, animations: { ...d.animations, [draft.field]: { file: `asset:${asset}`, rate: d.animations[draft.field]?.rate ?? null } } };
     });
-    toast("ok", t("Animação \"{name}\" salva e usada em {field}.", { name: draft.name, field: animLabel(draft.field) }));
+    toast("ok", t('Animação "{name}" salva e usada em {field}.', { name: draft.name, field: animLabel(draft.field) }));
     setDraft(null);
     setSection(`anim:${draft.field}`);
   };
@@ -509,7 +509,7 @@ export default function UnitStudio({ id }: { id: string }) {
       const setM = (fn: (x: typeof m) => typeof m) => p.commit((d) => ({ ...d, mix: fn(d.mix ?? m) }));
       const unitOpts = [{ value: "", label: t("— a do chassi —") }, ...(catalog ?? []).filter((u) => u.id !== doc.base).map((u) => ({ value: u.id, label: `${u.name} (${u.id}) · ${u.faction}` }))];
       if (modelSrc.source === "creation") {
-        out.push({ title: t("Misturar 3 tropas"), props: [{ kind: "info", label: "", value: t("O misturador usa o modelo do jogo como chassi. Volte para \"O da unidade base\" em Aparência para usá-lo.") }] });
+        out.push({ title: t("Misturar 3 tropas"), props: [{ kind: "info", label: "", value: t('O misturador usa o modelo do jogo como chassi. Volte para "O da unidade base" em Aparência para usá-lo.') }] });
       } else {
         out.push({ title: t("Peças"), props: [
           { kind: "info", label: "", value: t("Junte o chassi (a unidade base), a torre de uma segunda tropa e o cano/arma de uma terceira. Os modelos, as texturas e as animações são combinados num modelo só, com os ossos que o jogo espera.") },
@@ -1026,7 +1026,7 @@ function AnimTimeline({ draft, setDraft, bones, fields, time, setTime, playing, 
                 <input type="range" min={-1} max={1} step={0.01} value={sk.pos[a]} onChange={(e) => { const r = [...sk.pos] as [number, number, number]; r[a] = Number(e.target.value); setKey(selKey!, { pos: r }); }} /><output>{sk.pos[a]}</output></label>
             ))}
             <button className="btn sm text" onClick={() => { set({ keys: keys.filter((_, j) => j !== selKey) }); setSelKey(null); }}><Icon name="delete" size={15} /> {t("Apagar quadro")}</button>
-          </> : <p className="faint small">{t("Escolha um losango na linha do tempo, ou clique em \"Quadro\" para criar um no instante atual. Arraste os losangos para mudar o tempo.")}</p>}
+          </> : <p className="faint small">{t('Escolha um losango na linha do tempo, ou clique em "Quadro" para criar um no instante atual. Arraste os losangos para mudar o tempo.')}</p>}
         </div>
       </div>
     </div>

@@ -8,6 +8,7 @@ import type { ModView } from "../lib/types";
 import { AiModal, CheatsModal, FirstPersonModal, loadAi, loadCheats, loadFirstPerson, OptimizeModal } from "./dialogs";
 import { hueOf, Icon, Switch } from "./ui";
 import { FEATURES } from "../lib/features";
+import { t } from "../lib/i18n";
 
 type ModalId = "ai" | "cheats" | "opt" | "fp";
 interface Entry {
@@ -65,22 +66,22 @@ export default function CpModsHub() {
     else if (e.page) go(e.page);
   };
   const toggle = async (m: ModView, v: boolean) => {
-    await run("toggle:" + m.manifest.id, () => api.setModEnabled(m.manifest.id, v), v ? `${m.manifest.name} ligado.` : `${m.manifest.name} desligado.`);
+    await run("toggle:" + m.manifest.id, () => api.setModEnabled(m.manifest.id, v), v ? t("{name} ligado.", { name: m.manifest.name }) : t("{name} desligado.", { name: m.manifest.name }));
     await refreshMods();
   };
   const remove = async (m: ModView) => {
-    if (!(await confirmDialog(`Remover ${m.manifest.name} da biblioteca? Dá para instalar de novo pelo hub quando quiser.`, "Remover"))) return;
-    await run("remove", () => api.removeMod(m.manifest.id), `${m.manifest.name} removido.`);
+    if (!(await confirmDialog(t("Remover {name} da biblioteca? Dá para instalar de novo pelo hub quando quiser.", { name: m.manifest.name }), t("Remover")))) return;
+    await run("remove", () => api.removeMod(m.manifest.id), t("{name} removido.", { name: m.manifest.name }));
     await refreshMods();
   };
   /** remonta os mods instalados com as opções salvas (depois de atualizar o jogo ou o launcher) */
   const updateAll = async () => {
     const jobs: [string, () => Promise<unknown>][] = [];
     const has = (id: ModalId) => installedOf(id);
-    if (has("ai")) jobs.push(["IA esperta", () => api.buildAi(loadAi(), true)]);
-    if (has("cheats")) jobs.push(["Trapaças", () => api.buildCheats(loadCheats(), true)]);
-    if (has("opt")) jobs.push(["Otimização", async () => api.buildOptimize((await api.optimizeStatus()).options, true)]);
-    if (has("fp")) jobs.push(["Primeira Pessoa", () => api.buildFirstPerson(loadFirstPerson(), true)]);
+    if (has("ai")) jobs.push([t("IA esperta"), () => api.buildAi(loadAi(), true)]);
+    if (has("cheats")) jobs.push([t("Trapaças"), () => api.buildCheats(loadCheats(), true)]);
+    if (has("opt")) jobs.push([t("Otimização"), async () => api.buildOptimize((await api.optimizeStatus()).options, true)]);
+    if (has("fp")) jobs.push([t("Primeira Pessoa"), () => api.buildFirstPerson(loadFirstPerson(), true)]);
     if (!jobs.length) return;
     const done: string[] = [];
     for (const [name, job] of jobs) {
@@ -88,7 +89,7 @@ export default function CpModsHub() {
       if (ok !== undefined) done.push(name);
     }
     await refreshMods();
-    if (done.length) useStore.getState().toast("ok", `Atualizados com os arquivos do seu jogo: ${done.join(", ")}.`);
+    if (done.length) useStore.getState().toast("ok", t("Atualizados com os arquivos do seu jogo: {list}.", { list: done.join(", ") }));
   };
   const updatable = (["ai", "cheats", "opt", "fp"] as ModalId[]).some(installedOf);
 
@@ -96,10 +97,10 @@ export default function CpModsHub() {
     <section>
       <div className="section-head">
         <Icon name="verified" style={{ color: "var(--primary)" }} />
-        <h2>Mods do CommandProject</h2>
-        <span className="muted small">montados no seu PC com os arquivos do jogo · nada é baixado da internet</span>
+        <h2>{t("Mods do CommandProject")}</h2>
+        <span className="muted small">{t("montados no seu PC com os arquivos do jogo · nada é baixado da internet")}</span>
         <span className="grow" />
-        {updatable && <button className="btn sm" disabled={!!busy["hub:cp"]} onClick={() => void updateAll()} title="Monta de novo os mods instalados com as opções salvas (use depois de atualizar o jogo ou o launcher)"><Icon name="sync" size={16} /> {busy["hub:cp"] ? "Atualizando…" : "Atualizar todos"}</button>}
+        {updatable && <button className="btn sm" disabled={!!busy["hub:cp"]} onClick={() => void updateAll()} title={t("Monta de novo os mods instalados com as opções salvas (use depois de atualizar o jogo ou o launcher)")}><Icon name="sync" size={16} /> {busy["hub:cp"] ? t("Atualizando…") : t("Atualizar todos")}</button>}
       </div>
       <div className="store-grid">
         {CP_MODS.map((e) => {
@@ -110,22 +111,22 @@ export default function CpModsHub() {
               <div className="banner" style={{ background: banner(e.name) }}>
                 <Icon name={e.icon} className="big" />
                 <div className="chips">
-                  <span className="chip dark">{e.isNew ? <><Icon name="fiber_new" /> Novo</> : <><Icon name="verified" /> CommandProject</>}</span>
-                  {m && <span className={`chip ${on ? "ok" : "dark"}`}>{on ? "Ativo" : "Desligado"}{m.manifest.version ? ` · ${m.manifest.version}` : ""}</span>}
+                  <span className="chip dark">{e.isNew ? <><Icon name="fiber_new" /> {t("Novo")}</> : <><Icon name="verified" /> CommandProject</>}</span>
+                  {m && <span className={`chip ${on ? "ok" : "dark"}`}>{on ? t("Ativo") : t("Desligado")}{m.manifest.version ? ` · ${m.manifest.version}` : ""}</span>}
                 </div>
               </div>
               <div className="body">
-                <div className="name">{e.name}</div>
-                <div className="desc cp-desc">{e.desc}</div>
-                <div className="row wrap" style={{ gap: 6 }}>{e.tags.map((t) => <span key={t} className="chip">{t}</span>)}</div>
+                <div className="name">{t(e.name)}</div>
+                <div className="desc cp-desc">{t(e.desc)}</div>
+                <div className="row wrap" style={{ gap: 6 }}>{e.tags.map((tag) => <span key={tag} className="chip">{t(tag)}</span>)}</div>
                 <div className="foot" onClick={(ev) => ev.stopPropagation()}>
                   <button className={`btn sm ${m ? "" : "primary"}`} onClick={() => open(e)}>
-                    <Icon name={m ? "tune" : e.page ? "open_in_new" : "download"} size={16} /> {m ? "Configurar" : e.page ? "Abrir" : "Instalar"}
+                    <Icon name={m ? "tune" : e.page ? "open_in_new" : "download"} size={16} /> {m ? t("Configurar") : e.page ? t("Abrir") : t("Instalar")}
                   </button>
                   <span className="grow" />
-                  {m && !e.auto && <Switch label={on ? "Desligar" : "Ligar"} checked={on} onChange={(v) => void toggle(m, v)} />}
-                  {m && e.auto && <span className="small faint" title={e.auto}><Icon name="bolt" size={15} /> automático</span>}
-                  {m && <button className="btn icon-btn sm" title="Remover da biblioteca" aria-label={`Remover ${e.name}`} onClick={() => void remove(m)}><Icon name="delete" size={16} /></button>}
+                  {m && !e.auto && <Switch label={on ? t("Desligar") : t("Ligar")} checked={on} onChange={(v) => void toggle(m, v)} />}
+                  {m && e.auto && <span className="small faint" title={t(e.auto)}><Icon name="bolt" size={15} /> {t("automático")}</span>}
+                  {m && <button className="btn icon-btn sm" title={t("Remover da biblioteca")} aria-label={t("Remover {name}", { name: t(e.name) })} onClick={() => void remove(m)}><Icon name="delete" size={16} /></button>}
                 </div>
               </div>
             </article>

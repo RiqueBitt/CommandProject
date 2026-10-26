@@ -5,6 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { createPortal } from "react-dom";
 import { Icon, Modal } from "../ui";
 import { api } from "../../lib/api";
+import { locale, t } from "../../lib/i18n";
 import type { ProjectApi } from "../../lib/useProject";
 import type { CreationVersion } from "../../lib/types";
 
@@ -143,7 +144,7 @@ export function Tree({ nodes, selected, onSelect, onContext, onToggleHidden, onT
           onClick={(e) => onSelect(n.id, e.ctrlKey || e.metaKey ? "toggle" : e.shiftKey ? "range" : "set")}
           onContextMenu={(e) => { if (!onContext) return; e.preventDefault(); onContext(n.id, e.clientX, e.clientY); }}>
           {kids.length ? (
-            <button className="tw" aria-label={open ? "Recolher" : "Expandir"} onClick={(e) => {
+            <button className="tw" aria-label={open ? t("Recolher") : t("Expandir")} onClick={(e) => {
               e.stopPropagation();
               setClosed((c) => { const s = new Set(c); if (s.has(n.id)) s.delete(n.id); else s.add(n.id); return s; });
             }}><Icon name={open ? "expand_more" : "chevron_right"} size={16} /></button>
@@ -152,12 +153,12 @@ export function Tree({ nodes, selected, onSelect, onContext, onToggleHidden, onT
           <span className="tl">{n.label}</span>
           {n.detail && <span className="td">{n.detail}</span>}
           {onToggleLocked && depth > 0 && n.locked !== undefined && (
-            <button className={`tv ${n.locked ? "on" : ""}`} aria-label={n.locked ? "Destravar" : "Travar"} title={n.locked ? "Destravar" : "Travar (não seleciona nem move)"} onClick={(e) => { e.stopPropagation(); onToggleLocked(n.id); }}>
+            <button className={`tv ${n.locked ? "on" : ""}`} aria-label={n.locked ? t("Destravar") : t("Travar")} title={n.locked ? t("Destravar") : t("Travar (não seleciona nem move)")} onClick={(e) => { e.stopPropagation(); onToggleLocked(n.id); }}>
               <Icon name={n.locked ? "lock" : "lock_open"} size={14} />
             </button>
           )}
           {onToggleHidden && depth > 0 && n.hidden !== undefined && (
-            <button className={`tv ${n.hidden ? "on" : ""}`} aria-label={n.hidden ? "Mostrar" : "Esconder"} onClick={(e) => { e.stopPropagation(); onToggleHidden(n.id); }}>
+            <button className={`tv ${n.hidden ? "on" : ""}`} aria-label={n.hidden ? t("Mostrar") : t("Esconder")} onClick={(e) => { e.stopPropagation(); onToggleHidden(n.id); }}>
               <Icon name={n.hidden ? "visibility_off" : "visibility"} size={14} />
             </button>
           )}
@@ -210,7 +211,7 @@ function NumInput({ value, onChange, min, max, step, label }: { value: number; o
 const round = (v: number) => Math.round(v * 1000) / 1000;
 
 export function PropertyGrid({ sections, empty }: { sections: { title: string; props: Prop[] }[]; empty?: ReactNode }) {
-  if (!sections.length) return <div className="pgrid-empty">{empty ?? "Selecione um objeto para ver as propriedades."}</div>;
+  if (!sections.length) return <div className="pgrid-empty">{empty ?? t("Selecione um objeto para ver as propriedades.")}</div>;
   return (
     <div className="pgrid">
       {sections.map((s) => (
@@ -314,10 +315,10 @@ export function useHotkeys(active: boolean, map: Record<string, (e: KeyboardEven
 
 const ago = (t: number) => {
   const s = Math.round((Date.now() - t) / 1000);
-  if (s < 10) return "agora";
-  if (s < 60) return `há ${s} s`;
-  if (s < 3600) return `há ${Math.round(s / 60)} min`;
-  return `há ${Math.round(s / 3600)} h`;
+  if (s < 10) return t("agora");
+  if (s < 60) return t("há {n} s", { n: s });
+  if (s < 3600) return t("há {n} min", { n: Math.round(s / 60) });
+  return t("há {n} h", { n: Math.round(s / 3600) });
 };
 
 /** Estado de salvamento, desfazer/refazer, versões e o aviso de recuperação. */
@@ -328,23 +329,23 @@ export function ProjectBar<D>({ p, onSave, extra }: { p: ProjectApi<D>; onSave: 
   return (
     <>
       <div className="project-bar">
-        <button className="btn icon-btn sm-icon" title="Desfazer (Ctrl+Z)" aria-label="Desfazer" disabled={!p.canUndo} onClick={p.undo}><Icon name="undo" /></button>
-        <button className="btn icon-btn sm-icon" title="Refazer (Ctrl+Y)" aria-label="Refazer" disabled={!p.canRedo} onClick={p.redo}><Icon name="redo" /></button>
+        <button className="btn icon-btn sm-icon" title={t("Desfazer (Ctrl+Z)")} aria-label={t("Desfazer")} disabled={!p.canUndo} onClick={p.undo}><Icon name="undo" /></button>
+        <button className="btn icon-btn sm-icon" title={t("Refazer (Ctrl+Y)")} aria-label={t("Refazer")} disabled={!p.canRedo} onClick={p.redo}><Icon name="redo" /></button>
         <span className="save-state">
-          {p.saving ? <><Icon name="sync" size={15} /> Salvando…</>
-            : p.dirty ? <><i className="dot warn" /> Alterações não salvas</>
-              : p.savedAt ? <><Icon name="cloud_done" size={15} /> Salvo {ago(p.savedAt)}</> : <><Icon name="cloud_done" size={15} /> Salvo</>}
+          {p.saving ? <><Icon name="sync" size={15} /> {t("Salvando…")}</>
+            : p.dirty ? <><i className="dot warn" /> {t("Alterações não salvas")}</>
+              : p.savedAt ? <><Icon name="cloud_done" size={15} /> {t("Salvo {when}", { when: ago(p.savedAt) })}</> : <><Icon name="cloud_done" size={15} /> {t("Salvo")}</>}
         </span>
-        <button className="btn sm" onClick={() => setVersions(true)} title="Versões anteriores"><Icon name="history" size={17} /> Versões</button>
+        <button className="btn sm" onClick={() => setVersions(true)} title={t("Versões anteriores")}><Icon name="history" size={17} /> {t("Versões")}</button>
         {extra}
-        <button className="btn primary sm" onClick={onSave} disabled={p.saving} title="Salvar (Ctrl+S)"><Icon name="save" size={17} /> Salvar</button>
+        <button className="btn primary sm" onClick={onSave} disabled={p.saving} title={t("Salvar (Ctrl+S)")}><Icon name="save" size={17} /> {t("Salvar")}</button>
       </div>
       {p.recoveryAt && (
         <div className="recovery-banner" role="alert">
           <Icon name="restore_page" />
-          <span>Este projeto tem alterações de {new Date(p.recoveryAt).toLocaleString("pt-BR")} que não foram salvas (o launcher fechou antes).</span>
-          <button className="btn sm primary" onClick={() => void p.acceptRecovery()}>Recuperar</button>
-          <button className="btn sm text" onClick={() => void p.discardRecovery()}>Descartar</button>
+          <span>{t("Este projeto tem alterações de {date} que não foram salvas (o launcher fechou antes).", { date: new Date(p.recoveryAt).toLocaleString(locale()) })}</span>
+          <button className="btn sm primary" onClick={() => void p.acceptRecovery()}>{t("Recuperar")}</button>
+          <button className="btn sm text" onClick={() => void p.discardRecovery()}>{t("Descartar")}</button>
         </div>
       )}
       {versions && p.meta && <VersionsModal id={p.meta.id} onClose={() => setVersions(false)} onRestore={(d) => p.replace(d as D)} />}
@@ -356,15 +357,15 @@ function VersionsModal({ id, onClose, onRestore }: { id: string; onClose: () => 
   const [list, setList] = useState<CreationVersion[] | null>(null);
   useEffect(() => { void api.creationVersions(id).then(setList).catch(() => setList([])); }, [id]);
   return (
-    <Modal title="Versões anteriores" icon="history" onClose={onClose}>
-      <p className="muted small">Uma versão é guardada quando você salva (no máximo a cada 5 minutos, ou sempre em "Salvar versão"). Voltar para uma versão também guarda a atual, então dá para desfazer.</p>
+    <Modal title={t("Versões anteriores")} icon="history" onClose={onClose}>
+      <p className="muted small">{t('Uma versão é guardada quando você salva (no máximo a cada 5 minutos, ou sempre em "Salvar versão"). Voltar para uma versão também guarda a atual, então dá para desfazer.')}</p>
       <div className="versions">
-        {list === null ? <div className="bar indeterminate"><i /></div> : list.length === 0 ? <p className="faint small">Ainda não há versões anteriores.</p> : list.map((v) => (
+        {list === null ? <div className="bar indeterminate"><i /></div> : list.length === 0 ? <p className="faint small">{t("Ainda não há versões anteriores.")}</p> : list.map((v) => (
           <div key={v.file} className="version-row">
             <Icon name="description" size={18} />
-            <span className="grow">{new Date(v.savedAt).toLocaleString("pt-BR")}</span>
+            <span className="grow">{new Date(v.savedAt).toLocaleString(locale())}</span>
             <small className="faint">{(v.size / 1024).toFixed(0)} KB</small>
-            <button className="btn sm" onClick={async () => { const d = await api.creationRestore<unknown>(id, v.file); onRestore(d); onClose(); }}>Voltar para esta</button>
+            <button className="btn sm" onClick={async () => { const d = await api.creationRestore<unknown>(id, v.file); onRestore(d); onClose(); }}>{t("Voltar para esta")}</button>
           </div>
         ))}
       </div>

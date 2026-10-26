@@ -73,7 +73,7 @@ export default function App() {
           void api.appUpdateCheck().then((up) => {
             if (!up) return;
             useStore.setState({ appUpdate: up });
-            toast("info", t("CommandProject {version} disponível. Em Configurações → Atualizações é só clicar em \"Atualizar agora\".", { version: up.version }));
+            toast("info", t('CommandProject {version} disponível. Em Configurações → Atualizações é só clicar em "Atualizar agora".', { version: up.version }));
           }).catch(() => {});
         }
       } catch (e) {

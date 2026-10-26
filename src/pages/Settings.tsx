@@ -183,7 +183,7 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="setting-row">
-                <div className="txt"><b>{t("Estilo da interface")}</b><span>{t("\"Comando\" usa painéis táticos, botões chanfrados e moldura de comando inspirados no jogo (arte própria do launcher). \"Clássico\" é o visual anterior.")}</span></div>
+                <div className="txt"><b>{t("Estilo da interface")}</b><span>{t('"Comando" usa painéis táticos, botões chanfrados e moldura de comando inspirados no jogo (arte própria do launcher). "Clássico" é o visual anterior.')}</span></div>
                 <div className="chips" style={{ padding: 0 }}>
                   {[["sc", "Comando"], ["classic", "Clássico"]].map(([k, l]) => <button key={k} className="chip" aria-pressed={(s.uiPrefs?.skin ?? "sc") === k} onClick={() => commit({ ...s, uiPrefs: { ...(s.uiPrefs ?? {}), skin: k } })}>{t(l)}</button>)}
                 </div>
@@ -385,7 +385,7 @@ export function MemoryLimit() {
           <b>{t("Memória que o jogo pode usar")}</b>
           <span className="muted small">
             {t("O SC2 é um programa de 32 bits: sozinho ele usa até 2 GB, e o máximo possível para ele é 4 GB (mesmo num PC com mais RAM).")}{" "}
-            {t("Escolha um teto: acima de 2 GB o launcher libera o \"modo 4 GB\" no executável e, quando o jogo abre, aplica o limite escolhido.")}
+            {t('Escolha um teto: acima de 2 GB o launcher libera o "modo 4 GB" no executável e, quando o jogo abre, aplica o limite escolhido.')}
           </span>
         </div>
         <div className="mem-pc">

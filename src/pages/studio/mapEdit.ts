@@ -210,8 +210,11 @@ export const blankWater = (size: number) => (size <= 512 ? 0 : 40);
 /** Quilômetros de lado no jogo (1024 unidades = 20 km). */
 export const mapKm = (size: number) => Math.round((size * 20) / 1024);
 export function blankLabel(size: number) {
-  const name = size <= 512 ? t("Pequeno") : size <= 1024 ? t("Padrão") : size <= 2048 ? t("Grande") : t("Gigante");
-  return t("{name} ({size} × {size} · {km} km)", { name, size, km: mapKm(size) });
+  const v = { size, km: mapKm(size) };
+  return size <= 512 ? t("Pequeno ({size} × {size} · {km} km)", v)
+    : size <= 1024 ? t("Padrão ({size} × {size} · {km} km)", v)
+    : size <= 2048 ? t("Grande ({size} × {size} · {km} km)", v)
+    : t("Gigante ({size} × {size} · {km} km)", v);
 }
 /** Tamanho de um mapa em branco pelo terreno base (projetos sem `mapSize`). */
 export function blankSizeOf(terrain: string | null): BlankSize | null {

@@ -4,6 +4,7 @@ import { api, openUrl, windowAction } from "../lib/api";
 import { switchProfile, useStore, type Page } from "../lib/store";
 import { KIND_META, useTabs } from "../lib/tabs";
 import { confirmDialog } from "../lib/api";
+import { t, tr } from "../lib/i18n";
 import { Field, hueOf, Icon, Modal, monogram, Tip } from "./ui";
 
 /** Tarefas demoradas: aparecem na barra do topo em qualquer tela, com o progresso. */
@@ -37,10 +38,10 @@ function TaskDock() {
   if (!items.length) return null;
   const first = items[0];
   return (
-    <button className="task-dock" title={items.map((i) => `${i.meta.label}${i.msg ? `: ${i.msg}` : ""}`).join("\n")}
+    <button className="task-dock" title={items.map((i) => `${t(i.meta.label)}${i.msg ? `: ${tr(i.msg)}` : ""}`).join("\n")}
       onClick={() => { if (first.meta.tab) setStudioTab(first.meta.tab); go(first.meta.page); }}>
       <span className="spin"><Icon name="autorenew" size={16} /></span>
-      <span className="lbl">{first.meta.label}{items.length > 1 ? ` +${items.length - 1}` : ""}</span>
+      <span className="lbl">{t(first.meta.label)}{items.length > 1 ? ` +${items.length - 1}` : ""}</span>
       {first.pct !== null && <span className="pct">{first.pct}%</span>}
       <span className="mini-bar"><i style={{ width: `${first.pct ?? 35}%` }} className={first.pct === null ? "ind" : ""} /></span>
     </button>
@@ -54,9 +55,9 @@ function TabStrip() {
   const { activate, close } = useTabs.getState();
   const go = useStore((s) => s.go);
   const closeTab = async (id: string) => {
-    const t = useTabs.getState().tabs.find((x) => x.id === id);
-    if (t?.dirty) {
-      const save = await confirmDialog(`"${t.title}" tem alterações não salvas. Salvar antes de fechar?`, "Salvar e fechar", "Fechar sem salvar");
+    const tab = useTabs.getState().tabs.find((x) => x.id === id);
+    if (tab?.dirty) {
+      const save = await confirmDialog(t('"{title}" tem alterações não salvas. Salvar antes de fechar?', { title: tab.title }), t("Salvar e fechar"), t("Fechar sem salvar"));
       if (save) {
         const ok = await useTabs.getState().savers[id]?.();
         if (ok === false) return;
@@ -66,22 +67,22 @@ function TabStrip() {
   };
   if (!tabs.length) return null;
   return (
-    <div className="tab-strip" role="tablist" aria-label="Abas">
+    <div className="tab-strip" role="tablist" aria-label={t("Abas")}>
       <button role="tab" aria-selected={active === null} className="ptab home" onClick={() => activate(null)} title="Launcher">
         <Icon name="rocket_launch" size={16} /> <span>Launcher</span>
       </button>
-      {tabs.map((t) => (
-        <div key={t.id} role="tab" aria-selected={active === t.id} className="ptab" title={t.title}
-          style={{ ["--kc" as string]: KIND_META[t.kind].color }}
-          onClick={() => activate(t.id)}
-          onAuxClick={(e) => { if (e.button === 1) void closeTab(t.id); }}>
-          <Icon name={KIND_META[t.kind].icon} size={15} className="kic" />
-          <span className="tt">{t.title}</span>
-          {t.dirty && <i className="dirty" aria-label="não salvo" />}
-          <button className="tx" aria-label={`Fechar ${t.title}`} onClick={(e) => { e.stopPropagation(); void closeTab(t.id); }}><Icon name="close" size={14} /></button>
+      {tabs.map((tab) => (
+        <div key={tab.id} role="tab" aria-selected={active === tab.id} className="ptab" title={tab.title}
+          style={{ ["--kc" as string]: KIND_META[tab.kind].color }}
+          onClick={() => activate(tab.id)}
+          onAuxClick={(e) => { if (e.button === 1) void closeTab(tab.id); }}>
+          <Icon name={KIND_META[tab.kind].icon} size={15} className="kic" />
+          <span className="tt">{tab.title}</span>
+          {tab.dirty && <i className="dirty" aria-label={t("não salvo")} />}
+          <button className="tx" aria-label={t("Fechar {title}", { title: tab.title })} onClick={(e) => { e.stopPropagation(); void closeTab(tab.id); }}><Icon name="close" size={14} /></button>
         </div>
       ))}
-      <button className="ptab add" title="Novo projeto" aria-label="Novo projeto" onClick={() => go("create")}><Icon name="add" size={17} /></button>
+      <button className="ptab add" title={t("Novo projeto")} aria-label={t("Novo projeto")} onClick={() => go("create")}><Icon name="add" size={17} /></button>
     </div>
   );
 }
@@ -95,15 +96,15 @@ export function SystemBar() {
       <div className="drag" data-tauri-drag-region />
       <TaskDock />
       <button className="sys-btn" onClick={() => setPalette(true)}>
-        <Icon name="search" size={19} /> Ação rápida <span className="kbd">Ctrl+K</span>
+        <Icon name="search" size={19} /> {t("Ação rápida")} <span className="kbd">Ctrl+K</span>
       </button>
-      <button className="sys-btn" onClick={() => go("create")} title="Criar mapas, tropas e modelos"><Icon name="add_box" size={19} /> Criar</button>
+      <button className="sys-btn" onClick={() => go("create")} title={t("Criar mapas, tropas e modelos")}><Icon name="add_box" size={19} /> {t("Criar")}</button>
       <button className="sys-btn" onClick={() => openUrl("https://github.com/RiqueBitt/CommandProject#readme")}>
-        <Icon name="help_center" size={19} /> Ajuda
+        <Icon name="help_center" size={19} /> {t("Ajuda")}
       </button>
-      <button className="winbtn" onClick={() => windowAction("minimize")} aria-label="Minimizar"><Icon name="remove" size={18} /></button>
-      <button className="winbtn" onClick={() => windowAction("maximize")} aria-label="Maximizar"><Icon name="crop_square" size={17} /></button>
-      <button className="winbtn close" onClick={() => windowAction("close")} aria-label="Fechar"><Icon name="close" size={19} /></button>
+      <button className="winbtn" onClick={() => windowAction("minimize")} aria-label={t("Minimizar")}><Icon name="remove" size={18} /></button>
+      <button className="winbtn" onClick={() => windowAction("maximize")} aria-label={t("Maximizar")}><Icon name="crop_square" size={17} /></button>
+      <button className="winbtn close" onClick={() => windowAction("close")} aria-label={t("Fechar")}><Icon name="close" size={19} /></button>
     </header>
   );
 }
@@ -130,7 +131,7 @@ function RailItem({ label, page, onClick, children, selected, badge }: { label: 
 /** Áreas do launcher (trilho da esquerda, no estilo do painel de comando do jogo). */
 function AreaItem({ label, icon, active, onClick, badge, off }: { label: string; icon: string; active: boolean; onClick: () => void; badge?: number; off?: boolean }) {
   return (
-    <button className={`area-item ${active ? "on" : ""} ${off ? "off" : ""}`} aria-current={active ? "page" : undefined} onClick={onClick} title={off ? `${label} (modo local ligado)` : label}>
+    <button className={`area-item ${active ? "on" : ""} ${off ? "off" : ""}`} aria-current={active ? "page" : undefined} onClick={onClick} title={off ? t("{label} (modo local ligado)", { label }) : label}>
       <Icon name={icon} size={22} />
       <span>{label}</span>
       {!!badge && <i className="badge">{badge}</i>}
@@ -146,27 +147,27 @@ export function Rail() {
   const appUpdate = useStore((s) => s.appUpdate);
   const { back, go, goCreate } = useStore.getState();
   const [creating, setCreating] = useState(false);
-  const nick = settings?.nickname?.trim() || "Você";
+  const nick = settings?.nickname?.trim() || t("Você");
   const offline = !!settings?.offline;
   const area = (k: "map" | "unit" | "model") => page === "create" && createKind === k;
 
   return (
-    <nav className="rail" aria-label="Navegação principal">
+    <nav className="rail" aria-label={t("Navegação principal")}>
       <div className="rail-section">
-        <Tip text="Voltar"><button className="rail-back" onClick={back} aria-label="Voltar"><Icon name="arrow_back" size={18} /></button></Tip>
-        <RailItem label="Eu e meus perfis" page="me"><span className="avatar">{monogram(nick)}</span></RailItem>
+        <Tip text={t("Voltar")}><button className="rail-back" onClick={back} aria-label={t("Voltar")}><Icon name="arrow_back" size={18} /></button></Tip>
+        <RailItem label={t("Eu e meus perfis")} page="me"><span className="avatar">{monogram(nick)}</span></RailItem>
       </div>
       <div className="rail-areas">
-        <AreaItem label="Início" icon="sports_esports" active={page === "home"} onClick={() => go("home")} />
-        <AreaItem label="Partida grande" icon="groups" active={page === "bigmatch"} onClick={() => go("bigmatch")} />
-        <AreaItem label="Arquivos" icon="folder_open" active={page === "files"} onClick={() => go("files")} />
-        <AreaItem label="Mapas" icon="map" active={area("map")} onClick={() => goCreate("map")} />
-        {UNITS_ENABLED && <AreaItem label="Tropas" icon="smart_toy" active={area("unit")} onClick={() => goCreate("unit")} />}
-        <AreaItem label="Modelos" icon="view_in_ar" active={area("model") || page === "studio"} onClick={() => goCreate("model")} />
-        <AreaItem label="Ícones" icon="photo_camera" active={page === "icons"} onClick={() => go("icons")} />
-        <AreaItem label="Mods" icon="extension" active={page === "library" || page === "hub"} onClick={() => go("library")} />
-        <AreaItem label="Rede" icon="hub" active={page === "multiplayer"} onClick={() => go("multiplayer")} off={offline} />
-        <AreaItem label="Sistema" icon="settings" active={page === "settings" || page === "performance"} onClick={() => go("settings")} badge={appUpdate ? 1 : 0} />
+        <AreaItem label={t("Início")} icon="sports_esports" active={page === "home"} onClick={() => go("home")} />
+        <AreaItem label={t("Partida grande")} icon="groups" active={page === "bigmatch"} onClick={() => go("bigmatch")} />
+        <AreaItem label={t("Arquivos")} icon="folder_open" active={page === "files"} onClick={() => go("files")} />
+        <AreaItem label={t("Mapas")} icon="map" active={area("map")} onClick={() => goCreate("map")} />
+        {UNITS_ENABLED && <AreaItem label={t("Tropas")} icon="smart_toy" active={area("unit")} onClick={() => goCreate("unit")} />}
+        <AreaItem label={t("Modelos")} icon="view_in_ar" active={area("model") || page === "studio"} onClick={() => goCreate("model")} />
+        <AreaItem label={t("Ícones")} icon="photo_camera" active={page === "icons"} onClick={() => go("icons")} />
+        <AreaItem label={t("Mods")} icon="extension" active={page === "library" || page === "hub"} onClick={() => go("library")} />
+        <AreaItem label={t("Rede")} icon="hub" active={page === "multiplayer"} onClick={() => go("multiplayer")} off={offline} />
+        <AreaItem label={t("Sistema")} icon="settings" active={page === "settings" || page === "performance"} onClick={() => go("settings")} badge={appUpdate ? 1 : 0} />
       </div>
       <div className="rail-divider" />
       <div className="rail-list">
@@ -174,7 +175,7 @@ export function Rail() {
           const h = hueOf(p.id);
           const active = p.id === profiles.active;
           return (
-            <RailItem key={p.id} label={`Perfil ${p.name} (${p.mods.filter((m) => m.enabled).length} mods)`} selected={active && (page === "home" || page === "library")}
+            <RailItem key={p.id} label={t("Perfil {name} ({n} mods)", { name: p.name, n: p.mods.filter((m) => m.enabled).length })} selected={active && (page === "home" || page === "library")}
               onClick={() => void switchProfile(p.id, p.name, active)}>
               <span className="instance-tile" style={{ ["--tile-a" as string]: `hsl(${h} 42% 38%)`, ["--tile-b" as string]: `hsl(${(h + 35) % 360} 45% 18%)` }}>
                 {monogram(p.name)}
@@ -182,9 +183,9 @@ export function Rail() {
             </RailItem>
           );
         })}
-        <RailItem label="Novo perfil" onClick={() => setCreating(true)}><Icon name="add" /></RailItem>
+        <RailItem label={t("Novo perfil")} onClick={() => setCreating(true)}><Icon name="add" /></RailItem>
       </div>
-      {offline && <Tip text="Modo local: sem internet. Mude em Sistema → Configurações."><span className="rail-offline"><Icon name="cloud_off" size={16} /> LOCAL</span></Tip>}
+      {offline && <Tip text={t("Modo local: sem internet. Mude em Sistema → Configurações.")}><span className="rail-offline"><Icon name="cloud_off" size={16} /> LOCAL</span></Tip>}
       {creating && <NewProfile onClose={() => setCreating(false)} />}
     </nav>
   );
@@ -198,21 +199,21 @@ export function NewProfile({ onClose }: { onClose: () => void }) {
   const [copy, setCopy] = useState(false);
   const taken = profiles?.profiles.some((p) => p.name.trim().toLowerCase() === name.trim().toLowerCase());
   return (
-    <Modal title="Criar perfil" icon="add" onClose={onClose}>
+    <Modal title={t("Criar perfil")} icon="add" onClose={onClose}>
       <form className="col" style={{ gap: 14 }} onSubmit={async (e) => {
         e.preventDefault();
         const set = await run("newprofile", () => api.createProfile(name.trim(), copy ? profiles?.active : undefined));
         if (!set) return;
         const created = set.profiles[set.profiles.length - 1];
-        await run("activate", () => api.setActiveProfile(created.id), `Perfil "${created.name}" criado.`);
+        await run("activate", () => api.setActiveProfile(created.id), t('Perfil "{name}" criado.', { name: created.name }));
         await refresh();
         go("home");
         onClose();
       }}>
-        <p className="muted small">Cada perfil guarda quais mods ficam ligados e em que ordem — como uma instância do jogo.</p>
-        <Field label="Nome" hint={taken ? "Já existe um perfil com esse nome." : undefined}><input className="input" value={name} placeholder="Ex.: Liga 2v2" onChange={(e) => setName(e.target.value)} /></Field>
-        <label className="row small"><input type="checkbox" checked={copy} onChange={(e) => setCopy(e.target.checked)} /> Começar com os mods do perfil ativo</label>
-        <footer><button type="button" className="btn text" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!name.trim() || busy || taken}>{busy ? "Criando…" : "Criar"}</button></footer>
+        <p className="muted small">{t("Cada perfil guarda quais mods ficam ligados e em que ordem — como uma instância do jogo.")}</p>
+        <Field label={t("Nome")} hint={taken ? t("Já existe um perfil com esse nome.") : undefined}><input className="input" value={name} placeholder={t("Ex.: Liga 2v2")} onChange={(e) => setName(e.target.value)} /></Field>
+        <label className="row small"><input type="checkbox" checked={copy} onChange={(e) => setCopy(e.target.checked)} /> {t("Começar com os mods do perfil ativo")}</label>
+        <footer><button type="button" className="btn text" onClick={onClose}>{t("Cancelar")}</button><button className="btn primary" disabled={!name.trim() || busy || taken}>{busy ? t("Criando…") : t("Criar")}</button></footer>
       </form>
     </Modal>
   );
@@ -249,37 +250,37 @@ export function CommandPalette() {
   }, [open]);
 
   const cmds = useMemo<Cmd[]>(() => {
-    const nav = (id: Page, label: string, icon: string): Cmd => ({ id: "go-" + id, label, icon, hint: "abrir", run: () => go(id) });
+    const nav = (id: Page, label: string, icon: string): Cmd => ({ id: "go-" + id, label, icon, hint: t("abrir"), run: () => go(id) });
     const list: Cmd[] = [
-      { id: "play", label: "Jogar", icon: "play_arrow", hint: "ação", run: async () => { await run("launch", () => api.launchGame(), "Abrindo o jogo…"); await refresh(); } },
-      { id: "apply", label: "Aplicar o perfil sem jogar", icon: "published_with_changes", hint: "ação", run: async () => { await run("apply", () => api.applyActive(), "Perfil aplicado."); await refresh(); } },
-      { id: "purge", label: "Voltar a pasta do jogo ao original", icon: "restore", hint: "ação", run: async () => { await run("purge", () => api.purge(), "Pasta do jogo restaurada."); await refresh(); } },
-      nav("home", "Perfil ativo", "sports_esports"),
-      nav("library", "Mods do perfil", "extension"),
-      nav("hub", "Hub de mods", "store"),
-      nav("bigmatch", "Partida grande: mais de 8 jogadores, times à vontade", "groups"),
-      nav("multiplayer", "Multiplayer: salas e chat", "hub"),
-      nav("create", "Criar: mapas, tropas e modelos 3D", "add_box"),
-      nav("files", "Arquivos: espaço, cópias de segurança e lixeira", "folder_open"),
-      nav("icons", "Gerador de ícones de tropas", "photo_camera"),
-      nav("studio", "Estúdio de criação", "construction"),
-      nav("performance", "Desempenho e diagnóstico", "speed"),
-      nav("me", "Meus perfis", "account_circle"),
-      nav("settings", "Configurações", "settings"),
+      { id: "play", label: t("Jogar"), icon: "play_arrow", hint: t("ação"), run: async () => { await run("launch", () => api.launchGame(), t("Abrindo o jogo…")); await refresh(); } },
+      { id: "apply", label: t("Aplicar o perfil sem jogar"), icon: "published_with_changes", hint: t("ação"), run: async () => { await run("apply", () => api.applyActive(), t("Perfil aplicado.")); await refresh(); } },
+      { id: "purge", label: t("Voltar a pasta do jogo ao original"), icon: "restore", hint: t("ação"), run: async () => { await run("purge", () => api.purge(), t("Pasta do jogo restaurada.")); await refresh(); } },
+      nav("home", t("Perfil ativo"), "sports_esports"),
+      nav("library", t("Mods do perfil"), "extension"),
+      nav("hub", t("Hub de mods"), "store"),
+      nav("bigmatch", t("Partida grande: mais de 8 jogadores, times à vontade"), "groups"),
+      nav("multiplayer", t("Multiplayer: salas e chat"), "hub"),
+      nav("create", t("Criar: mapas, tropas e modelos 3D"), "add_box"),
+      nav("files", t("Arquivos: espaço, cópias de segurança e lixeira"), "folder_open"),
+      nav("icons", t("Gerador de ícones de tropas"), "photo_camera"),
+      nav("studio", t("Estúdio de criação"), "construction"),
+      nav("performance", t("Desempenho e diagnóstico"), "speed"),
+      nav("me", t("Meus perfis"), "account_circle"),
+      nav("settings", t("Configurações"), "settings"),
       ...(profiles?.profiles ?? []).map<Cmd>((p) => ({
-        id: "profile-" + p.id, label: `Usar o perfil ${p.name}`, icon: "swap_horiz", hint: "perfil",
+        id: "profile-" + p.id, label: t("Usar o perfil {name}", { name: p.name }), icon: "swap_horiz", hint: t("perfil"),
         run: async () => { await switchProfile(p.id, p.name); },
       })),
       ...mods.map<Cmd>((m) => ({
-        id: "mod-" + m.manifest.id, label: `${m.enabled ? "Desligar" : "Ligar"} ${m.manifest.name}`, icon: m.enabled ? "toggle_on" : "toggle_off", hint: "mod",
+        id: "mod-" + m.manifest.id, label: m.enabled ? t("Desligar {name}", { name: m.manifest.name }) : t("Ligar {name}", { name: m.manifest.name }), icon: m.enabled ? "toggle_on" : "toggle_off", hint: "mod",
         run: async () => {
-          const ok = await run("toggle:" + m.manifest.id, () => api.setModEnabled(m.manifest.id, !m.enabled), `${m.manifest.name} ${m.enabled ? "desligado" : "ligado"}.`);
+          const ok = await run("toggle:" + m.manifest.id, () => api.setModEnabled(m.manifest.id, !m.enabled), (m.enabled ? t("{name} desligado.", { name: m.manifest.name }) : t("{name} ligado.", { name: m.manifest.name })));
           if (ok !== undefined) await refreshMods();
         },
       })),
     ];
-    const t = q.trim().toLowerCase();
-    return t ? list.filter((c) => c.label.toLowerCase().includes(t)) : list;
+    const term = q.trim().toLowerCase();
+    return term ? list.filter((c) => c.label.toLowerCase().includes(term)) : list;
   }, [q, mods, profiles, go, run, refresh, refreshMods]);
 
   if (!open) return null;
@@ -289,8 +290,8 @@ export function CommandPalette() {
   };
   return (
     <div className="palette-wrap" onMouseDown={(e) => e.target === e.currentTarget && setPalette(false)}>
-      <div className="palette" role="dialog" aria-label="Ação rápida">
-        <input ref={input} className="input" placeholder="Digite uma ação, página, perfil ou mod…" value={q}
+      <div className="palette" role="dialog" aria-label={t("Ação rápida")}>
+        <input ref={input} className="input" placeholder={t("Digite uma ação, página, perfil ou mod…")} value={q}
           onChange={(e) => { setQ(e.target.value); setSel(0); }}
           onKeyDown={(e) => {
             if (e.key === "Escape") setPalette(false);
@@ -299,7 +300,7 @@ export function CommandPalette() {
             else if (e.key === "Enter" && cmds[sel]) void exec(cmds[sel]);
           }} />
         <div className="items" role="listbox">
-          {cmds.length === 0 && <p className="muted" style={{ padding: 14 }}>Nada encontrado.</p>}
+          {cmds.length === 0 && <p className="muted" style={{ padding: 14 }}>{t("Nada encontrado.")}</p>}
           {cmds.slice(0, 60).map((c, i) => (
             <button key={c.id} className="menu-item" role="option" aria-selected={i === sel} onMouseEnter={() => setSel(i)} onClick={() => exec(c)}>
               <Icon name={c.icon} /> {c.label} <small>{c.hint}</small>

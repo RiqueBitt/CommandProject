@@ -1,5 +1,5 @@
 import { visibleMods } from "./features";
-import { tr } from "./i18n";
+import { locale, t, tr } from "./i18n";
 import { create } from "zustand";
 import { api, onProgress } from "./api";
 import type * as T from "./types";
@@ -116,7 +116,7 @@ export const useStore = create<State>((set, get) => ({
 export async function switchProfile(id: string, name: string, alreadyActive = false) {
   const { run, refresh, go } = useStore.getState();
   if (!alreadyActive) {
-    const ok = await run("profile", () => api.setActiveProfile(id), `Perfil "${name}" ativo.`);
+    const ok = await run("profile", () => api.setActiveProfile(id), t('Perfil "{name}" ativo.', { name }));
     if (ok === undefined) return;
   }
   await refresh();
@@ -154,17 +154,17 @@ export const fmtBytes = (n: number) => {
     v /= 1024;
     i++;
   }
-  return `${v.toFixed(v < 10 ? 1 : 0).replace(".", ",")} ${u[i]}`;
+  return `${v.toLocaleString(locale(), { minimumFractionDigits: v < 10 ? 1 : 0, maximumFractionDigits: v < 10 ? 1 : 0, useGrouping: false })} ${u[i]}`;
 };
 
 export const fmtDate = (iso?: string | null) => {
   if (!iso) return "—";
   const d = new Date(iso);
-  return d.toLocaleString("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleString(locale(), { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 };
 
-/** "1 alteração" / "3 alterações" */
-export const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+/** "1 alteração" / "3 alterações" (as palavras passam por t(): coloque-as no dicionário) */
+export const plural = (n: number, one: string, many: string) => `${n.toLocaleString(locale())} ${t(n === 1 ? one : many)}`;
 
 // ---- preferências da interface guardadas no settings.json (arquivo local) ----
 let prefTimer: number | undefined;

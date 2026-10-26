@@ -5,6 +5,7 @@ import { api } from "./api";
 import { errorText, useStore } from "./store";
 import { useTabs } from "./tabs";
 import type { CreationMeta } from "./types";
+import { t, tr } from "./i18n";
 
 export interface ProjectApi<D> {
   status: "loading" | "ready" | "error";
@@ -62,7 +63,7 @@ export function useProject<D>(id: string, migrate: (raw: unknown) => D, empty: D
       setMeta(l.meta);
       setHist({ cur: migrate(l.doc), past: [], future: [] });
       setRecoveryAt(l.recoveryAt);
-      if (l.repaired) useStore.getState().toast("info", `O arquivo de "${l.meta.name}" estava danificado e foi recuperado do ${l.repaired}. O arquivo danificado ficou guardado na pasta do projeto.`);
+      if (l.repaired) useStore.getState().toast("info", t('O arquivo de "{name}" estava danificado e foi recuperado do {source}. O arquivo danificado ficou guardado na pasta do projeto.', { name: l.meta.name, source: tr(l.repaired) }));
       setStatus("ready");
     }).catch((e) => {
       if (!alive) return;
@@ -112,7 +113,7 @@ export function useProject<D>(id: string, migrate: (raw: unknown) => D, empty: D
       autosaved.current = docRef.current;
       return true;
     } catch (e) {
-      useStore.getState().toast("error", `Não deu para salvar: ${errorText(e)}`);
+      useStore.getState().toast("error", t("Não deu para salvar: {error}", { error: errorText(e) }));
       return false;
     } finally {
       setSaving(false);
@@ -141,7 +142,7 @@ export function useProject<D>(id: string, migrate: (raw: unknown) => D, empty: D
       const d = await api.creationRecovery<unknown>(id);
       replace(migrate(d));
       setRecoveryAt(null);
-      useStore.getState().toast("ok", "Recuperei as alterações que não tinham sido salvas.");
+      useStore.getState().toast("ok", t("Recuperei as alterações que não tinham sido salvas."));
     } catch (e) {
       useStore.getState().toast("error", errorText(e));
     }

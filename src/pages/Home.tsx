@@ -95,7 +95,7 @@ export default function Home() {
           <div className="card pad col" style={{ maxWidth: 720 }}>
             <Empty icon="travel_explore" title={t("Onde está o jogo?")}
               action={<div className="row"><button className="btn primary" onClick={chooseFolder}><Icon name="folder_open" /> {t("Escolher pasta")}</button><button className="btn text" disabled={busy.game} onClick={async () => {
-                const g = await run("game", () => api.setGamePath(null), (x) => (x ? t("Jogo encontrado.") : t("Ainda não achei o jogo nas pastas da Steam e da GOG. Use \"Escolher pasta\".")));
+                const g = await run("game", () => api.setGamePath(null), (x) => (x ? t("Jogo encontrado.") : t('Ainda não achei o jogo nas pastas da Steam e da GOG. Use "Escolher pasta".')));
                 if (g !== undefined) await refresh();
               }}><Icon name="refresh" /> {busy.game ? t("Procurando…") : t("Procurar de novo")}</button></div>}>
               {t("Procuramos nas bibliotecas da Steam e na GOG. Se o jogo está em outra pasta, aponte para ela — pode ser a pasta do jogo, a gamedata ou a bin.")}
@@ -220,7 +220,7 @@ export default function Home() {
                     <div key={f} className="row">
                       <span className="mono" style={{ flex: 1 }}>{f}</span>
                       <button className="btn sm tonal" disabled={busy["adopt:" + f]} onClick={async () => {
-                        await run("adopt:" + f, () => api.adoptUnmanaged(f), (m) => t("\"{name}\" agora está na biblioteca.", { name: m.name }));
+                        await run("adopt:" + f, () => api.adoptUnmanaged(f), (m) => t('"{name}" agora está na biblioteca.', { name: m.name }));
                         await refresh();
                       }}>{t("Gerenciar")}</button>
                       <button className="btn sm text" title={t("É um arquivo do jogo")} onClick={async () => {
@@ -359,7 +359,7 @@ function RenameProfile({ onClose }: { onClose: () => void }) {
         <Field label={t("Nome")}><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
         <footer>
           <button type="button" className="btn danger" disabled={(profiles?.profiles.length ?? 0) <= 1} onClick={async () => {
-            if (!(await confirmDialog(t("Apagar o perfil \"{name}\"? Os mods continuam na biblioteca.", { name: current.name })))) return;
+            if (!(await confirmDialog(t('Apagar o perfil "{name}"? Os mods continuam na biblioteca.', { name: current.name })))) return;
             const r = await run("del", () => api.deleteProfile(current.id), t("Perfil apagado."));
             if (r) { await refresh(); go("me"); onClose(); }
           }}><Icon name="delete" /> {t("Apagar perfil")}</button>

@@ -5,23 +5,25 @@ import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 import { useStore } from "./store";
 import type { ChatMsg, Room, ServerInfo } from "./types";
+import { t } from "./i18n";
 
+// texto em português (chave): traduza onde mostrar, com t(OFFLINE_TEXT)
 export const OFFLINE_TEXT = "O modo local está ligado: o launcher não usa a internet. Desligue em Configurações → Modo local para usar o multiplayer.";
 const isOffline = () => !!useStore.getState().settings?.offline;
 
 async function req<T>(base: string, path: string, init: RequestInit & { token?: string } = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (init.token) headers.Authorization = `Bearer ${init.token}`;
-  if (isOffline()) throw new Error(OFFLINE_TEXT);
+  if (isOffline()) throw new Error(t(OFFLINE_TEXT));
   let r: Response;
   try {
     r = await fetch(base.replace(/\/$/, "") + path, { ...init, headers, signal: AbortSignal.timeout(12000) });
   } catch {
-    throw new Error("Não foi possível falar com o servidor da comunidade. Confira o endereço e a sua conexão.");
+    throw new Error(t("Não foi possível falar com o servidor da comunidade. Confira o endereço e a sua conexão."));
   }
   if (r.status === 204) return undefined as T;
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error((body as { error?: string }).error ?? `O servidor respondeu ${r.status}`);
+  if (!r.ok) throw new Error((body as { error?: string }).error ?? t("O servidor respondeu {status}", { status: r.status }));
   return body as T;
 }
 
@@ -104,7 +106,7 @@ export function useChat(base: string | null | undefined, nick: string, channel: 
 
   useEffect(() => {
     if (!base || nick.trim().length < 2) return;
-    if (isOffline()) { setState("offline"); setNotice(OFFLINE_TEXT); return; }
+    if (isOffline()) { setState("offline"); setNotice(t(OFFLINE_TEXT)); return; }
     let closed = false;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
