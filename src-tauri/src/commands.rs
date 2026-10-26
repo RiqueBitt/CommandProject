@@ -1348,6 +1348,7 @@ pub async fn build_first_person(state: State<'_, AppState>, opts: cp_core::first
         let import = ImportOptions {
             id: Some("cp-primeira-pessoa".into()),
             name: Some("Primeira Pessoa".into()),
+            version: Some(cp_core::firstperson::MOD_VERSION.into()),
             category: Some(Category::Gameplay),
             description: Some(cp_core::firstperson::describe(&opts)),
             replace: true,

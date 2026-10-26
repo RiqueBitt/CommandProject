@@ -384,6 +384,8 @@ export function OptimizeModal({ onClose }: { onClose: () => void }) {
 // ------------------------------------------------------------------ primeira pessoa
 
 const FP_KEY = "cp-fp";
+/** versão do mod montado por esta versão do launcher (igual a `firstperson::MOD_VERSION`) */
+export const FP_VERSION = "1.1.0";
 export const FP_DEFAULT: FirstPersonOptions = { key: "F5", hud: true, drive: true, firstZoom: 14, thirdZoom: 38 };
 const FP_KEYS = ["F5", "F6", "F7", "F8", "F11", "Home", "Insert"];
 
@@ -402,8 +404,8 @@ export function FirstPersonModal({ installed, onClose }: { installed: boolean; o
   const [o, setO] = useState<FirstPersonOptions>(loadFirstPerson);
   const set = (patch: Partial<FirstPersonOptions>) => setO((v) => ({ ...v, ...patch }));
   const modes: { icon: string; title: string; text: string }[] = [
-    { icon: "visibility", title: "Primeira pessoa", text: `Uma unidade selecionada + ${o.key}: a câmera do jogo fica colada na unidade (robô, tanque, avião, navio ou construtor), na altura dela, e vira junto quando ela anda. Gire com os controles normais do jogo para olhar em volta.` },
-    { icon: "3d_rotation", title: "Terceira pessoa", text: `${o.key} de novo: a câmera fica atrás da unidade e a segue pelo terreno; gire e dê zoom com os controles normais do jogo.` },
+    { icon: "visibility", title: "Primeira pessoa", text: `Uma unidade selecionada + ${o.key}: a câmera fica na cabeça da unidade (robô, tanque, avião, navio ou construtor), no tamanho do modelo dela, e vira junto quando ela anda. A e D viram a vista; W e S andam para onde você olha.` },
+    { icon: "3d_rotation", title: "Terceira pessoa", text: `${o.key} de novo: a câmera fica atrás da unidade e a segue pelo terreno; A e D giram a vista e a roda do mouse dá zoom.` },
     { icon: "groups", title: "Câmera de comando", text: "Várias unidades selecionadas: câmera acima e atrás da formação, acompanhando o grupo, e as ordens vão para todos." },
     { icon: "construction", title: "Construtores", text: "O menu de construção, o posicionamento dos prédios e as habilidades funcionam em qualquer câmera, como no jogo." },
   ];
@@ -435,7 +437,7 @@ export function FirstPersonModal({ installed, onClose }: { installed: boolean; o
           <Icon name="keyboard" size={20} />
           <div className="grow">
             <div>Controle direto pelo teclado</div>
-            <div className="small faint">Enquanto a câmera está ligada: W A S D andam para onde a câmera olha (a unidade ou o grupo inteiro), E atira no que está sob o mouse, Q para, R troca 1ª/3ª pessoa e Esc volta. Desligado, essas teclas mantêm as funções do jogo e você comanda com o botão direito.</div>
+            <div className="small faint">Enquanto a câmera está ligada: W/S andam para onde a câmera olha (a unidade ou o grupo inteiro), A/D viram a vista, E atira no que está sob o mouse, Q para, R troca 1ª/3ª pessoa e Esc volta. Desligado, essas teclas mantêm as funções do jogo e você comanda com o botão direito.</div>
           </div>
           <Switch label="Controle pelo teclado" checked={o.drive} onChange={(v) => set({ drive: v })} />
         </div>

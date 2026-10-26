@@ -25,6 +25,9 @@ use crate::error::{Error, Result};
 
 /// Teclas que o mod pode usar para alternar a câmera.
 pub const FP_KEYS: &[&str] = &["F5", "F6", "F7", "F8", "F11", "Home", "Insert"];
+/// Versão do mod: o launcher remonta sozinho uma cópia instalada de outra versão (a 1.0 fechava o
+/// jogo no F5). Suba junto com `FP_VERSION` em `src/components/dialogs.tsx`.
+pub const MOD_VERSION: &str = "1.1.0";
 /// Nome do arquivo do mod (o último na ordem de montagem: o `SimCallbacks.lua` dele vale).
 pub const ARCHIVE: &str = "zz_cp_zz_primeira_pessoa.scd";
 
@@ -40,9 +43,9 @@ pub struct FirstPersonOptions {
     pub key: String,
     /// mira, nome, vida e teclas na tela
     pub hud: bool,
-    /// W A S D, E, Q e R controlam a unidade enquanto a câmera está ligada
+    /// W/S, A/D, E, Q e R controlam a unidade enquanto a câmera está ligada
     pub drive: bool,
-    /// distância da câmera em primeira pessoa (o motor tem uma distância mínima)
+    /// distância da câmera em primeira pessoa quando o motor não informa a mínima
     pub first_zoom: f32,
     /// distância da câmera em terceira pessoa
     pub third_zoom: f32,
@@ -134,7 +137,7 @@ pub fn describe(o: &FirstPersonOptions) -> String {
     format!(
         "Selecione uma unidade e aperte {k}: câmera em primeira pessoa, depois atrás da unidade; com várias selecionadas, câmera de comando do grupo.{d} Construtores constroem pelo menu normal em qualquer câmera. Sem nada selecionado, {k} continua com a função original.",
         k = o.key,
-        d = if o.drive { " W A S D andam para onde a câmera olha, E atira no alvo do mouse, Q para, R troca 1ª/3ª pessoa, Esc volta." } else { "" }
+        d = if o.drive { " W/S andam para onde a câmera olha, A/D viram a vista, E atira no alvo do mouse, Q para, R troca 1ª/3ª pessoa, Esc volta." } else { "" }
     )
 }
 

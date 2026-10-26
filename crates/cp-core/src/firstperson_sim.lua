@@ -2,7 +2,7 @@
 -- game's own /lua/SimSync.lua; SimCallback 'CPFirstPerson' (SimCallbacks.lua) calls
 -- CPFirstPersonSim with the units the player had selected. Only units of the army that sent the
 -- command are used (OkayToMessWithArmy), so it is safe in multiplayer.
---   drive: F (forward -1..1) and S (sideways -1..1) along the camera direction DX, DZ
+--   drive: F (forward -1..1) and S (sideways -1..1, kept for older interfaces) along DX, DZ
 --   halt / stop: clears the orders and stops
 --   fire: attacks the enemy unit Target (entity id) or the ground at Pos
 function CPFirstPersonSim(data, units)
@@ -36,8 +36,9 @@ function CPFirstPersonSim(data, units)
                 local phys = u:GetBlueprint().Physics
                 speed = (phys and phys.MaxSpeed) or speed
             end)
-            -- a target a little ahead: re-sent while the key is held, the unit keeps going
-            local d = math.max(10, speed * 3)
+            -- a target well ahead (the launcher re-sends it about once a second, or when the view
+            -- turns, so the unit never slows down to arrive)
+            local d = math.max(12, speed * 4)
             local x = math.max(2, math.min(sx - 2, p[1] + mx * d))
             local z = math.max(2, math.min(sz - 2, p[3] + mz * d))
             local y = p[2]

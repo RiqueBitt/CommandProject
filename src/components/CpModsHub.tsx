@@ -26,7 +26,7 @@ interface Entry {
 
 export const CP_MODS: Entry[] = [
   { ids: ["cp-primeira-pessoa"], name: "Primeira Pessoa", icon: "videocam", modal: "fp", isNew: true, tags: ["Câmera", "Controle"],
-    desc: "Selecione uma unidade e aperte F5: câmera em primeira pessoa presa nela, depois em terceira pessoa; com um grupo, câmera de comando. W A S D andam, E atira, construtores constroem pelo menu normal." },
+    desc: "Selecione uma unidade e aperte F5: câmera em primeira pessoa presa nela, depois em terceira pessoa; com um grupo, câmera de comando. W/S andam, A/D viram, E atira, construtores constroem pelo menu normal." },
   { ids: ["cp-ia-esperta"], name: "IA esperta", icon: "psychology", modal: "ai", tags: ["IA", "Escaramuça"],
     desc: "Comandante estratégico para a IA: navios, economia, mini-bases, personalidades e um painel (F4) que mostra o que ela pensa." },
   { ids: ["cp-trapacas", "cp-trapacas-menu"], name: "Trapaças", icon: "auto_fix_high", modal: "cheats", tags: ["Jogar sozinho"],

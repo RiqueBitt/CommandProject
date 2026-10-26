@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect } from "react";
+import { FP_VERSION, loadFirstPerson } from "./components/dialogs";
 import { CommandPalette, Rail, SystemBar } from "./components/Shell";
 import { Toasts } from "./components/ui";
 import { api, onEvent } from "./lib/api";
@@ -44,6 +45,18 @@ export default function App() {
           await api.setModEnabled(oldTheme.manifest.id, false).catch(() => {});
           await refresh();
           toast("info", "Desliguei o Menu moderno antigo, que fazia o jogo fechar ao abrir. Gere de novo na Biblioteca para usar a versão corrigida.");
+        }
+        // Primeira Pessoa montada por um launcher antigo (a 1.0 fechava o jogo no F5): monta de novo
+        // com as opções salvas, mantendo ligado ou desligado como estava
+        const fp = useStore.getState().mods.find((m) => m.manifest.id === "cp-primeira-pessoa");
+        if (fp && fp.manifest.version !== FP_VERSION) {
+          try {
+            await api.buildFirstPerson(loadFirstPerson(), fp.enabled);
+            await refresh();
+            toast("info", `Primeira Pessoa atualizada para a versão ${FP_VERSION}.`);
+          } catch (e) {
+            toast("error", `Não deu para atualizar a Primeira Pessoa: ${errorText(e)}. Abra o Hub de mods e clique em Atualizar.`);
+          }
         }
         // cópia de segurança automática dos projetos (local, de tempos em tempos)
         void api.backupAuto().then((b) => { if (b) toast("info", `Cópia de segurança automática dos projetos feita (${b.projects} projeto(s)).`); }).catch(() => {});

@@ -52,12 +52,23 @@ function cam:SnapTo(p, hpr, zoom) W.cam.focus = p; W.cam.heading = hpr[1]; W.cam
 function cam:NoseCam(u, pitch, zoom, s, t) if type(u) ~= 'table' then error('quer a unidade') end W.cam.nose = u; table.insert(W.calls, 'nose') end
 function cam:Reset() table.insert(W.calls, 'reset') end
 function cam:GetMinZoom() return 5 end
+function cam:UseAbsoluteCoords(on) W.cam.absolute = on; table.insert(W.calls, on and 'abs' or 'rel') end
 function GetCamera(name) return cam end
-function GetCameraPositionAndZoom()
-    -- olho atrás do foco, na direção oposta ao rumo (rumo 0 = olhando para -z)
+function Vector(x, y, z) return { x, y, z } end
+-- vista de cima, a tela gira com o rumo (rumo 0 = olhando para -z): na frente fica acima
+viewLeft = {}
+function viewLeft:Project(p)
     local h = W.cam.heading
     local dx, dz = -math.sin(h), -math.cos(h)
-    return W.cam.focus[1] - dx * 50, W.cam.focus[2] + 50, W.cam.focus[3] - dz * 50, W.cam.zoom
+    local rx, rz = -dz, dx
+    local ox, oz = p[1] - W.cam.focus[1], p[3] - W.cam.focus[3]
+    return { x = 500 + ox * rx + oz * rz, y = 400 - (ox * dx + oz * dz) }
+end
+function GetCameraPositionAndZoom()
+    -- câmera em órbita: olho atrás do foco (rumo 0 = olhando para -z) e acima dele pelo ângulo
+    local h, p, z = W.cam.heading, W.cam.pitch, W.cam.zoom
+    local dx, dz = -math.sin(h), -math.cos(h)
+    return W.cam.focus[1] - dx * z * math.cos(p), W.cam.focus[2] + z * math.sin(p), W.cam.focus[3] - dz * z * math.cos(p), z
 end
 function CurrentTime() return W.time end
 function IsKeyDown(k) return W.held[k] == true end
@@ -96,7 +107,7 @@ function Unit(id, x, z, army)
     function u:GetEntityId() return self.id end
     function u:GetHealth() return 50 end
     function u:GetMaxHealth() return 100 end
-    function u:GetBlueprint() return { General = { UnitName = 'Tanque ' .. self.id }, Description = 'tank' } end
+    function u:GetBlueprint() return { General = { UnitName = 'Tanque ' .. self.id }, Description = 'tank', SizeX = 3, SizeY = 6, SizeZ = 2.5, Physics = { MeshExtentsX = 0, MeshExtentsY = self.meshY or 0, MeshExtentsZ = 0 } } end
     return u
 end
 local keyActions = { ping_alert = { action = 'UI_Lua ping()' }, zoom_out = { action = 'UI_Lua zoomout()' }, attack = { action = 'UI_Lua attack()' }, stop = { action = 'UI_Lua stop()' }, escape = { action = 'UI_Lua esc()' } }
@@ -162,28 +173,71 @@ def test_ui(code):
     g.W.selected = lua.table_from([tank])
     g.CPFirstPersonToggle()
     g.Step(3)
-    check(g.W.cam.nose is None and abs(g.W.cam.focus[1] - 300) < 8 and abs(g.W.cam.focus[3] - 400) < 8 and g.W.cam.zoom >= 5, f"1ª pessoa: câmera colada na unidade, sem NoseCam ({list(g.W.cam.focus.values())}, zoom {g.W.cam.zoom})")
-    calls = list(g.W.calls.values())
-    check("nose" not in calls and "snap" in calls, "1ª pessoa usa SnapTo (o NoseCam do motor fecha o jogo)")
-    check("CPFirstPersonKey" in g.W.map.W.action and "CPFirstPersonKey" in g.W.map.Esc.action, "W e Esc controlam a unidade enquanto a câmera está ligada")
-    # W segurado: anda para onde a câmera olha (foco − olho, no chão)
-    g.W.held.W = True
-    g.Step(4)
-    a = last_cmd(g)
-    check(a is not None and a.Cmd == "drive" and a.F == 1 and a.S == 0, f"W anda para a frente ({a and a.Cmd})")
+    eye = g.GetCameraPositionAndZoom()
     import math
     h = g.W.cam.heading
+    fx, fz = -math.sin(h), -math.cos(h)
+    # olho na frente da cabeça: altura 6 × 0,92 + 0,15, à frente metade do maior lado + 0,12
+    want = (300 + fx * 1.62, 5 + 5.67, 400 + fz * 1.62)
+    err = max(abs(eye[i] - want[i]) for i in range(3))
+    check(g.W.cam.nose is None and err < 0.05, f"1ª pessoa: olho na cabeça da unidade ({[round(v, 2) for v in eye[:3]]} ≈ {[round(v, 2) for v in want]})")
+    calls = list(g.W.calls.values())
+    check("nose" not in calls and "snap" in calls, "1ª pessoa usa SnapTo (o NoseCam do motor fecha o jogo)")
+    check(g.W.cam.absolute is True and abs(g.W.cam.zoom - 0.6) < 1e-6, f"1ª pessoa em coordenadas absolutas, olho logo atrás do foco (zoom {g.W.cam.zoom})")
+    check("CPFirstPersonKey" in g.W.map.W.action and "CPFirstPersonKey" in g.W.map.Esc.action, "W e Esc controlam a unidade enquanto a câmera está ligada")
+    n0 = len(g.W.cmds)
+    g.Step(5)
+    check(len(g.W.cmds) == n0, "sem tecla, nenhuma ordem é enviada")
+    # tecla que o motor ainda acha apertada, sem ter sido apertada agora: não anda sozinha
+    g.W.held.W = True
+    g.Step(5)
+    check(len(g.W.cmds) == n0, "tecla presa de antes não move a unidade")
+    g.W.held.W = None
+    # W segurado: anda para onde a câmera olha, sem mandar ordem nova a cada quadro
+    g.W.held.W = True
+    g.CPFirstPersonKey("W")
+    g.Step(6)
+    a = last_cmd(g)
+    check(a is not None and a.Cmd == "drive" and a.F == 1 and a.S == 0, f"W anda para a frente ({a and a.Cmd})")
+    h = g.W.cam.heading
     check(a is not None and abs(a.DX - (-math.sin(h))) < 1e-6 and abs(a.DZ - (-math.cos(h))) < 1e-6, f"na direção em que a câmera olha ({a and (a.DX, a.DZ)}, rumo {h})")
-    # andando, a câmera vira para onde a unidade vai (aqui: para +x)
-    for k in range(30):
-        tank.pos = lua.table_from([300 + k * 2, 5, 400])
+    check(len(g.W.cmds) - n0 == 1, f"uma ordem só enquanto a direção não muda ({len(g.W.cmds) - n0})")
+    # andando com W a câmera não balança: o rumo é do jogador, mesmo com a unidade desviando
+    h0 = g.W.cam.heading
+    for k in range(10):
+        tank.pos = lua.table_from([300 + (k % 2) * 0.6, 5, 400 - k])
+        g.Step(1)
+    check(abs(g.W.cam.heading - h0) < 1e-6, "com W o rumo não segue os desvios da unidade (sem balanço)")
+    # D vira a vista para a direita (olhando para -z, direita = +x)
+    g.W.held.D = True
+    g.CPFirstPersonKey("D")
+    g.Step(5)
+    g.W.held.D = None
+    h1 = g.W.cam.heading
+    dx1 = -math.sin(h1)
+    check(dx1 > -math.sin(h0) + 0.3, f"D vira a vista para a direita ({-math.sin(h0):.2f} -> {dx1:.2f})")
+    a = last_cmd(g)
+    check(abs(a.DX - dx1) < 0.05, "virando com W, a unidade recebe a direção nova")
+    g.W.held.W = None
+    g.Step(2)
+    check(last_cmd(g).Cmd == "halt", "soltar a tecla para a unidade")
+    # andando por ordens (botão direito), a vista vira para onde a unidade vai (aqui: para +x)
+    base = tank.pos[3]
+    for k in range(40):
+        tank.pos = lua.table_from([300 + k * 2, 5, base])
         g.Step(1)
     fx, fz = -math.sin(g.W.cam.heading), -math.cos(g.W.cam.heading)
     check(fx > 0.9, f"1ª pessoa vira com o movimento da unidade (direção {fx:.2f}, {fz:.2f})")
-    check(abs(g.W.cam.focus[1] - (358 + fx * 6)) < 3, f"foco à frente da unidade ({g.W.cam.focus[1]:.1f})")
-    g.W.held.W = None
-    g.Step(4)
-    check(last_cmd(g).Cmd == "halt", "soltar a tecla para a unidade")
+    # o jogo devolve um objeto novo a cada chamada: a mesma unidade não reinicia a câmera
+    hb = g.W.cam.heading
+    g.W.selected = lua.table_from([g.Unit(7, tank.pos[1], tank.pos[3])])
+    g.Step(1)
+    check(abs(g.W.cam.heading - hb) < 0.05, "mesma unidade (objeto novo) mantém a vista")
+    g.W.selected = lua.table_from([tank])
+    # sem IsKeyDown: a primeira batida vale até a repetição do Windows começar
+    g.W.held = lua.table()
+    real = g.IsKeyDown
+    g.IsKeyDown = None
     # E com inimigo sob o mouse: atira nele; sem inimigo: atira no chão
     enemy = g.Unit(99, 320, 420)
     g.W.rollover = lua.table_from({"userUnit": enemy, "armyIndex": 2})
@@ -192,27 +246,38 @@ def test_ui(code):
     g.W.rollover = None
     g.CPFirstPersonKey("E")
     check(last_cmd(g).Cmd == "fire" and last_cmd(g).Pos[1] == 100, "E sem inimigo atira no chão do mouse")
+    g.CPFirstPersonKey("W")
+    g.Step(5)
+    check(last_cmd(g).Cmd == "drive", "sem IsKeyDown: W anda com a batida da tecla")
+    g.Step(1)
+    check(last_cmd(g).Cmd == "drive", "e não para antes da repetição da tecla (0,5 s)")
+    g.Step(3)
+    check(last_cmd(g).Cmd == "halt", "sem repetição, para")
+    g.IsKeyDown = real
     # F5 de novo: terceira pessoa (atrás, seguindo a unidade)
     g.CPFirstPersonToggle()
     tank.pos = lua.table_from([310, 5, 380])
     g.Step(2)
-    check(g.W.cam.nose is None and abs(g.W.cam.focus[1] - 310) < 1e-6 and abs(g.W.cam.focus[3] - 380) < 1e-6, "3ª pessoa: a câmera acompanha a unidade")
+    g.Step(20)
+    check(g.W.cam.nose is None and abs(g.W.cam.focus[1] - 310) < 0.5 and abs(g.W.cam.focus[3] - 380) < 0.5, f"3ª pessoa: a câmera acompanha a unidade ({g.W.cam.focus[1]:.1f}, {g.W.cam.focus[3]:.1f})")
     # F5 de novo: volta à estratégica, com a câmera e as teclas de antes
     g.CPFirstPersonToggle()
     check(abs(g.W.cam.focus[1] - 500) < 1e-6 and abs(g.W.cam.zoom - 80) < 1e-6, "volta à câmera estratégica de antes")
+    check(g.W.cam.absolute is False, "coordenadas normais de volta")
     check(g.W.map.W.action == "UI_Lua zoomout()" and g.W.map.A.action == "UI_Lua attack()", "teclas originais de volta (W, A)")
     check(g.W.map.D is None and g.W.map.F5 is not None, "teclas sem função original saem; F5 continua")
     # grupo: câmera de comando acima da formação, W anda com todos
     a1, a2 = g.Unit(1, 100, 100), g.Unit(2, 140, 100)
     g.W.selected = lua.table_from([a1, a2])
     g.CPFirstPersonToggle()
-    g.Step(2)
-    check(g.W.cam.nose is None and abs(g.W.cam.focus[1] - 120) < 1e-6 and g.W.cam.zoom >= 60, f"grupo: câmera de comando no centro da formação (zoom {g.W.cam.zoom})")
-    g.W.held.D = True
+    g.Step(20)
+    check(g.W.cam.nose is None and abs(g.W.cam.focus[1] - 120) < 0.5 and g.W.cam.zoom >= 60, f"grupo: câmera de comando no centro da formação (zoom {g.W.cam.zoom})")
+    g.W.held.W = True
+    g.CPFirstPersonKey("W")
     g.Step(4)
     a = last_cmd(g)
-    check(a.Cmd == "drive" and a.S == 1 and g.W.cmds[len(g.W.cmds)].sel is not False, "D anda para o lado com o grupo selecionado")
-    g.W.held.D = None
+    check(a.Cmd == "drive" and a.F == 1 and g.W.cmds[len(g.W.cmds)].sel is not False, "W anda com o grupo selecionado")
+    g.W.held.W = None
     # unidade destruída: volta sozinho
     a1.dead = True
     a2.dead = True

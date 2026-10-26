@@ -793,7 +793,7 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     case "perf_set_priority": { perfDb().priority = String(a.level); return r(String(a.level)); }
     case "build_first_person": {
       await progress("fp", ["Montando a primeira pessoa", "Pronto"]);
-      return r(manifest("cp-primeira-pessoa", "Primeira Pessoa", "1.0.0", "gameplay", ["zz_cp_zz_primeira_pessoa.scd"]));
+      return r(manifest("cp-primeira-pessoa", "Primeira Pessoa", "1.1.0", "gameplay", ["zz_cp_zz_primeira_pessoa.scd"]));
     }
     case "optimize_status": return r(optDb());
     case "build_optimize": {

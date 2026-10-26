@@ -2,8 +2,8 @@
 -- /lua/ui/game/worldview.lua; CreateMainWorldView calls CPFirstPersonInit. @KEY@ cycles the camera:
 --   one unit selected:  strategic -> first person (camera on the unit) -> third person (behind it) -> strategic
 --   several selected:   strategic -> command camera (above and behind the formation) -> strategic
--- While a mode is on, W A S D drive the unit (or the whole group) relative to where the camera
--- looks, E fires at what is under the mouse, Q stops, R swaps first/third person and Esc goes back.
+-- While a mode is on, W/S drive the unit (or the whole group) where the camera looks, A/D turn the
+-- view, E fires at what is under the mouse, Q stops, R swaps first/third person and Esc goes back.
 -- Everything else stays the game's own: right click orders, abilities, the build menu and its
 -- placement work from any camera. With nothing selected @KEY@ keeps its original action.
 -- Moves and shots go to the simulation through SimCallback 'CPFirstPerson' (SimSync.lua), which
@@ -19,11 +19,8 @@ local DRIVE_KEYS = @DRIVE@
 local FIRST_ZOOM = @FIRST_ZOOM@
 local THIRD_ZOOM = @THIRD_ZOOM@
 local GROUP_PITCH = 0.75
-local THIRD_PITCH = 0.42
-local FIRST_PITCH = 0.14
-local EYE_HEIGHT = 2.5
-local LOOK_AHEAD = 6
-local SEND_EVERY = 0.25
+local THIRD_PITCH = 0.38
+local FIRST_PITCH = 0.1
 
 local C_PANEL = 'C80E161E'
 local C_TEXT = 'FFE6EEF5'
@@ -39,7 +36,6 @@ local Loop = false
 local Hud = false
 local Overridden = false
 local Pressed = {}
-local KeyWorks = {}
 local Driving = false
 local Ready = false
 
@@ -123,35 +119,39 @@ local function Health(u)
     return math.max(0, math.min(1, h / m))
 end
 
--- where the camera looks, on the ground plane: focus point minus eye position
-local function ViewDir()
-    local fx, fz = 0, 0
-    local ok = pcall(function()
-        local s = Cam():SaveSettings()
-        local ex, ey, ez = GetCameraPositionAndZoom()
-        fx = s.Focus[1] - ex
-        fz = s.Focus[3] - ez
-    end)
-    local len = math.sqrt(fx * fx + fz * fz)
-    if ok and len > 0.001 then return fx / len, fz / len end
-    -- fallback: from the camera heading
-    local h = 0
-    pcall(function() h = Cam():SaveSettings().Heading or 0 end)
-    return -math.sin(h), -math.cos(h)
+-- held keys: a hold only starts with a real key press (the key map calls CPFirstPersonKey), so a
+-- key the engine still thinks is down from before never moves the unit by itself. It goes on while
+-- the engine's IsKeyDown says the key is down (asked by name or by its code, once it has answered
+-- for that key); without IsKeyDown, while Windows keeps repeating the key (the first press counts
+-- for a while: Windows waits before repeating a held key)
+local KeyCode = {}
+local Holding = {}
+local function KeyDown(key)
+    local tries = { key }
+    if string.len(key) == 1 then table.insert(tries, string.byte(key)) end
+    if KeyCode[key] ~= nil then tries = { KeyCode[key] } end
+    local answered = false
+    for _, k in tries do
+        local ok, down = pcall(IsKeyDown, k)
+        if ok and down == true then
+            KeyCode[key] = k
+            return true
+        end
+        if ok and down == false then answered = true end
+    end
+    if KeyCode[key] ~= nil and answered then return false end
+    return nil
 end
 
--- held keys: the engine's IsKeyDown when it understands the key, otherwise the last key press
 local function Held(key)
-    if KeyWorks[key] ~= false then
-        local ok, down = pcall(IsKeyDown, key)
-        if ok and type(down) == 'boolean' then
-            if down then KeyWorks[key] = true end
-            if KeyWorks[key] then return down end
-        else
-            KeyWorks[key] = false
-        end
+    if not Holding[key] then return false end
+    local down = KeyDown(key)
+    if down == nil then
+        local p = Pressed[key]
+        down = p and (Now() - p.last) < (p.n >= 2 and 0.3 or 0.7)
     end
-    return Pressed[key] and (Now() - Pressed[key]) < 0.45
+    if not down then Holding[key] = false end
+    return down and true or false
 end
 
 local function Send(args, withSelection)
@@ -288,7 +288,7 @@ local function UpdateHud()
     Hud.life:SetSolidColor(life > 0.5 and C_GOOD or (life > 0.25 and C_ACCENT or C_BAD))
     Hud.lifeText:SetText(math.floor(life * 100 + 0.5) .. '% vida')
     if DRIVE_KEYS then
-        Hud.keys:SetText('W A S D mover   E atirar no alvo do mouse   Q parar' .. (n == 1 and '   R 1a/3a pessoa' or '') .. '   Esc sair')
+        Hud.keys:SetText('W/S andar   A/D virar   E atirar no alvo do mouse   Q parar' .. (n == 1 and '   R 1a/3a pessoa' or '') .. '   Esc sair')
     else
         Hud.keys:SetText('Botao direito: ordens   Esc sair')
     end
@@ -296,9 +296,12 @@ end
 
 -- ------------------------------------------------------------------ cameras
 
--- The game's camera is an orbit camera: a focus point, a heading, a pitch and a distance (zoom).
--- Every frame the focus goes to the unit; first person puts it just ahead of the unit at eye height,
--- with the shortest distance the engine allows and a low pitch, turning with the unit as it moves.
+-- The game's camera is an orbit camera: a focus point, a heading, a pitch and a zoom. The mod owns
+-- the heading while a mode is on (A/D turn it, or it follows where the unit walks).
+-- First person switches the camera to absolute coordinates, as the game's own cinematics do: the
+-- zoom is then a real distance with no minimum, so a short zoom puts the eye right behind the
+-- focus, and the focus goes just ahead of the unit's head. Third person and the command camera use
+-- the normal camera. Positions are smoothed, so the unit's steps don't shake the view.
 -- (Camera:NoseCam is not used: it is unfinished in the engine and closes the game.)
 local DIRS = {
     function(h) return -math.sin(h), -math.cos(h) end,
@@ -306,10 +309,18 @@ local DIRS = {
     function(h) return -math.sin(h), math.cos(h) end,
     function(h) return math.sin(h), math.cos(h) end,
 }
-local Calib = 1
+-- heading pi looks to the top of the map (CameraDefaults.InitialHeading) and grows turning left
+-- (seen in the game): formula 3 when it can't be measured
+local Calib = 3
+local CalibNote = ''
 local Calibrated = false
-local CalibStep = false
-local Look = { h = false, set = false, last = false }
+-- h: heading the mod keeps; eye/focus: smoothed points; anchor: last place the unit was seen
+-- (to know where it walks); want: heading of that walk; key: ids of the units
+local View = { h = false, eye = false, focus = false, anchor = false, want = false, key = '' }
+local TURN_RATE = 1.5
+-- first person: distance from the eye to the focus (absolute coordinates)
+local FP_DIST = 0.6
+local Absolute = false
 
 local function DirOf(h)
     return DIRS[Calib](h)
@@ -335,98 +346,175 @@ local function LerpAngle(a, b, t)
     return a + d * t
 end
 
+-- turns a heading to the right (positive) or left (negative) by an angle, whatever way the
+-- engine counts headings: x grows to the right of the map, z towards the bottom
+local function Turn(h, a)
+    local dx, dz = DirOf(h)
+    local rx, rz = -dz, dx
+    local c, s = math.cos(a), math.sin(a)
+    return HeadingOf(dx * c + rx * s, dz * c + rz * s)
+end
+
+local function Smooth(cur, target, rate, dt)
+    if not cur then return { target[1], target[2], target[3] } end
+    local k = 1 - math.exp(-rate * dt)
+    return { cur[1] + (target[1] - cur[1]) * k, cur[2] + (target[2] - cur[2]) * k, cur[3] + (target[3] - cur[3]) * k }
+end
+
 local function MinZoom(cam)
-    local z = 5
+    local z = FIRST_ZOOM
     pcall(function() z = cam:GetMinZoom() or z end)
     if not Finite(z) or z <= 0 then z = 5 end
     return z
 end
 
-local function Snap(cam, focus, h, pitch, zoom)
+local function Snap(cam, focus, h, pitch, zoom, free)
     if not (Finite(focus[1]) and Finite(focus[2]) and Finite(focus[3]) and Finite(h) and Finite(pitch) and Finite(zoom)) then return false end
-    zoom = math.max(MinZoom(cam), zoom)
+    if not free then zoom = math.max(MinZoom(cam), zoom) end
     local ok = pcall(function() cam:SnapTo(focus, { h, pitch, 0 }, zoom) end)
     return ok
 end
 
--- which way heading turns the view: measured once (focus minus eye after a known heading)
-local function Calibrate(cam)
-    if Calibrated then return end
-    if not CalibStep then
-        local s = cam:SaveSettings()
-        CalibStep = (s.Heading or 0) + 0.8
-        Snap(cam, s.Focus, CalibStep, s.Pitch or 0.8, s.Zoom or 60)
-        return
-    end
-    local ok = pcall(function()
-        local s = cam:SaveSettings()
-        local ex, ey, ez = GetCameraPositionAndZoom()
-        local mx, mz = s.Focus[1] - ex, s.Focus[3] - ez
-        local len = math.sqrt(mx * mx + mz * mz)
-        if len < 0.001 then error('sem direção') end
-        mx, mz = mx / len, mz / len
-        local best, bd = 1, 99
-        for k, f in DIRS do
-            local dx, dz = f(CalibStep)
-            local d = (dx - mx) * (dx - mx) + (dz - mz) * (dz - mz)
-            if d < bd then best, bd = k, d end
-        end
-        Calib = best
-    end)
-    Calibrated = true
-    LOG('*CPFP: camera calibrada (' .. tostring(Calib) .. ', ' .. tostring(ok) .. ')')
+local function SetAbsolute(cam, on)
+    if Absolute == on then return end
+    Absolute = on
+    pcall(function() cam:UseAbsoluteCoords(on) end)
 end
 
-local function FollowFirst(cam)
+-- which way the heading turns the view, measured once on the strategic camera: for the right
+-- formula a point ahead of the focus shows up higher on the screen and a point to its right, to
+-- the right
+local function ScreenOf(p)
+    local v = viewLeft:Project(Vector(p[1], p[2], p[3]))
+    local x, y = v.x or v[1], v.y or v[2]
+    if not (Finite(x) and Finite(y)) then error('sem projeção') end
+    return x, y
+end
+
+local function Calibrate(cam)
+    if Calibrated then return end
+    Calibrated = true
+    local found = false
+    local ok, err = pcall(function()
+        local s = cam:SaveSettings()
+        local f, h = s.Focus, s.Heading or 0
+        local cx, cy = ScreenOf(f)
+        for k, dir in DIRS do
+            local dx, dz = dir(h)
+            local _, ay = ScreenOf({ f[1] + dx * 20, f[2], f[3] + dz * 20 })
+            local rx = ScreenOf({ f[1] - dz * 20, f[2], f[3] + dx * 20 })
+            if ay < cy - 1 and rx > cx + 1 then
+                Calib = k
+                found = true
+                return
+            end
+        end
+    end)
+    CalibNote = tostring(found) .. ' ' .. tostring(ok and '' or err)
+    LOG('*CPFP: camera calibrada (' .. tostring(Calib) .. ', ' .. CalibNote .. ')')
+end
+
+-- size of the unit's model: width, height, length (the mesh extents of the blueprint, or its size)
+local DimCache = {}
+local function Dims(u)
+    local id = 'x'
+    pcall(function() id = u:GetEntityId() end)
+    if DimCache[id] then return DimCache[id][1], DimCache[id][2], DimCache[id][3] end
+    local w, h, d = 1, 1, 1
+    pcall(function()
+        local bp = u:GetBlueprint()
+        local ph = bp.Physics or {}
+        -- the game fills the extents it doesn't have with 0
+        local function pick(a, b, def)
+            a, b = tonumber(a), tonumber(b)
+            if a and a > 0 then return a end
+            if b and b > 0 then return b end
+            return def
+        end
+        w = pick(ph.MeshExtentsX, bp.SizeX, w)
+        h = pick(ph.MeshExtentsY, bp.SizeY, h)
+        d = pick(ph.MeshExtentsZ, bp.SizeZ, d)
+    end)
+    local function clamp(v) if not Finite(v) then return 1 end return math.max(0.3, math.min(40, v)) end
+    w, h, d = clamp(w), clamp(h), clamp(d)
+    DimCache[id] = { w, h, d }
+    LOG('*CPFP: tamanho da unidade ' .. tostring(id) .. ': ' .. w .. ' x ' .. h .. ' x ' .. d)
+    return w, h, d
+end
+
+-- the mod's heading: A/D turn it while driving; otherwise it follows where the unit walks
+local function SteerHeading(p, turn, dt, follow)
+    if turn ~= 0 then
+        View.h = Turn(View.h, turn * TURN_RATE * dt)
+    end
+    if not p then return end
+    if not View.anchor then
+        View.anchor = { p[1], p[3] }
+        return
+    end
+    local dx, dz = p[1] - View.anchor[1], p[3] - View.anchor[2]
+    local d = math.sqrt(dx * dx + dz * dz)
+    if d > 0.35 then
+        View.anchor = { p[1], p[3] }
+        if follow and turn == 0 then
+            View.want = HeadingOf(dx / d, dz / d)
+        end
+    end
+    if follow and turn == 0 and View.want then
+        View.h = LerpAngle(View.h, View.want, 1 - math.exp(-2.5 * dt))
+    end
+end
+
+local function FollowFirst(cam, dt, turn, driving)
     local u = Units[1]
     local p = Pos(u)
     if not p then return end
-    local s = cam:SaveSettings()
-    -- the player turned the camera with the game's own controls: keep that direction
-    if Look.set and Finite(s.Heading) and math.abs(s.Heading - Look.set) > 0.02 then
-        Look.h = s.Heading
-    end
-    if Look.last then
-        local dx, dz = p[1] - Look.last[1], p[3] - Look.last[3]
-        local d = math.sqrt(dx * dx + dz * dz)
-        if d > 0.04 then
-            local target = HeadingOf(dx / d, dz / d)
-            Look.h = LerpAngle(Look.h or target, target, 0.12)
-        end
-    end
-    Look.last = { p[1], p[2], p[3] }
-    local h = Look.h or s.Heading or 0
+    -- driving: the view is the player's (A/D); walking by orders: the view turns where it goes
+    SteerHeading(p, turn, dt, not driving)
+    local h = View.h
     local fx, fz = DirOf(h)
-    local focus = { p[1] + fx * LOOK_AHEAD, p[2] + EYE_HEIGHT, p[3] + fz * LOOK_AHEAD }
-    if Snap(cam, focus, h, FIRST_PITCH, FIRST_ZOOM) then
-        Look.h = h
-        Look.set = h
-    end
+    local w, ht, len = Dims(u)
+    -- the eye: on the front of the head, a little above the top of the model
+    local up = ht * 0.92 + 0.15
+    local ahead = math.max(len, w) * 0.5 + 0.12
+    View.eye = Smooth(View.eye, { p[1] + fx * ahead, p[2] + up, p[3] + fz * ahead }, 14, dt)
+    local eye = View.eye
+    local pitch = FIRST_PITCH
+    local c = FP_DIST * math.cos(pitch)
+    local focus = { eye[1] + fx * c, eye[2] - FP_DIST * math.sin(pitch), eye[3] + fz * c }
+    SetAbsolute(cam, true)
+    Snap(cam, focus, h, pitch, FP_DIST, true)
 end
 
-local function Follow()
+local function Follow(dt, turn, driving)
     local cam = Cam()
-    if not Calibrated then
-        Calibrate(cam)
-        return
-    end
     if Mode == 'first' then
-        FollowFirst(cam)
+        FollowFirst(cam, dt, turn, driving)
         return
     end
+    SetAbsolute(cam, false)
     local c = Center(Units)
     if not c then return end
     local s = cam:SaveSettings()
-    local zoom = s.Zoom
-    local pitch = s.Pitch
-    if Mode == 'group' then
-        local want = math.max(60, Spread(Units, c) * 2.4 + 40)
-        if zoom < want * 0.6 then zoom = want end
-        if pitch < 0.35 then pitch = 0.35 end
-    elseif Mode == 'third' then
-        if pitch < 0.12 then pitch = 0.12 end
+    if DRIVE_KEYS then
+        SteerHeading(table.getn(Units) == 1 and c or nil, turn, dt, Mode == 'third' and not driving)
+    else
+        View.h = s.Heading or View.h
     end
-    Snap(cam, { c[1], c[2] + 2, c[3] }, s.Heading, pitch, zoom)
+    local zoom = s.Zoom
+    local pitch = THIRD_PITCH
+    local lift = 2
+    if Mode == 'group' then
+        pitch = GROUP_PITCH
+        local want = math.max(60, Spread(Units, c) * 2.4 + 40)
+        if not Finite(zoom) or zoom < want * 0.5 then zoom = want end
+    else
+        local _, ht = Dims(Units[1])
+        lift = ht * 0.7
+        if not Finite(zoom) or zoom < MinZoom(cam) then zoom = THIRD_ZOOM end
+    end
+    View.focus = Smooth(View.focus, { c[1], c[2] + lift, c[3] }, 10, dt)
+    Snap(cam, View.focus, View.h, pitch, zoom)
 end
 
 local function Exit(quiet)
@@ -436,13 +524,23 @@ local function Exit(quiet)
         Driving = false
     end
     Mode = 'off'
+    Holding = {}
     UnbindDrive()
     pcall(UpdateHud)
     local cam = Cam()
+    SetAbsolute(cam, false)
     if Saved then
         local s = Saved
-        pcall(function() cam:RestoreSettings(s) end)
-        pcall(function() cam:MoveTo(s.Focus, { s.Heading, s.Pitch, 0 }, s.Zoom, 0) end)
+        local function restore()
+            pcall(function() cam:RestoreSettings(s) end)
+            pcall(function() cam:MoveTo(s.Focus, { s.Heading, s.Pitch, 0 }, s.Zoom, 0) end)
+        end
+        restore()
+        -- the engine takes a frame to leave absolute coordinates: put the view back again after it
+        ForkThread(function()
+            WaitFrames(2)
+            if Mode == 'off' then restore() end
+        end)
     else
         pcall(function() cam:Reset() end)
     end
@@ -451,25 +549,44 @@ local function Exit(quiet)
     if not quiet then Notify('Camera estrategica') end
 end
 
+local function IdsOf(list)
+    local ids = {}
+    for _, u in list do
+        local id = '?'
+        pcall(function() id = tostring(u:GetEntityId()) end)
+        table.insert(ids, id)
+    end
+    return table.concat(ids, ',')
+end
+
 local function Start(mode, units)
     local cam = Cam()
+    local s = false
+    pcall(function() s = cam:SaveSettings() end)
     if Mode == 'off' then
-        local ok, s = pcall(function() return cam:SaveSettings() end)
-        Saved = ok and s or false
+        Saved = s
+        -- measured on the strategic camera, before the mod moves it
+        Calibrate(cam)
+    end
+    local key = IdsOf(units)
+    -- same units: keep the view; new units: start looking where the camera looked
+    if key ~= View.key or not View.h then
+        View = { h = (s and s.Heading) or 0, eye = false, focus = false, anchor = false, want = false, key = key }
+    else
+        View.eye = false
+        View.focus = false
     end
     Units = units
     pcall(SelectUnits, units)
     LOG('*CPFP: modo ' .. mode .. ' com ' .. table.getn(units) .. ' unidade(s)')
-    Look = { h = false, set = false, last = false }
-    if mode == 'third' or mode == 'group' then
+    SetAbsolute(cam, mode == 'first')
+    if mode == 'third' and s then
+        local _, ht = Dims(units[1])
         local c = Center(units)
-        if c then
-            local h = 0
-            pcall(function() h = cam:SaveSettings().Heading or 0 end)
-            local zoom = mode == 'group' and math.max(60, Spread(units, c) * 2.4 + 40) or THIRD_ZOOM
-            local pitch = mode == 'group' and GROUP_PITCH or THIRD_PITCH
-            Snap(cam, { c[1], c[2] + 2, c[3] }, h, pitch, zoom)
-        end
+        if c then Snap(cam, { c[1], c[2] + ht * 0.7, c[3] }, View.h, THIRD_PITCH, THIRD_ZOOM) end
+    elseif mode == 'group' and s then
+        local c = Center(units)
+        if c then Snap(cam, { c[1], c[2] + 2, c[3] }, View.h, GROUP_PITCH, math.max(60, Spread(units, c) * 2.4 + 40)) end
     end
     Mode = mode
     BindDrive()
@@ -482,50 +599,57 @@ local function Selected()
     return Alive(sel)
 end
 
+-- the drive keys as numbers: forward (W +1, S -1) and turn (D +1 right, A -1 left)
+local function DriveInput()
+    if not DRIVE_KEYS then return 0, 0 end
+    local f, t = 0, 0
+    if Held('W') then f = f + 1 end
+    if Held('S') then f = f - 1 end
+    if Held('D') then t = t + 1 end
+    if Held('A') then t = t - 1 end
+    return f, t
+end
+
 local function Tick()
-    local lastSend = 0
-    local wasMoving = false
+    local last = Now()
     local lastHud = 0
+    -- what was last sent to the units: forward, direction and when
+    local sent = { f = 0, dx = 0, dz = 0, t = -10 }
     while Mode ~= 'off' do
+        local t = Now()
+        local dt = t - last
+        if not Finite(dt) or dt <= 0 or dt > 0.25 then dt = 1 / 60 end
+        last = t
         Units = Alive(Units)
-        -- the player picked other units: the camera goes with them
+        -- the player picked other units: the camera goes with them (compared by id: the game
+        -- hands out a new object for the same unit on every call)
         local sel = Selected()
-        if table.getn(sel) > 0 then
-            local same = table.getn(sel) == table.getn(Units)
-            if same then
-                for i, u in sel do
-                    if u ~= Units[i] then same = false; break end
-                end
-            end
-            if not same then
-                local mode = Mode
-                if table.getn(sel) > 1 then mode = 'group' elseif mode == 'group' then mode = 'third' end
-                Start(mode, sel)
-            end
+        if table.getn(sel) > 0 and IdsOf(sel) ~= View.key then
+            local mode = Mode
+            if table.getn(sel) > 1 then mode = 'group' elseif mode == 'group' then mode = 'third' end
+            Start(mode, sel)
         end
         if table.getn(Units) == 0 then
             Notify('Unidade destruida', C_BAD)
             Exit(true)
             break
         end
-        local okF, errF = pcall(Follow)
+        local f, turn = DriveInput()
+        local okF, errF = pcall(Follow, dt, turn, f ~= 0)
         if not okF then LOG('*CPFP: camera: ' .. tostring(errF)) end
-        local t = Now()
-        if DRIVE_KEYS and t - lastSend >= SEND_EVERY then
-            lastSend = t
-            local f, s = 0, 0
-            if Held('W') then f = f + 1 end
-            if Held('S') then f = f - 1 end
-            if Held('D') then s = s + 1 end
-            if Held('A') then s = s - 1 end
-            if f ~= 0 or s ~= 0 then
-                local dx, dz = ViewDir()
-                Send({ Cmd = 'drive', F = f, S = s, DX = dx, DZ = dz })
-                wasMoving = true
-                Driving = true
-            elseif wasMoving then
+        if DRIVE_KEYS then
+            if f ~= 0 then
+                local dx, dz = DirOf(View.h or 0)
+                local turned = (dx - sent.dx) * (dx - sent.dx) + (dz - sent.dz) * (dz - sent.dz) > 0.012
+                -- a new order only when needed: each one makes the unit plan its path again
+                if f ~= sent.f or (turned and t - sent.t >= 0.2) or t - sent.t >= 0.9 then
+                    Send({ Cmd = 'drive', F = f, S = 0, DX = dx, DZ = dz })
+                    sent = { f = f, dx = dx, dz = dz, t = t }
+                    Driving = true
+                end
+            elseif Driving then
                 Send({ Cmd = 'halt' })
-                wasMoving = false
+                sent = { f = 0, dx = 0, dz = 0, t = t }
                 Driving = false
             end
         end
@@ -542,7 +666,15 @@ end
 
 function CPFirstPersonKey(key)
     if Mode == 'off' then return end
-    Pressed[key] = Now()
+    local t = Now()
+    local p = Pressed[key]
+    if p and t - p.last < 0.7 then
+        p.last = t
+        p.n = p.n + 1
+    else
+        Pressed[key] = { last = t, n = 1 }
+    end
+    Holding[key] = true
     if key == 'Esc' then
         Exit()
     elseif key == 'Q' then
