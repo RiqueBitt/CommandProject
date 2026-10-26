@@ -791,6 +791,10 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     case "perf_profile_delete": { const db = perfDb(); db.profiles = db.profiles.filter((x) => x.id !== a.id); return r(undefined); }
     case "perf_dumps_delete": { const db = perfDb(); const names = a.names as string[]; db.dumps = db.dumps.filter((d) => !names.includes(d.name)); return r(names.length); }
     case "perf_set_priority": { perfDb().priority = String(a.level); return r(String(a.level)); }
+    case "build_first_person": {
+      await progress("fp", ["Montando a primeira pessoa", "Pronto"]);
+      return r(manifest("cp-primeira-pessoa", "Primeira Pessoa", "1.0.0", "gameplay", ["zz_cp_zz_primeira_pessoa.scd"]));
+    }
     case "optimize_status": return r(optDb());
     case "build_optimize": {
       const o = a.opts as T.OptimizeOptions, db = optDb();

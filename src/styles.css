@@ -1162,3 +1162,6 @@ textarea.pinput { height: auto; padding: 4px 6px; resize: vertical; }
 .bm-restrict-grid .check { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
 .bm-restrict-grid .check.on { background: rgba(var(--primary-rgb), .1); }
 .bm-launch { gap: 12px; align-items: center; position: sticky; bottom: 0; padding: 12px 0; background: linear-gradient(transparent, var(--bg) 35%); }
+.store-card.cp-mod { cursor: default; }
+.store-card.cp-mod .desc { -webkit-line-clamp: 4; }
+.store-card.cp-mod .foot { color: var(--muted); }

@@ -179,6 +179,7 @@ export const api = {
   aiMemory: () => call<T.AiMemoryReport>("ai_memory"),
   buildAi: (opts: T.AiOptions, enable = true) => call<T.AiInstall>("build_ai", { opts, enable }),
   buildCheats: (opts: T.CheatOptions, enable = true) => call<T.Manifest>("build_cheats", { opts, enable }),
+  buildFirstPerson: (opts: T.FirstPersonOptions, enable = true) => call<T.Manifest>("build_first_person", { opts, enable }),
   optimizeStatus: () => call<T.OptimizeState>("optimize_status"),
   buildOptimize: (opts: T.OptimizeOptions, enable = true) => call<T.OptimizeState>("build_optimize", { opts, enable }),
   optimizeUndoWindows: () => call<T.OptimizeState>("optimize_undo_windows"),

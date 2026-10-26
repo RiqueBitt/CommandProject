@@ -148,6 +148,7 @@ export interface Project {
 export interface ProjectFile { path: string; size: number; kind: "lua" | "texture" | "model" | "blueprint" | "audio" | "other" }
 
 /** Mod de trapaças para jogar sozinho (montado com os arquivos do jogo). */
+export interface FirstPersonOptions { key: string; hud: boolean; drive: boolean; firstZoom: number; thirdZoom: number }
 export interface OptimizeOptions { fps: number; bigFps: number; gpu: boolean; fullscreenFix: boolean; priority: string; noThrottle: boolean; largeAddress: boolean }
 export interface OptimizeState {
   options: OptimizeOptions; installed: boolean; enabled: boolean;

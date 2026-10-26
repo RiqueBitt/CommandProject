@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
-import type { AiMemoryReport, AiOptions, AiPersonality, CheatOptions, ConflictReport, OptimizeOptions, OptimizeState } from "../lib/types";
+import type { AiMemoryReport, AiOptions, AiPersonality, CheatOptions, ConflictReport, FirstPersonOptions, OptimizeOptions, OptimizeState } from "../lib/types";
 import { Field, Icon, Modal, Notice, Switch, TaskProgress } from "./ui";
 
 export function ConflictsModal({ report, onClose }: { report: ConflictReport; onClose: () => void }) {
@@ -75,7 +75,7 @@ const CHEAT_ROWS: { key: "mass" | "energy" | "research" | "unlockAll" | "god" | 
 ];
 const SPEEDS = [1, 2, 5, 10, 25];
 
-function loadCheats(): CheatOptions {
+export function loadCheats(): CheatOptions {
   try {
     const raw = localStorage.getItem(CHEATS_KEY);
     if (raw) return { ...CHEATS_DEFAULT, ...JSON.parse(raw) };
@@ -181,7 +181,7 @@ const AI_PERSONALITIES: { key: AiPersonality; label: string; hint: string }[] = 
   { key: "airborne", label: "Aérea", hint: "aviação mais agressiva" },
 ];
 
-function loadAi(): AiOptions {
+export function loadAi(): AiOptions {
   try {
     const raw = localStorage.getItem("cp-ai");
     if (raw) return { ...AI_DEFAULT, ...JSON.parse(raw) };
@@ -377,6 +377,83 @@ export function OptimizeModal({ onClose }: { onClose: () => void }) {
           </footer>
         </form>
       )}
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------------ primeira pessoa
+
+const FP_KEY = "cp-fp";
+export const FP_DEFAULT: FirstPersonOptions = { key: "F5", hud: true, drive: true, firstZoom: 0, thirdZoom: 38 };
+const FP_KEYS = ["F5", "F6", "F7", "F8", "F11", "Home", "Insert"];
+
+export function loadFirstPerson(): FirstPersonOptions {
+  try {
+    const raw = localStorage.getItem(FP_KEY);
+    if (raw) return { ...FP_DEFAULT, ...JSON.parse(raw) };
+  } catch { /* sem armazenamento: usa o padrão */ }
+  return FP_DEFAULT;
+}
+
+/** Monta e instala o mod Primeira Pessoa com as opções escolhidas. */
+export function FirstPersonModal({ installed, onClose }: { installed: boolean; onClose: () => void }) {
+  const { run, refreshMods } = useStore.getState();
+  const busy = useStore((s) => s.busy.fp);
+  const [o, setO] = useState<FirstPersonOptions>(loadFirstPerson);
+  const set = (patch: Partial<FirstPersonOptions>) => setO((v) => ({ ...v, ...patch }));
+  const modes: { icon: string; title: string; text: string }[] = [
+    { icon: "visibility", title: "Primeira pessoa", text: `Uma unidade selecionada + ${o.key}: a câmera do jogo fica presa na unidade (robô, tanque, avião, navio ou construtor) e acompanha o movimento e as animações dela.` },
+    { icon: "3d_rotation", title: "Terceira pessoa", text: `${o.key} de novo: a câmera fica atrás da unidade e a segue pelo terreno; gire e dê zoom com os controles normais do jogo.` },
+    { icon: "groups", title: "Câmera de comando", text: "Várias unidades selecionadas: câmera acima e atrás da formação, acompanhando o grupo, e as ordens vão para todos." },
+    { icon: "construction", title: "Construtores", text: "O menu de construção, o posicionamento dos prédios e as habilidades funcionam em qualquer câmera, como no jogo." },
+  ];
+  return (
+    <Modal title="Primeira Pessoa" icon="videocam" onClose={onClose}>
+      <form className="col" style={{ gap: 14 }} onSubmit={async (e) => {
+        e.preventDefault();
+        try { localStorage.setItem(FP_KEY, JSON.stringify(o)); } catch { /* ok */ }
+        const m = await run("fp", () => api.buildFirstPerson(o, true), () => installed ? "Primeira Pessoa atualizada." : "Primeira Pessoa instalada e ativada.");
+        if (m) {
+          await refreshMods();
+          onClose();
+        }
+      }}>
+        <div className="col" style={{ gap: 10 }}>
+          {modes.map((m) => (
+            <div key={m.title} className="row" style={{ gap: 12, alignItems: "flex-start" }}>
+              <Icon name={m.icon} size={20} />
+              <div className="grow"><div>{m.title}</div><div className="small faint">{m.text}</div></div>
+            </div>
+          ))}
+        </div>
+        <Field label="Tecla que troca a câmera" hint={`Sem nada selecionado, ${o.key} continua fazendo o que fazia no jogo.`}>
+          <div className="seg" role="group" aria-label="Tecla da câmera">
+            {FP_KEYS.map((k) => <button type="button" key={k} className="btn" aria-pressed={o.key === k} onClick={() => set({ key: k })}>{k}</button>)}
+          </div>
+        </Field>
+        <div className="row" style={{ gap: 12 }}>
+          <Icon name="keyboard" size={20} />
+          <div className="grow">
+            <div>Controle direto pelo teclado</div>
+            <div className="small faint">Enquanto a câmera está ligada: W A S D andam para onde a câmera olha (a unidade ou o grupo inteiro), E atira no que está sob o mouse, Q para, R troca 1ª/3ª pessoa e Esc volta. Desligado, essas teclas mantêm as funções do jogo e você comanda com o botão direito.</div>
+          </div>
+          <Switch label="Controle pelo teclado" checked={o.drive} onChange={(v) => set({ drive: v })} />
+        </div>
+        <div className="row" style={{ gap: 12 }}>
+          <Icon name="center_focus_strong" size={20} />
+          <div className="grow"><div>Mira e painel na tela</div><div className="small faint">Mira no centro em primeira pessoa e um painel com o modo, a unidade, a vida e as teclas.</div></div>
+          <Switch label="Mira e painel" checked={o.hud} onChange={(v) => set({ hud: v })} />
+        </div>
+        <Field label={`Distância em terceira pessoa: ${o.thirdZoom}`}>
+          <input type="range" min={15} max={120} step={1} value={o.thirdZoom} onChange={(e) => set({ thirdZoom: Number(e.target.value) })} aria-label="Distância em terceira pessoa" />
+        </Field>
+        <Notice kind="info">O mod é montado agora com os arquivos de interface e de simulação do seu jogo. As ordens passam pela simulação como as do próprio jogo (valem em multiplayer, mas todos na partida precisam ter o mod). Desligue na lista para voltar ao normal.</Notice>
+        {busy && <TaskProgress task="fp" label="Montando a primeira pessoa…" />}
+        <footer>
+          <button type="button" className="btn text" onClick={onClose}>Cancelar</button>
+          <button className="btn primary" disabled={busy}>{installed ? "Atualizar" : "Instalar e ativar"}</button>
+        </footer>
+      </form>
     </Modal>
   );
 }

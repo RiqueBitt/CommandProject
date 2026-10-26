@@ -4,6 +4,7 @@ import { api, openUrl } from "../lib/api";
 import { errorText, fmtBytes, useStore } from "../lib/store";
 import { CATEGORY_LABEL, type Category, type HubIndex, type HubMod } from "../lib/types";
 import { CATEGORY_ICON } from "./Library";
+import CpModsHub from "../components/CpModsHub";
 
 type Item = { mod: HubMod; index: HubIndex };
 type Sort = "downloads" | "rating" | "recent" | "name";
@@ -77,10 +78,15 @@ export default function Hub() {
     return (
       <div className="scroll"><div className="page">
         <h1 className="page-title">Hub de mods</h1>
-        {offline && <Notice kind="info">O modo local está ligado: o hub não é consultado. Mods que você já tem continuam na biblioteca; para baixar novos, desligue em Sistema → Modo local.</Notice>}
-        <div className="card"><Empty icon="store" title="Nenhum hub configurado" action={<button className="btn primary" onClick={() => useStore.getState().openSettings("hub")}>Abrir configurações</button>}>
-          Conecte a um servidor da comunidade (cp-server) ou adicione o endereço de um índice de mods em Configurações.
-        </Empty></div>
+        <p className="muted" style={{ marginTop: -6 }}>Instale, configure, ligue e desligue os mods sem mexer nos arquivos do jogo: o launcher cuida de tudo ao jogar.</p>
+        <CpModsHub />
+        <section>
+          <div className="section-head"><Icon name="public" /><h2>Mods da comunidade</h2></div>
+          {offline && <Notice kind="info">O modo local está ligado: índices de mods da comunidade não são consultados. Os mods do CommandProject acima funcionam sem internet.</Notice>}
+          <div className="card"><Empty icon="store" title="Nenhum índice da comunidade" action={<button className="btn" onClick={() => useStore.getState().openSettings("hub")}>Abrir configurações</button>}>
+            Opcional: adicione o endereço de um índice de mods em Configurações para ver mods feitos por outras pessoas aqui também.
+          </Empty></div>
+        </section>
       </div></div>
     );
   }
@@ -133,6 +139,8 @@ export default function Hub() {
           </div>
         </div>
         <div className="page">
+          <CpModsHub />
+          <div className="section-head" style={{ marginBottom: -8 }}><Icon name="public" /><h2>Mods da comunidade</h2></div>
           {errors.map((e) => <Notice key={e.url + e.message} kind="err">{e.url && <b>{e.url}: </b>}{e.message}</Notice>)}
           {!query && !cats.length && hero && (
             <section>

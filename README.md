@@ -112,7 +112,23 @@ disponível em Sistema → Visual.
 - **Ação rápida** (`Ctrl+K`): jogar, aplicar, trocar de perfil ou abrir qualquer tela pelo teclado.
 
 **Hub de mods**
-- Loja com destaques, filtros por fonte/categoria e ordenação; instala e atualiza com um clique.
+- **Mods do CommandProject** no topo do hub, todos num lugar só: Primeira Pessoa, IA esperta,
+  Trapaças, Otimização, Partida grande, Texturas HD e Menu moderno. Instalar, configurar, ligar,
+  desligar e remover com um clique, e **Atualizar todos** (monta de novo com as opções salvas,
+  depois de atualizar o jogo ou o launcher). Eles são montados no seu PC com os arquivos do próprio
+  jogo: nada é baixado de servidor e o hub funciona sem internet.
+- **Primeira Pessoa** (novo): selecione uma unidade e aperte **F5** — a câmera do motor do jogo
+  (`NoseCam`) fica presa nela e acompanha o movimento e as animações; F5 de novo, terceira pessoa
+  atrás da unidade, seguindo pelo terreno (gira e dá zoom com os controles normais); com várias
+  unidades, **câmera de comando** acima e atrás da formação. Enquanto a câmera está ligada,
+  **W A S D** andam para onde a câmera olha (a unidade ou o grupo todo), **E** atira no que está sob
+  o mouse, **Q** para, **R** troca 1ª/3ª pessoa e **Esc** volta à câmera estratégica (com as teclas
+  originais de volta). Ordens com o botão direito, habilidades, o menu de construção e o
+  posicionamento de prédios continuam os do jogo em qualquer câmera — construtores constroem em
+  primeira pessoa. Sem nada selecionado, F5 continua com a função original. Mira e painel com a
+  unidade, a vida e as teclas. As ordens passam pela simulação e só valem para unidades do
+  próprio exército (funciona em multiplayer, com todos tendo o mod).
+- Loja da comunidade com destaques, filtros por fonte/categoria e ordenação; instala e atualiza com um clique.
 - Fontes: o hub do servidor da comunidade e quantos índices JSON extras você quiser.
 - Download verificado por **SHA-256 e tamanho** antes de entrar na biblioteca.
 

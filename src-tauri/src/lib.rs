@@ -166,6 +166,7 @@ pub fn run() {
             commands::build_ui_skin,
             commands::build_cheats,
             commands::build_optimize,
+            commands::build_first_person,
             commands::optimize_status,
             commands::optimize_undo_windows,
             commands::build_ai,

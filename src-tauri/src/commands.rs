@@ -1338,6 +1338,29 @@ pub async fn build_cheats(state: State<'_, AppState>, opts: cp_core::cheats::Che
     .await
 }
 
+/// Mod "Primeira Pessoa", montado com os arquivos do jogo do próprio usuário.
+#[tauri::command]
+pub async fn build_first_person(state: State<'_, AppState>, opts: cp_core::firstperson::FirstPersonOptions, enable: bool) -> R<Manifest> {
+    with_ws(&state.ws, move |ws| {
+        let dir = ws.data_dir.join("cache").join("firstperson");
+        std::fs::create_dir_all(&dir).map_err(|e| cp_core::Error::io(&dir, e))?;
+        let archive = cp_core::firstperson::build(&ws.stock_sources()?, &opts, &dir.join(cp_core::firstperson::ARCHIVE))?;
+        let import = ImportOptions {
+            id: Some("cp-primeira-pessoa".into()),
+            name: Some("Primeira Pessoa".into()),
+            category: Some(Category::Gameplay),
+            description: Some(cp_core::firstperson::describe(&opts)),
+            replace: true,
+            move_source: true,
+            ..Default::default()
+        };
+        let m = ws.import_mod(&archive, &import, enable)?;
+        let _ = std::fs::remove_file(&archive);
+        Ok(m)
+    })
+    .await
+}
+
 /// Estado do mod de otimização: opções salvas, se está instalado e os ajustes do Windows.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
