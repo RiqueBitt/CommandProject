@@ -2,8 +2,10 @@
 -- /lua/ui/game/worldview.lua; CreateMainWorldView calls CPFirstPersonInit. @KEY@ cycles the camera:
 --   one unit selected:  strategic -> first person (camera on the unit) -> third person (behind it) -> strategic
 --   several selected:   strategic -> command camera (above and behind the formation) -> strategic
--- While a mode is on, W/S drive the unit (or the whole group) where the camera looks, A/D turn the
--- view, E fires at what is under the mouse, Q stops, R swaps first/third person and Esc goes back.
+-- While a mode is on, W A S D move the unit (or the whole group) relative to where the camera looks,
+-- as in an action game (A/D step sideways); the view turns with the mouse while the middle button
+-- is held, with Q/E or with the game's own rotation (Space + mouse). F fires at what is under the mouse, X stops, R swaps first/third person and Esc
+-- goes back.
 -- Everything else stays the game's own: right click orders, abilities, the build menu and its
 -- placement work from any camera. With nothing selected @KEY@ keeps its original action.
 -- Moves and shots go to the simulation through SimCallback 'CPFirstPerson' (SimSync.lua), which
@@ -164,7 +166,13 @@ local function Action(fn)
     return { action = 'UI_Lua import("/lua/ui/game/worldview.lua").' .. fn, category = 'ui', order = 98 }
 end
 
-local OVERRIDE = { 'W', 'A', 'S', 'D', 'E', 'Q', 'R', 'Esc' }
+-- the keys the mod takes while a mode is on (Shift + W A S D too: the game zooms with Shift-W)
+local OVERRIDE = { 'W', 'A', 'S', 'D', 'Q', 'E', 'F', 'X', 'R', 'Esc', 'Shift-W', 'Shift-A', 'Shift-S', 'Shift-D', 'Shift-Q', 'Shift-E' }
+
+local function BaseKey(k)
+    if string.sub(k, 1, 6) == 'Shift-' then return string.sub(k, 7) end
+    return k
+end
 
 local function OriginalFor(key)
     local act = nil
@@ -180,8 +188,10 @@ local function BindDrive()
     if Overridden or not DRIVE_KEYS then return end
     local t = {}
     for _, k in OVERRIDE do
-        t[k] = Action('CPFirstPersonKey("' .. k .. '")')
+        t[k] = Action('CPFirstPersonKey("' .. BaseKey(k) .. '")')
     end
+    -- out first, then in: the game's own action for the key (zoom, attack, stop...) must not run too
+    pcall(IN_RemoveKeyMapTable, t)
     pcall(IN_AddKeyMapTable, t)
     Overridden = true
 end
@@ -192,7 +202,7 @@ local function UnbindDrive()
     local back, gone = {}, {}
     for _, k in OVERRIDE do
         local a = OriginalFor(k)
-        if a then back[k] = a else gone[k] = Action('CPFirstPersonKey("' .. k .. '")') end
+        if a then back[k] = a else gone[k] = Action('CPFirstPersonKey("' .. BaseKey(k) .. '")') end
     end
     pcall(IN_RemoveKeyMapTable, gone)
     pcall(IN_AddKeyMapTable, back)
@@ -288,7 +298,7 @@ local function UpdateHud()
     Hud.life:SetSolidColor(life > 0.5 and C_GOOD or (life > 0.25 and C_ACCENT or C_BAD))
     Hud.lifeText:SetText(math.floor(life * 100 + 0.5) .. '% vida')
     if DRIVE_KEYS then
-        Hud.keys:SetText('W/S andar   A/D virar   E atirar no alvo do mouse   Q parar' .. (n == 1 and '   R 1a/3a pessoa' or '') .. '   Esc sair')
+        Hud.keys:SetText('W A S D andar   botao do meio + mouse ou Q/E olhar   F atirar   X parar' .. (n == 1 and '   R 1a/3a' or '') .. '   Esc sair')
     else
         Hud.keys:SetText('Botao direito: ordens   Esc sair')
     end
@@ -320,6 +330,8 @@ local View = { h = false, eye = false, focus = false, anchor = false, want = fal
 local TURN_RATE = 1.5
 -- first person: distance from the eye to the focus (absolute coordinates)
 local FP_DIST = 0.6
+-- mouse look: radians per pixel
+local MOUSE_TURN = 0.006
 local Absolute = false
 
 local function DirOf(h)
@@ -442,10 +454,30 @@ local function Dims(u)
     return w, h, d
 end
 
--- the mod's heading: A/D turn it while driving; otherwise it follows where the unit walks
+-- the player turned the view with the game's own controls (Space + mouse): the camera reports a
+-- heading (and pitch) other than the one the mod set last frame, so the view keeps that turn
+local function AdoptTurn(cam)
+    local ok, s = pcall(function() return cam:SaveSettings() end)
+    if not ok or not s then return end
+    if View.setH and Finite(s.Heading) then
+        local d = LerpAngle(0, s.Heading - View.setH, 1)
+        if math.abs(d) > 0.002 and math.abs(d) < 1.5 then
+            View.h = View.h + d
+            View.want = false
+        end
+    end
+    if View.setP and Finite(s.Pitch) then
+        local d = s.Pitch - View.setP
+        if math.abs(d) > 0.002 and math.abs(d) < 1 then View.pitch = math.max(-0.45, math.min(0.9, (View.pitch or FIRST_PITCH) + d)) end
+    end
+end
+
+-- the mod's heading: Q/E (and the game's rotation) turn it; when the unit walks by orders and no
+-- key moves it, the view follows where it goes
 local function SteerHeading(p, turn, dt, follow)
     if turn ~= 0 then
         View.h = Turn(View.h, turn * TURN_RATE * dt)
+        View.want = false
     end
     if not p then return end
     if not View.anchor then
@@ -456,11 +488,15 @@ local function SteerHeading(p, turn, dt, follow)
     local d = math.sqrt(dx * dx + dz * dz)
     if d > 0.35 then
         View.anchor = { p[1], p[3] }
+        View.movedAt = Now()
+        -- where the unit faces: units turn to where they walk
+        View.face = HeadingOf(dx / d, dz / d)
         if follow and turn == 0 then
             View.want = HeadingOf(dx / d, dz / d)
         end
     end
-    if follow and turn == 0 and View.want then
+    -- only while it is walking: once it stops, the view stays where the player left it
+    if follow and turn == 0 and View.want and View.movedAt and Now() - View.movedAt < 0.6 then
         View.h = LerpAngle(View.h, View.want, 1 - math.exp(-2.5 * dt))
     end
 end
@@ -469,21 +505,28 @@ local function FollowFirst(cam, dt, turn, driving)
     local u = Units[1]
     local p = Pos(u)
     if not p then return end
-    -- driving: the view is the player's (A/D); walking by orders: the view turns where it goes
+    -- driving: the view is the player's (Q/E, Space + mouse); walking by orders: it follows the unit
+    AdoptTurn(cam)
     SteerHeading(p, turn, dt, not driving)
     local h = View.h
     local fx, fz = DirOf(h)
     local w, ht, len = Dims(u)
-    -- the eye: on the front of the head, a little above the top of the model
-    local up = ht * 0.92 + 0.15
-    local ahead = math.max(len, w) * 0.5 + 0.12
-    View.eye = Smooth(View.eye, { p[1] + fx * ahead, p[2] + up, p[3] + fz * ahead }, 14, dt)
+    -- the eye: in front of the unit's face (the way it faces, not the way the view looks, so its
+    -- own body stays out of the picture), a little above the top of the model
+    View.faceS = LerpAngle(View.faceS or View.face or h, View.face or h, 1 - math.exp(-5 * dt))
+    local ox, oz = DirOf(View.faceS)
+    local up = ht + 0.3
+    local ahead = math.max(len, w) * 0.55 + 0.25
+    View.eye = Smooth(View.eye, { p[1] + ox * ahead, p[2] + up, p[3] + oz * ahead }, 14, dt)
     local eye = View.eye
-    local pitch = FIRST_PITCH
+    local pitch = View.pitch or FIRST_PITCH
     local c = FP_DIST * math.cos(pitch)
     local focus = { eye[1] + fx * c, eye[2] - FP_DIST * math.sin(pitch), eye[3] + fz * c }
     SetAbsolute(cam, true)
-    Snap(cam, focus, h, pitch, FP_DIST, true)
+    if Snap(cam, focus, h, pitch, FP_DIST, true) then
+        View.setH = h
+        View.setP = pitch
+    end
 end
 
 local function Follow(dt, turn, driving)
@@ -496,10 +539,10 @@ local function Follow(dt, turn, driving)
     local c = Center(Units)
     if not c then return end
     local s = cam:SaveSettings()
+    AdoptTurn(cam)
+    View.setP = nil
     if DRIVE_KEYS then
         SteerHeading(table.getn(Units) == 1 and c or nil, turn, dt, Mode == 'third' and not driving)
-    else
-        View.h = s.Heading or View.h
     end
     local zoom = s.Zoom
     local pitch = THIRD_PITCH
@@ -514,7 +557,7 @@ local function Follow(dt, turn, driving)
         if not Finite(zoom) or zoom < MinZoom(cam) then zoom = THIRD_ZOOM end
     end
     View.focus = Smooth(View.focus, { c[1], c[2] + lift, c[3] }, 10, dt)
-    Snap(cam, View.focus, View.h, pitch, zoom)
+    if Snap(cam, View.focus, View.h, pitch, zoom) then View.setH = View.h end
 end
 
 local function Exit(quiet)
@@ -575,6 +618,8 @@ local function Start(mode, units)
     else
         View.eye = false
         View.focus = false
+        View.setH = nil
+        View.setP = nil
     end
     Units = units
     pcall(SelectUnits, units)
@@ -599,22 +644,54 @@ local function Selected()
     return Alive(sel)
 end
 
--- the drive keys as numbers: forward (W +1, S -1) and turn (D +1 right, A -1 left)
+-- the drive keys as numbers: forward (W +1, S -1), sideways (D +1 right, A -1 left) and turn
+-- (E +1 right, Q -1 left)
 local function DriveInput()
-    if not DRIVE_KEYS then return 0, 0 end
-    local f, t = 0, 0
+    if not DRIVE_KEYS then return 0, 0, 0 end
+    local f, side, t = 0, 0, 0
     if Held('W') then f = f + 1 end
     if Held('S') then f = f - 1 end
-    if Held('D') then t = t + 1 end
-    if Held('A') then t = t - 1 end
-    return f, t
+    if Held('D') then side = side + 1 end
+    if Held('A') then side = side - 1 end
+    if Held('E') then t = t + 1 end
+    if Held('Q') then t = t - 1 end
+    return f, side, t
+end
+
+-- mouse look: with the middle mouse button held, moving the mouse turns the view (and in first
+-- person tilts it up and down), as in an action game
+local MouseLast = false
+local function MouseLook()
+    local held = false
+    pcall(function() held = IsKeyDown('MBUTTON') == true end)
+    if not held or not View.h then
+        MouseLast = false
+        return
+    end
+    local x, y = false, false
+    pcall(function()
+        local m = GetMouseScreenPos()
+        x, y = m.x or m[1], m.y or m[2]
+    end)
+    if not (Finite(x) and Finite(y)) then return end
+    if MouseLast then
+        local dx, dy = x - MouseLast[1], y - MouseLast[2]
+        if dx ~= 0 then
+            View.h = Turn(View.h, dx * MOUSE_TURN)
+            View.want = false
+        end
+        if dy ~= 0 and Mode == 'first' then
+            View.pitch = math.max(-0.45, math.min(0.9, (View.pitch or FIRST_PITCH) + dy * MOUSE_TURN * 0.8))
+        end
+    end
+    MouseLast = { x, y }
 end
 
 local function Tick()
     local last = Now()
     local lastHud = 0
     -- what was last sent to the units: forward, direction and when
-    local sent = { f = 0, dx = 0, dz = 0, t = -10 }
+    local sent = { f = 0, s = 0, dx = 0, dz = 0, t = -10 }
     while Mode ~= 'off' do
         local t = Now()
         local dt = t - last
@@ -634,22 +711,24 @@ local function Tick()
             Exit(true)
             break
         end
-        local f, turn = DriveInput()
-        local okF, errF = pcall(Follow, dt, turn, f ~= 0)
+        local f, side, turn = DriveInput()
+        MouseLook()
+        local moving = f ~= 0 or side ~= 0
+        local okF, errF = pcall(Follow, dt, turn, moving)
         if not okF then LOG('*CPFP: camera: ' .. tostring(errF)) end
         if DRIVE_KEYS then
-            if f ~= 0 then
+            if moving then
                 local dx, dz = DirOf(View.h or 0)
                 local turned = (dx - sent.dx) * (dx - sent.dx) + (dz - sent.dz) * (dz - sent.dz) > 0.012
                 -- a new order only when needed: each one makes the unit plan its path again
-                if f ~= sent.f or (turned and t - sent.t >= 0.2) or t - sent.t >= 0.9 then
-                    Send({ Cmd = 'drive', F = f, S = 0, DX = dx, DZ = dz })
-                    sent = { f = f, dx = dx, dz = dz, t = t }
+                if f ~= sent.f or side ~= sent.s or (turned and t - sent.t >= 0.2) or t - sent.t >= 0.9 then
+                    Send({ Cmd = 'drive', F = f, S = side, DX = dx, DZ = dz })
+                    sent = { f = f, s = side, dx = dx, dz = dz, t = t }
                     Driving = true
                 end
             elseif Driving then
                 Send({ Cmd = 'halt' })
-                sent = { f = 0, dx = 0, dz = 0, t = t }
+                sent = { f = 0, s = 0, dx = 0, dz = 0, t = t }
                 Driving = false
             end
         end
@@ -677,14 +756,14 @@ function CPFirstPersonKey(key)
     Holding[key] = true
     if key == 'Esc' then
         Exit()
-    elseif key == 'Q' then
+    elseif key == 'X' then
         Send({ Cmd = 'stop' })
         Driving = false
     elseif key == 'R' then
         if table.getn(Units) == 1 then
             if Mode == 'first' then Start('third', Units) else Start('first', Units) end
         end
-    elseif key == 'E' then
+    elseif key == 'F' then
         local info = false
         pcall(function() info = GetRolloverInfo() end)
         local id = false

@@ -81,6 +81,8 @@ function GetFocusArmy() return 1 end
 function SessionIsReplay() return false end
 function GetRolloverInfo() return W.rollover end
 function GetMouseWorldPos() return W.mouse end
+W.screen = { x = 500, y = 400 }
+function GetMouseScreenPos() return W.screen end
 function ConExecute(c) table.insert(W.calls, 'con:' .. c) end
 function LOC(s) return s end
 function LOG(s) end
@@ -177,8 +179,8 @@ def test_ui(code):
     import math
     h = g.W.cam.heading
     fx, fz = -math.sin(h), -math.cos(h)
-    # olho na frente da cabeça: altura 6 × 0,92 + 0,15, à frente metade do maior lado + 0,12
-    want = (300 + fx * 1.62, 5 + 5.67, 400 + fz * 1.62)
+    # olho na frente da cabeça: altura 6 + 0,3, à frente 0,55 do maior lado + 0,25
+    want = (300 + fx * 1.9, 5 + 6.3, 400 + fz * 1.9)
     err = max(abs(eye[i] - want[i]) for i in range(3))
     check(g.W.cam.nose is None and err < 0.05, f"1ª pessoa: olho na cabeça da unidade ({[round(v, 2) for v in eye[:3]]} ≈ {[round(v, 2) for v in want]})")
     calls = list(g.W.calls.values())
@@ -208,14 +210,14 @@ def test_ui(code):
         tank.pos = lua.table_from([300 + (k % 2) * 0.6, 5, 400 - k])
         g.Step(1)
     check(abs(g.W.cam.heading - h0) < 1e-6, "com W o rumo não segue os desvios da unidade (sem balanço)")
-    # D vira a vista para a direita (olhando para -z, direita = +x)
-    g.W.held.D = True
-    g.CPFirstPersonKey("D")
+    # E vira a vista para a direita (olhando para -z, direita = +x)
+    g.W.held.E = True
+    g.CPFirstPersonKey("E")
     g.Step(5)
-    g.W.held.D = None
+    g.W.held.E = None
     h1 = g.W.cam.heading
     dx1 = -math.sin(h1)
-    check(dx1 > -math.sin(h0) + 0.3, f"D vira a vista para a direita ({-math.sin(h0):.2f} -> {dx1:.2f})")
+    check(dx1 > -math.sin(h0) + 0.3, f"E vira a vista para a direita ({-math.sin(h0):.2f} -> {dx1:.2f})")
     a = last_cmd(g)
     check(abs(a.DX - dx1) < 0.05, "virando com W, a unidade recebe a direção nova")
     g.W.held.W = None
@@ -241,11 +243,47 @@ def test_ui(code):
     # E com inimigo sob o mouse: atira nele; sem inimigo: atira no chão
     enemy = g.Unit(99, 320, 420)
     g.W.rollover = lua.table_from({"userUnit": enemy, "armyIndex": 2})
-    g.CPFirstPersonKey("E")
-    check(last_cmd(g).Cmd == "fire" and last_cmd(g).Target == 99, "E atira no inimigo sob o mouse")
+    g.CPFirstPersonKey("F")
+    check(last_cmd(g).Cmd == "fire" and last_cmd(g).Target == 99, "F atira no inimigo sob o mouse")
     g.W.rollover = None
-    g.CPFirstPersonKey("E")
-    check(last_cmd(g).Cmd == "fire" and last_cmd(g).Pos[1] == 100, "E sem inimigo atira no chão do mouse")
+    g.CPFirstPersonKey("F")
+    check(last_cmd(g).Cmd == "fire" and last_cmd(g).Pos[1] == 100, "F sem inimigo atira no chão do mouse")
+    g.CPFirstPersonKey("X")
+    check(last_cmd(g).Cmd == "stop", "X para a unidade")
+    # A anda de lado (para a esquerda da vista), sem girar a câmera
+    hs = g.W.cam.heading
+    g.W.held.A = True
+    g.CPFirstPersonKey("A")
+    g.Step(3)
+    a = last_cmd(g)
+    check(a.Cmd == "drive" and a.F == 0 and a.S == -1, f"A anda para a esquerda ({a.Cmd} F={a.F} S={a.S})")
+    check(abs(g.W.cam.heading - hs) < 1e-6, "A/D não giram a câmera")
+    g.W.held.A = None
+    g.Step(2)
+    # botão do meio + mouse para a direita: a vista gira para a direita e olha para baixo/cima
+    hm = g.W.cam.heading
+    g.IsKeyDown = real
+    g.W.held.MBUTTON = True
+    g.Step(1)
+    g.W.screen = lua.table_from({"x": 600, "y": 380})
+    g.Step(1)
+    g.W.held.MBUTTON = None
+    dxm = -math.sin(g.W.cam.heading)
+    # olhando para +x, a direita é +z: girar 0,6 rad para a direita
+    ox, oz = -math.sin(hm), -math.cos(hm)
+    nx, nz = dxm, -math.cos(g.W.cam.heading)
+    want = (ox * math.cos(0.6) - oz * math.sin(0.6), oz * math.cos(0.6) + ox * math.sin(0.6))
+    check(abs(nx - want[0]) < 0.02 and abs(nz - want[1]) < 0.02, f"botão do meio + mouse gira a vista para a direita (({ox:.2f},{oz:.2f}) -> ({nx:.2f},{nz:.2f}))")
+    check(g.W.cam.pitch < 0.1 - 0.05, f"mouse para cima olha para cima (pitch {g.W.cam.pitch:.2f})")
+    g.W.screen = lua.table_from({"x": 900, "y": 380})
+    g.Step(1)
+    check(abs(-math.sin(g.W.cam.heading) - dxm) < 1e-6, "sem o botão, mexer o mouse não gira")
+    g.IsKeyDown = None
+    hs = g.W.cam.heading
+    # Espaço + mouse do jogo gira a câmera: a vista fica com o giro
+    g.W.cam.heading = g.W.cam.heading + 0.5
+    g.Step(1)
+    check(abs(g.W.cam.heading - (hs + 0.5)) < 0.05, f"o giro do próprio jogo (Espaço + mouse) é mantido ({hs:.2f} -> {g.W.cam.heading:.2f})")
     g.CPFirstPersonKey("W")
     g.Step(5)
     check(last_cmd(g).Cmd == "drive", "sem IsKeyDown: W anda com a batida da tecla")
@@ -265,6 +303,7 @@ def test_ui(code):
     check(abs(g.W.cam.focus[1] - 500) < 1e-6 and abs(g.W.cam.zoom - 80) < 1e-6, "volta à câmera estratégica de antes")
     check(g.W.cam.absolute is False, "coordenadas normais de volta")
     check(g.W.map.W.action == "UI_Lua zoomout()" and g.W.map.A.action == "UI_Lua attack()", "teclas originais de volta (W, A)")
+    check(g.W.map["Shift-W"] is None, "Shift-W também volta (sem ação própria aqui, sai)")
     check(g.W.map.D is None and g.W.map.F5 is not None, "teclas sem função original saem; F5 continua")
     # grupo: câmera de comando acima da formação, W anda com todos
     a1, a2 = g.Unit(1, 100, 100), g.Unit(2, 140, 100)
