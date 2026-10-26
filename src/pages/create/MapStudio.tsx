@@ -21,7 +21,7 @@ import { GroundPaint, GroundTextures, PropPicker } from "../studio/MapDecor";
 import { biomeChain, chainTile, combinePaint, deckLayer, decodePaint, encodePaint, groundBaseT, paintDab, paintT, resamplePaint, trailPaint, type PaintLayer } from "../studio/biome";
 import { customLayers, customStem, importTexture, isCustomPath, registerCustomTextures, texUrl } from "../studio/customTex";
 import {
-  applyRelief, BLANK_BASES, BLANK_LABEL, BLANK_WATER, BLANK_Y, blankSizeOf, cutTester, decodeHeights, decorKind, groundCandidates, groundSpec, heightAt, meanInDisc,
+  applyRelief, BLANK_SIZES, BLANK_Y, blankLabel, blankTerrain, blankWater, cutTester, docMapSize, mapKm, nativeBlank, decodeHeights, decorKind, groundCandidates, groundSpec, heightAt, meanInDisc,
   RELIEF_LABEL, reliefShape, reskinPaths, round1, type BlankSize, type Edits, type GroundBiome, type GroundLayer, type PlacedProp, type Pt, type Relief, type Relief3D, type ReliefKind,
 } from "../studio/mapEdit";
 import { MAX_SPAWNS, migrateMap, newMapDoc, TEAM_OPTIONS, teamLists, teamOfSpawn, worldTeams, type MapDoc } from "./docs";
@@ -215,9 +215,10 @@ export default function MapStudio({ id }: { id: string }) {
 
   const blank = doc.base === "blank";
   useEffect(() => { if ((doc.clean || blank) && (skin === "game" || (blank && skin === "nav"))) setSkin("relief"); }, [doc.clean, blank, skin]);
+  const blankSize = blank ? docMapSize(doc) : null;
   useEffect(() => {
     const t = doc.terrain;
-    const key = `${t}|${blank ? "blank" : "game"}`;
+    const key = `${t}|${blank ? `blank${blankSize}` : "game"}`;
     if (p.status !== "ready" || !t || loadedTerrain.current === key) return;
     loadedTerrain.current = key;
     setPreview(null);
@@ -230,15 +231,16 @@ export default function MapStudio({ id }: { id: string }) {
         // mapa em branco: o terreno do jogo é só o suporte — o chão começa liso, sem água nem decorações
         const h = decodeHeights(r.heights, r.heightScale);
         if (blank) h.fill(BLANK_Y);
-        const bw = blank ? BLANK_WATER[blankSizeOf(t) ?? 1024] ?? 0 : 0;
-        setRelief3d({ size: r.size, grid: r.grid, heights: h, waterLevel: blank ? bw : r.waterLevel, yMin: blank ? BLANK_Y : r.yMin, yMax: blank ? BLANK_Y : r.yMax, texture: blank ? null : r.texture });
+        const bw = blank ? blankWater(blankSize ?? 1024) : 0;
+        // mapa gigante: o terreno base é redimensionado ao gerar; no editor o chão já tem o tamanho novo
+        setRelief3d({ size: r.size, grid: blank ? blankSize ?? r.grid : r.grid, heights: h, waterLevel: blank ? bw : r.waterLevel, yMin: blank ? BLANK_Y : r.yMin, yMax: blank ? BLANK_Y : r.yMax, texture: blank ? null : r.texture });
         setDonor({ props: blank ? [] : r.props ?? [], kinds: blank ? [] : r.propKinds ?? [] });
       } else setView("2d");
     });
-  }, [doc.terrain, p.status, blank]);
+  }, [doc.terrain, p.status, blank, blankSize]);
 
   const terrain = terrains?.find((t) => t.id === doc.terrain) ?? null;
-  const baseName = doc.base === "blank" ? `Em branco ${blankSizeOf(doc.terrain) ?? ""}` : terrain?.name ?? doc.terrain ?? "sem terreno";
+  const baseName = doc.base === "blank" ? `Em branco ${blankSize} (${mapKm(blankSize ?? 1024)} km)` : terrain?.name ?? doc.terrain ?? "sem terreno";
   const grid = relief3d?.grid ?? preview?.grid ?? 1024;
   const water = relief3d?.waterLevel ?? preview?.waterLevel ?? 0;
   const hasWater = water > 0.5;
@@ -1020,6 +1022,8 @@ export default function MapStudio({ id }: { id: string }) {
     const mm = doc.minimap === "donor" && (blank || doc.clean) ? "natural" : doc.minimap;
     if (mm !== "donor") s.minimap = mm;
     if (blank) s.flat_base = BLANK_Y;
+    // tamanho que o jogo não tem: o terreno base é redimensionado ao gerar
+    if (blank && blankSize && !nativeBlank(blankSize)) s.grid = blankSize;
     if (doc.clean) {
       const ch = chain.map((l) => (l ? { d: l.d, ...(l.n ? { n: l.n } : {}), ...(l.s ? { s: l.s } : {}) } : null));
       const full = ch.every(Boolean) ? (ch as { d: string }[]) : null;
@@ -1058,7 +1062,7 @@ export default function MapStudio({ id }: { id: string }) {
     }
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, edits, usePatch, grid, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands, chain, hasWater, water, id, heights, relief3d, skyNow, deck, deckSegs, worldPaint, navNow, uvTile]);
+  }, [doc, edits, usePatch, grid, blankSize, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands, chain, hasWater, water, id, heights, relief3d, skyNow, deck, deckSegs, worldPaint, navNow, uvTile]);
   const canBuild = !!doc.terrain;
 
   // ------------------------------------------------------------ ações
@@ -1165,10 +1169,10 @@ export default function MapStudio({ id }: { id: string }) {
   const changeBase = async (b: MapDoc["base"]) => {
     if (b === doc.base) return;
     if (b === "blank") {
-      const size: BlankSize = grid <= 512 ? 512 : 1024;
+      const size: BlankSize = BLANK_SIZES.reduce((a, b) => (Math.abs(b - grid) < Math.abs(a - grid) ? b : a), 1024);
       if (!(await confirmDialog(`O chão vira um plano liso de ${size} × ${size}: o relevo, a água, as texturas e as decorações do mapa do jogo deixam de aparecer. O que você colocou (bases, massa, formas, decorações) fica.`, "Usar mapa em branco"))) return;
       const k = size / grid;
-      p.commit((d) => ({ ...scaleDoc(d, k), base: "blank", terrain: BLANK_BASES[size], clean: true, minimap: d.minimap === "donor" ? "natural" : d.minimap }));
+      p.commit((d) => ({ ...scaleDoc(d, k), base: "blank", terrain: blankTerrain(size), mapSize: size, clean: true, minimap: d.minimap === "donor" ? "natural" : d.minimap }));
       setSkin("relief");
       setExag(1);
     } else {
@@ -1177,12 +1181,13 @@ export default function MapStudio({ id }: { id: string }) {
     }
   };
   const changeBlankSize = async (size: BlankSize) => {
-    const cur = blankSizeOf(doc.terrain) ?? 1024;
+    const cur = docMapSize(doc);
     if (size === cur) return;
     const k = size / cur;
     const any = edits.spawns.length + edits.mass.length + edits.props.length + doc.features.length + edits.relief.length > 0;
-    if (any && !(await confirmDialog(`Mudar para ${size} × ${size}? Bases, massa, formas e decorações acompanham na mesma proporção.`, "Mudar tamanho"))) return;
-    p.commit((d) => ({ ...scaleDoc(d, k), terrain: BLANK_BASES[size] }));
+    const giant = size > 2048 ? ` Mapas acima de 2048 são experimentais (o jogo original vai até 2048) e demoram alguns minutos para gerar.` : "";
+    if ((any || giant) && !(await confirmDialog(`Mudar para ${size} × ${size} (${mapKm(size)} km)?${any ? " Bases, massa, formas e decorações acompanham na mesma proporção." : ""}${giant}`, "Mudar tamanho"))) return;
+    p.commit((d) => ({ ...scaleDoc(d, k), terrain: blankTerrain(size), mapSize: size }));
   };
 
   const removeWorld = async () => {
@@ -1299,7 +1304,7 @@ export default function MapStudio({ id }: { id: string }) {
         { kind: "text", label: "Nome no lobby", value: doc.lobbyName, onChange: (v) => setDoc((d) => ({ ...d, lobbyName: v.slice(0, 48) })), hint: `Aparece como "${lobbyName}". Id: ${scenarioId}` },
         { kind: "select", label: "Começar de", value: doc.base, onChange: (v) => void changeBase(v as MapDoc["base"]), options: [{ value: "blank", label: "Mapa em branco (grama lisa)" }, { value: "game", label: "Um mapa do jogo" }] },
         blank
-          ? { kind: "select", label: "Tamanho", value: String(blankSizeOf(doc.terrain) ?? 1024), onChange: (v) => void changeBlankSize(Number(v) as BlankSize), options: (Object.keys(BLANK_BASES) as unknown as BlankSize[]).map((k) => ({ value: String(k), label: BLANK_LABEL[k] })), hint: "Mapas de 2048 só a partir de um mapa do jogo." }
+          ? { kind: "select", label: "Tamanho", value: String(blankSize ?? 1024), onChange: (v) => void changeBlankSize(Number(v) as BlankSize), options: BLANK_SIZES.map((k) => ({ value: String(k), label: `${blankLabel(k)}${k > 2048 ? " · experimental" : ""}` })), hint: "De 512 a 4096 (80 km). O jogo original vai até 2048; maiores são experimentais, pesam mais e demoram alguns minutos para gerar." }
           : { kind: "select", label: "Terreno base", value: doc.terrain ?? "", onChange: (v) => setDoc((d) => ({ ...d, terrain: v || null })), options: [{ value: "", label: "— escolha —" }, ...(terrains ?? []).map((t) => ({ value: t.id, label: `${t.name ?? t.id}${t.kind === "campaign" ? " (campanha)" : ""}${t.waterY ? " · água" : ""}` }))] },
         { kind: "select", label: "Times", value: doc.teams, onChange: (v) => setDoc((d) => ({ ...d, teams: v as MapDoc["teams"] })), options: TEAM_OPTIONS, hint: "Só para conferir o equilíbrio do mapa: na hora de jogar você escolhe os times." },
         { kind: "select", label: "Simetria ao colocar", value: doc.symmetry, onChange: (v) => setDoc((d) => ({ ...d, symmetry: v as Symmetry })), options: (Object.keys(SYMMETRY_LABEL) as Symmetry[]).map((k) => ({ value: k, label: SYMMETRY_LABEL[k] })), hint: "Bases, massa, decorações, formas e pinceladas são repetidas nos outros lados." },
@@ -1740,9 +1745,9 @@ export default function MapStudio({ id }: { id: string }) {
                   <span className="col" style={{ gap: 10, alignItems: "center" }}>
                     <span>Um chão liso de grama, pronto para esculpir, ou um mapa do jogo como base.</span>
                     <span className="row" style={{ gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-                      {(Object.keys(BLANK_BASES) as unknown as BlankSize[]).map((k) => (
-                        <button key={k} className="btn primary" onClick={() => p.commit((d) => ({ ...d, base: "blank", terrain: BLANK_BASES[k], clean: true, minimap: d.minimap === "donor" ? "natural" : d.minimap }))}>
-                          <Icon name="grass" size={18} /> Em branco · {BLANK_LABEL[k]}
+                      {[512, 1024, 2048, 4096].map((k) => (
+                        <button key={k} className={`btn ${k <= 2048 ? "primary" : ""}`} onClick={() => p.commit((d) => ({ ...d, base: "blank", terrain: blankTerrain(k), mapSize: k, clean: true, minimap: d.minimap === "donor" ? "natural" : d.minimap }))}>
+                          <Icon name="grass" size={18} /> Em branco · {blankLabel(k)}
                         </button>
                       ))}
                     </span>
@@ -1846,10 +1851,10 @@ export default function MapStudio({ id }: { id: string }) {
       ] as CtxItem[]} />}
       {genOpen && relief3d && (
         <Suspense fallback={null}>
-          <WorldGenModal grid={relief3d} donor={relief3d.heights} water={water} hasWater={hasWater} terrains={terrains} terrain={doc.terrain} blank={blank}
+          <WorldGenModal grid={relief3d} donor={relief3d.heights} water={water} hasWater={hasWater} terrains={terrains} terrain={doc.terrain} blank={blank} blankSize={blankSize}
             initial={doc.world ? { ...doc.world, sky: doc.sky } : null} catalog={catalog} skies={skies.map((x) => ({ value: x.map, label: skyLabel(x) }))} onTerrain={(t) => setDoc((d) => {
               const m = /^blank:(\d+)$/.exec(t);
-              if (m) { const size = Number(m[1]) as BlankSize; return { ...scaleDoc(d, size / grid), base: "blank", terrain: BLANK_BASES[size], clean: true, minimap: d.minimap === "donor" ? "natural" : d.minimap }; }
+              if (m) { const size = Number(m[1]) as BlankSize; return { ...scaleDoc(d, size / grid), base: "blank", terrain: blankTerrain(size), mapSize: size, clean: true, minimap: d.minimap === "donor" ? "natural" : d.minimap }; }
               return { ...d, base: "game", terrain: t };
             })} onClose={() => setGenOpen(false)} onApply={applyWorld} />
         </Suspense>

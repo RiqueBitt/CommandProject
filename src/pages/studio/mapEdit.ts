@@ -187,19 +187,38 @@ export const round1 = (v: number) => Math.round(v * 10) / 10;
 // ------------------------------------------------------------------ base em branco e chão limpo
 
 export type GroundBiome = "temperate" | "desert" | "snow" | "volcanic";
-export type BlankSize = 512 | 1024;
-/** Terrenos do jogo usados por baixo de um mapa em branco: sem água, com a malha do chão
- *  acompanhando o relevo (≥ 98% dos vértices), então tudo pode virar um plano liso. */
-export const BLANK_BASES: Record<BlankSize, string> = { 512: "SC2_MP_004", 1024: "SC2_MP_007" };
+/** Lado do mapa em branco, em unidades do mundo (1024 = 20 km no jogo). */
+export type BlankSize = number;
+/** Terrenos do jogo usados por baixo de um mapa em branco, no tamanho deles: tudo vira um plano
+ *  liso. Os outros tamanhos usam o de 2048 redimensionado na hora de gerar (mapa gigante). */
+export const BLANK_BASES: Record<number, string> = { 512: "SC2_MP_004", 1024: "SC2_MP_007", 2048: "SC2_MP_304" };
+/** Terreno usado (redimensionado) nos tamanhos que o jogo não tem. */
+export const GIANT_BASE = "SC2_MP_304";
+/** Maior lado aceito (80 km); o jogo original vai até 2048 (40 km). */
+export const MAX_MAP_SIZE = 4096;
+/** Tamanhos oferecidos: de 512 em 512 (a máscara de água do jogo tem 512 texels de lado). */
+export const BLANK_SIZES: number[] = Array.from({ length: MAX_MAP_SIZE / 512 }, (_, i) => (i + 1) * 512);
+/** Terreno do jogo por baixo de um mapa em branco deste tamanho. */
+export const blankTerrain = (size: number) => BLANK_BASES[size] ?? GIANT_BASE;
+/** O tamanho existe no jogo (sem redimensionar)? */
+export const nativeBlank = (size: number) => !!BLANK_BASES[size];
 /** Altura do plano do mapa em branco (dá espaço para cavar vales e subir montanhas). */
 export const BLANK_Y = 60;
 /** Nível da água do mapa em branco (a lâmina d'água do terreno base sobe até ele); 0 = sem água. */
-export const BLANK_WATER: Record<BlankSize, number> = { 512: 0, 1024: 40 };
-export const BLANK_LABEL: Record<BlankSize, string> = { 512: "Pequeno (512 × 512)", 1024: "Padrão (1024 × 1024)" };
-export function blankSizeOf(terrain: string | null): BlankSize | null {
-  const hit = (Object.keys(BLANK_BASES) as unknown as BlankSize[]).find((k) => BLANK_BASES[k] === terrain);
-  return hit ? (Number(hit) as BlankSize) : null;
+export const blankWater = (size: number) => (size <= 512 ? 0 : 40);
+/** Quilômetros de lado no jogo (1024 unidades = 20 km). */
+export const mapKm = (size: number) => Math.round((size * 20) / 1024);
+export function blankLabel(size: number) {
+  const name = size <= 512 ? "Pequeno" : size <= 1024 ? "Padrão" : size <= 2048 ? "Grande" : "Gigante";
+  return `${name} (${size} × ${size} · ${mapKm(size)} km)`;
 }
+/** Tamanho de um mapa em branco pelo terreno base (projetos sem `mapSize`). */
+export function blankSizeOf(terrain: string | null): BlankSize | null {
+  const hit = Object.keys(BLANK_BASES).find((k) => BLANK_BASES[Number(k)] === terrain);
+  return hit ? Number(hit) : null;
+}
+/** Lado do mapa em branco de um projeto. */
+export const docMapSize = (d: { mapSize?: number | null; terrain: string | null }) => d.mapSize ?? blankSizeOf(d.terrain) ?? 1024;
 
 /** Preferência de textura por bioma (o primeiro nome que existir e couber ganha). */
 const GROUND_PREF: Record<GroundBiome, RegExp[]> = {

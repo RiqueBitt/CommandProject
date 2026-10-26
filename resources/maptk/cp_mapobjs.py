@@ -26,24 +26,35 @@ def read_mfdb(data):
     head = list(struct.unpack_from("<8I", data, 0))
     if data[:4] != b"MFDB":
         raise ValueError("não é um arquivo MFDB")
-    nfix = head[6]
+    nfix, nsec = head[6], head[7]
     fixups = list(struct.unpack_from(f"<{nfix}I", data, 32))
-    off = (32 + 4 * nfix + 31) // 32 * 32
+    # depois dos fixups vêm os inícios das seções (um u32 cada); ficam no fim do cabeçalho
+    head += list(struct.unpack_from(f"<{nsec}I", data, 32 + 4 * nfix))
+    off = (32 + 4 * (nfix + nsec) + 31) // 32 * 32
     try:
         payload = zlib.decompress(data[off:off + head[4]])
     except zlib.error:
-        # arquivos montados por outras ferramentas: procura o fluxo zlib como o toolkit faz
-        o = data.find(b"\x78\x9c", 28)
-        payload = zlib.decompress(data[o:])
+        # arquivos montados por outras ferramentas: o primeiro fluxo zlib que abre de verdade
+        o = data.find(b"\x78\x9c", 32 + 4 * nfix)
+        while True:
+            if o < 0:
+                raise
+            try:
+                payload = zlib.decompress(data[o:])
+                break
+            except zlib.error:
+                o = data.find(b"\x78\x9c", o + 1)
     return head, fixups, bytearray(payload)
 
 
 def write_mfdb(head, fixups, payload):
     comp = zlib.compress(bytes(payload), 6)
-    h = list(head)
-    h[4], h[5], h[6] = len(comp), len(payload), len(fixups)
+    h = list(head[:8])
+    secs = list(head[8:]) or [0] * h[7]
+    h[4], h[5], h[6], h[7] = len(comp), len(payload), len(fixups), len(secs)
     out = bytearray(struct.pack("<8I", *h))
     out += struct.pack(f"<{len(fixups)}I", *fixups)
+    out += struct.pack(f"<{len(secs)}I", *secs)
     while len(out) % 32:
         out += b"\x00"
     out += comp

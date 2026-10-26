@@ -1058,7 +1058,10 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
     return false;
   };
 
-  const per = (n: number) => Math.max(0, Math.round(n / ops.length));
+  // mapas maiores que 1024 (até 4096): mais formas, na proporção da área (senão um mapa gigante
+  // ficaria quase todo plano); até 1024 continua igual
+  const areaK = G > 1024 ? Math.min(16, (G / 1024) ** 2) : 1;
+  const per = (n: number) => Math.max(0, Math.round((n * areaK) / ops.length));
   const mh = Math.max(45, wg.mountainHeight);
   /** linha reta de a até b com pontos a cada ~36 */
   const straight = (a: Pt, b: Pt): Pt[] => {

@@ -159,7 +159,7 @@ class Terrain:
         # heightfield
         hp = read_bdf_payload(self.raw["hfield.win.bdf"])
         _, self.HW, self.HH, _, hdat = struct.unpack_from("<5I", hp, 0)
-        self.H = struct.unpack_from(f"<{self.HW*self.HH}H", hp, hdat)
+        self.H = u16_array(hp, hdat, self.HW*self.HH)
         # water mask (optional)
         self._wd = self.raw["waterDepth.dds"][128:] if self.raw["waterDepth.dds"] else None
         # costs / navmesh
@@ -180,7 +180,7 @@ class Terrain:
         self.raw["hfield.win.bdf"] = hfield_bytes
         hp = read_bdf_payload(hfield_bytes)
         _, self.HW, self.HH, _, hdat = struct.unpack_from("<5I", hp, 0)
-        self.H = struct.unpack_from(f"<{self.HW*self.HH}H", hp, hdat)
+        self.H = u16_array(hp, hdat, self.HW*self.HH)
 
     # --- height / water queries (world coords) ---
     def y(self, x, z):
@@ -509,7 +509,7 @@ def make_save(markers_blob, n_armies, area=(40, 40, 984, 984)):
             + markers_blob +
             "            },\n        },\n    },\n" + armies_tail(n_armies))
 
-def make_scenario(scenario_id, terrain_id, name, spawns, norush=70.0, reverb=None):
+def make_scenario(scenario_id, terrain_id, name, spawns, norush=70.0, reverb=None, size=1024):
     """spawns: {army_index: (x, y, z)}. terrain_id is the folder whose .scmap/.bdf
     the engine loads (== scenario_id for PATCH maps, a stock id for REMIX maps)."""
     armies = sorted(spawns)
@@ -530,7 +530,7 @@ ScenarioInfo = {{
     starts = true,
     preview = '',
     reverbPreset = '{reverb or terrain_id}',
-    size = {{1024, 1024}},
+    size = {{{int(size)}, {int(size)}}},
     map = '/maps/{terrain_id}/{terrain_id}.scmap',
     save = '/maps/{scenario_id}/{scenario_id}_save.lua',
     script = '/maps/{scenario_id}/{scenario_id}_script.lua',
@@ -554,16 +554,19 @@ def _pack565(r, g, b):
     return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
 
 def write_minimap_dds(terrain, palette):
-    """Build a 1024x1024 DXT1 minimap. `palette(x,z)->(r,g,b)` colors each block."""
+    """Build a 1024x1024 DXT1 minimap. `palette(x,z)->(r,g,b)` colors each block (world coords:
+    the texture always covers the whole map, whatever its size)."""
     ref = terrain.raw["minimap.win.dds"]
     assert ref and ref[84:88] == b"DXT1", "donor minimap is not DXT1"
     blocks = bytearray()
+    k = getattr(terrain, "grid", 1024) / 1024.0
+    top = getattr(terrain, "grid", 1024)
     for bz in range(0, 1024, 4):
         for bx in range(0, 1024, 4):
             rs = gs = bs = 0
             for dz in (0, 2):
                 for dx in (0, 2):
-                    r, g, b = palette(bx+dx, bz+dz)
+                    r, g, b = palette(min(top, round((bx+dx)*k)), min(top, round((bz+dz)*k)))
                     rs += r; gs += g; bs += b
             c = _pack565(rs//4, gs//4, bs//4)
             blocks += struct.pack("<HHI", c, c, 0)
@@ -1133,11 +1136,22 @@ def list_installed():
 # mask must carry the full mip chain (write_waterdepth_dds_mips).
 # ---------------------------------------------------------------------------
 
+def u16_array(buf, off, n):
+    """n little-endian u16 from buf[off:] as a compact array (a tuple of 16.8M ints for a 4096 map
+    would take ~600 MB; the array takes 33 MB and indexes the same way)."""
+    import array
+    import sys as _sys
+    a = array.array("H")
+    a.frombytes(bytes(buf[off:off + 2 * n]))
+    if _sys.byteorder != "little":
+        a.byteswap()
+    return a
+
 def hfield_heights(hfield_bytes):
-    """Parse a hfield.win.bdf -> (heights u16 tuple, width). world_y = raw/128."""
+    """Parse a hfield.win.bdf -> (heights u16 array, width). world_y = raw/128."""
     pl = read_bdf_payload(hfield_bytes)
     _, w, h, _, hd = struct.unpack_from("<5I", pl, 0)
-    return struct.unpack_from(f"<{w*h}H", pl, hd), w
+    return u16_array(pl, hd, w*h), w
 
 def hf_sample(H, hw, x, z):
     """Bilinear WORLD-height sample of a parsed heightfield at world (x, z)."""

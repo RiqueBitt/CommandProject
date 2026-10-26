@@ -217,7 +217,7 @@ def build_map(spec, verbose=True, install=True):
                             prop="/env/common/props/markers/M_Blank_prop.bp"))
         mk.append(sm.marker(f"Base Marker 0{a}", "Base Marker", sx, sz-22, t.y(sx, sz-22), color="ff0000ff"))
         mk.append(sm.marker(f"Rally Point 0{a}", "Rally Point",
-                            sx + (18 if sx < 512 else -18), sz, t.y(sx, sz), color="FF808080"))
+                            sx + (18 if sx < t.grid / 2 else -18), sz, t.y(sx, sz), color="FF808080"))
     if patch:  # belt-and-suspenders island seeds (harmless on stock maps too)
         for i, a in enumerate(armies, 1):
             sx, sz = spawns[a]
@@ -278,10 +278,10 @@ def build_map(spec, verbose=True, install=True):
     # ---- assemble lua ----
     spawns_xyz = {a: (spawns[a][0] + 0.5, t.y(*spawns[a]), spawns[a][1] + 0.5) for a in armies}
     terrain_id = sid if (patch or spec.get("ship_terrain")) else t.id
-    save_lua = sm.make_save("".join(mk), len(armies), spec.get("playable_area", (40, 40, 984, 984)))
+    save_lua = sm.make_save("".join(mk), len(armies), spec.get("playable_area", (40, 40, t.grid - 40, t.grid - 40)))
     scenario_lua = sm.make_scenario(sid, terrain_id, spec["name"], spawns_xyz,
                                     norush=spec.get("norush", 70.0),
-                                    reverb=sm.TERRAINS.get(t.id, {}).get("reverb", t.id))
+                                    reverb=sm.TERRAINS.get(t.id, {}).get("reverb", t.id), size=t.grid)
 
     # ---- minimap ----
     mm = None

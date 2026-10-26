@@ -2,7 +2,7 @@
 // veja a prévia ao vivo e gere. Tudo o que sai daqui continua editável no editor.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon, Modal, Notice } from "../../components/ui";
-import { BLANK_BASES, BLANK_LABEL, blankSizeOf, type BlankSize } from "../studio/mapEdit";
+import { BLANK_SIZES, blankLabel } from "../studio/mapEdit";
 import type { Terrain } from "../../lib/types";
 import type { Pt } from "../studio/mapEdit";
 import { teamOfSpawn, worldTeams } from "./docs";
@@ -20,6 +20,8 @@ interface Props {
   terrain: string | null;
   /** base em branco (chão liso; o terreno do jogo é só o suporte) */
   blank: boolean;
+  /** lado do mapa em branco */
+  blankSize?: number | null;
   initial: WorldGen | null;
   catalog: PropCatalog;
   /** céus dos mapas do jogo (id do mapa, nome) */
@@ -154,9 +156,9 @@ export default function WorldGenModal(props: Props) {
 
           <div className="wg-row">
             <label className="field"><span className="label">Terreno base</span>
-              <select className="select" value={props.blank ? `blank:${blankSizeOf(props.terrain) ?? 1024}` : props.terrain ?? ""} onChange={(e) => props.onTerrain(e.target.value)}>
+              <select className="select" value={props.blank ? `blank:${props.blankSize ?? 1024}` : props.terrain ?? ""} onChange={(e) => props.onTerrain(e.target.value)}>
                 <optgroup label="Em branco (grama lisa)">
-                  {(Object.keys(BLANK_BASES) as unknown as BlankSize[]).map((k) => <option key={k} value={`blank:${k}`}>{BLANK_LABEL[k]}</option>)}
+                  {BLANK_SIZES.map((k) => <option key={k} value={`blank:${k}`}>{blankLabel(k)}{k > 2048 ? " · experimental" : ""}</option>)}
                 </optgroup>
                 <optgroup label="Mapas do jogo">
                   {(props.terrains ?? []).filter((t) => t.kind === "skirmish").map((t) => <option key={t.id} value={t.id}>{t.name ?? t.id}{t.waterY ? " · com água" : ""}</option>)}

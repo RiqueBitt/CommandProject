@@ -109,5 +109,26 @@ for (const [sym, players, G] of [["mirror-x", 24, 1024], ["rot2", 24, 2048], ["r
   check(!plain.features.some((f) => f.name === "Cordilheira entre os times" || f.name === "Serra entre bases"), `opções desligadas ${sym}`);
   console.log("grande", sym, players, "distância mínima", Math.round(gap), "formas", a.features.length, "dif simetria", maxd.toFixed(4));
 }
+// mapas gigantes (até 4096): mais formas na proporção da área, bases alcançáveis, simetria exata
+for (const [sym, players, G] of [["rot2", 4, 4096], ["mirror-x", 8, 3072]] as const) {
+  const gg = { size: 128, grid: G };
+  const t0 = Date.now();
+  const wg = newWorld({ seed: 77, symmetry: sym, players });
+  const a = generateWorld(gg, donor, 0, false, wg, cat);
+  const small = generateWorld({ size: 128, grid: 1024 }, donor, 0, false, wg, cat);
+  const count = (r: typeof a) => r.features.filter((f) => f.gen && ["mountain", "hill", "ridge", "plateau", "lake", "river"].includes(f.kind)).length;
+  check(count(a) > count(small) * 3, `gigante ${G}: mais formas que no 1024 (${count(a)} contra ${count(small)})`);
+  const m = walkMask(gg, a.heights, 0, false);
+  const d0 = walkDistances(gg, m, a.spawns[0]);
+  check(a.spawns.length === players && a.spawns.every((s) => distAt(gg, d0, s) >= 0), `gigante ${G}: bases alcançáveis`);
+  const ops = symmetryOps(sym, G), step = G / 128;
+  let maxd = 0;
+  for (const o of ops.slice(1)) for (let j = 0; j <= 128; j++) for (let i = 0; i <= 128; i++) {
+    const [x, z] = o.pt([i * step, j * step]);
+    maxd = Math.max(maxd, Math.abs(a.heights[j * 129 + i] - a.heights[Math.round(z / step) * 129 + Math.round(x / step)]));
+  }
+  check(maxd < 0.01, `gigante ${G}: relevo simétrico (dif ${maxd.toFixed(3)})`);
+  console.log("gigante", G, sym, "formas", count(a), "ms", Date.now() - t0);
+}
 console.log(fails ? `${fails} falha(s)` : "worldgen: tudo certo");
 process.exit(fails ? 1 : 0);

@@ -275,6 +275,7 @@ def main():
         assert abs(H6[700 * w6 + 512] / 128 - 33) < 0.01 and abs(H6[3 * w6 + 3] / 128 - 33) < 0.01
         print("base lisa ok: heightfield plano e decorações originais retiradas")
         test_lighting()
+        test_resize()
         test_rebuild()
         test_sky_and_water()
 
@@ -283,6 +284,55 @@ def main():
         p = subprocess.run([sys.executable, BRIDGE, "build"], input=json.dumps({"spec": bad}).encode(), capture_output=True, env=env)
         assert p.returncode == 1 and b"SC2_MEUMAPA" in p.stdout, p.stdout
     print("maptk_bridge: todos os testes passaram")
+
+
+def test_resize():
+    """Mapa gigante: o terreno base redimensionado para 2048 (heightfield, navegação e info)."""
+    sys.path.insert(0, os.path.join(ROOT, "resources", "maptk"))
+    import maptk_bridge as mb
+    import sc2maps as sm
+
+    class T:
+        pass
+    t = T()
+    t.raw = {"hfield.win.bdf": heightfield(), "costs.win.bdf": costs()}
+    ip = bytearray(256)
+    struct.pack_into("<2f", ip, 204, 1024.0, 1024.0)
+    t.raw["info.win.bdf"] = bdf(bytes(ip))
+    t.grid, t.HW, t.HH = GRID, HW, HW
+    t.costs_payload = bytearray(sm.read_bdf_payload(t.raw["costs.win.bdf"]))
+    _, nl, toff = struct.unpack_from("<3I", t.costs_payload, 0)
+    t.layers = [struct.unpack_from("<7I", t.costs_payload, toff + 28 * i) for i in range(nl)]
+    old_events = mb.emit
+    mb.emit = lambda *a, **k: None
+    try:
+        mb._resize_terrain(sm, t, 2048)
+    finally:
+        mb.emit = old_events
+    hp = sm.read_bdf_payload(t.raw["hfield.win.bdf"])
+    ver, w, h, n, off, cnt2, off2 = struct.unpack_from("<7I", hp, 0)
+    assert (w, h, n, off) == (2049, 2049, 2049 * 2049, 28) and cnt2 == 2048 * 2048 and off2 % 4 == 0 and off2 + cnt2 == len(hp), (w, cnt2, off2, len(hp))
+    assert t.grid == 2048 and sm.GRID == 2048 and t.HW == 2049
+    # o morro do centro (700, 512) vai para (1400, 1024), na mesma altura; a planície continua em 20
+    assert abs(t.H[1024 * 2049 + 1400] / 128 - (20 + 90 * 0.05)) < 0.1 and abs(t.H[100 * 2049 + 100] / 128 - 20) < 1e-3
+    cp = t.costs_payload
+    assert len(t.layers) == 3 and all(r[1] == 2048 * 2048 for r in t.layers)
+    oA = t.layers[0][2]
+    # a parede em x=300 vira x=600..601; a passagem (z 480..540) vira z 960..1081
+    assert cp[oA + 200 * 2048 + 600] == 255 and cp[oA + 200 * 2048 + 601] == 255 and cp[oA + 200 * 2048 + 602] == 1
+    assert cp[oA + 1000 * 2048 + 600] == 1
+    assert t.layers[-1][6] + 4 * t.layers[-1][5] <= len(cp)
+    assert struct.unpack_from("<2f", sm.read_bdf_payload(t.raw["info.win.bdf"]), 204) == (2048.0, 2048.0)
+    # base lisa: sai plano direto, sem interpolar
+    t2 = T()
+    t2.__dict__.update({k: v for k, v in t.__dict__.items()})
+    mb.emit = lambda *a, **k: None
+    try:
+        mb._resize_terrain(sm, t2, 4096, flat=60)
+    finally:
+        mb.emit = old_events
+    assert t2.HW == 4097 and t2.H[0] == 60 * 128 and t2.H[4097 * 4097 - 1] == 60 * 128
+    print("mapa gigante ok: heightfield 2049² e 4097², navegação e tamanho no info")
 
 
 def test_lighting():

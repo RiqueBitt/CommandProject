@@ -9,7 +9,7 @@ import { load, useStore } from "../../lib/store";
 import { KIND_META, useTabs } from "../../lib/tabs";
 import type { CreationKind, CreationMeta, Terrain, UnitInfo } from "../../lib/types";
 import { MODEL_TEMPLATES, newMapDoc, newUnitDoc, suggestUnitId } from "./docs";
-import { BLANK_BASES, BLANK_LABEL, type BlankSize } from "../studio/mapEdit";
+import { BLANK_SIZES, blankLabel, blankTerrain, mapKm } from "../studio/mapEdit";
 
 const DESC: Record<CreationKind, string> = {
   map: "Terreno 3D do jogo, relevo, água, bases, massa, decorações, texturas do chão e modelos próprios.",
@@ -191,7 +191,8 @@ export function NewProject({ kind, onClose, onCreated }: { kind: CreationKind; o
   const [terrains, setTerrains] = useState<Terrain[] | null>(null);
   const [terrain, setTerrain] = useState<string | null>(null);
   // mapa novo começa em branco (chão liso de grama); um mapa do jogo como base é opcional
-  const [start, setStart] = useState<"blank512" | "blank1024" | "game">("blank1024");
+  const [start, setStart] = useState<"blank" | "game">("blank");
+  const [mapSize, setMapSize] = useState(1024);
   const [units, setUnits] = useState<UnitInfo[] | null>(null);
   const [base, setBase] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -219,8 +220,7 @@ export function NewProject({ kind, onClose, onCreated }: { kind: CreationKind; o
     const m = await run("create", async () => {
       if (kind === "map") {
         if (start === "game") return api.creationCreate("map", name, newMapDoc({ terrain, lobbyName: name }));
-        const size: BlankSize = start === "blank512" ? 512 : 1024;
-        return api.creationCreate("map", name, newMapDoc({ terrain: BLANK_BASES[size], lobbyName: name, base: "blank", clean: true, minimap: "natural", patch: true }));
+        return api.creationCreate("map", name, newMapDoc({ terrain: blankTerrain(mapSize), mapSize, lobbyName: name, base: "blank", clean: true, minimap: "natural", patch: true }));
       }
       if (kind === "model") return api.creationCreate("model", name, (MODEL_TEMPLATES.find((t) => t.id === template) ?? MODEL_TEMPLATES[0]).make());
       const taken = new Set((units ?? []).map((u) => u.id));
@@ -238,11 +238,11 @@ export function NewProject({ kind, onClose, onCreated }: { kind: CreationKind; o
         {kind === "map" && (
           <Field label="Começar de" hint="Em branco: chão liso de grama do tamanho escolhido, pronto para esculpir, texturizar e decorar. Dá para trocar depois.">
             <div className="blank-sizes">
-              {(Object.keys(BLANK_BASES) as unknown as BlankSize[]).map((k) => (
-                <button key={k} type="button" className="pick" aria-pressed={start === `blank${k}`} onClick={() => setStart(`blank${k}` as typeof start)}>
-                  <Icon name="grass" size={22} />
-                  <b>Em branco</b>
-                  <small className="faint">{BLANK_LABEL[k]}</small>
+              {[512, 1024, 2048, 4096].map((k) => (
+                <button key={k} type="button" className="pick" aria-pressed={start === "blank" && mapSize === k} onClick={() => { setStart("blank"); setMapSize(k); }}>
+                  <Icon name={k > 2048 ? "public" : "grass"} size={22} />
+                  <b>{k > 2048 ? "Mapa gigante" : "Em branco"}</b>
+                  <small className="faint">{blankLabel(k)}</small>
                 </button>
               ))}
               <button type="button" className="pick" aria-pressed={start === "game"} onClick={() => setStart("game")}>
@@ -251,6 +251,11 @@ export function NewProject({ kind, onClose, onCreated }: { kind: CreationKind; o
                 <small className="faint">relevo, água e texturas de um mapa existente</small>
               </button>
             </div>
+          </Field>
+        )}
+        {kind === "map" && start === "blank" && (
+          <Field label={`Tamanho: ${mapSize} × ${mapSize} (${mapKm(mapSize)} km de lado)`} hint={mapSize > 2048 ? "Experimental: o jogo original vai até 2048 (40 km). Maior que isso pesa mais no jogo e leva alguns minutos para gerar; teste antes de chamar os amigos." : "Dá para mudar depois em Propriedades → Tamanho (tudo acompanha na mesma proporção)."}>
+            <input type="range" min={BLANK_SIZES[0]} max={BLANK_SIZES[BLANK_SIZES.length - 1]} step={512} value={mapSize} onChange={(e) => setMapSize(Number(e.target.value))} aria-label="Tamanho do mapa" />
           </Field>
         )}
         {kind === "map" && start === "game" && (

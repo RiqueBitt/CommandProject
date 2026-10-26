@@ -68,6 +68,8 @@ export interface MapDoc {
   /** de onde vem o chão: "blank" = plano liso do tamanho escolhido (o terreno do jogo por baixo
    *  é só o suporte e não aparece); "game" = relevo, água e texturas de um mapa do jogo */
   base: "blank" | "game";
+  /** lado do mapa em branco (512 a 4096); ausente = o tamanho do terreno base */
+  mapSize?: number;
   /** visual limpo: chão inteiro com as texturas do bioma, luz refeita para o relevo novo e sem as
    *  decorações originais — nada do mapa base aparece por cima do mapa novo */
   clean: boolean;

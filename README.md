@@ -195,7 +195,13 @@ disponível em Sistema → Visual.
 - **Editor de mapas** no estilo de um editor de jogo:
   - **quantas bases quiser** (até 64) e conferência com 2, 3, 4, 5, 6 ou 8 times ou todos contra
     todos; mapas com mais de 8 bases jogam pela Partida grande;
-  - abre direto num **mapa em branco** (chão liso de grama, 512 ou 1024), sem escolher terreno;
+  - abre direto num **mapa em branco** (chão liso de grama), sem escolher terreno, do tamanho que
+    quiser: de 512 a **4096** (80 km de lado), de 512 em 512. 512, 1024 e 2048 usam terrenos do
+    próprio jogo; os outros tamanhos (os **mapas gigantes**, como 3072 e 4096) redimensionam o
+    terreno de 2048 na hora de gerar: relevo, navegação das tropas, colisão, malha do chão, luz,
+    água, minimapa e área jogável são refeitos no tamanho novo, e o gerador de mundos põe mais
+    montanhas, lagos e rios na proporção da área. Acima de 2048 é experimental (o jogo original
+    vai até 2048), pesa mais e leva alguns minutos para gerar;
   - **visual limpo**: a malha do chão (e a colisão) é refeita para o relevo novo, a luz e as
     sombras também, e as decorações originais saem — nada do mapa original aparece por cima;
   - **chão por biomas** (praia, chão, terra, rocha e topo misturados pelo relevo) e **pincel de

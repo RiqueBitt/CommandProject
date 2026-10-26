@@ -18,6 +18,7 @@ Este arquivo é do CommandProject (MIT).
 
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -246,6 +247,107 @@ def cmd_examples(_inp):
     return dict(examples=out)
 
 
+# maior lado de mapa aceito (81 km no jogo; o Supreme Commander 2 original vai até 2048)
+MAX_GRID = 4096
+
+
+def _resize_terrain(sm, t, n, flat=None):
+    """Redimensiona o terreno base para n×n: heightfield (n+1)², navegação n² por camada (vizinho
+    mais próximo; o modo PATCH refaz a navegação depois) e o tamanho no info.win.bdf. Com `flat`, o
+    heightfield novo já sai liso nessa altura (o mapa em branco), sem interpolar o antigo."""
+    import array
+    import struct
+    g = t.grid
+    if n == g:
+        return
+    w = n + 1
+    hb = t.raw["hfield.win.bdf"]
+    hp = sm.read_bdf_payload(hb)
+    ver, hw, hh, _, off = struct.unpack_from("<5I", hp, 0)
+    if flat is not None:
+        v = max(0, min(65535, int(round(flat * 128))))
+        data = struct.pack("<H", v) * (w * w)
+    else:
+        src = sm.u16_array(hp, off, hw * hh)
+        k = (hw - 1) / n
+        cols = []
+        for x in range(w):
+            fx = x * k
+            i = min(hw - 2, int(fx))
+            cols.append((i, fx - i))
+        out = array.array("H", bytes(2 * w * w))
+        for z in range(w):
+            fz = z * k
+            j = min(hh - 2, int(fz))
+            v = fz - j
+            r0, r1, base = j * hw, (j + 1) * hw, z * w
+            for x, (i, u) in enumerate(cols):
+                a0 = src[r0 + i] + (src[r0 + i + 1] - src[r0 + i]) * u
+                a1 = src[r1 + i] + (src[r1 + i + 1] - src[r1 + i]) * u
+                out[base + x] = int(a0 + (a1 - a0) * v + 0.5)
+        if sys.byteorder != "little":
+            out.byteswap()
+        data = out.tobytes()
+    # depois das alturas vem uma grade de 1 byte por célula ((w-1)², alinhada a 4; zerada em todos
+    # os mapas do jogo): conta e posição dela ficam no cabeçalho (bytes 20 e 24, com fixup)
+    cnt2, off2 = struct.unpack_from("<2I", hp, 20)
+    old2 = bytes(hp[off2:off2 + cnt2]) if off2 and cnt2 == (hw - 1) * (hh - 1) else b""
+    noff2 = (off + 2 * w * w + 3) // 4 * 4
+    grid2 = b"\0" * (n * n) if not old2 or not any(old2) else bytes(
+        old2[min(g - 1, z * g // n) * g + min(g - 1, x * g // n)] for z in range(n) for x in range(n))
+    head = struct.pack("<7I", ver, w, w, w * w, off, n * n, noff2) + bytes(hp[28:off])
+    new_hp = head + data + b"\0" * (noff2 - off - 2 * w * w) + grid2
+    t.raw["hfield.win.bdf"] = sm.rebuild_bdf(hb, new_hp)
+    t.HW = t.HH = w
+    t.H = sm.u16_array(new_hp, off, w * w)
+    # navegação: mesmas camadas, grades no tamanho novo (o espaço das caixas das ilhas fica igual)
+    cp = t.costs_payload
+    _, nl, toff = struct.unpack_from("<3I", cp, 0)
+    xs = [min(g - 1, x * g // n) for x in range(n)]
+    pos = toff + 28 * nl
+    recs, chunks = [], []
+    for (lid, _ca, oa, _cb, ob, cs, os_) in t.layers:
+        grids = []
+        for src_off in (oa, ob):
+            rows = []
+            last_z, last_row = -1, b""
+            for z in range(n):
+                sz = min(g - 1, z * g // n)
+                if sz != last_z:
+                    srow = cp[src_off + sz * g: src_off + (sz + 1) * g]
+                    last_row = bytes(map(srow.__getitem__, xs))
+                    last_z = sz
+                rows.append(last_row)
+            grids.append(b"".join(rows))
+        boxes = bytearray(cp[os_: os_ + 4 * cs]) if os_ != 0xFFFFFFFF else bytearray()
+        for b in range(0, len(boxes) - 15, 16):
+            vals = struct.unpack_from("<4I", boxes, b)
+            struct.pack_into("<4I", boxes, b, *(min(n - 1, v * n // g) for v in vals))
+        na, nb = pos, pos + n * n
+        ns = nb + n * n if boxes else 0xFFFFFFFF
+        recs.append((lid, n * n, na, n * n, nb, cs, ns))
+        chunks += [grids[0], grids[1], bytes(boxes)]
+        pos = nb + n * n + len(boxes)
+    last = max(r[6] + 4 * r[5] if r[6] != 0xFFFFFFFF else r[4] + r[3] for r in t.layers)
+    head = bytearray(cp[:toff])
+    table = b"".join(struct.pack("<7I", *r) for r in recs)
+    new_cp = bytes(head) + table + bytes(cp[toff + 28 * nl: t.layers[0][2]]) + b"".join(chunks) + bytes(cp[last:])
+    t.raw["costs.win.bdf"] = sm.rebuild_bdf(t.raw["costs.win.bdf"], new_cp)
+    t.costs_payload = bytearray(new_cp)
+    t.layers = recs
+    t.grid = n
+    sm.GRID = n
+    # o info.win.bdf guarda o tamanho do mapa (2048 nos mapas de 40 km do jogo)
+    if t.raw.get("info.win.bdf"):
+        ipl = bytearray(sm.read_bdf_payload(t.raw["info.win.bdf"]))
+        if len(ipl) >= 212 and struct.unpack_from("<2f", ipl, 204) == (float(max(g, 1024)), float(max(g, 1024))):
+            struct.pack_into("<2f", ipl, 204, float(max(n, 1024)), float(max(n, 1024)))
+            t.raw["info.win.bdf"] = sm.rebuild_bdf(t.raw["info.win.bdf"], bytes(ipl))
+    # nada do terreno antigo fica: decorações e decalques estavam nas posições do tamanho antigo
+    t._wd = None
+    emit("progress", message=f"terreno base redimensionado: {g} → {n} ({n * n // 1_000_000 or round(n * n / 1e6, 1)} milhões de células)")
+
+
 def _clean_spec(spec):
     spec = dict(spec)
     for k in ("terrain", "scenario_id", "name", "anchors"):
@@ -462,6 +564,19 @@ def _clean_spec(spec):
         spec.pop("sky", None)
     if spec.get("minimap") not in (None, "donor", "desert", "snow", "dark", "natural"):
         raise ValueError("minimapa inválido")
+    # mapa gigante: o terreno base é redimensionado para este tamanho (lado em unidades do mundo).
+    # Só com base lisa e visual limpo: a malha, a luz, a colisão e a água são todas refeitas e as
+    # decorações do terreno base saem (estavam no tamanho antigo).
+    if spec.get("grid"):
+        g = int(spec["grid"])
+        if not 512 <= g <= MAX_GRID or g % 512:
+            raise ValueError(f"tamanho de mapa inválido: {g} (de 512 a {MAX_GRID}, de 512 em 512)")
+        if spec.get("flat_base") is None or not spec.get("clean") or not spec["clean"]["relight"]:
+            raise ValueError("mapas de tamanho personalizado precisam de base em branco e visual limpo")
+        spec["clean"]["clear_props"] = True
+        spec["grid"] = g
+    else:
+        spec.pop("grid", None)
     return spec
 
 
@@ -517,6 +632,9 @@ def _hooks(sm, spec, state):
                 state["sun"] = cp_lighting.fit_sun(tb, sm.read_bdf_payload(tb), lit, self.y, self.grid)
             except Exception as e:  # noqa: BLE001 — sem o ajuste, usa a direção padrão
                 emit("progress", message=f"luz: direção do sol padrão ({e})")
+        if spec.get("grid") and spec["grid"] != self.grid:
+            _resize_terrain(sm, self, spec["grid"], flat=spec.get("flat_base"))
+            state["resized"] = True
         hf = self.raw["hfield.win.bdf"]
         fb, hd = spec.get("flat_base"), spec.get("height_delta")
         if fb is not None:
@@ -573,8 +691,11 @@ def _hooks(sm, spec, state):
             self._wd = wd[128:]
             state["water_mask"] = True
 
-    def make_save(blob, n_armies, area=(40, 40, 984, 984)):
+    def make_save(blob, n_armies, area=None):
         t = state.get("t")
+        if area is None:
+            g = t.grid if t is not None else 1024
+            area = (40, 40, g - 40, g - 40)
         extra = ""
         if t is not None:
             for i, (x, z) in enumerate(spec.get("extra_mass") or [], 1):
@@ -695,7 +816,10 @@ def _mesh_step(grid):
     v = _os.environ.get("CP_MESH_STEP")
     if v:
         return float(v)
-    return 2.0 if grid <= 512 else 4.0 if grid <= 1024 else 8.0
+    if grid <= 2048:
+        return 2.0 if grid <= 512 else 4.0 if grid <= 1024 else 8.0
+    # mapas gigantes: até ~230 vértices por lado (o jogo não aceita mais de ~65 mil num material)
+    return float(math.ceil(grid / 230 / 4) * 4)
 
 
 def _clean_visual(sm, spec, state, terrain, new_id):
@@ -747,7 +871,7 @@ def _clean_visual(sm, spec, state, terrain, new_id):
             path = f"/maps/{new_id}/lighting/cpgrid.dds"
             wpath = f"/maps/{new_id}/{new_id}.waterDepth.dds" if water and terrain.raw.get("waterDepth.dds") else None
             ring_step = 16.0
-            for _try in range(3):
+            for _try in range(4):
                 tb2, info = cp_regrid.rebuild_terrain(tb, height, g, step=step, mask_path=path, margin=margin, ring_step=ring_step,
                                                       zones=zones, zone_t=zone_t, uv_scale=clean.get("uv_tile"),
                                                       water_y=wl, water_mask_path=wpath, log=lambda m: emit("progress", message=m))
