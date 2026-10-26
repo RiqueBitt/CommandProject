@@ -38,6 +38,16 @@ pub const MAX_SLOTS: usize = 64;
 /// esperado de um motor que guarda os exércitos em máscaras de 32 bits. O mod deixa os civis de fora
 /// quando eles passariam do limite, e o launcher não começa partidas com mais jogadores que isso.
 pub const MAX_ARMIES: usize = 32;
+/// jogadores × (lado do mapa / 1024)² que cabem na memória do jogo (32 bits, até 4 GB): testado num
+/// PC de verdade, 32 jogadores em 2048 e 16 em 4096 abrem a partida; 24 e 32 em 4096 fecham o jogo
+/// logo depois de criar os exércitos, sem relatório de erro. Igual a `src/lib/matchLimits.ts`.
+pub const MEMORY_BUDGET: f64 = 256.0;
+
+/// Máximo de jogadores numa partida num mapa com esse lado.
+pub fn max_players_for(size: u32) -> usize {
+    let area = (size.max(1024) as f64 / 1024.0).powi(2);
+    ((MEMORY_BUDGET / area + 1e-9).floor() as usize).clamp(2, MAX_ARMIES)
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -124,6 +134,8 @@ pub struct BigMatch {
     /// uma vaga por base do mapa, na ordem das bases
     pub slots: Vec<Slot>,
     pub options: MatchOptions,
+    /// lado do mapa (0 = não informado): confere o limite de jogadores pela memória do jogo
+    pub size: u32,
 }
 
 fn pick<'a>(value: &'a str, allowed: &[&'a str], what: &str) -> Result<&'a str> {
@@ -153,6 +165,14 @@ pub fn encode(m: &BigMatch) -> Result<String> {
         return Err(Error::Other(format!(
             "o jogo aguenta no máximo {MAX_ARMIES} jogadores numa partida ({players} escolhidos): deixe {} base(s) vazia(s)",
             players - MAX_ARMIES
+        )));
+    }
+    if m.size > 0 && players > max_players_for(m.size) {
+        let max = max_players_for(m.size);
+        return Err(Error::Other(format!(
+            "num mapa de {} o jogo aguenta até {max} jogadores (com mais, fica sem memória e fecha): deixe {} base(s) vazia(s)",
+            m.size,
+            players - max
         )));
     }
     if players < 2 {
@@ -298,11 +318,13 @@ pub fn read_log(text: &str) -> LogReport {
     if !r.started {
         r.hints.push("O jogo fechou antes de montar a partida grande (ainda abrindo ou carregando os mods).".into());
     }
-    if let Some(size) = r.size.filter(|s| *s > 2048) {
-        r.hints.push(format!("Mapa de {size}: acima de 2048 é experimental. Teste os mesmos jogadores num mapa de 2048 para saber se o tamanho é o problema."));
-    }
-    if let Some(n) = r.players.filter(|n| *n > 24) {
-        r.hints.push(format!("Com {n} jogadores: até 24 já foi testado. Deixe algumas bases vazias para achar o limite do seu computador."));
+    if let (Some(n), Some(size)) = (r.players, r.size) {
+        let max = max_players_for(size);
+        if n as usize > max {
+            r.hints.push(format!("Num mapa de {size} o jogo aguenta até {max} jogadores; com {n}, ele fica sem memória. Deixe algumas bases vazias ou use um mapa menor."));
+        } else if size > 2048 && !r.finished {
+            r.hints.push(format!("Mapa de {size}: acima de 2048 é experimental. Com unidades demais a memória do jogo pode acabar no meio da partida: tente um limite de unidades menor."));
+        }
     }
     r
 }
@@ -564,6 +586,7 @@ mod tests {
             map: "/maps/X/X_scenario.lua".into(),
             slots: vec![slot(SlotKind::You, 1), slot(SlotKind::Ai, 1), slot(SlotKind::Ai, 2), slot(SlotKind::Empty, 0), slot(SlotKind::Ai, 2)],
             options: MatchOptions { no_rush: 5, ..Default::default() },
+            size: 0,
         };
         let s = encode(&m).unwrap();
         assert!(s.starts_with("Victory=demoralization;UnitCap=500;FogOfWar=explored;GameSpeed=normal;NoRushOption=5;"));
@@ -580,6 +603,14 @@ mod tests {
         assert!(encode(&r).is_err());
         assert!(s.ends_with("|H,2,0,,|A,2,0,Normal,|A,3,0,Normal,|X|A,3,0,Normal,"), "{s}");
         assert!(!s.contains(' '));
+        // limite pela memória do jogo: 5 jogadores cabem em 4096 (até 16); 17 não
+        let mut big = m.clone();
+        big.size = 4096;
+        assert!(encode(&big).is_ok());
+        big.slots = (0..17).map(|i| slot(if i == 0 { SlotKind::You } else { SlotKind::Ai }, 1 + i % 2)).collect();
+        assert!(encode(&big).unwrap_err().to_string().contains("até 16 jogadores"));
+        big.size = 2048;
+        assert!(encode(&big).is_ok());
         let args = launch_args(&m).unwrap();
         assert_eq!(args[..3], ["/map", "/maps/X/X_scenario.lua", "/cpmatch"]);
 
@@ -623,13 +654,15 @@ mod tests {
         assert_eq!((r.players, r.size), (Some(32), Some(4096)));
         assert_eq!(r.problems, vec!["warning: something odd"]);
         assert_eq!(r.tail.last().map(|s| s.as_str()), Some("info: loading"));
-        assert_eq!(r.hints.len(), 2, "{:?}", r.hints);
+        assert_eq!(r.hints.len(), 1, "{:?}", r.hints);
+        assert!(r.hints[0].contains("até 16 jogadores"), "{:?}", r.hints);
         let ok = read_log("info: *CommandProject big match: 8 players on /maps/a/a_scenario.lua (1024x1024)\ninfo: Run time: 0h19m50s\n");
         assert!(ok.finished && ok.hints.is_empty());
         let early = read_log("info: checking C:\\mods\nerror: Out of memory\n");
         assert!(!early.started && early.hints.len() == 2);
         assert_eq!(user_log(&["/windowed".into(), "/LOG".into(), "a.log".into()]), Some("a.log".into()));
         assert!(weight(24, 1024) == 1.0 && weight(32, 4096) > 20.0);
+        assert_eq!([max_players_for(1024), max_players_for(2048), max_players_for(3072), max_players_for(3584), max_players_for(4096)], [32, 32, 28, 20, 16]);
     }
 
     /// Com `CP_TEST_MAP_SCD` (um mapa feito pelo editor): o minimapa sai em PNG.

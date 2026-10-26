@@ -100,7 +100,8 @@ disponível em Sistema → Visual.
   sozinhos pelo lado do mapa ou pela ordem das bases, e clicar numa base da prévia põe você nela.
   A prévia mostra o **terreno do mapa** (o minimapa do jogo) com as bases por cima, e a lista de
   mapas tem uma miniatura de cada um. Até **32 jogadores** por partida (o limite de exércitos do
-  motor do jogo; os civis do mapa ficam de fora quando não cabem) e até um time por base
+  motor do jogo; os civis do mapa ficam de fora quando não cabem; em mapas acima de 2560, menos,
+  pela memória do jogo: 16 em 4096) e até um time por base
   (24 bases, até 24 times), com **32 cores de exército** (as 10 do jogo e mais 22
   só nas partidas grandes): **cada jogador com uma cor diferente, mesmo no mesmo time** (padrão), ou
   uma cor por time; cores já usadas por outra base aparecem bloqueadas na escolha à mão.
@@ -404,12 +405,15 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
   `SimCallbacks.lua` do seu jogo e, com o menu, também do `gamemain.lua` e do `UserSync.lua` (o
   código vai dentro desses arquivos, que o jogo já conhece); outro mod que mexa neles entra em
   conflito (veja Conflitos). Ao começar a partida aparece no alto da tela "trapacas ligadas". Os textos do menu ficam sem acento para não depender da fonte do jogo. As unidades criadas viram invencíveis em até 1 s.
-- **Partida grande** (experimental: confirme no jogo): o jogo foi feito para até 8 jogadores. 24
-  jogadores num mapa de 1024 jogaram normalmente; 32 jogadores com os civis do mapa (33 exércitos)
-  fecharam o jogo ao carregar, como esperado de um motor que guarda os exércitos em máscaras de 32
-  bits, então a partida aceita até 32 jogadores e deixa os civis de fora quando não cabem. O jogo
-  grava um log em `logs/partida-grande.log` (pasta de dados do launcher); se ele fechar no meio, a
-  tela da partida mostra onde parou e o que tentar. Mapas acima de 2048 também são experimentais. Cada IA a mais pesa: com muitas, a IA esperta olha o mapa e decide com
+- **Partida grande** (experimental): o jogo foi feito para até 8 jogadores. O motor aceita até 32
+  exércitos (os civis do mapa ficam de fora quando não cabem), e a memória limita mais: o SC2 é um
+  programa de 32 bits (até 4 GB) e cada exército guarda dados do mapa inteiro. Testado num PC de
+  verdade: 32 jogadores em 2048 e 16 em 4096 abrem a partida; 24 e 32 em 4096 fecham o jogo logo
+  depois de criar os exércitos, sem relatório de erro. O launcher usa a conta
+  jogadores × (lado/1024)² ≤ 256: até 32 jogadores em mapas de até 2560, 28 em 3072, 20 em 3584 e
+  16 em 4096 (num mapa com mais bases, ele começa com bases espalhadas e deixa as outras vazias).
+  O jogo grava um log em `logs/partida-grande.log` (pasta de dados do launcher); se ele fechar no
+  meio, a tela da partida mostra onde parou e o que tentar. Cada IA a mais pesa: com muitas, a IA esperta olha o mapa e decide com
   menos frequência, e o painel dela mostra uma linha por IA. O lobby do jogo desenha só 8 posições e
   **fecha o jogo** com um mapa maior: por isso mapas com mais de 8 bases saem do editor com um tipo
   próprio, que o lobby não lista (mapas feitos na 0.25.0 precisam ser gerados de novo).

@@ -321,7 +321,7 @@ export interface MatchOptions {
   /** posições: fixas, sorteadas dentro de cada time ou sorteadas entre todos (só o launcher usa) */
   spawn: "fixed" | "team" | "all";
 }
-export interface BigMatch { map: string; slots: MatchSlot[]; options: MatchOptions }
+export interface BigMatch { map: string; /** lado do mapa (confere o limite de jogadores) */ size?: number; slots: MatchSlot[]; options: MatchOptions }
 /** O que o log do jogo diz sobre uma partida grande que fechou no meio. */
 export interface GameLogReport { finished: boolean; started: boolean; players: number | null; size: number | null; problems: string[]; tail: string[]; hints: string[] }
 /** O jogo fechou com erro: relatório do Windows (.mdmp), mods ligados e o log (partida grande). */

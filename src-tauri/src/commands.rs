@@ -379,8 +379,13 @@ pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<Launch
 /// Fecha o jogo travado (o processo fica aberto sem janela).
 #[tauri::command]
 pub async fn kill_game() -> R<usize> {
+    // fechado pelo usuário: o vigia não confunde com o jogo fechando sozinho no meio da partida
+    KILLED_BY_USER.store(true, std::sync::atomic::Ordering::SeqCst);
     Ok(tauri::async_runtime::spawn_blocking(cp_core::game::kill_game).await.unwrap_or(0))
 }
+
+/// O jogo aberto pelo launcher foi fechado no botão "Fechar o jogo travado".
+static KILLED_BY_USER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Mapas de escaramuça para a partida grande: os do jogo e os dos mods de mapa ligados no perfil.
 #[tauri::command]
@@ -596,6 +601,7 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             cp_core::game::spawn_exe(&plan).map_err(err)?;
         }
     }
+    KILLED_BY_USER.store(false, std::sync::atomic::Ordering::SeqCst);
     if let Some((bin, before, mods)) = crash_watch {
         // o jogo grava um .mdmp na pasta bin quando trava: avisa e sugere o que desligar
         let app6 = app.clone();
@@ -623,6 +629,9 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
                 // fechou (com ou sem relatório) ou nem chegou a abrir em 2 min
                 if (seen_running && !running) || (!seen_running && tick > 40) {
                     tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                    if KILLED_BY_USER.load(std::sync::atomic::Ordering::SeqCst) {
+                        return;
+                    }
                     let log = report(&log_path);
                     if let Some(new) = crash_dumps(&bin).iter().find(|d| !before.contains(*d)) {
                         let _ = app6.emit("cp://game-crashed", crashed(Some(new), log));

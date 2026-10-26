@@ -67,7 +67,9 @@ jobs:
       - name: Cores da Partida grande (times nunca com a mesma cor)
         run: node --experimental-strip-types tools/test_teamcolors.ts
       - name: Posições sorteadas da Partida grande
-        run: node --experimental-strip-types tools/test_matchspawn.ts
+        run: |
+          node --experimental-strip-types tools/test_matchspawn.ts
+          node --experimental-strip-types tools/test_matchlimits.ts
 
   shaders-dx9:
     needs: test

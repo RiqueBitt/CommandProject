@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon, Modal, Notice } from "../../components/ui";
 import { BLANK_SIZES, blankLabel } from "../studio/mapEdit";
+import { largestSizeFor, maxPlayersFor } from "../../lib/matchLimits";
 import type { Terrain } from "../../lib/types";
 import { t, tr } from "../../lib/i18n";
 import type { Pt } from "../studio/mapEdit";
@@ -127,6 +128,10 @@ export default function WorldGenModal(props: Props) {
     setGallery(out);
   };
   const syms = symmetriesFor(wg.players);
+  // limite de jogadores na partida pelo tamanho do mapa (memória do jogo)
+  const mapSize = props.blank ? (props.blankSize ?? 1024) : grid.grid;
+  const playLimit = maxPlayersFor(mapSize);
+  const fitSize = largestSizeFor(wg.players, [...BLANK_SIZES]);
   const terrainName = props.terrains?.find((tn) => tn.id === props.terrain)?.name ?? props.terrain ?? "—";
   const G = grid.grid;
   const svgPt = (p: Pt) => [(p[0] / G) * 100, (p[1] / G) * 100];
@@ -188,6 +193,12 @@ export default function WorldGenModal(props: Props) {
               </select>
             </label>
           </div>
+          {wg.players > playLimit && (
+            <Notice kind="warn">
+              {t("Num mapa de {size} o jogo aguenta até {max} jogadores numa partida (é um programa de 32 bits e cada exército guarda dados do mapa inteiro): as outras bases ficam vazias.", { size: mapSize, max: playLimit })}
+              {fitSize ? " " + t("Para jogar com os {n}, use um mapa de até {size}.", { n: wg.players, size: fitSize }) : ""}
+            </Notice>
+          )}
 
           <div className="wg-row">
             <label className="field"><span className="label">{t("Estilo do terreno")}</span>

@@ -8,6 +8,7 @@ import { api } from "../lib/api";
 import { t, tr } from "../lib/i18n";
 import { load, useStore } from "../lib/store";
 import { shuffleSpawns } from "../lib/matchSpawn";
+import { MAX_PLAYERS, maxPlayersFor, spreadBases } from "../lib/matchLimits";
 import { assignColors, GAME_COLORS, groupOf, type ColorMode } from "../lib/teamColors";
 import type { MatchMap, MatchOptions, MatchSlot, SlotKind } from "../lib/types";
 
@@ -114,18 +115,18 @@ function splitTeams(m: MatchMap, n: number, by: "side" | "order"): number[] {
   return team;
 }
 
-/** Exércitos que o motor do jogo aguenta numa partida (contando os civis do mapa, que ficam de fora
- *  quando não cabem). Igual a `MAX_ARMIES` no cp-core. */
-const MAX_PLAYERS = 32;
-
 function defaultSlots(m: MatchMap): MatchSlot[] {
   const teams = m.armies.length >= 4 && m.armies.length % 2 === 0 ? splitTeams(m, 2, "side") : m.armies.map(() => 0);
-  // mapas com mais bases que o jogo aguenta: as do fim começam vazias
-  return m.armies.map((_, i) => ({ kind: i === 0 ? "you" : i < MAX_PLAYERS ? "ai" : "empty", team: teams[i], faction: 0, ai: "Normal", color: -1 }));
+  // mapas com mais bases que o jogo aguenta (no tamanho deles): começa com bases bem espalhadas
+  const max = maxPlayersFor(m.size[0]);
+  const on = m.armies.length > max
+    ? (m.starts.length === m.armies.length ? spreadBases(m.starts, max) : new Set(m.armies.map((_, i) => i).slice(0, max)))
+    : null;
+  return m.armies.map((_, i) => ({ kind: i === 0 ? "you" : !on || on.has(i) ? "ai" : "empty", team: teams[i], faction: 0, ai: "Normal", color: -1 }));
 }
 
 /** "12 contra 12", "6 x 6 x 6", "todos contra todos (8)"... e o erro, se houver. */
-function summary(slots: MatchSlot[]): { text: string; error: string | null; players: number } {
+function summary(slots: MatchSlot[], size: number): { text: string; error: string | null; players: number } {
   const on = slots.filter((s) => s.kind !== "empty");
   const you = slots.filter((s) => s.kind === "you").length;
   const groups = new Map<string, number>();
@@ -135,6 +136,7 @@ function summary(slots: MatchSlot[]): { text: string; error: string | null; play
   if (you !== 1) error = you === 0 ? t("Escolha uma base para você.") : t("Só uma base pode ser sua.");
   else if (on.length < 2) error = t("A partida precisa de pelo menos 2 jogadores.");
   else if (on.length > MAX_PLAYERS) error = t("O jogo aguenta até {max} jogadores numa partida: deixe {n} base(s) vazia(s).", { max: MAX_PLAYERS, n: on.length - MAX_PLAYERS });
+  else if (on.length > maxPlayersFor(size)) error = t("Num mapa de {size} o jogo aguenta até {max} jogadores (com mais, fica sem memória e fecha): deixe {n} base(s) vazia(s).", { size, max: maxPlayersFor(size), n: on.length - maxPlayersFor(size) });
   else if (groups.size < 2) error = t("Todos estão no mesmo time: separe em pelo menos dois.");
   const same = sizes.length > 2 && sizes.every((n) => n === sizes[0]);
   const text = on.every((s) => s.team === 0) ? t("todos contra todos ({n})", { n: on.length })
@@ -176,7 +178,9 @@ export default function BigMatch() {
     if (!map) { setPath(maps[0].path); return; }
     const saved = readSlots(map.path);
     // vagas guardadas de versões antigas não têm cor: automática
-    setSlots(saved && saved.length === map.armies.length ? saved.map((x) => ({ ...x, color: typeof x.color === "number" ? x.color : -1 })) : defaultSlots(map));
+    // vagas guardadas com mais jogadores do que o mapa aguenta (de antes do limite): começa de novo
+    const fits = saved && saved.filter((x) => x.kind !== "empty").length <= maxPlayersFor(map.size[0]);
+    setSlots(saved && fits && saved.length === map.armies.length ? saved.map((x) => ({ ...x, color: typeof x.color === "number" ? x.color : -1 })) : defaultSlots(map));
     try { localStorage.setItem("cp-bigmatch-map", map.path); } catch { /* ok */ }
   }, [maps, map]);
   useEffect(() => { if (map && slots.length === map.armies.length) save("cp-bigmatch:" + map.path, slots); }, [map, slots]);
@@ -184,7 +188,8 @@ export default function BigMatch() {
   useEffect(() => { try { localStorage.setItem("cp-bigmatch-colors2", colorMode); } catch { /* ok */ } }, [colorMode]);
 
   const list = useMemo(() => (maps ?? []).filter((m) => (!onlyBig || m.armies.length > 8) && (!query.trim() || `${m.name} ${m.id} ${m.source}`.toLowerCase().includes(query.trim().toLowerCase()))), [maps, query, onlyBig]);
-  const sum = summary(slots);
+  const limit = maxPlayersFor(map?.size[0] ?? 1024);
+  const sum = summary(slots, map?.size[0] ?? 1024);
   // tantos times quantas bases (24 bases: até 24 times)
   const maxTeam = Math.max(2, slots.length);
   const colorPlan = useMemo(() => assignColors(slots, colorMode), [slots, colorMode]);
@@ -227,7 +232,7 @@ export default function BigMatch() {
     if (!map || error) return;
     // posições sorteadas: cada vaga leva junto a cor dela
     const placed = shuffleSpawns(slots.map((x, i) => ({ ...x, color: colors[i] })), options.spawn);
-    const r = await run("launch", () => api.launchBigMatch({ map: map.path, slots: placed, options }), (options.spawn !== "fixed" ? t("Abrindo o jogo: {what} em {map} (posições sorteadas).", { what: sum.text, map: map.name }) : t("Abrindo o jogo: {what} em {map}.", { what: sum.text, map: map.name })));
+    const r = await run("launch", () => api.launchBigMatch({ map: map.path, size: map.size[0], slots: placed, options }), (options.spawn !== "fixed" ? t("Abrindo o jogo: {what} em {map} (posições sorteadas).", { what: sum.text, map: map.name }) : t("Abrindo o jogo: {what} em {map}.", { what: sum.text, map: map.name })));
     if (r) await refresh();
   };
 
@@ -333,9 +338,9 @@ export default function BigMatch() {
                         <select className="select dense" value="" onChange={(e) => e.target.value !== "" && setAll({ faction: Number(e.target.value) })} aria-label={t("Facção de todas as IAs")}>
                           <option value="">{t("facção…")}</option>{FACTIONS.map((f, i) => <option key={f} value={i}>{t(f)}</option>)}
                         </select>
-                        <button type="button" className="btn sm" disabled={sum.players >= MAX_PLAYERS} title={sum.players >= MAX_PLAYERS ? t("O jogo aguenta até {max} jogadores numa partida.", { max: MAX_PLAYERS }) : undefined} onClick={() => setSlots((l) => {
-                          // até o limite do jogo: as vazias do fim continuam vazias
-                          let free = MAX_PLAYERS - l.filter((s) => s.kind !== "empty").length;
+                        <button type="button" className="btn sm" disabled={sum.players >= limit} title={sum.players >= limit ? t("Num mapa de {size} o jogo aguenta até {max} jogadores.", { size: map.size[0], max: limit }) : undefined} onClick={() => setSlots((l) => {
+                          // até o limite do jogo (no tamanho deste mapa): as vazias do fim continuam vazias
+                          let free = limit - l.filter((s) => s.kind !== "empty").length;
                           return l.map((s) => (s.kind === "empty" && free-- > 0 ? { ...s, kind: "ai" } : s));
                         })}>{t("Encher as vazias")}</button>
                       </div>
@@ -452,12 +457,9 @@ export default function BigMatch() {
                 </div>
               </section>
 
-              {(map.size[0] > 2048 || sum.players > 24) ? (
-                <Notice kind="warn">
-                  {map.size[0] > 2048 && t("Mapa de {size}: acima de 2048 é experimental (os mapas do jogo vão até 2048) e pesa bem mais para carregar.", { size: map.size[0] })}
-                  {map.size[0] > 2048 && sum.players > 24 && " "}
-                  {sum.players > 24 && t("Mais de 24 jogadores ainda não foi testado; o jogo aguenta até {max} exércitos e os civis do mapa ficam de fora quando não cabem.", { max: MAX_PLAYERS })}
-                  {" "}{t("Se o jogo fechar, o launcher mostra aqui o que o log do jogo disse.")}
+              {map.armies.length > limit ? (
+                <Notice kind="info">
+                  {t("Este mapa tem {bases} bases, mas num mapa de {size} o jogo aguenta até {max} jogadores: ele é um programa de 32 bits e cada exército guarda dados do mapa inteiro. Escolha quais bases jogam; as outras ficam vazias.", { bases: map.armies.length, size: map.size[0], max: limit })}
                 </Notice>
               ) : sum.players > 8 && <Notice kind="info">{t("O jogo foi feito para até 8 jogadores. Com mais, a partida fica mais pesada (cada IA pensa sozinha): se o jogo fechar ao carregar, o launcher mostra aqui o que o log do jogo disse.")}</Notice>}
               {busy && <TaskProgress task="apply" label={t("Preparando a partida…")} />}

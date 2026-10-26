@@ -623,6 +623,7 @@
  "o jogo aguenta no máximo {0} jogadores numa partida ({1} escolhidos): deixe {2} base(s) vazia(s)": "the game handles at most {0} players in a match ({1} chosen): leave {2} base(s) empty",
  "Faltou memória para o jogo: use um mapa menor, menos jogadores ou um limite de unidades menor.": "The game ran out of memory: use a smaller map, fewer players or a lower unit cap.",
  "O jogo fechou antes de montar a partida grande (ainda abrindo ou carregando os mods).": "The game closed before setting up the big match (still opening or loading the mods).",
- "Mapa de {0}: acima de 2048 é experimental. Teste os mesmos jogadores num mapa de 2048 para saber se o tamanho é o problema.": "{0} map: above 2048 is experimental. Try the same players on a 2048 map to find out whether the size is the problem.",
- "Com {0} jogadores: até 24 já foi testado. Deixe algumas bases vazias para achar o limite do seu computador.": "With {0} players: up to 24 has been tested. Leave a few bases empty to find your computer's limit."
+ "num mapa de {0} o jogo aguenta até {1} jogadores (com mais, fica sem memória e fecha): deixe {2} base(s) vazia(s)": "on a {0} map the game handles up to {1} players (with more it runs out of memory and closes): leave {2} base(s) empty",
+ "Num mapa de {0} o jogo aguenta até {1} jogadores; com {2}, ele fica sem memória. Deixe algumas bases vazias ou use um mapa menor.": "On a {0} map the game handles up to {1} players; with {2} it runs out of memory. Leave some bases empty or use a smaller map.",
+ "Mapa de {0}: acima de 2048 é experimental. Com unidades demais a memória do jogo pode acabar no meio da partida: tente um limite de unidades menor.": "{0} map: above 2048 is experimental. With too many units the game can run out of memory mid-match: try a lower unit cap."
 }
