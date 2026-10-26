@@ -1311,7 +1311,7 @@ export default function MapStudio({ id }: { id: string }) {
         { kind: "select", label: t("Simetria ao colocar"), value: doc.symmetry, onChange: (v) => setDoc((d) => ({ ...d, symmetry: v as Symmetry })), options: (Object.keys(SYMMETRY_LABEL) as Symmetry[]).map((k) => ({ value: k, label: t(SYMMETRY_LABEL[k]) })), hint: t("Bases, massa, decorações, formas e pinceladas são repetidas nos outros lados.") },
         { kind: "number", label: t("Raio sem ataque inicial"), value: doc.norush, min: 0, max: 200, onChange: (v) => setDoc((d) => ({ ...d, norush: v })) },
         { kind: "select", label: t("Minimapa do lobby"), value: doc.minimap, onChange: (v) => setDoc((d) => ({ ...d, minimap: v as MapDoc["minimap"] })), options: [{ value: "donor", label: t("Original do terreno") }, { value: "natural", label: t("Gerar: cores do relevo") }, { value: "desert", label: t("Gerar: deserto") }, { value: "snow", label: t("Gerar: neve") }, { value: "dark", label: t("Gerar: rocha escura") }] },
-        { kind: "custom", label: "", node: <button className="btn sm" onClick={() => setLobbyOpen(true)}><Icon name="preview" size={16} /> Prévia do lobby</button> },
+        { kind: "custom", label: "", node: <button className="btn sm" onClick={() => setLobbyOpen(true)}><Icon name="preview" size={16} /> {t("Prévia do lobby")}</button> },
       ] });
       sections.push({ title: t("Chão e visual"), props: [
         blank
