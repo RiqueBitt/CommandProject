@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Field, Notice, TaskProgress, Icon } from "../../components/ui";
 import { api } from "../../lib/api";
 import { useStore } from "../../lib/store";
+import { locale, t } from "../../lib/i18n";
 import type { ColorAdjust, TextureView, UiSkinOptions } from "../../lib/types";
 import { ColorSliders, IDENTITY } from "./adjust";
 
@@ -15,7 +16,7 @@ const PRESETS: { name: string; adjust: ColorAdjust }[] = [
 export default function UiSkin() {
   const { run, refreshMods } = useStore.getState();
   const busy = useStore((s) => s.busy.skin);
-  const [opts, setOpts] = useState<UiSkinOptions>({ name: "Minha skin", adjust: PRESETS[0].adjust, prefixes: ["/textures/ui/"], exclude: [], quality: "normal" });
+  const [opts, setOpts] = useState<UiSkinOptions>(() => ({ name: t("Minha skin"), adjust: PRESETS[0].adjust, prefixes: ["/textures/ui/"], exclude: [], quality: "normal" }));
   const [targets, setTargets] = useState<{ count: number; sample: string[] } | null>(null);
   const [sample, setSample] = useState<string | null>(null);
   const [before, setBefore] = useState<TextureView | null>(null);
@@ -48,56 +49,56 @@ export default function UiSkin() {
   return (
     <div className="grid-2" style={{ gridTemplateColumns: "minmax(320px, 420px) 1fr", alignItems: "start" }}>
       <section className="card pad col">
-        <h2>Recolorir a interface inteira</h2>
+        <h2>{t("Recolorir a interface inteira")}</h2>
         <p className="muted small">
-          Gera um mod só com as texturas alteradas, a partir dos arquivos originais do jogo. É visual: não interfere em partidas multiplayer.
+          {t("Gera um mod só com as texturas alteradas, a partir dos arquivos originais do jogo. É visual: não interfere em partidas multiplayer.")}
         </p>
         <div className="chips">
           {PRESETS.map((p) => (
-            <button key={p.name} className="chip" aria-pressed={JSON.stringify(opts.adjust) === JSON.stringify(p.adjust)} onClick={() => setOpts({ ...opts, adjust: p.adjust, name: p.name })}>{p.name}</button>
+            <button key={p.name} className="chip" aria-pressed={JSON.stringify(opts.adjust) === JSON.stringify(p.adjust)} onClick={() => setOpts({ ...opts, adjust: p.adjust, name: t(p.name) })}>{t(p.name)}</button>
           ))}
         </div>
         <ColorSliders value={opts.adjust} onChange={(adjust) => setOpts({ ...opts, adjust })} />
-        <Field label="Nome da skin"><input className="input" value={opts.name} onChange={(e) => setOpts({ ...opts, name: e.target.value })} /></Field>
-        <Field label="Pastas incluídas" hint="Uma por linha. O padrão cobre toda a interface.">
+        <Field label={t("Nome da skin")}><input className="input" value={opts.name} onChange={(e) => setOpts({ ...opts, name: e.target.value })} /></Field>
+        <Field label={t("Pastas incluídas")} hint={t("Uma por linha. O padrão cobre toda a interface.")}>
           <textarea className="textarea mono" rows={2} value={opts.prefixes.join("\n")} onChange={(e) => setOpts({ ...opts, prefixes: list(e.target.value) })} />
         </Field>
-        <Field label="Pastas ignoradas" hint="Ex.: ícones de unidade, para manter as cores das facções.">
+        <Field label={t("Pastas ignoradas")} hint={t("Ex.: ícones de unidade, para manter as cores das facções.")}>
           <textarea className="textarea mono" rows={2} value={opts.exclude.join("\n")} placeholder="/textures/ui/common/icons/" onChange={(e) => setOpts({ ...opts, exclude: list(e.target.value) })} />
         </Field>
-        <Field label="Qualidade da compressão">
+        <Field label={t("Qualidade da compressão")}>
           <select className="select" value={opts.quality} onChange={(e) => setOpts({ ...opts, quality: e.target.value as UiSkinOptions["quality"] })}>
-            <option value="fast">Rápida</option>
-            <option value="normal">Normal</option>
-            <option value="best">Máxima (demora mais)</option>
+            <option value="fast">{t("Rápida")}</option>
+            <option value="normal">{t("Normal")}</option>
+            <option value="best">{t("Máxima (demora mais)")}</option>
           </select>
         </Field>
-        {busy ? <TaskProgress task="skin" label="Recolorindo texturas…" /> : (
+        {busy ? <TaskProgress task="skin" label={t("Recolorindo texturas…")} /> : (
           <button className="btn primary" disabled={!targets?.count || !opts.name.trim()} onClick={async () => {
-            await run("skin", () => api.buildUiSkin(opts, true), (m) => `"${m.name}" criada e ativada na biblioteca.`);
+            await run("skin", () => api.buildUiSkin(opts, true), (m) => t("\"{name}\" criada e ativada na biblioteca.", { name: m.name }));
             await refreshMods();
-          }}><Icon name="brush" size={19} /> Gerar skin ({targets?.count.toLocaleString("pt-BR") ?? "…"} texturas)</button>
+          }}><Icon name="brush" size={19} /> {t("Gerar skin ({n} texturas)", { n: targets?.count.toLocaleString(locale()) ?? "…" })}</button>
         )}
       </section>
 
       <section className="card pad col">
         <div className="section-title">
-          <h2>Prévia</h2>
+          <h2>{t("Prévia")}</h2>
           {targets && targets.sample.length > 0 && (
-            <select className="select" style={{ maxWidth: 380 }} value={sample ?? ""} onChange={(e) => setSample(e.target.value)} aria-label="Textura de exemplo">
+            <select className="select" style={{ maxWidth: 380 }} value={sample ?? ""} onChange={(e) => setSample(e.target.value)} aria-label={t("Textura de exemplo")}>
               {targets.sample.map((s) => <option key={s} value={s}>{s.replace(/^textures\/ui\//i, "")}</option>)}
             </select>
           )}
         </div>
-        {targets && targets.count === 0 && <Notice kind="warn">Nenhuma textura encontrada nessas pastas.</Notice>}
+        {targets && targets.count === 0 && <Notice kind="warn">{t("Nenhuma textura encontrada nessas pastas.")}</Notice>}
         <div className="grid-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
           <figure style={{ margin: 0 }}>
-            <div className="tex-stage checker" style={{ minHeight: 280 }}>{before && <img src={before.png} alt="Original" />}</div>
-            <figcaption className="muted small" style={{ marginTop: 6 }}>Original</figcaption>
+            <div className="tex-stage checker" style={{ minHeight: 280 }}>{before && <img src={before.png} alt={t("Original")} />}</div>
+            <figcaption className="muted small" style={{ marginTop: 6 }}>{t("Original")}</figcaption>
           </figure>
           <figure style={{ margin: 0 }}>
-            <div className="tex-stage checker" style={{ minHeight: 280 }}>{after && <img src={after.png} alt="Com a skin" />}</div>
-            <figcaption className="muted small" style={{ marginTop: 6 }}>Com a skin</figcaption>
+            <div className="tex-stage checker" style={{ minHeight: 280 }}>{after && <img src={after.png} alt={t("Com a skin")} />}</div>
+            <figcaption className="muted small" style={{ marginTop: 6 }}>{t("Com a skin")}</figcaption>
           </figure>
         </div>
       </section>

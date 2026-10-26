@@ -7,6 +7,7 @@ import {
 } from "../../components/studio/kit";
 import { Empty, Icon, Modal, Notice } from "../../components/ui";
 import { api } from "../../lib/api";
+import { locale, t, tr } from "../../lib/i18n";
 import { errorText, useStore } from "../../lib/store";
 import { useTabs } from "../../lib/tabs";
 import type { AnimKey, BpLeaf, CreationMeta, Finding, MixCheck, MixSpec, ScaAnimation, UnitBuildReq, UnitBuildResult, UnitDetails, UnitInfo, UnitPack } from "../../lib/types";
@@ -35,7 +36,7 @@ const MOTION: Record<string, string> = { RULEUMT_Land: "Terrestre", RULEUMT_Air:
 const TEAM = ["#2f6fd6", "#c8352b", "#d9a227", "#3fa34d", "#8e44ad", "#e67e22", "#eceff1"];
 const PAINT = ["#2b2f33", "#6b7178", "#c9cdd2", "#8a6a3c", "#4d6b3a", "#7a2f2a", "#2c4f7a", "#d9a227"];
 const ANIM_LABEL: Record<string, string> = { AnimationWalk: "Andar", AnimationIdle: "Parado", AnimationDeath: "Morte", AnimationActivate: "Ativar", AnimationOpen: "Abrir", AnimationBuild: "Construir", AnimationTakeOff: "Decolar", AnimationLand: "Pousar", AnimationTransform: "Transformar", AnimationUpgrade: "Melhorar", AnimationFire: "Disparar", AnimationReload: "Recarregar" };
-const animLabel = (field: string) => { const k = field.split(".").pop() ?? field; return ANIM_LABEL[k] ?? k.replace(/^Animation/, ""); };
+const animLabel = (field: string) => { const k = field.split(".").pop() ?? field; return ANIM_LABEL[k] ? t(ANIM_LABEL[k]) : k.replace(/^Animation/, ""); };
 
 /** modelos de função: multiplicadores sobre os valores da base ("Weapon.*" = todas as armas) */
 const ROLE_PRESETS: { id: string; label: string; icon: string; desc: string; mul: Record<string, number>; air?: boolean }[] = [
@@ -65,7 +66,7 @@ function statsOf(get: (p: string) => number | null, weapons: { index: number; du
     hpPerMass: mass ? hp / mass : 0, dpsPerMass: mass ? dps / mass : 0, eff: cost ? Math.sqrt(Math.max(0, hp) * Math.max(0, dps)) / cost : 0,
   };
 }
-const fmt = (v: number) => (Math.abs(v) >= 100 ? Math.round(v).toLocaleString("pt-BR") : (Math.round(v * 100) / 100).toLocaleString("pt-BR"));
+const fmt = (v: number) => (Math.abs(v) >= 100 ? Math.round(v).toLocaleString(locale()) : (Math.round(v * 100) / 100).toLocaleString(locale()));
 const isPath = (t: string) => /^\/[\w/.-]+\.(bp|sca|scm|dds|lua)$/i.test(t.trim());
 
 interface AnimDraft { index: number | null; name: string; field: string; duration: number; keys: AnimKey[] }
@@ -169,10 +170,10 @@ export default function UnitStudio({ id }: { id: string }) {
   const copies = useMemo(() => doc.weaponCopies ?? [], [doc.weaponCopies]);
   const weapons = useMemo(() => {
     const base = (details?.weapons ?? []).map((w) => ({ ...w, from: null as string | null }));
-    for (const [t, u, s] of copies) {
+    for (const [tg, u, s] of copies) {
       const ow = others[u]?.weapons.find((w) => w.index === s);
-      const label = ow?.label ?? `Arma ${s} de ${u}`;
-      if (t > 0) { const i = base.findIndex((w) => w.index === t); if (i >= 0) base[i] = { index: t, label, dummy: ow?.dummy ?? false, from: u }; }
+      const label = ow?.label ?? t("Arma {n} de {unit}", { n: s, unit: u });
+      if (tg > 0) { const i = base.findIndex((w) => w.index === tg); if (i >= 0) base[i] = { index: tg, label, dummy: ow?.dummy ?? false, from: u }; }
       else base.push({ index: base.length + 1, label, dummy: ow?.dummy ?? false, from: u });
     }
     return base;
@@ -224,10 +225,10 @@ export default function UnitStudio({ id }: { id: string }) {
     if (file.startsWith("asset:")) {
       const c = (doc.customAnims ?? []).find((x) => `asset:${x.asset}` === file);
       if (c && view) { setAnim(animFromKeys(view, c.keys, c.duration)); setPlaying(true); }
-      else toast("info", "Esta animação foi criada antes do editor guardar os quadros: gere a tropa para vê-la no jogo.");
+      else toast("info", t("Esta animação foi criada antes do editor guardar os quadros: gere a tropa para vê-la no jogo."));
       return;
     }
-    try { setAnim(await api.animRead(file)); setPlaying(true); } catch (e) { setAnim(null); toast("error", `Não deu para ler a animação: ${errorText(e)}`); }
+    try { setAnim(await api.animRead(file)); setPlaying(true); } catch (e) { setAnim(null); toast("error", t("Não deu para ler a animação: {error}", { error: errorText(e) })); }
   };
 
   // prévia ao vivo da animação em edição
@@ -266,37 +267,37 @@ export default function UnitStudio({ id }: { id: string }) {
 
   const problems = useMemo(() => {
     const out: { level: "err" | "warn"; text: string; section: Section }[] = [];
-    if (!doc.base) out.push({ level: "err", text: "Escolha a unidade base.", section: "general" });
-    if (!/^[a-z][a-z0-9_]{3,15}$/.test(doc.newId)) out.push({ level: "err", text: "O id precisa ter 4 a 16 letras minúsculas, números ou _, começando por letra.", section: "general" });
-    if (catalog?.some((u) => u.id === doc.newId)) out.push({ level: "err", text: `Já existe a unidade ${doc.newId} no jogo: troque o id.`, section: "general" });
-    if (!doc.name.trim()) out.push({ level: "err", text: "Dê um nome para a tropa.", section: "general" });
+    if (!doc.base) out.push({ level: "err", text: t("Escolha a unidade base."), section: "general" });
+    if (!/^[a-z][a-z0-9_]{3,15}$/.test(doc.newId)) out.push({ level: "err", text: t("O id precisa ter 4 a 16 letras minúsculas, números ou _, começando por letra."), section: "general" });
+    if (catalog?.some((u) => u.id === doc.newId)) out.push({ level: "err", text: t("Já existe a unidade {id} no jogo: troque o id.", { id: doc.newId }), section: "general" });
+    if (!doc.name.trim()) out.push({ level: "err", text: t("Dê um nome para a tropa."), section: "general" });
     for (const [pth, label] of [["Defense.MaxHealth", "Vida máxima"], ["Economy.BuildTime", "Tempo de construção"]] as const) {
       const v = num(pth);
-      if (v !== null && v <= 0) out.push({ level: "err", text: `${label} precisa ser maior que zero.`, section: "attr:defense" });
+      if (v !== null && v <= 0) out.push({ level: "err", text: t("{label} precisa ser maior que zero.", { label: t(label) }), section: "attr:defense" });
     }
     for (const w of weapons) {
       const r = num(`Weapon.${w.index}.MaxRadius`), f = num(`Weapon.${w.index}.RateOfFire`), dmg = num(`Weapon.${w.index}.Damage`);
-      if (r !== null && r <= 0 && !w.dummy) out.push({ level: "err", text: `${w.label}: alcance precisa ser maior que zero.`, section: `weapon:${w.index}` });
-      if (f !== null && f <= 0 && !w.dummy) out.push({ level: "err", text: `${w.label}: cadência precisa ser maior que zero.`, section: `weapon:${w.index}` });
-      if (dmg !== null && dmg < 0) out.push({ level: "err", text: `${w.label}: dano não pode ser negativo.`, section: `weapon:${w.index}` });
-      if (dmg !== null && dmg > 100000) out.push({ level: "warn", text: `${w.label}: dano muito alto (${dmg}).`, section: `weapon:${w.index}` });
-      if (w.from) out.push({ level: "warn", text: `${w.label} veio de ${w.from}: confira no jogo se os pontos de disparo existem nesta tropa.`, section: `weapon:${w.index}` });
+      if (r !== null && r <= 0 && !w.dummy) out.push({ level: "err", text: t("{weapon}: alcance precisa ser maior que zero.", { weapon: w.label }), section: `weapon:${w.index}` });
+      if (f !== null && f <= 0 && !w.dummy) out.push({ level: "err", text: t("{weapon}: cadência precisa ser maior que zero.", { weapon: w.label }), section: `weapon:${w.index}` });
+      if (dmg !== null && dmg < 0) out.push({ level: "err", text: t("{weapon}: dano não pode ser negativo.", { weapon: w.label }), section: `weapon:${w.index}` });
+      if (dmg !== null && dmg > 100000) out.push({ level: "warn", text: t("{weapon}: dano muito alto ({n}).", { weapon: w.label, n: dmg }), section: `weapon:${w.index}` });
+      if (w.from) out.push({ level: "warn", text: t("{weapon} veio de {unit}: confira no jogo se os pontos de disparo existem nesta tropa.", { weapon: w.label, unit: w.from }), section: `weapon:${w.index}` });
     }
     const speedV = num("Physics.MaxSpeed");
-    if (speedV !== null && speedV > 60) out.push({ level: "warn", text: `Velocidade ${speedV} é muito alta para o jogo.`, section: "attr:physics" });
+    if (speedV !== null && speedV > 60) out.push({ level: "warn", text: t("Velocidade {n} é muito alta para o jogo.", { n: speedV }), section: "attr:physics" });
     if (modelSrc.source === "creation" && view && details) {
       const have = new Set(view.bones.map((b) => b.name.toLowerCase()));
       const map = doc.appearance.boneMap ?? {};
       const miss = details.bones.filter((b) => !have.has(b.toLowerCase()) && !map[b]);
-      if (miss.length) out.push({ level: "warn", text: `O modelo próprio não tem ${miss.length} osso(s) que as armas usam (${miss.slice(0, 4).join(", ")}${miss.length > 4 ? "…" : ""}). Ligue no assistente de ossos.`, section: "look" });
+      if (miss.length) out.push({ level: "warn", text: t("O modelo próprio não tem {n} osso(s) que as armas usam ({bones}). Ligue no assistente de ossos.", { n: miss.length, bones: `${miss.slice(0, 4).join(", ")}${miss.length > 4 ? "…" : ""}` }), section: "look" });
     }
-    for (const m of missing) out.push({ level: "err", text: `Arquivo citado não existe no jogo: ${m}`, section: "advanced" });
+    for (const m of missing) out.push({ level: "err", text: t("Arquivo citado não existe no jogo: {file}", { file: m }), section: "advanced" });
     const tv = doc.texgen?.versions.find((v) => v.asset === doc.appearance.albedoAsset);
-    if (tv && tv.modelKey !== `${doc.base}|${modelSrc.source === "creation" ? modelSrc.creation : ""}|${mixKey}`) out.push({ level: "warn", text: "A textura gerada foi feita para outro modelo: gere e aplique de novo.", section: "texture" });
-    if (mix && mixChecks === null) out.push({ level: "warn", text: "A mistura ainda está sendo montada.", section: "mix" });
-    for (const c of mixChecks ?? []) if (c.level === "err" || c.level === "warn") out.push({ level: c.level, text: `Mistura: ${c.text}`, section: "mix" });
-    if (!categories.length) out.push({ level: "err", text: "A tropa ficou sem categorias.", section: "cats" });
-    if (!categories.some((c) => c.toUpperCase().startsWith("BUILTBY"))) out.push({ level: "warn", text: "Nenhuma categoria BUILTBY…: talvez nenhuma fábrica consiga construir a tropa.", section: "cats" });
+    if (tv && tv.modelKey !== `${doc.base}|${modelSrc.source === "creation" ? modelSrc.creation : ""}|${mixKey}`) out.push({ level: "warn", text: t("A textura gerada foi feita para outro modelo: gere e aplique de novo."), section: "texture" });
+    if (mix && mixChecks === null) out.push({ level: "warn", text: t("A mistura ainda está sendo montada."), section: "mix" });
+    for (const c of mixChecks ?? []) if (c.level === "err" || c.level === "warn") out.push({ level: c.level, text: t("Mistura: {text}", { text: tr(c.text) }), section: "mix" });
+    if (!categories.length) out.push({ level: "err", text: t("A tropa ficou sem categorias."), section: "cats" });
+    if (!categories.some((c) => c.toUpperCase().startsWith("BUILTBY"))) out.push({ level: "warn", text: t("Nenhuma categoria BUILTBY…: talvez nenhuma fábrica consiga construir a tropa."), section: "cats" });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, details, catalog, categories, weapons, missing, view, mixChecks, mixKey]);
@@ -306,7 +307,7 @@ export default function UnitStudio({ id }: { id: string }) {
   const runChecks = async () => {
     if (!doc.base || problems.some((x) => x.level === "err")) return;
     setChecking(true);
-    try { setFindings(await api.unitValidate(id, request())); } catch (e) { setFindings([{ level: "err", area: "Verificação", text: errorText(e) }]); } finally { setChecking(false); }
+    try { setFindings(await api.unitValidate(id, request())); } catch (e) { setFindings([{ level: "err", area: t("Verificação"), text: errorText(e) }]); } finally { setChecking(false); }
   };
   useEffect(() => { setFindings(null); }, [doc]);
   useEffect(() => { if (section === "check" && findings === null && !checking) void runChecks(); },
@@ -316,12 +317,12 @@ export default function UnitStudio({ id }: { id: string }) {
     const errs = problems.filter((x) => x.level === "err");
     if (errs.length) { setSection("check"); toast("error", errs[0].text); return; }
     await save();
-    const r = await run(`unit:${id}`, () => api.unitBuild(id, request()), (x) => `Tropa "${doc.name}" gerada${doc.pack ? ` no pacote "${doc.pack}"` : ""} (${x.manifest.name}).`);
+    const r = await run(`unit:${id}`, () => api.unitBuild(id, request()), (x) => (doc.pack ? t("Tropa \"{name}\" gerada no pacote \"{pack}\" ({mod}).", { name: doc.name, pack: doc.pack, mod: x.manifest.name }) : t("Tropa \"{name}\" gerada ({mod}).", { name: doc.name, mod: x.manifest.name })));
     if (!r) return;
     setResult(r);
     await refreshMods();
     void api.unitPacks().then(setPacks).catch(() => {});
-    if (play) await run("launch", () => api.launchGame(), "Abrindo o jogo…");
+    if (play) await run("launch", () => api.launchGame(), t("Abrindo o jogo…"));
   };
 
   const applyPreset = (preset: (typeof ROLE_PRESETS)[number] | null) => p.commit((d) => {
@@ -346,30 +347,30 @@ export default function UnitStudio({ id }: { id: string }) {
   };
   const makeIcon = async () => {
     const url = iconShot.current?.();
-    if (!url) { toast("error", "Não deu para fotografar a vista 3D."); return; }
+    if (!url) { toast("error", t("Não deu para fotografar a vista 3D.")); return; }
     const name = await api.creationAssetPut(id, "icone.png", url);
     p.commit((d) => ({ ...d, appearance: { ...d.appearance, iconAsset: name } }));
-    toast("ok", "Ícone criado a partir da vista 3D. Ele substitui o ícone da base no jogo.");
+    toast("ok", t("Ícone criado a partir da vista 3D. Ele substitui o ícone da base no jogo."));
   };
 
   useHotkeys(active, { "ctrl+s": () => void save(), "ctrl+z": p.undo, "ctrl+y": p.redo, "ctrl+shift+z": p.redo });
 
   // ------------------------------------------------------------ árvore
   const nodes = useMemo<TreeNode[]>(() => [{
-    id: "root", label: doc.name || "Tropa", icon: "smart_toy", color: "#f2b33d", detail: doc.newId,
+    id: "root", label: doc.name || t("Tropa"), icon: "smart_toy", color: "#f2b33d", detail: doc.newId,
     children: [
-      { id: "general", label: "Geral", icon: "badge", detail: doc.pack ? `pacote ${doc.pack}` : undefined },
-      { id: "look", label: "Aparência", icon: "palette", detail: modelSrc.source === "creation" ? "modelo próprio" : undefined },
-      { id: "texture", label: "Gerador de texturas", icon: "texture", detail: doc.texgen?.versions.length ? `${doc.texgen.versions.length} versões` : undefined },
-      { id: "mix", label: "Misturar 3 tropas", icon: "merge_type", color: mix ? "#ffd166" : undefined, detail: mix ? [mix.turret && "torre", mix.weapon && "arma"].filter(Boolean).join(" + ") : undefined },
-      { id: "balance", label: "Equilíbrio", icon: "balance" },
-      { id: "grp:attr", label: "Atributos", icon: "tune", children: ATTRS.map((a) => ({ id: `attr:${a.id}`, label: a.label, icon: a.icon, detail: String(a.fields.filter(([f]) => changed(f)).length || "") })) },
-      { id: "weapons", label: "Armas", icon: "gps_fixed", detail: String(weapons.length), children: weapons.map((w) => ({ id: `weapon:${w.index}`, label: String(value(`Weapon.${w.index}.Label`) ?? w.label), icon: w.dummy ? "block" : w.from ? "content_copy" : "gps_fixed", detail: w.from ? `de ${w.from}` : w.dummy ? "efeito" : undefined })) },
-      { id: "anims", label: "Animações", icon: "animation", children: animFields.map(([f, file]) => ({ id: `anim:${f}`, label: animLabel(f), icon: "play_circle", detail: file.startsWith("asset:") ? "criada aqui" : doc.animations[f] ? "trocada" : undefined })) },
-      { id: "cats", label: "Comportamento", icon: "category", detail: `${categories.length}` },
-      { id: "advanced", label: "Todos os campos", icon: "list" },
-      { id: "bp", label: "Blueprint (texto)", icon: "description" },
-      { id: "check", label: "Validação", icon: problems.some((x) => x.level === "err") ? "error" : "verified", color: problems.some((x) => x.level === "err") ? "#e5534b" : "#7bd88f", detail: problems.length ? String(problems.length) : "ok" },
+      { id: "general", label: t("Geral"), icon: "badge", detail: doc.pack ? t("pacote {name}", { name: doc.pack }) : undefined },
+      { id: "look", label: t("Aparência"), icon: "palette", detail: modelSrc.source === "creation" ? t("modelo próprio") : undefined },
+      { id: "texture", label: t("Gerador de texturas"), icon: "texture", detail: doc.texgen?.versions.length ? t("{n} versões", { n: doc.texgen.versions.length }) : undefined },
+      { id: "mix", label: t("Misturar 3 tropas"), icon: "merge_type", color: mix ? "#ffd166" : undefined, detail: mix ? [mix.turret && t("torre"), mix.weapon && t("arma")].filter(Boolean).join(" + ") : undefined },
+      { id: "balance", label: t("Equilíbrio"), icon: "balance" },
+      { id: "grp:attr", label: t("Atributos"), icon: "tune", children: ATTRS.map((a) => ({ id: `attr:${a.id}`, label: t(a.label), icon: a.icon, detail: String(a.fields.filter(([f]) => changed(f)).length || "") })) },
+      { id: "weapons", label: t("Armas"), icon: "gps_fixed", detail: String(weapons.length), children: weapons.map((w) => ({ id: `weapon:${w.index}`, label: String(value(`Weapon.${w.index}.Label`) ?? w.label), icon: w.dummy ? "block" : w.from ? "content_copy" : "gps_fixed", detail: w.from ? t("de {unit}", { unit: w.from }) : w.dummy ? t("efeito") : undefined })) },
+      { id: "anims", label: t("Animações"), icon: "animation", children: animFields.map(([f, file]) => ({ id: `anim:${f}`, label: animLabel(f), icon: "play_circle", detail: file.startsWith("asset:") ? t("criada aqui") : doc.animations[f] ? t("trocada") : undefined })) },
+      { id: "cats", label: t("Comportamento"), icon: "category", detail: `${categories.length}` },
+      { id: "advanced", label: t("Todos os campos"), icon: "list" },
+      { id: "bp", label: t("Blueprint (texto)"), icon: "description" },
+      { id: "check", label: t("Validação"), icon: problems.some((x) => x.level === "err") ? "error" : "verified", color: problems.some((x) => x.level === "err") ? "#e5534b" : "#7bd88f", detail: problems.length ? String(problems.length) : "ok" },
     ],
   }],
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -382,11 +383,11 @@ export default function UnitStudio({ id }: { id: string }) {
     if (v === null && !l) return null;
     const mark = changed(path) ? " •" : "";
     if (path === "Physics.MotionType") {
-      return { kind: "select", label: label + mark, value: String(v ?? ""), onChange: (x) => setValue(path, x), options: Object.entries(MOTION).map(([value, lab]) => ({ value, label: lab })), hint: "Mudar o tipo de movimento pode exigir animações e física compatíveis." };
+      return { kind: "select", label: label + mark, value: String(v ?? ""), onChange: (x) => setValue(path, x), options: Object.entries(MOTION).map(([value, lab]) => ({ value, label: t(lab) })), hint: t("Mudar o tipo de movimento pode exigir animações e física compatíveis.") };
     }
-    if (typeof v === "number") return { kind: "number", label: label + mark, value: v, step: Math.abs(v) < 10 ? 0.1 : 1, onChange: (x) => setValue(path, x), hint: changed(path) ? `Original: ${l?.number ?? "—"}` : undefined };
+    if (typeof v === "number") return { kind: "number", label: label + mark, value: v, step: Math.abs(v) < 10 ? 0.1 : 1, onChange: (x) => setValue(path, x), hint: changed(path) ? t("Original: {v}", { v: l?.number ?? "—" }) : undefined };
     if (typeof v === "boolean") return { kind: "toggle", label: label + mark, value: v, onChange: (x) => setValue(path, x) };
-    return { kind: "text", label: label + mark, value: String(v ?? ""), onChange: (x) => setValue(path, x), hint: missing.includes(String(v)) ? "Este arquivo não existe no jogo." : undefined };
+    return { kind: "text", label: label + mark, value: String(v ?? ""), onChange: (x) => setValue(path, x), hint: missing.includes(String(v)) ? t("Este arquivo não existe no jogo.") : undefined };
   };
 
   const cur = useMemo(() => statsOf(num, weapons),
@@ -403,7 +404,7 @@ export default function UnitStudio({ id }: { id: string }) {
 
   function openDraft(index: number | null) {
     const bones = view?.bones.map((b) => b.name) ?? [];
-    if (!bones.length) { toast("info", "Espere o modelo carregar para animar."); return; }
+    if (!bones.length) { toast("info", t("Espere o modelo carregar para animar.")); return; }
     if (index !== null) {
       const c = (doc.customAnims ?? [])[index];
       if (c) { setDraft({ index, name: c.name, field: c.field, duration: c.duration, keys: c.keys.map((k) => ({ ...k })) }); setPlaying(false); setScrub(0); return; }
@@ -424,7 +425,7 @@ export default function UnitStudio({ id }: { id: string }) {
       if (draft.index !== null && list[draft.index]) list[draft.index] = entry; else list.push(entry);
       return { ...d, customAnims: list, animations: { ...d.animations, [draft.field]: { file: `asset:${asset}`, rate: d.animations[draft.field]?.rate ?? null } } };
     });
-    toast("ok", `Animação "${draft.name}" salva e usada em ${animLabel(draft.field)}.`);
+    toast("ok", t("Animação \"{name}\" salva e usada em {field}.", { name: draft.name, field: animLabel(draft.field) }));
     setDraft(null);
     setSection(`anim:${draft.field}`);
   };
@@ -433,103 +434,103 @@ export default function UnitStudio({ id }: { id: string }) {
     const out: { title: string; props: Prop[] }[] = [];
     if (!doc.base) return out;
     if (section === "general") {
-      out.push({ title: "Identidade", props: [
-        { kind: "text", label: "Nome", value: doc.name, onChange: (v) => p.commit((d) => ({ ...d, name: v.slice(0, 60) })) },
-        { kind: "text", label: "Descrição", value: doc.description, multiline: true, onChange: (v) => p.commit((d) => ({ ...d, description: v.slice(0, 300) })) },
-        { kind: "text", label: "Id da unidade", value: doc.newId, onChange: (v) => p.commit((d) => ({ ...d, newId: v.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 16) })), hint: "Nome da pasta no jogo. Precisa ser único." },
+      out.push({ title: t("Identidade"), props: [
+        { kind: "text", label: t("Nome"), value: doc.name, onChange: (v) => p.commit((d) => ({ ...d, name: v.slice(0, 60) })) },
+        { kind: "text", label: t("Descrição"), value: doc.description, multiline: true, onChange: (v) => p.commit((d) => ({ ...d, description: v.slice(0, 300) })) },
+        { kind: "text", label: t("Id da unidade"), value: doc.newId, onChange: (v) => p.commit((d) => ({ ...d, newId: v.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 16) })), hint: t("Nome da pasta no jogo. Precisa ser único.") },
       ] });
-      out.push({ title: "Base", props: [
-        { kind: "select", label: "Unidade base", value: doc.base ?? "", onChange: (v) => p.commit((d) => ({ ...d, base: v })), options: (catalog ?? []).map((u) => ({ value: u.id, label: `${u.name} (${u.id})` })), hint: "Atributos, armas e comportamento começam iguais aos dela." },
-        { kind: "info", label: "Facção", value: details?.faction ?? "…" },
-        { kind: "info", label: "Função", value: details?.role ?? "…" },
-        { kind: "info", label: "Alterações", value: `${Object.keys(doc.overrides).length} campo(s)` },
+      out.push({ title: t("Base"), props: [
+        { kind: "select", label: t("Unidade base"), value: doc.base ?? "", onChange: (v) => p.commit((d) => ({ ...d, base: v })), options: (catalog ?? []).map((u) => ({ value: u.id, label: `${u.name} (${u.id})` })), hint: t("Atributos, armas e comportamento começam iguais aos dela.") },
+        { kind: "info", label: t("Facção"), value: details?.faction ?? "…" },
+        { kind: "info", label: t("Função"), value: details?.role ?? "…" },
+        { kind: "info", label: t("Alterações"), value: t("{n} campo(s)", { n: Object.keys(doc.overrides).length }) },
       ] });
-      out.push({ title: "Pacote (várias tropas num mod)", props: [
-        { kind: "select", label: "Pacote", value: doc.pack ?? "", onChange: (v) => p.commit((d) => ({ ...d, pack: v || null })),
-          options: [{ value: "", label: "Sem pacote (mod próprio)" }, ...packs.map((x) => ({ value: x.name, label: `${x.name} (${x.units.length} tropa${x.units.length === 1 ? "" : "s"})` })), ...(doc.pack && !packs.some((x) => x.name === doc.pack) ? [{ value: doc.pack, label: `${doc.pack} (novo)` }] : [])] },
-        { kind: "custom", label: "Novo pacote", node: <form className="row" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); const n = newPack.trim(); if (!n) return; p.commit((d) => ({ ...d, pack: n.slice(0, 40) })); setNewPack(""); }}>
-          <input className="pinput" placeholder="ex.: Minha facção" value={newPack} onChange={(e) => setNewPack(e.target.value)} /><button className="btn sm"><Icon name="add" size={15} /></button></form> },
-        { kind: "info", label: "", value: "Tropas do mesmo pacote vão juntas num mod só na biblioteca: liga e desliga tudo de uma vez." },
+      out.push({ title: t("Pacote (várias tropas num mod)"), props: [
+        { kind: "select", label: t("Pacote"), value: doc.pack ?? "", onChange: (v) => p.commit((d) => ({ ...d, pack: v || null })),
+          options: [{ value: "", label: t("Sem pacote (mod próprio)") }, ...packs.map((x) => ({ value: x.name, label: x.units.length === 1 ? t("{name} (1 tropa)", { name: x.name }) : t("{name} ({n} tropas)", { name: x.name, n: x.units.length }) })), ...(doc.pack && !packs.some((x) => x.name === doc.pack) ? [{ value: doc.pack, label: t("{name} (novo)", { name: doc.pack }) }] : [])] },
+        { kind: "custom", label: t("Novo pacote"), node: <form className="row" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); const n = newPack.trim(); if (!n) return; p.commit((d) => ({ ...d, pack: n.slice(0, 40) })); setNewPack(""); }}>
+          <input className="pinput" placeholder={t("ex.: Minha facção")} value={newPack} onChange={(e) => setNewPack(e.target.value)} /><button className="btn sm"><Icon name="add" size={15} /></button></form> },
+        { kind: "info", label: "", value: t("Tropas do mesmo pacote vão juntas num mod só na biblioteca: liga e desliga tudo de uma vez.") },
       ] });
-      out.push({ title: "Anotações", props: [{ kind: "text", label: "Notas", value: doc.notes, multiline: true, onChange: (v) => p.commit((d) => ({ ...d, notes: v })) }] });
+      out.push({ title: t("Anotações"), props: [{ kind: "text", label: t("Notas"), value: doc.notes, multiline: true, onChange: (v) => p.commit((d) => ({ ...d, notes: v })) }] });
     } else if (section === "look") {
       const a = doc.appearance;
       const setA = (fn: (x: UnitDoc["appearance"]) => UnitDoc["appearance"]) => p.commit((d) => ({ ...d, appearance: fn(d.appearance) }));
-      out.push({ title: "Modelo 3D", props: [
-        { kind: "select", label: "Modelo", value: a.model.source === "creation" ? a.model.creation : "", onChange: (v) => setA((x) => ({ ...x, model: v ? { source: "creation", creation: v, name: models?.find((m) => m.id === v)?.name ?? v } : { source: "base" } })),
-          options: [{ value: "", label: "O da unidade base" }, ...(models ?? []).map((m) => ({ value: m.id, label: `Modelo próprio: ${m.name}` }))], hint: "Modelos próprios precisam ser preparados no editor 3D (Exportar → Preparar para o jogo)." },
-        { kind: "number", label: "Escala", value: (typeof doc.overrides["Display.UniformScale"] === "number" ? doc.overrides["Display.UniformScale"] as number : (leaves.get("Display.UniformScale")?.number ?? 1)), step: 0.005, min: 0.001, max: 10, onChange: (v) => setValue("Display.UniformScale", v) },
+      out.push({ title: t("Modelo 3D"), props: [
+        { kind: "select", label: t("Modelo"), value: a.model.source === "creation" ? a.model.creation : "", onChange: (v) => setA((x) => ({ ...x, model: v ? { source: "creation", creation: v, name: models?.find((m) => m.id === v)?.name ?? v } : { source: "base" } })),
+          options: [{ value: "", label: t("O da unidade base") }, ...(models ?? []).map((m) => ({ value: m.id, label: t("Modelo próprio: {name}", { name: m.name }) }))], hint: t("Modelos próprios precisam ser preparados no editor 3D (Exportar → Preparar para o jogo).") },
+        { kind: "number", label: t("Escala"), value: (typeof doc.overrides["Display.UniformScale"] === "number" ? doc.overrides["Display.UniformScale"] as number : (leaves.get("Display.UniformScale")?.number ?? 1)), step: 0.005, min: 0.001, max: 10, onChange: (v) => setValue("Display.UniformScale", v) },
       ] });
       if (a.model.source === "creation" && details) {
         const mine = view?.bones.map((b) => b.name) ?? [];
         const map = a.boneMap ?? {};
-        out.push({ title: "Assistente de ossos", props: [
-          { kind: "info", label: "", value: "As armas e efeitos saem de ossos com estes nomes. Escolha qual grupo do seu modelo faz o papel de cada um." },
+        out.push({ title: t("Assistente de ossos"), props: [
+          { kind: "info", label: "", value: t("As armas e efeitos saem de ossos com estes nomes. Escolha qual grupo do seu modelo faz o papel de cada um.") },
           ...details.bones.map((b) => {
             const auto = mine.find((m) => m.toLowerCase() === b.toLowerCase());
             return { kind: "select", label: `${auto || map[b] ? "✓" : "✗"} ${b}`, value: map[b] ?? (auto ? "__same" : ""),
               onChange: (v: string) => setA((x) => { const bm = { ...(x.boneMap ?? {}) }; if (!v || v === "__same") delete bm[b]; else bm[b] = v; return { ...x, boneMap: bm }; }),
-              options: [{ value: "", label: "— nenhum —" }, ...(auto ? [{ value: "__same", label: `${auto} (mesmo nome)` }] : []), ...mine.filter((m) => m !== auto).map((m) => ({ value: m, label: m }))] } as Prop;
+              options: [{ value: "", label: t("— nenhum —") }, ...(auto ? [{ value: "__same", label: t("{name} (mesmo nome)", { name: auto }) }] : []), ...mine.filter((m) => m !== auto).map((m) => ({ value: m, label: m }))] } as Prop;
           }),
         ] });
       }
-      out.push({ title: "Textura", props: [
-        { kind: "slider", label: "Matiz", value: a.tint.hue, min: -180, max: 180, unit: "°", onChange: (v) => setA((x) => ({ ...x, tint: { ...x.tint, hue: v } })) },
-        { kind: "slider", label: "Saturação", value: a.tint.sat, min: -100, max: 100, unit: "%", onChange: (v) => setA((x) => ({ ...x, tint: { ...x.tint, sat: v } })) },
-        { kind: "slider", label: "Brilho", value: a.tint.bright, min: -60, max: 60, unit: "%", onChange: (v) => setA((x) => ({ ...x, tint: { ...x.tint, bright: v } })) },
-        { kind: "custom", label: "Pintar no modelo", node: <button className={`btn sm ${paint.on ? "primary" : ""}`} onClick={() => { setPaint((x) => ({ ...x, on: !x.on })); setRibbon("look"); }}><Icon name="brush" size={15} /> {paint.on ? "Pincel ligado" : "Ligar pincel"}</button> },
-        { kind: "custom", label: "Imagem própria", node: <span className="row" style={{ gap: 6 }}>
-          <button className="btn sm" onClick={() => imageInput.current?.click()}><Icon name="upload" size={15} /> Importar PNG</button>
-          {a.albedoAsset && <button className="btn sm text" title="Voltar à textura original" onClick={() => setA((x) => ({ ...x, albedoAsset: null }))}><Icon name="undo" size={15} /> Original</button>}
+      out.push({ title: t("Textura"), props: [
+        { kind: "slider", label: t("Matiz"), value: a.tint.hue, min: -180, max: 180, unit: "°", onChange: (v) => setA((x) => ({ ...x, tint: { ...x.tint, hue: v } })) },
+        { kind: "slider", label: t("Saturação"), value: a.tint.sat, min: -100, max: 100, unit: "%", onChange: (v) => setA((x) => ({ ...x, tint: { ...x.tint, sat: v } })) },
+        { kind: "slider", label: t("Brilho"), value: a.tint.bright, min: -60, max: 60, unit: "%", onChange: (v) => setA((x) => ({ ...x, tint: { ...x.tint, bright: v } })) },
+        { kind: "custom", label: t("Pintar no modelo"), node: <button className={`btn sm ${paint.on ? "primary" : ""}`} onClick={() => { setPaint((x) => ({ ...x, on: !x.on })); setRibbon("look"); }}><Icon name="brush" size={15} /> {paint.on ? t("Pincel ligado") : t("Ligar pincel")}</button> },
+        { kind: "custom", label: t("Imagem própria"), node: <span className="row" style={{ gap: 6 }}>
+          <button className="btn sm" onClick={() => imageInput.current?.click()}><Icon name="upload" size={15} /> {t("Importar PNG")}</button>
+          {a.albedoAsset && <button className="btn sm text" title={t("Voltar à textura original")} onClick={() => setA((x) => ({ ...x, albedoAsset: null }))}><Icon name="undo" size={15} /> {t("Original")}</button>}
         </span> },
       ] });
-      out.push({ title: "Ícone", props: [
+      out.push({ title: t("Ícone"), props: [
         { kind: "custom", label: "", node: <span className="row" style={{ gap: 10, alignItems: "center" }}>
-          <span className="unit-icon">{iconUrl ? <img src={iconUrl} alt="Ícone" /> : <Icon name="smart_toy" size={26} />}</span>
+          <span className="unit-icon">{iconUrl ? <img src={iconUrl} alt={t("Ícone")} /> : <Icon name="smart_toy" size={26} />}</span>
           <span className="col" style={{ gap: 6 }}>
-            <button className="btn sm primary" onClick={() => setIconLab(true)}><Icon name="tune" size={15} /> Gerador de ícones</button>
-            <button className="btn sm" onClick={() => void makeIcon()}><Icon name="photo_camera" size={15} /> Foto da vista 3D</button>
+            <button className="btn sm primary" onClick={() => setIconLab(true)}><Icon name="tune" size={15} /> {t("Gerador de ícones")}</button>
+            <button className="btn sm" onClick={() => void makeIcon()}><Icon name="photo_camera" size={15} /> {t("Foto da vista 3D")}</button>
             <span className="row" style={{ gap: 6 }}>
               <button className="btn sm text" onClick={() => iconInput.current?.click()}><Icon name="upload" size={15} /> PNG</button>
               {a.iconAsset && <button className="btn sm text" onClick={() => setA((x) => ({ ...x, iconAsset: null }))}><Icon name="close" size={15} /></button>}
             </span>
           </span>
         </span> },
-        { kind: "info", label: "", value: a.iconAsset ? "Substitui o ícone da base (mesmo tamanho e formato)." : "Sem ícone próprio: usa o da base." },
+        { kind: "info", label: "", value: a.iconAsset ? t("Substitui o ícone da base (mesmo tamanho e formato).") : t("Sem ícone próprio: usa o da base.") },
       ] });
-      out.push({ title: "Prévia", props: [{ kind: "custom", label: "Cor do time", node: <span className="swatches">{TEAM.map((c) => <button key={c} style={{ background: c, outline: teamColor === c ? "2px solid #fff" : undefined }} aria-label={c} onClick={() => setTeamColor(c)} />)}</span> }] });
+      out.push({ title: t("Prévia"), props: [{ kind: "custom", label: t("Cor do time"), node: <span className="swatches">{TEAM.map((c) => <button key={c} style={{ background: c, outline: teamColor === c ? "2px solid #fff" : undefined }} aria-label={c} onClick={() => setTeamColor(c)} />)}</span> }] });
     } else if (section === "texture") {
-      out.push({ title: "Gerador de texturas", props: [{ kind: "custom", label: "", node: <TextureLab projectId={id} name={doc.name} model={view}
+      out.push({ title: t("Gerador de texturas"), props: [{ kind: "custom", label: "", node: <TextureLab projectId={id} name={doc.name} model={view}
         modelKey={`${doc.base}|${modelSrc.source === "creation" ? modelSrc.creation : ""}|${mixKey}`}
         value={doc.texgen ?? null} onChange={(v) => p.commit((d) => ({ ...d, texgen: v }))} onPreview={setTexPreview}
         applied={doc.appearance.albedoAsset} onApply={(asset) => p.commit((d) => ({ ...d, appearance: { ...d.appearance, albedoAsset: asset } }))} /> }] });
     } else if (section === "mix") {
       const m = doc.mix ?? { chassis: doc.base, turret: null, weapon: null, turretScale: 0, weaponScale: 0, turretOffset: [0, 0, 0] as [number, number, number], turretYaw: 0 };
       const setM = (fn: (x: typeof m) => typeof m) => p.commit((d) => ({ ...d, mix: fn(d.mix ?? m) }));
-      const unitOpts = [{ value: "", label: "— a do chassi —" }, ...(catalog ?? []).filter((u) => u.id !== doc.base).map((u) => ({ value: u.id, label: `${u.name} (${u.id}) · ${u.faction}` }))];
+      const unitOpts = [{ value: "", label: t("— a do chassi —") }, ...(catalog ?? []).filter((u) => u.id !== doc.base).map((u) => ({ value: u.id, label: `${u.name} (${u.id}) · ${u.faction}` }))];
       if (modelSrc.source === "creation") {
-        out.push({ title: "Misturar 3 tropas", props: [{ kind: "info", label: "", value: "O misturador usa o modelo do jogo como chassi. Volte para \"O da unidade base\" em Aparência para usá-lo." }] });
+        out.push({ title: t("Misturar 3 tropas"), props: [{ kind: "info", label: "", value: t("O misturador usa o modelo do jogo como chassi. Volte para \"O da unidade base\" em Aparência para usá-lo.") }] });
       } else {
-        out.push({ title: "Peças", props: [
-          { kind: "info", label: "", value: "Junte o chassi (a unidade base), a torre de uma segunda tropa e o cano/arma de uma terceira. Os modelos, as texturas e as animações são combinados num modelo só, com os ossos que o jogo espera." },
-          { kind: "info", label: "1 · Chassi", value: details ? `${details.name} (${doc.base})` : doc.base ?? "—" },
-          { kind: "select", label: "2 · Torre de", value: m.turret ?? "", onChange: (v) => setM((x) => ({ ...x, turret: v || null })), options: unitOpts },
-          { kind: "select", label: "3 · Arma de", value: m.weapon ?? "", onChange: (v) => setM((x) => ({ ...x, weapon: v || null })), options: unitOpts, hint: "O cano e a arma do blueprint (projétil, dano, efeitos) vêm desta tropa." },
+        out.push({ title: t("Peças"), props: [
+          { kind: "info", label: "", value: t("Junte o chassi (a unidade base), a torre de uma segunda tropa e o cano/arma de uma terceira. Os modelos, as texturas e as animações são combinados num modelo só, com os ossos que o jogo espera.") },
+          { kind: "info", label: t("1 · Chassi"), value: details ? `${details.name} (${doc.base})` : doc.base ?? "—" },
+          { kind: "select", label: t("2 · Torre de"), value: m.turret ?? "", onChange: (v) => setM((x) => ({ ...x, turret: v || null })), options: unitOpts },
+          { kind: "select", label: t("3 · Arma de"), value: m.weapon ?? "", onChange: (v) => setM((x) => ({ ...x, weapon: v || null })), options: unitOpts, hint: t("O cano e a arma do blueprint (projétil, dano, efeitos) vêm desta tropa.") },
         ] });
-        out.push({ title: "Encaixe", props: [
-          { kind: "slider", label: "Escala da torre", value: Math.round((m.turretScale || 0) * 100), min: 0, max: 280, unit: "%", onChange: (v) => setM((x) => ({ ...x, turretScale: v < 30 ? 0 : v / 100 })), hint: m.turretScale ? undefined : "0 = automática (pela largura do chassi)" },
-          { kind: "slider", label: "Escala da arma", value: Math.round((m.weaponScale || 0) * 100), min: 0, max: 300, unit: "%", onChange: (v) => setM((x) => ({ ...x, weaponScale: v < 30 ? 0 : v / 100 })), hint: m.weaponScale ? undefined : "0 = automática" },
-          { kind: "slider", label: "Giro da torre", value: m.turretYaw, min: -180, max: 180, unit: "°", onChange: (v) => setM((x) => ({ ...x, turretYaw: v })) },
-          ...(["Lado", "Altura", "Frente"] as const).map((lab, k) => ({ kind: "number", label: lab, value: m.turretOffset[k], step: 0.01, min: -2, max: 2,
+        out.push({ title: t("Encaixe"), props: [
+          { kind: "slider", label: t("Escala da torre"), value: Math.round((m.turretScale || 0) * 100), min: 0, max: 280, unit: "%", onChange: (v) => setM((x) => ({ ...x, turretScale: v < 30 ? 0 : v / 100 })), hint: m.turretScale ? undefined : t("0 = automática (pela largura do chassi)") },
+          { kind: "slider", label: t("Escala da arma"), value: Math.round((m.weaponScale || 0) * 100), min: 0, max: 300, unit: "%", onChange: (v) => setM((x) => ({ ...x, weaponScale: v < 30 ? 0 : v / 100 })), hint: m.weaponScale ? undefined : t("0 = automática") },
+          { kind: "slider", label: t("Giro da torre"), value: m.turretYaw, min: -180, max: 180, unit: "°", onChange: (v) => setM((x) => ({ ...x, turretYaw: v })) },
+          ...(["Lado", "Altura", "Frente"] as const).map((lab, k) => ({ kind: "number", label: t(lab), value: m.turretOffset[k], step: 0.01, min: -2, max: 2,
             onChange: (v: number) => setM((x) => { const o = [...x.turretOffset] as [number, number, number]; o[k] = v; return { ...x, turretOffset: o }; }) } as Prop)),
           { kind: "custom", label: "", node: <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-            <button className="btn sm text" onClick={() => setM((x) => ({ ...x, turretScale: 0, weaponScale: 0, turretOffset: [0, 0, 0], turretYaw: 0 }))}><Icon name="restart_alt" size={15} /> Encaixe automático</button>
-            {doc.mix && <button className="btn sm text" onClick={() => p.commit((d) => ({ ...d, mix: null }))}><Icon name="undo" size={15} /> Desfazer mistura</button>}
+            <button className="btn sm text" onClick={() => setM((x) => ({ ...x, turretScale: 0, weaponScale: 0, turretOffset: [0, 0, 0], turretYaw: 0 }))}><Icon name="restart_alt" size={15} /> {t("Encaixe automático")}</button>
+            {doc.mix && <button className="btn sm text" onClick={() => p.commit((d) => ({ ...d, mix: null }))}><Icon name="undo" size={15} /> {t("Desfazer mistura")}</button>}
           </span> },
         ] });
-        out.push({ title: "Verificações", props: !mix ? [{ kind: "info", label: "", value: "Escolha a torre ou a arma de outra tropa." }]
-          : mixChecks === null ? [{ kind: "info", label: "", value: "Montando a mistura…" }]
-          : mixChecks.map((c) => ({ kind: "custom", label: c.level === "err" ? "Erro" : c.level === "warn" ? "Aviso" : c.level === "fix" ? "Corrigido" : "OK", node: <span className={`check-item ${c.level}`}>{c.text}</span> } as Prop)) });
+        out.push({ title: t("Verificações"), props: !mix ? [{ kind: "info", label: "", value: t("Escolha a torre ou a arma de outra tropa.") }]
+          : mixChecks === null ? [{ kind: "info", label: "", value: t("Montando a mistura…") }]
+          : mixChecks.map((c) => ({ kind: "custom", label: c.level === "err" ? t("Erro") : c.level === "warn" ? t("Aviso") : c.level === "fix" ? t("Corrigido") : "OK", node: <span className={`check-item ${c.level}`}>{tr(c.text)}</span> } as Prop)) });
       }
     } else if (section === "balance") {
       const rows: [string, keyof Stats, boolean][] = [
@@ -538,44 +539,44 @@ export default function UnitStudio({ id }: { id: string }) {
         ["Vida por massa", "hpPerMass", true], ["Dano/s por massa", "dpsPerMass", true],
       ];
       const ratio = ref.s.eff ? cur.eff / ref.s.eff : 1;
-      out.push({ title: "Comparação", props: [
-        { kind: "select", label: "Comparar com", value: compareWith, onChange: setCompareWith, options: [{ value: "", label: `A base (${details?.name ?? "…"})` }, ...(catalog ?? []).filter((u) => u.id !== doc.base).map((u) => ({ value: u.id, label: `${u.name} (${u.id})` }))] },
+      out.push({ title: t("Comparação"), props: [
+        { kind: "select", label: t("Comparar com"), value: compareWith, onChange: setCompareWith, options: [{ value: "", label: t("A base ({name})", { name: details?.name ?? "…" }) }, ...(catalog ?? []).filter((u) => u.id !== doc.base).map((u) => ({ value: u.id, label: `${u.name} (${u.id})` }))] },
         { kind: "custom", label: "", node: <table className="bal-table">
-          <thead><tr><th /><th>{ref.name}</th><th>Esta tropa</th><th /></tr></thead>
+          <thead><tr><th /><th>{ref.name}</th><th>{t("Esta tropa")}</th><th /></tr></thead>
           <tbody>{rows.map(([label, k, up]) => {
             const a0 = ref.s[k], b0 = cur[k];
             const pct = a0 ? Math.round(((b0 - a0) / Math.abs(a0)) * 100) : 0;
             const good = pct === 0 ? "" : (pct > 0) === up ? "good" : "bad";
-            return <tr key={k}><td>{label}</td><td>{fmt(a0)}</td><td><b>{fmt(b0)}</b></td><td className={good}>{pct ? `${pct > 0 ? "+" : ""}${pct}%` : "="}</td></tr>;
+            return <tr key={k}><td>{t(label)}</td><td>{fmt(a0)}</td><td><b>{fmt(b0)}</b></td><td className={good}>{pct ? `${pct > 0 ? "+" : ""}${pct}%` : "="}</td></tr>;
           })}</tbody>
         </table> },
         { kind: "custom", label: "", node: <Notice kind={ratio > 1.6 || ratio < 0.5 ? "warn" : "ok"}>
-          Força pelo custo: <b>{Math.round(ratio * 100)}%</b> da referência. {ratio > 1.6 ? "Pode desequilibrar as partidas: aumente o custo ou reduza vida/dano." : ratio < 0.5 ? "Ficou fraca para o preço." : "Dentro do razoável."}
+          {t("Força pelo custo:")} <b>{Math.round(ratio * 100)}%</b> {t("da referência.")} {ratio > 1.6 ? t("Pode desequilibrar as partidas: aumente o custo ou reduza vida/dano.") : ratio < 0.5 ? t("Ficou fraca para o preço.") : t("Dentro do razoável.")}
         </Notice> },
-        { kind: "info", label: "", value: "Estimativa simples (vida × dano por segundo ÷ custo). Teste no jogo antes de usar em partidas sérias." },
+        { kind: "info", label: "", value: t("Estimativa simples (vida × dano por segundo ÷ custo). Teste no jogo antes de usar em partidas sérias.") },
       ] });
-      out.push({ title: "Modelos de função", props: [
+      out.push({ title: t("Modelos de função"), props: [
         { kind: "custom", label: "", node: <div className="role-grid">
           {ROLE_PRESETS.filter((r) => !r.air || categories.some((c) => c.toUpperCase() === "AIR")).map((r) => (
-            <button key={r.id} className="role-card" onClick={() => applyPreset(r)} title={r.desc}><Icon name={r.icon} size={20} /><b>{r.label}</b><small>{r.desc}</small></button>
+            <button key={r.id} className="role-card" onClick={() => applyPreset(r)} title={t(r.desc)}><Icon name={r.icon} size={20} /><b>{t(r.label)}</b><small>{t(r.desc)}</small></button>
           ))}
-          <button className="role-card" onClick={() => applyPreset(null)}><Icon name="undo" size={20} /><b>Voltar à base</b><small>Tira os valores dos modelos.</small></button>
+          <button className="role-card" onClick={() => applyPreset(null)}><Icon name="undo" size={20} /><b>{t("Voltar à base")}</b><small>{t("Tira os valores dos modelos.")}</small></button>
         </div> },
-        { kind: "info", label: "", value: "Os modelos ajustam vários atributos a partir dos valores da base (não se somam). Depois ajuste à mão." },
+        { kind: "info", label: "", value: t("Os modelos ajustam vários atributos a partir dos valores da base (não se somam). Depois ajuste à mão.") },
       ] });
     } else if (section.startsWith("attr:")) {
       const g = ATTRS.find((a) => `attr:${a.id}` === section);
       if (g) {
-        const props = g.fields.map(([f, label]) => fieldProp(f, label)).filter((x): x is Prop => !!x);
-        out.push({ title: g.label, props: props.length ? props : [{ kind: "info", label: "", value: "A unidade base não tem estes campos." }] });
+        const props = g.fields.map(([f, label]) => fieldProp(f, t(label))).filter((x): x is Prop => !!x);
+        out.push({ title: t(g.label), props: props.length ? props : [{ kind: "info", label: "", value: t("A unidade base não tem estes campos.") }] });
         const changedHere = g.fields.filter(([f]) => changed(f));
-        if (changedHere.length) out.push({ title: "Alterados", props: [{ kind: "custom", label: "", node: <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>{changedHere.map(([f, label]) => <button key={f} className="chip" onClick={() => reset(f)} title="Voltar ao valor original">{label} <Icon name="undo" size={14} /></button>)}</span> }] });
+        if (changedHere.length) out.push({ title: t("Alterados"), props: [{ kind: "custom", label: "", node: <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>{changedHere.map(([f, label]) => <button key={f} className="chip" onClick={() => reset(f)} title={t("Voltar ao valor original")}>{t(label)} <Icon name="undo" size={14} /></button>)}</span> }] });
       }
     } else if (section === "weapons") {
-      out.push({ title: "Armas", props: [
-        { kind: "info", label: "Total", value: `${weapons.length} arma(s)` },
-        { kind: "custom", label: "", node: <button className="btn sm" onClick={() => setWeaponPick(0)}><Icon name="add" size={15} /> Adicionar arma de outra unidade</button> },
-        { kind: "info", label: "", value: "Copiar a arma inteira traz junto o projétil, os efeitos e os sons originais dela." },
+      out.push({ title: t("Armas"), props: [
+        { kind: "info", label: t("Total"), value: t("{n} arma(s)", { n: weapons.length }) },
+        { kind: "custom", label: "", node: <button className="btn sm" onClick={() => setWeaponPick(0)}><Icon name="add" size={15} /> {t("Adicionar arma de outra unidade")}</button> },
+        { kind: "info", label: "", value: t("Copiar a arma inteira traz junto o projétil, os efeitos e os sons originais dela.") },
       ] });
     } else if (section.startsWith("weapon:")) {
       const i = Number(section.split(":")[1]);
@@ -583,16 +584,16 @@ export default function UnitStudio({ id }: { id: string }) {
       const baseCount = details?.weapons.length ?? 0;
       let appended = 0;
       const copyIdx = copies.findIndex(([t]) => { if (t > 0) return t === i; appended++; return baseCount + appended === i; });
-      const props = WEAPON_FIELDS.map(([f, label]) => fieldProp(`Weapon.${i}.${f}`, label)).filter((x): x is Prop => !!x);
+      const props = WEAPON_FIELDS.map(([f, label]) => fieldProp(`Weapon.${i}.${f}`, t(label))).filter((x): x is Prop => !!x);
       const dps = (num(`Weapon.${i}.Damage`) ?? 0) * (num(`Weapon.${i}.RateOfFire`) ?? 0) * Math.max(1, num(`Weapon.${i}.MuzzleSalvoSize`) ?? 1);
-      out.push({ title: w?.label ?? `Arma ${i}`, props: [
-        ...(w?.from ? [{ kind: "info", label: "Origem", value: `copiada de ${w.from}` } as Prop] : []),
-        { kind: "info", label: "Dano por segundo", value: fmt(dps) },
+      out.push({ title: w?.label ?? t("Arma {n}", { n: i }), props: [
+        ...(w?.from ? [{ kind: "info", label: t("Origem"), value: t("copiada de {unit}", { unit: w.from }) } as Prop] : []),
+        { kind: "info", label: t("Dano por segundo"), value: fmt(dps) },
         ...props,
       ] });
-      out.push({ title: "Trocar", props: [
+      out.push({ title: t("Trocar"), props: [
         { kind: "custom", label: "", node: <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-          <button className="btn sm" onClick={() => setWeaponPick(i)}><Icon name="swap_horiz" size={15} /> Trocar por arma de outra unidade</button>
+          <button className="btn sm" onClick={() => setWeaponPick(i)}><Icon name="swap_horiz" size={15} /> {t("Trocar por arma de outra unidade")}</button>
           {copyIdx >= 0 && <button className="btn sm text" onClick={() => p.commit((d) => {
             const list = [...(d.weaponCopies ?? [])];
             const [t] = list.splice(copyIdx, 1)[0];
@@ -606,18 +607,18 @@ export default function UnitStudio({ id }: { id: string }) {
               overrides[t === 0 && n > i ? `Weapon.${n - 1}.${m[2]}` : k] = v;
             }
             return { ...d, weaponCopies: list, overrides };
-          })}><Icon name="undo" size={15} /> {copies[copyIdx]?.[0] === 0 ? "Remover arma" : "Voltar à original"}</button>}
+          })}><Icon name="undo" size={15} /> {copies[copyIdx]?.[0] === 0 ? t("Remover arma") : t("Voltar à original")}</button>}
         </span> },
       ] });
       const known = new Set(WEAPON_FIELDS.map(([f]) => `Weapon.${i}.${f}`));
       const extra = [...leaves.values()].filter((l) => l.path.startsWith(`Weapon.${i}.`) && !known.has(l.path) && l.kind !== "text").slice(0, 60);
-      if (extra.length) out.push({ title: "Mais campos desta arma", props: extra.map((l) => fieldProp(l.path, l.path.slice(`Weapon.${i}.`.length))).filter((x): x is Prop => !!x) });
+      if (extra.length) out.push({ title: t("Mais campos desta arma"), props: extra.map((l) => fieldProp(l.path, l.path.slice(`Weapon.${i}.`.length))).filter((x): x is Prop => !!x) });
     } else if (section === "anims" || section.startsWith("anim:")) {
       const field = section.startsWith("anim:") ? section.slice(5) : animField;
-      out.push({ title: "Animações", props: [
-        { kind: "info", label: "Total", value: `${animFields.length} animações` },
-        { kind: "custom", label: "Criar", node: <button className="btn sm" onClick={() => openDraft(null)}><Icon name="add" size={15} /> Nova animação</button> },
-        ...((doc.customAnims ?? []).length ? [{ kind: "custom", label: "Feitas aqui", node: <span className="col" style={{ gap: 4 }}>{(doc.customAnims ?? []).map((c, k) => (
+      out.push({ title: t("Animações"), props: [
+        { kind: "info", label: t("Total"), value: t("{n} animações", { n: animFields.length }) },
+        { kind: "custom", label: t("Criar"), node: <button className="btn sm" onClick={() => openDraft(null)}><Icon name="add" size={15} /> {t("Nova animação")}</button> },
+        ...((doc.customAnims ?? []).length ? [{ kind: "custom", label: t("Feitas aqui"), node: <span className="col" style={{ gap: 4 }}>{(doc.customAnims ?? []).map((c, k) => (
           <button key={k} className="btn sm text" style={{ justifyContent: "flex-start" }} onClick={() => openDraft(k)}><Icon name="edit" size={15} /> {c.name} <small className="faint">({animLabel(c.field)})</small></button>
         ))}</span> } as Prop] : []),
       ] });
@@ -625,14 +626,14 @@ export default function UnitStudio({ id }: { id: string }) {
         const cur2 = animFields.find(([f]) => f === field)?.[1] ?? "";
         const rate = doc.animations[field]?.rate ?? null;
         out.push({ title: animLabel(field), props: [
-          { kind: "info", label: "Campo", value: field },
-          { kind: "info", label: "Arquivo", value: cur2.startsWith("asset:") ? `${cur2.slice(6)} (criada aqui)` : cur2.split("/").pop() },
+          { kind: "info", label: t("Campo"), value: field },
+          { kind: "info", label: t("Arquivo"), value: cur2.startsWith("asset:") ? t("{name} (criada aqui)", { name: cur2.slice(6) }) : cur2.split("/").pop() },
           { kind: "custom", label: "", node: <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-            <button className="btn sm" onClick={() => void playAnim(field, cur2)}><Icon name="play_arrow" size={15} /> Ver</button>
-            <button className="btn sm" onClick={() => { setAnimPick(field); if (!allAnims) void api.unitAnimations().then(setAllAnims).catch(() => setAllAnims([])); }}><Icon name="swap_horiz" size={15} /> Trocar</button>
-            {doc.animations[field] && <button className="btn sm text" onClick={() => p.commit((d) => { const a = { ...d.animations }; delete a[field]; return { ...d, animations: a }; })}><Icon name="undo" size={15} /> Original</button>}
+            <button className="btn sm" onClick={() => void playAnim(field, cur2)}><Icon name="play_arrow" size={15} /> {t("Ver")}</button>
+            <button className="btn sm" onClick={() => { setAnimPick(field); if (!allAnims) void api.unitAnimations().then(setAllAnims).catch(() => setAllAnims([])); }}><Icon name="swap_horiz" size={15} /> {t("Trocar")}</button>
+            {doc.animations[field] && <button className="btn sm text" onClick={() => p.commit((d) => { const a = { ...d.animations }; delete a[field]; return { ...d, animations: a }; })}><Icon name="undo" size={15} /> {t("Original")}</button>}
           </span> },
-          { kind: "number", label: "Velocidade", value: rate ?? 1, step: 0.1, min: 0.05, max: 10, onChange: (v) => p.commit((d) => ({ ...d, animations: { ...d.animations, [field]: { file: d.animations[field]?.file ?? cur2, rate: v } } })) },
+          { kind: "number", label: t("Velocidade"), value: rate ?? 1, step: 0.1, min: 0.05, max: 10, onChange: (v) => p.commit((d) => ({ ...d, animations: { ...d.animations, [field]: { file: d.animations[field]?.file ?? cur2, rate: v } } })) },
         ] });
       }
     } else if (section === "cats") {
@@ -640,41 +641,41 @@ export default function UnitStudio({ id }: { id: string }) {
       const builtOpts = allCats.filter((c) => c.startsWith("BUILTBY") && !builtBy.includes(c));
       const addCat = (c: string) => p.commit((d) => ({ ...d, categoriesAdd: [...d.categoriesAdd.filter((x) => x !== c), c], categoriesRemove: d.categoriesRemove.filter((x) => x !== c) }));
       const rmCat = (c: string) => p.commit((d) => ({ ...d, categoriesAdd: d.categoriesAdd.filter((x) => x !== c), categoriesRemove: (details?.categories ?? []).includes(c) ? [...d.categoriesRemove, c] : d.categoriesRemove }));
-      out.push({ title: "Quem constrói (fábricas)", props: [
-        { kind: "custom", label: "", node: <div className="cat-chips">{builtBy.length ? builtBy.map((c) => <button key={c} className="chip" title="Remover" onClick={() => rmCat(c)}>{c} <Icon name="close" size={13} /></button>) : <span className="faint small">nenhuma</span>}</div> },
-        { kind: "select", label: "Adicionar fábrica", value: "", onChange: (v) => v && addCat(v), options: [{ value: "", label: "— escolha —" }, ...builtOpts.map((c) => ({ value: c, label: c }))] },
-        { kind: "info", label: "Pesquisa", value: "A tropa nova segue as regras de construção das categorias acima. Exigir uma pesquisa própria ainda não é possível (experimental)." },
+      out.push({ title: t("Quem constrói (fábricas)"), props: [
+        { kind: "custom", label: "", node: <div className="cat-chips">{builtBy.length ? builtBy.map((c) => <button key={c} className="chip" title={t("Remover")} onClick={() => rmCat(c)}>{c} <Icon name="close" size={13} /></button>) : <span className="faint small">{t("nenhuma")}</span>}</div> },
+        { kind: "select", label: t("Adicionar fábrica"), value: "", onChange: (v) => v && addCat(v), options: [{ value: "", label: t("— escolha —") }, ...builtOpts.map((c) => ({ value: c, label: c }))] },
+        { kind: "info", label: t("Pesquisa"), value: t("A tropa nova segue as regras de construção das categorias acima. Exigir uma pesquisa própria ainda não é possível (experimental).") },
       ] });
-      out.push({ title: "Categorias (comportamento no jogo)", props: [
+      out.push({ title: t("Categorias (comportamento no jogo)"), props: [
         { kind: "custom", label: "", node: <div className="cat-chips">{categories.map((c) => (
-          <button key={c} className="chip" title="Remover" onClick={() => rmCat(c)}>{c} <Icon name="close" size={13} /></button>
+          <button key={c} className="chip" title={t("Remover")} onClick={() => rmCat(c)}>{c} <Icon name="close" size={13} /></button>
         ))}</div> },
-        { kind: "custom", label: "Adicionar", node: <form className="row" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); const c = newCat.trim().toUpperCase().replace(/[^A-Z0-9_]/g, ""); if (!c) return; addCat(c); setNewCat(""); }}>
-          <input className="pinput" placeholder="EX.: AMPHIBIOUS" list={`cats-${id}`} value={newCat} onChange={(e) => setNewCat(e.target.value)} /><button className="btn sm"><Icon name="add" size={15} /></button>
+        { kind: "custom", label: t("Adicionar"), node: <form className="row" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); const c = newCat.trim().toUpperCase().replace(/[^A-Z0-9_]/g, ""); if (!c) return; addCat(c); setNewCat(""); }}>
+          <input className="pinput" placeholder={t("EX.: AMPHIBIOUS")} list={`cats-${id}`} value={newCat} onChange={(e) => setNewCat(e.target.value)} /><button className="btn sm"><Icon name="add" size={15} /></button>
           <datalist id={`cats-${id}`}>{allCats.map((c) => <option key={c} value={c} />)}</datalist></form> },
-        { kind: "info", label: "Dica", value: "Categorias decidem quem constrói a tropa, alvos das armas e como a IA a usa. Mantenha as de facção e de fábrica da base." },
+        { kind: "info", label: t("Dica"), value: t("Categorias decidem quem constrói a tropa, alvos das armas e como a IA a usa. Mantenha as de facção e de fábrica da base.") },
       ] });
     } else if (section === "advanced") {
       const f = advFilter.trim().toLowerCase();
       const list = [...leaves.values()].filter((l: BpLeaf) => l.kind !== "text" || l.path.endsWith("Label") || (l.text && isPath(l.text))).filter((l) => !f || l.path.toLowerCase().includes(f)).slice(0, 150);
-      out.push({ title: "Todos os campos do blueprint", props: [
-        { kind: "custom", label: "Filtrar", node: <input className="pinput" placeholder="ex.: Weapon.1, Speed, Radius" value={advFilter} onChange={(e) => setAdvFilter(e.target.value)} /> },
+      out.push({ title: t("Todos os campos do blueprint"), props: [
+        { kind: "custom", label: t("Filtrar"), node: <input className="pinput" placeholder={t("ex.: Weapon.1, Speed, Radius")} value={advFilter} onChange={(e) => setAdvFilter(e.target.value)} /> },
         ...list.map((l) => fieldProp(l.path, l.path)).filter((x): x is Prop => !!x),
       ] });
     } else if (section === "bp") {
-      out.push({ title: "Blueprint gerado", props: [
-        { kind: "custom", label: "", node: <button className="btn sm" onClick={async () => { try { setBpText(await api.unitBlueprintPreview(request())); } catch (e) { toast("error", errorText(e)); } }}><Icon name="visibility" size={15} /> Ver o texto final</button> },
-        { kind: "info", label: "", value: "O blueprint da base com as suas alterações. O resto (comentários, ordem) fica como no original." },
+      out.push({ title: t("Blueprint gerado"), props: [
+        { kind: "custom", label: "", node: <button className="btn sm" onClick={async () => { try { setBpText(await api.unitBlueprintPreview(request())); } catch (e) { toast("error", errorText(e)); } }}><Icon name="visibility" size={15} /> {t("Ver o texto final")}</button> },
+        { kind: "info", label: "", value: t("O blueprint da base com as suas alterações. O resto (comentários, ordem) fica como no original.") },
       ] });
     } else if (section === "check") {
-      out.push({ title: "Projeto", props: problems.length ? problems.map((x) => ({ kind: "custom", label: x.level === "err" ? "Erro" : "Aviso", node: <button className={`check-item ${x.level}`} onClick={() => setSection(x.section)}>{x.text}</button> } as Prop)) : [{ kind: "info", label: "", value: "Campos do projeto em ordem." }] });
+      out.push({ title: t("Projeto"), props: problems.length ? problems.map((x) => ({ kind: "custom", label: x.level === "err" ? t("Erro") : t("Aviso"), node: <button className={`check-item ${x.level}`} onClick={() => setSection(x.section)}>{x.text}</button> } as Prop)) : [{ kind: "info", label: "", value: t("Campos do projeto em ordem.") }] });
       const areas = [...new Set((findings ?? []).map((f) => f.area))];
-      out.push({ title: "Combate, movimento e animações", props: [
-        { kind: "info", label: "", value: "Confere o blueprint final, o modelo e as animações como o jogo vai usar: movimento, colisão, seleção, ossos das armas, giro da torre, peças soltas e articulações. Erros impedem gerar a tropa." },
-        ...(problems.some((x) => x.level === "err") ? [{ kind: "info", label: "", value: "Corrija os erros do projeto acima para rodar esta verificação." } as Prop]
-          : checking || findings === null ? [{ kind: "info", label: "", value: "Conferindo…" } as Prop]
-          : areas.flatMap((ar) => (findings ?? []).filter((f) => f.area === ar).map((f) => ({ kind: "custom", label: ar, node: <span className={`check-item ${f.level}`}>{f.text}</span> } as Prop)))),
-        { kind: "custom", label: "", node: <button className="btn sm" disabled={checking} onClick={() => void runChecks()}><Icon name="refresh" size={15} /> Conferir de novo</button> },
+      out.push({ title: t("Combate, movimento e animações"), props: [
+        { kind: "info", label: "", value: t("Confere o blueprint final, o modelo e as animações como o jogo vai usar: movimento, colisão, seleção, ossos das armas, giro da torre, peças soltas e articulações. Erros impedem gerar a tropa.") },
+        ...(problems.some((x) => x.level === "err") ? [{ kind: "info", label: "", value: t("Corrija os erros do projeto acima para rodar esta verificação.") } as Prop]
+          : checking || findings === null ? [{ kind: "info", label: "", value: t("Conferindo…") } as Prop]
+          : areas.flatMap((ar) => (findings ?? []).filter((f) => f.area === ar).map((f) => ({ kind: "custom", label: tr(ar), node: <span className={`check-item ${f.level}`}>{tr(f.text)}</span> } as Prop)))),
+        { kind: "custom", label: "", node: <button className="btn sm" disabled={checking} onClick={() => void runChecks()}><Icon name="refresh" size={15} /> {t("Conferir de novo")}</button> },
       ] });
     }
     return out;
@@ -682,83 +683,83 @@ export default function UnitStudio({ id }: { id: string }) {
   }, [section, doc, details, leaves, catalog, models, animFields, animField, allAnims, categories, problems, newCat, advFilter, view, teamColor, weapons, cur, ref, compareWith, packs, newPack, iconUrl, paint.on, missing, allCats, mixChecks, mixKey, findings, checking]);
 
   if (p.status === "loading") return <div className="studio-root"><div className="bar indeterminate" style={{ margin: 30 }}><i /></div></div>;
-  if (p.status === "error") return <div className="studio-root"><Empty icon="error" title="Não deu para abrir o projeto">{p.error}</Empty></div>;
+  if (p.status === "error") return <div className="studio-root"><Empty icon="error" title={t("Não deu para abrir o projeto")}>{p.error}</Empty></div>;
 
   return (
     <div className="studio-root">
       <div className="studio-top">
-        <Ribbon active={ribbon} onTab={setRibbon} tabs={[{ id: "home", label: "Início" }, { id: "look", label: "Aparência" }, { id: "anim", label: "Animação" }, { id: "test", label: "Testar e gerar" }]}>
+        <Ribbon active={ribbon} onTab={setRibbon} tabs={[{ id: "home", label: t("Início") }, { id: "look", label: t("Aparência") }, { id: "anim", label: t("Animação") }, { id: "test", label: t("Testar e gerar") }]}>
           {ribbon === "home" && <>
-            <RibbonGroup label="Editar">
-              <RibbonButton icon="badge" label="Geral" active={section === "general"} onClick={() => setSection("general")} />
-              <RibbonButton icon="balance" label="Equilíbrio" active={section === "balance"} onClick={() => setSection("balance")} color="#ffd166" />
-              <RibbonButton icon="shield" label="Defesa" active={section === "attr:defense"} onClick={() => setSection("attr:defense")} />
-              <RibbonButton icon="payments" label="Custo" active={section === "attr:economy"} onClick={() => setSection("attr:economy")} />
-              <RibbonButton icon="speed" label="Movimento" active={section === "attr:physics"} onClick={() => setSection("attr:physics")} />
-              <RibbonButton icon="gps_fixed" label="Armas" active={section.startsWith("weapon")} onClick={() => setSection(weapons[0] ? `weapon:${weapons[0].index}` : "weapons")} />
-              <RibbonButton icon="category" label="Comportamento" active={section === "cats"} onClick={() => setSection("cats")} />
+            <RibbonGroup label={t("Editar")}>
+              <RibbonButton icon="badge" label={t("Geral")} active={section === "general"} onClick={() => setSection("general")} />
+              <RibbonButton icon="balance" label={t("Equilíbrio")} active={section === "balance"} onClick={() => setSection("balance")} color="#ffd166" />
+              <RibbonButton icon="shield" label={t("Defesa")} active={section === "attr:defense"} onClick={() => setSection("attr:defense")} />
+              <RibbonButton icon="payments" label={t("Custo")} active={section === "attr:economy"} onClick={() => setSection("attr:economy")} />
+              <RibbonButton icon="speed" label={t("Movimento")} active={section === "attr:physics"} onClick={() => setSection("attr:physics")} />
+              <RibbonButton icon="gps_fixed" label={t("Armas")} active={section.startsWith("weapon")} onClick={() => setSection(weapons[0] ? `weapon:${weapons[0].index}` : "weapons")} />
+              <RibbonButton icon="category" label={t("Comportamento")} active={section === "cats"} onClick={() => setSection("cats")} />
             </RibbonGroup>
-            <RibbonGroup label="Gerar">
-              <RibbonButton icon="fact_check" label="Validar" onClick={() => setSection("check")} color={problems.some((x) => x.level === "err") ? "#e5534b" : "#7bd88f"} />
-              <RibbonButton icon="rocket_launch" label={busy ? "Gerando…" : "Gerar tropa"} onClick={() => void build(false)} disabled={busy || !doc.base} color="#a3e635" />
+            <RibbonGroup label={t("Gerar")}>
+              <RibbonButton icon="fact_check" label={t("Validar")} onClick={() => setSection("check")} color={problems.some((x) => x.level === "err") ? "#e5534b" : "#7bd88f"} />
+              <RibbonButton icon="rocket_launch" label={busy ? t("Gerando…") : t("Gerar tropa")} onClick={() => void build(false)} disabled={busy || !doc.base} color="#a3e635" />
             </RibbonGroup>
           </>}
           {ribbon === "look" && <>
-            <RibbonGroup label="Modelo">
-              <RibbonButton icon="palette" label="Aparência" active={section === "look"} onClick={() => setSection("look")} />
-              <RibbonButton icon="merge_type" label="Misturar 3 tropas" active={section === "mix"} onClick={() => setSection("mix")} color="#ffd166" />
-              <RibbonButton icon="view_in_ar" label="Novo modelo 3D" onClick={async () => {
-                const m = await run("newmodel", () => api.creationCreate("model", `${doc.name} (modelo)`, { schema: 1, parts: [], groups: [], gridSize: 1, notes: "" }));
-                if (m) { useTabs.getState().open(m); toast("info", "Modele, prepare para o jogo e escolha o modelo em Aparência."); }
+            <RibbonGroup label={t("Modelo")}>
+              <RibbonButton icon="palette" label={t("Aparência")} active={section === "look"} onClick={() => setSection("look")} />
+              <RibbonButton icon="merge_type" label={t("Misturar 3 tropas")} active={section === "mix"} onClick={() => setSection("mix")} color="#ffd166" />
+              <RibbonButton icon="view_in_ar" label={t("Novo modelo 3D")} onClick={async () => {
+                const m = await run("newmodel", () => api.creationCreate("model", t("{name} (modelo)", { name: doc.name }), { schema: 1, parts: [], groups: [], gridSize: 1, notes: "" }));
+                if (m) { useTabs.getState().open(m); toast("info", t("Modele, prepare para o jogo e escolha o modelo em Aparência.")); }
               }} />
-              <RibbonButton icon="texture" label="Gerar textura" active={section === "texture"} onClick={() => setSection("texture")} color="#7bd88f" />
-              <RibbonButton icon="upload" label="Textura PNG" onClick={() => imageInput.current?.click()} />
-              <RibbonButton icon="photo_camera" label="Gerador de ícones" onClick={() => setIconLab(true)} />
+              <RibbonButton icon="texture" label={t("Gerar textura")} active={section === "texture"} onClick={() => setSection("texture")} color="#7bd88f" />
+              <RibbonButton icon="upload" label={t("Textura PNG")} onClick={() => imageInput.current?.click()} />
+              <RibbonButton icon="photo_camera" label={t("Gerador de ícones")} onClick={() => setIconLab(true)} />
             </RibbonGroup>
-            <RibbonGroup label="Pintar no modelo">
-              <RibbonButton icon="brush" label={paint.on ? "Pincel ligado" : "Pincel"} active={paint.on} onClick={() => setPaint((x) => ({ ...x, on: !x.on }))} hint="Pinte direto no modelo 3D. Cada pincelada vira a textura da tropa." />
+            <RibbonGroup label={t("Pintar no modelo")}>
+              <RibbonButton icon="brush" label={paint.on ? t("Pincel ligado") : t("Pincel")} active={paint.on} onClick={() => setPaint((x) => ({ ...x, on: !x.on }))} hint={t("Pinte direto no modelo 3D. Cada pincelada vira a textura da tropa.")} />
               <div className="ribbon-stack" style={{ width: 200 }}>
                 <span className="swatches big">{PAINT.map((c) => <button key={c} style={{ background: c, outline: paint.color === c ? "2px solid #fff" : undefined }} aria-label={c} onClick={() => setPaint((x) => ({ ...x, color: c, on: true }))} />)}
-                  <input type="color" value={paint.color} onChange={(e) => setPaint((x) => ({ ...x, color: e.target.value, on: true }))} aria-label="Outra cor" /></span>
+                  <input type="color" value={paint.color} onChange={(e) => setPaint((x) => ({ ...x, color: e.target.value, on: true }))} aria-label={t("Outra cor")} /></span>
               </div>
               <div className="ribbon-stack" style={{ width: 170 }}>
-                <label className="range" style={{ gridTemplateColumns: "54px 1fr 30px" }}><span>Tamanho</span><input type="range" min={1} max={30} value={paint.size} onChange={(e) => setPaint((x) => ({ ...x, size: Number(e.target.value) }))} /><output>{paint.size}</output></label>
-                <label className="range" style={{ gridTemplateColumns: "54px 1fr 30px" }}><span>Força</span><input type="range" min={0.1} max={1} step={0.05} value={paint.opacity} onChange={(e) => setPaint((x) => ({ ...x, opacity: Number(e.target.value) }))} /><output>{Math.round(paint.opacity * 100)}</output></label>
+                <label className="range" style={{ gridTemplateColumns: "54px 1fr 30px" }}><span>{t("Tamanho")}</span><input type="range" min={1} max={30} value={paint.size} onChange={(e) => setPaint((x) => ({ ...x, size: Number(e.target.value) }))} /><output>{paint.size}</output></label>
+                <label className="range" style={{ gridTemplateColumns: "54px 1fr 30px" }}><span>{t("Força")}</span><input type="range" min={0.1} max={1} step={0.05} value={paint.opacity} onChange={(e) => setPaint((x) => ({ ...x, opacity: Number(e.target.value) }))} /><output>{Math.round(paint.opacity * 100)}</output></label>
               </div>
-              <RibbonButton icon="undo" label="Textura original" onClick={() => p.commit((d) => ({ ...d, appearance: { ...d.appearance, albedoAsset: null } }))} disabled={!doc.appearance.albedoAsset} />
+              <RibbonButton icon="undo" label={t("Textura original")} onClick={() => p.commit((d) => ({ ...d, appearance: { ...d.appearance, albedoAsset: null } }))} disabled={!doc.appearance.albedoAsset} />
             </RibbonGroup>
-            <RibbonGroup label="Cor do time (prévia)">
+            <RibbonGroup label={t("Cor do time (prévia)")}>
               <span className="swatches big">{TEAM.map((c) => <button key={c} style={{ background: c, outline: teamColor === c ? "2px solid #fff" : undefined }} aria-label={c} onClick={() => setTeamColor(c)} />)}</span>
             </RibbonGroup>
           </>}
           {ribbon === "anim" && <>
-            <RibbonGroup label="Animações">
-              <RibbonButton icon="animation" label="Lista" active={section === "anims"} onClick={() => setSection("anims")} />
-              <RibbonButton icon="add" label="Nova animação" onClick={() => openDraft(null)} color="#a3e635" />
+            <RibbonGroup label={t("Animações")}>
+              <RibbonButton icon="animation" label={t("Lista")} active={section === "anims"} onClick={() => setSection("anims")} />
+              <RibbonButton icon="add" label={t("Nova animação")} onClick={() => openDraft(null)} color="#a3e635" />
             </RibbonGroup>
-            <RibbonGroup label="Prévia">
-              <RibbonButton icon={playing ? "pause" : "play_arrow"} label={playing ? "Pausar" : "Tocar"} onClick={() => setPlaying((v) => !v)} disabled={!shownAnim} />
+            <RibbonGroup label={t("Prévia")}>
+              <RibbonButton icon={playing ? "pause" : "play_arrow"} label={playing ? t("Pausar") : t("Tocar")} onClick={() => setPlaying((v) => !v)} disabled={!shownAnim} />
               <div className="ribbon-stack" style={{ width: 170 }}>
-                <label className="range" style={{ gridTemplateColumns: "70px 1fr 34px" }}><span>Velocidade</span><input type="range" min={0.1} max={3} step={0.1} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} /><output>{speed}×</output></label>
+                <label className="range" style={{ gridTemplateColumns: "70px 1fr 34px" }}><span>{t("Velocidade")}</span><input type="range" min={0.1} max={3} step={0.1} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} /><output>{speed}×</output></label>
               </div>
             </RibbonGroup>
           </>}
           {ribbon === "test" && <>
-            <RibbonGroup label="Conferir">
-              <RibbonButton icon="balance" label="Equilíbrio" onClick={() => setSection("balance")} />
-              <RibbonButton icon="fact_check" label="Validar" onClick={() => setSection("check")} />
-              <RibbonButton icon="description" label="Ver blueprint" onClick={async () => { try { setBpText(await api.unitBlueprintPreview(request())); } catch (e) { toast("error", errorText(e)); } }} />
+            <RibbonGroup label={t("Conferir")}>
+              <RibbonButton icon="balance" label={t("Equilíbrio")} onClick={() => setSection("balance")} />
+              <RibbonButton icon="fact_check" label={t("Validar")} onClick={() => setSection("check")} />
+              <RibbonButton icon="description" label={t("Ver blueprint")} onClick={async () => { try { setBpText(await api.unitBlueprintPreview(request())); } catch (e) { toast("error", errorText(e)); } }} />
             </RibbonGroup>
-            <RibbonGroup label="Gerar">
-              <RibbonButton icon="rocket_launch" label={busy ? "Gerando…" : "Gerar tropa"} onClick={() => void build(false)} disabled={busy || !doc.base} color="#a3e635" />
-              <RibbonButton icon="play_circle" label="Gerar e jogar" onClick={() => void build(true)} disabled={busy || !doc.base} color="#a3e635" />
+            <RibbonGroup label={t("Gerar")}>
+              <RibbonButton icon="rocket_launch" label={busy ? t("Gerando…") : t("Gerar tropa")} onClick={() => void build(false)} disabled={busy || !doc.base} color="#a3e635" />
+              <RibbonButton icon="play_circle" label={t("Gerar e jogar")} onClick={() => void build(true)} disabled={busy || !doc.base} color="#a3e635" />
             </RibbonGroup>
           </>}
         </Ribbon>
         <ProjectBar p={p} onSave={() => void save()} />
       </div>
       <StudioLayout id="unit"
-        left={<Panel title="Explorador da tropa" icon="account_tree" grow collapsible={false} id="unit-explorer">
+        left={<Panel title={t("Explorador da tropa")} icon="account_tree" grow collapsible={false} id="unit-explorer">
           <Tree nodes={nodes} selected={new Set([section])} onSelect={(nid) => {
             if (nid === "root" || nid.startsWith("grp:")) return;
             setSection(nid as Section);
@@ -768,20 +769,20 @@ export default function UnitStudio({ id }: { id: string }) {
         center={
           <div className="unit-center">
             <div className="viewport">
-              {!doc.base ? <div style={{ display: "grid", placeItems: "center", height: "100%" }}><Empty icon="smart_toy" title="Escolha a unidade base">Em Geral → Base.</Empty></div> : (
+              {!doc.base ? <div style={{ display: "grid", placeItems: "center", height: "100%" }}><Empty icon="smart_toy" title={t("Escolha a unidade base")}>{t("Em Geral → Base.")}</Empty></div> : (
                 <UnitViewport model={view} tint={doc.appearance.tint} albedoOverride={section === "texture" && texPreview ? texPreview : albedoUrl} teamColor={teamColor} anim={shownAnim} playing={playing} speed={speed}
                   snapshotRef={snapshot} iconRef={iconShot} paint={paint} onPainted={(png) => void savePaint(png)} seek={draft && !playing ? scrub : null}
                   onTime={(t) => { if (draft && draftAnim) setScrub(t % Math.max(0.05, draftAnim.duration)); }} />
               )}
               <div className="viewport-overlay">
-                <span className="vp-chip"><Icon name="smart_toy" size={15} /> {doc.name} <small className="faint">({doc.newId || "sem id"})</small></span>
-                {details && <span className="vp-chip"><span className={`fac fac-${details.faction.toLowerCase()}`}>{details.faction.slice(0, 1)}</span> baseada em {details.name}</span>}
-                {mix && <span className="vp-chip"><Icon name="merge_type" size={15} /> Mistura: {[mix.turret && `torre de ${mix.turret}`, mix.weapon && `arma de ${mix.weapon}`].filter(Boolean).join(" · ")}</span>}
-                {paint.on && <span className="vp-chip" style={{ color: "var(--warn)" }}><Icon name="brush" size={15} /> Pintando: arraste sobre o modelo · botão direito gira</span>}
-                {anim && animField && !draft && <span className="vp-chip"><Icon name="animation" size={15} /> {animLabel(animField)} <button aria-label="Parar" onClick={() => { setAnim(null); setAnimField(null); }}><Icon name="stop" size={15} /></button></span>}
+                <span className="vp-chip"><Icon name="smart_toy" size={15} /> {doc.name} <small className="faint">({doc.newId || t("sem id")})</small></span>
+                {details && <span className="vp-chip"><span className={`fac fac-${details.faction.toLowerCase()}`}>{details.faction.slice(0, 1)}</span> {t("baseada em {name}", { name: details.name })}</span>}
+                {mix && <span className="vp-chip"><Icon name="merge_type" size={15} /> {t("Mistura:")} {[mix.turret && t("torre de {unit}", { unit: mix.turret }), mix.weapon && t("arma de {unit}", { unit: mix.weapon })].filter(Boolean).join(" · ")}</span>}
+                {paint.on && <span className="vp-chip" style={{ color: "var(--warn)" }}><Icon name="brush" size={15} /> {t("Pintando: arraste sobre o modelo · botão direito gira")}</span>}
+                {anim && animField && !draft && <span className="vp-chip"><Icon name="animation" size={15} /> {animLabel(animField)} <button aria-label={t("Parar")} onClick={() => { setAnim(null); setAnimField(null); }}><Icon name="stop" size={15} /></button></span>}
               </div>
-              {details === undefined && doc.base && <div className="vp-hint">Lendo a unidade do jogo…</div>}
-              {view === null && details && <div className="vp-hint">{modelSrc.source === "creation" ? "Prepare o modelo próprio para o jogo para vê-lo aqui." : "Sem prévia 3D para esta unidade."}</div>}
+              {details === undefined && doc.base && <div className="vp-hint">{t("Lendo a unidade do jogo…")}</div>}
+              {view === null && details && <div className="vp-hint">{modelSrc.source === "creation" ? t("Prepare o modelo próprio para o jogo para vê-lo aqui.") : t("Sem prévia 3D para esta unidade.")}</div>}
             </div>
             {draft && view && (
               <AnimTimeline draft={draft} setDraft={setDraft} bones={view.bones.map((b) => b.name)} fields={animFields.map(([f]) => f)}
@@ -790,14 +791,14 @@ export default function UnitStudio({ id }: { id: string }) {
             )}
           </div>
         }
-        right={<Panel title="Propriedades" icon="tune" grow collapsible={false} id="unit-props">
-          {details === null ? <div className="pgrid-empty">Não deu para ler a unidade base.</div> : <PropertyGrid sections={sections} />}
+        right={<Panel title={t("Propriedades")} icon="tune" grow collapsible={false} id="unit-props">
+          {details === null ? <div className="pgrid-empty">{t("Não deu para ler a unidade base.")}</div> : <PropertyGrid sections={sections} />}
         </Panel>}
       />
       <StatusBar>
-        <span><b>{Object.keys(doc.overrides).length}</b> campos alterados · <b>{weapons.length}</b> armas · <b>{Object.keys(doc.animations).length}</b> animações trocadas · <b>{categories.length}</b> categorias</span>
+        <span><b>{Object.keys(doc.overrides).length}</b> {t("campos alterados")} · <b>{weapons.length}</b> {t("armas")} · <b>{Object.keys(doc.animations).length}</b> {t("animações trocadas")} · <b>{categories.length}</b> {t("categorias")}</span>
         <span className="grow" />
-        <span style={{ color: "var(--warn)" }}>Experimental: confirme no jogo se a tropa aparece na fábrica.</span>
+        <span style={{ color: "var(--warn)" }}>{t("Experimental: confirme no jogo se a tropa aparece na fábrica.")}</span>
       </StatusBar>
 
       <input ref={imageInput} type="file" accept="image/png" hidden onChange={async (e) => {
@@ -836,7 +837,7 @@ export default function UnitStudio({ id }: { id: string }) {
           const idx = target > 0 ? target : weapons.length + 1;
           setWeaponPick(null);
           setSection(`weapon:${idx}`);
-          toast("ok", `Arma de ${d.name} ${target > 0 ? "no lugar da original" : "adicionada"}.`);
+          toast("ok", target > 0 ? t("Arma de {name} no lugar da original.", { name: d.name }) : t("Arma de {name} adicionada.", { name: d.name }));
         }} />
       )}
       {iconLab && (
@@ -845,25 +846,25 @@ export default function UnitStudio({ id }: { id: string }) {
           onUse={async (png) => {
             const name = await api.creationAssetPut(id, "icone.png", png);
             p.commit((d) => ({ ...d, appearance: { ...d.appearance, iconAsset: name } }));
-            toast("ok", "Ícone aplicado. Ele substitui o ícone da base no jogo.");
+            toast("ok", t("Ícone aplicado. Ele substitui o ícone da base no jogo."));
             setIconLab(false);
           }} />
       )}
       {bpText !== null && (
-        <Modal title="Blueprint da tropa" icon="description" onClose={() => setBpText(null)} wide>
+        <Modal title={t("Blueprint da tropa")} icon="description" onClose={() => setBpText(null)} wide>
           <pre className="code-view">{bpText}</pre>
         </Modal>
       )}
       {result && (
-        <Modal title="Tropa gerada" icon="rocket_launch" onClose={() => setResult(null)}>
+        <Modal title={t("Tropa gerada")} icon="rocket_launch" onClose={() => setResult(null)}>
           <div className="col" style={{ gap: 10 }}>
             <Notice kind={result.report.warnings.length ? "warn" : "ok"}>
-              <b>{result.manifest.name}</b> foi para a biblioteca e está ligada no perfil ativo ({result.report.files} arquivos).
-              {(result.report.checks ?? []).some((c) => c.level === "ok") && <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>{(result.report.checks ?? []).filter((c) => c.level === "ok").map((c, i) => <li key={i}>✓ {c.area}: {c.text}</li>)}</ul>}
-              {result.report.warnings.length > 0 && <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>{result.report.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>}
+              <b>{result.manifest.name}</b> {t("foi para a biblioteca e está ligada no perfil ativo ({n} arquivos).", { n: result.report.files })}
+              {(result.report.checks ?? []).some((c) => c.level === "ok") && <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>{(result.report.checks ?? []).filter((c) => c.level === "ok").map((c, i) => <li key={i}>✓ {tr(c.area)}: {tr(c.text)}</li>)}</ul>}
+              {result.report.warnings.length > 0 && <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>{result.report.warnings.map((w, i) => <li key={i}>{tr(w)}</li>)}</ul>}
             </Notice>
-            <p className="muted small">Tropas novas são <b>experimentais</b>: abra uma escaramuça e procure a unidade na fábrica da mesma facção da base. Se não aparecer ou o jogo reclamar, desligue o mod na biblioteca e relate o que aconteceu nas issues do projeto no GitHub.</p>
-            <footer><button className="btn primary" onClick={() => setResult(null)}>Fechar</button></footer>
+            <p className="muted small">{t("Tropas novas são")} <b>{t("experimentais")}</b>{t(": abra uma escaramuça e procure a unidade na fábrica da mesma facção da base. Se não aparecer ou o jogo reclamar, desligue o mod na biblioteca e relate o que aconteceu nas issues do projeto no GitHub.")}</p>
+            <footer><button className="btn primary" onClick={() => setResult(null)}>{t("Fechar")}</button></footer>
           </div>
         </Modal>
       )}
@@ -880,17 +881,17 @@ function AnimPicker({ all, base, onClose, onPick, onPreview }: { all: string[] |
     return (all ?? []).filter((a) => !t || a.includes(t)).slice(0, 300);
   }, [all, q]);
   return (
-    <Modal title="Trocar animação" icon="animation" onClose={onClose} wide>
+    <Modal title={t("Trocar animação")} icon="animation" onClose={onClose} wide>
       <div className="col" style={{ gap: 10 }}>
-        <div className="search-bar"><Icon name="search" /><input className="input dense" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar: uul0101, walk, death…" /></div>
-        <p className="faint small">Animações de qualquer unidade do jogo. Funcionam melhor entre unidades com os mesmos ossos (mesma família de modelo).</p>
+        <div className="search-bar"><Icon name="search" /><input className="input dense" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("Buscar: uul0101, walk, death…")} /></div>
+        <p className="faint small">{t("Animações de qualquer unidade do jogo. Funcionam melhor entre unidades com os mesmos ossos (mesma família de modelo).")}</p>
         <div className="anim-list">
           {all === null ? <div className="bar indeterminate"><i /></div> : list.map((a) => (
             <div key={a} className="anim-row">
               <Icon name="animation" size={18} />
               <span className="grow mono small">{a}</span>
               <button className="btn sm text" onClick={() => onPreview(a)}><Icon name="play_arrow" size={16} /></button>
-              <button className="btn sm" onClick={() => onPick(a)}>Usar</button>
+              <button className="btn sm" onClick={() => onPick(a)}>{t("Usar")}</button>
             </div>
           ))}
         </div>
@@ -915,10 +916,10 @@ function WeaponPicker({ catalog, exclude, target, onClose, onPick }: { catalog: 
   }, [catalog, q, exclude]);
   const leaf = (path: string) => { const l = d?.leaves.find((x) => x.path === path); return l ? (l.kind === "number" ? l.number : l.text) : null; };
   return (
-    <Modal title={target ? `Trocar a arma ${target}` : "Adicionar arma"} icon="gps_fixed" onClose={onClose} wide>
+    <Modal title={target ? t("Trocar a arma {n}", { n: target }) : t("Adicionar arma")} icon="gps_fixed" onClose={onClose} wide>
       <div className="wpick">
         <div className="col" style={{ gap: 8, minHeight: 0 }}>
-          <div className="search-bar"><Icon name="search" /><input className="input dense" autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar unidade: artilharia, cybran, ucl0103…" /></div>
+          <div className="search-bar"><Icon name="search" /><input className="input dense" autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("Buscar unidade: artilharia, cybran, ucl0103…")} /></div>
           <div className="anim-list">{list.map((u) => (
             <button key={u.id} className="pick row-pick" aria-pressed={unit === u.id} onClick={() => setUnit(u.id)}>
               <span className={`fac fac-${u.faction.toLowerCase()}`}>{u.faction.slice(0, 1)}</span>
@@ -928,18 +929,18 @@ function WeaponPicker({ catalog, exclude, target, onClose, onPick }: { catalog: 
           ))}</div>
         </div>
         <div className="col" style={{ gap: 8, minHeight: 0, overflow: "auto" }}>
-          {!unit ? <p className="faint small">Escolha uma unidade para ver as armas dela.</p> : d === undefined ? <div className="bar indeterminate"><i /></div> : !d ? <p className="faint small">Não deu para ler essa unidade.</p> : d.weapons.length === 0 ? <p className="faint small">{d.name} não tem armas.</p> : d.weapons.map((w) => {
+          {!unit ? <p className="faint small">{t("Escolha uma unidade para ver as armas dela.")}</p> : d === undefined ? <div className="bar indeterminate"><i /></div> : !d ? <p className="faint small">{t("Não deu para ler essa unidade.")}</p> : d.weapons.length === 0 ? <p className="faint small">{t("{name} não tem armas.", { name: d.name })}</p> : d.weapons.map((w) => {
             const dmg = Number(leaf(`Weapon.${w.index}.Damage`) ?? 0), rof = Number(leaf(`Weapon.${w.index}.RateOfFire`) ?? 0);
             const proj = String(leaf(`Weapon.${w.index}.ProjectileId`) ?? "").split("/").filter(Boolean).slice(-2, -1)[0];
             return (
               <div key={w.index} className="wcard">
-                <div className="row" style={{ gap: 8 }}><Icon name={w.dummy ? "block" : "gps_fixed"} size={18} /><b className="grow">{w.label}</b>{w.dummy && <span className="chip">efeito</span>}</div>
+                <div className="row" style={{ gap: 8 }}><Icon name={w.dummy ? "block" : "gps_fixed"} size={18} /><b className="grow">{w.label}</b>{w.dummy && <span className="chip">{t("efeito")}</span>}</div>
                 <div className="wstats">
-                  <span><small>Dano</small><b>{fmt(dmg)}</b></span><span><small>Tiros/s</small><b>{fmt(rof)}</b></span>
-                  <span><small>Dano/s</small><b>{fmt(dmg * rof)}</b></span><span><small>Alcance</small><b>{fmt(Number(leaf(`Weapon.${w.index}.MaxRadius`) ?? 0))}</b></span>
+                  <span><small>{t("Dano")}</small><b>{fmt(dmg)}</b></span><span><small>{t("Tiros/s")}</small><b>{fmt(rof)}</b></span>
+                  <span><small>{t("Dano/s")}</small><b>{fmt(dmg * rof)}</b></span><span><small>{t("Alcance")}</small><b>{fmt(Number(leaf(`Weapon.${w.index}.MaxRadius`) ?? 0))}</b></span>
                 </div>
-                {proj && <small className="faint mono">projétil: {proj}</small>}
-                <button className="btn sm primary" onClick={() => onPick(d.id, w.index, d)}><Icon name="content_copy" size={15} /> {target ? "Usar no lugar" : "Adicionar"}</button>
+                {proj && <small className="faint mono">{t("projétil: {name}", { name: proj })}</small>}
+                <button className="btn sm primary" onClick={() => onPick(d.id, w.index, d)}><Icon name="content_copy" size={15} /> {target ? t("Usar no lugar") : t("Adicionar")}</button>
               </div>
             );
           })}
@@ -978,21 +979,21 @@ function AnimTimeline({ draft, setDraft, bones, fields, time, setTime, playing, 
     <div className="timeline">
       <div className="tl-head">
         <Icon name="animation" size={18} />
-        <input className="pinput" style={{ width: 160 }} value={draft.name} onChange={(e) => set({ name: e.target.value.replace(/[^\w-]/g, "_").slice(0, 40) })} aria-label="Nome" />
-        <select className="pinput" value={draft.field} onChange={(e) => set({ field: e.target.value })} aria-label="Usar como">
-          {[...new Set([...fields, "Display.AnimationIdle", "Display.AnimationWalk", "Display.AnimationDeath", "Display.AnimationActivate", "Display.AnimationFire", "Display.AnimationBuild"])].map((f) => <option key={f} value={f}>Usar como: {animLabel(f)}</option>)}
+        <input className="pinput" style={{ width: 160 }} value={draft.name} onChange={(e) => set({ name: e.target.value.replace(/[^\w-]/g, "_").slice(0, 40) })} aria-label={t("Nome")} />
+        <select className="pinput" value={draft.field} onChange={(e) => set({ field: e.target.value })} aria-label={t("Usar como")}>
+          {[...new Set([...fields, "Display.AnimationIdle", "Display.AnimationWalk", "Display.AnimationDeath", "Display.AnimationActivate", "Display.AnimationFire", "Display.AnimationBuild"])].map((f) => <option key={f} value={f}>{t("Usar como: {name}", { name: animLabel(f) })}</option>)}
         </select>
-        <label className="row small" style={{ gap: 4 }}>Duração <input className="pinput" style={{ width: 60 }} type="number" step={0.1} min={0.1} max={60} value={draft.duration} onChange={(e) => { const v = Math.max(0.1, Number(e.target.value) || 1); set({ duration: v, keys: keys.map((k) => ({ ...k, time: Math.min(k.time, v) })) }); }} />s</label>
-        <select className="pinput" value="" onChange={(e) => { const t = ANIM_TEMPLATES.find((x) => x.id === e.target.value); if (t) { set({ keys: t.make(selBone, bones), duration: t.duration, field: t.field }); setSelKey(0); } }} aria-label="Modelo">
-          <option value="">Começar de um modelo…</option>
-          {ANIM_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.label} (osso {selBone})</option>)}
+        <label className="row small" style={{ gap: 4 }}>{t("Duração")} <input className="pinput" style={{ width: 60 }} type="number" step={0.1} min={0.1} max={60} value={draft.duration} onChange={(e) => { const v = Math.max(0.1, Number(e.target.value) || 1); set({ duration: v, keys: keys.map((k) => ({ ...k, time: Math.min(k.time, v) })) }); }} />s</label>
+        <select className="pinput" value="" onChange={(e) => { const t = ANIM_TEMPLATES.find((x) => x.id === e.target.value); if (t) { set({ keys: t.make(selBone, bones), duration: t.duration, field: t.field }); setSelKey(0); } }} aria-label={t("Modelo")}>
+          <option value="">{t("Começar de um modelo…")}</option>
+          {ANIM_TEMPLATES.map((tp) => <option key={tp.id} value={tp.id}>{t("{name} (osso {bone})", { name: t(tp.label), bone: selBone })}</option>)}
         </select>
         <span className="grow" />
-        <button className="btn sm icon-btn" onClick={() => setPlaying(!playing)} aria-label={playing ? "Pausar" : "Tocar"}><Icon name={playing ? "pause" : "play_arrow"} size={18} /></button>
+        <button className="btn sm icon-btn" onClick={() => setPlaying(!playing)} aria-label={playing ? t("Pausar") : t("Tocar")}><Icon name={playing ? "pause" : "play_arrow"} size={18} /></button>
         <span className="mono small">{time.toFixed(2)}s</span>
-        <button className="btn sm" onClick={addKey}><Icon name="add" size={15} /> Quadro em {selBone}</button>
-        <button className="btn sm primary" disabled={busy || !keys.length || !draft.name.trim()} onClick={onSave}><Icon name="save" size={15} /> {busy ? "Salvando…" : "Salvar animação"}</button>
-        <button className="btn sm icon-btn" onClick={onClose} aria-label="Fechar"><Icon name="close" size={18} /></button>
+        <button className="btn sm" onClick={addKey}><Icon name="add" size={15} /> {t("Quadro em {bone}", { bone: selBone })}</button>
+        <button className="btn sm primary" disabled={busy || !keys.length || !draft.name.trim()} onClick={onSave}><Icon name="save" size={15} /> {busy ? t("Salvando…") : t("Salvar animação")}</button>
+        <button className="btn sm icon-btn" onClick={onClose} aria-label={t("Fechar")}><Icon name="close" size={18} /></button>
       </div>
       <div className="tl-body">
         <div className="tl-bones" ref={boneList} onScroll={(e) => { if (track.current) track.current.scrollTop = e.currentTarget.scrollTop; }}>
@@ -1017,15 +1018,15 @@ function AnimTimeline({ draft, setDraft, bones, fields, time, setTime, playing, 
           {sk ? <>
             <b className="small">{sk.bone} · {sk.time.toFixed(2)}s</b>
             {(["X", "Y", "Z"] as const).map((ax, a) => (
-              <label key={`r${ax}`} className="range" style={{ gridTemplateColumns: "56px 1fr 44px" }}><span>Girar {ax}</span>
+              <label key={`r${ax}`} className="range" style={{ gridTemplateColumns: "56px 1fr 44px" }}><span>{t("Girar {axis}", { axis: ax })}</span>
                 <input type="range" min={-180} max={180} value={sk.rot[a]} onChange={(e) => { const r = [...sk.rot] as [number, number, number]; r[a] = Number(e.target.value); setKey(selKey!, { rot: r }); }} /><output>{sk.rot[a]}°</output></label>
             ))}
             {(["X", "Y", "Z"] as const).map((ax, a) => (
-              <label key={`p${ax}`} className="range" style={{ gridTemplateColumns: "56px 1fr 44px" }}><span>Mover {ax}</span>
+              <label key={`p${ax}`} className="range" style={{ gridTemplateColumns: "56px 1fr 44px" }}><span>{t("Mover {axis}", { axis: ax })}</span>
                 <input type="range" min={-1} max={1} step={0.01} value={sk.pos[a]} onChange={(e) => { const r = [...sk.pos] as [number, number, number]; r[a] = Number(e.target.value); setKey(selKey!, { pos: r }); }} /><output>{sk.pos[a]}</output></label>
             ))}
-            <button className="btn sm text" onClick={() => { set({ keys: keys.filter((_, j) => j !== selKey) }); setSelKey(null); }}><Icon name="delete" size={15} /> Apagar quadro</button>
-          </> : <p className="faint small">Escolha um losango na linha do tempo, ou clique em "Quadro" para criar um no instante atual. Arraste os losangos para mudar o tempo.</p>}
+            <button className="btn sm text" onClick={() => { set({ keys: keys.filter((_, j) => j !== selKey) }); setSelKey(null); }}><Icon name="delete" size={15} /> {t("Apagar quadro")}</button>
+          </> : <p className="faint small">{t("Escolha um losango na linha do tempo, ou clique em \"Quadro\" para criar um no instante atual. Arraste os losangos para mudar o tempo.")}</p>}
         </div>
       </div>
     </div>

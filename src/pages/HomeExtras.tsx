@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { useStore } from "../lib/store";
 import type { LaaStatus, ShaderStatus, Showcase } from "../lib/types";
 import { hdOutdated } from "../lib/hd";
+import { t } from "../lib/i18n";
 
 const Showcase3D = lazy(() => import("../components/Showcase3D"));
 
@@ -12,10 +13,10 @@ const KIND: Record<string, string> = { l: "terrestre", a: "aérea", s: "naval", 
 
 /** Nome legível a partir do id da unidade (ex.: uul0001 → "UEF · Comandante (ACU)"). */
 export function unitLabel(id: string) {
-  const faction = FACTION[id[1]] ?? "Unidade";
-  if (/0001$/.test(id)) return `${faction} · Comandante (ACU)`;
+  const faction = FACTION[id[1]] ?? t("Unidade");
+  if (/0001$/.test(id)) return `${faction} · ${t("Comandante (ACU)")}`;
   const kind = KIND[id[2]];
-  return `${faction} · ${kind ? `${kind} ` : ""}${id.toUpperCase()}`;
+  return `${faction} · ${kind ? `${t(kind)} ` : ""}${id.toUpperCase()}`;
 }
 
 /** Cor do time padrão de cada facção (como nas partidas). */
@@ -60,7 +61,7 @@ export function HomeShowcase() {
     if (!settings) return;
     setPicker(false);
     cached = null;
-    await run("showcase-unit", () => api.saveSettings({ ...settings, showcaseUnit: unit }), unit ? `Carregando ${unitLabel(unit)}…` : "Voltando ao Comandante…");
+    await run("showcase-unit", () => api.saveSettings({ ...settings, showcaseUnit: unit }), unit ? t("Carregando {name}…", { name: unitLabel(unit) }) : t("Voltando ao Comandante…"));
     await refresh();
   };
 
@@ -72,26 +73,26 @@ export function HomeShowcase() {
       </Suspense>
       <div className="showcase-label">
         <div className="col" style={{ gap: 0 }}>
-          <span className="overline">{data ? "Do seu jogo" : "Modelo de demonstração"}</span>
-          <b>{data ? unitLabel(data.unit) : "Robô CommandProject"}</b>
+          <span className="overline">{data ? t("Do seu jogo") : t("Modelo de demonstração")}</span>
+          <b>{data ? unitLabel(data.unit) : t("Robô CommandProject")}</b>
         </div>
-        <button className="btn icon-btn sm-icon" title={paused ? "Girar" : "Pausar"} aria-label={paused ? "Girar" : "Pausar"} onClick={() => setPaused((p) => !p)}><Icon name={paused ? "play_arrow" : "pause"} /></button>
-        {data && <button className="btn icon-btn sm-icon" title="Trocar unidade" aria-label="Trocar unidade" onClick={() => setPicker(true)}><Icon name="swap_horiz" /></button>}
+        <button className="btn icon-btn sm-icon" title={paused ? t("Girar") : t("Pausar")} aria-label={paused ? t("Girar") : t("Pausar")} onClick={() => setPaused((p) => !p)}><Icon name={paused ? "play_arrow" : "pause"} /></button>
+        {data && <button className="btn icon-btn sm-icon" title={t("Trocar unidade")} aria-label={t("Trocar unidade")} onClick={() => setPicker(true)}><Icon name="swap_horiz" /></button>}
         {data?.team && (
-          <button className="btn icon-btn sm-icon" title="Cor do time" aria-label="Cor do time" aria-expanded={colors} onClick={() => setColors((c) => !c)}>
+          <button className="btn icon-btn sm-icon" title={t("Cor do time")} aria-label={t("Cor do time")} aria-expanded={colors} onClick={() => setColors((c) => !c)}>
             <span className="team-dot" style={{ background: teamColor }} />
           </button>
         )}
-        <button className="btn icon-btn sm-icon" title="Esconder o modelo" aria-label="Esconder o modelo" onClick={async () => {
-          await run("settings", () => api.saveSettings({ ...settings, showcase: false }), "Modelo escondido. Dá para mostrar de novo em Configurações.");
+        <button className="btn icon-btn sm-icon" title={t("Esconder o modelo")} aria-label={t("Esconder o modelo")} onClick={async () => {
+          await run("settings", () => api.saveSettings({ ...settings, showcase: false }), t("Modelo escondido. Dá para mostrar de novo em Configurações."));
           await refresh();
         }}><Icon name="visibility_off" /></button>
       </div>
       {colors && (
-        <div className="team-colors" role="group" aria-label="Cor do time">
-          {TEAM_COLORS.map((c) => <button key={c} className="accent-swatch" style={{ background: c }} aria-pressed={teamColor === c} aria-label={`Cor ${c}`} onClick={() => void pickColor(c)} />)}
-          <input type="color" value={teamColor} onChange={(e) => void pickColor(e.target.value)} aria-label="Outra cor" title="Outra cor" />
-          <button className="btn text sm" onClick={() => void pickColor(null)}>Cor da facção</button>
+        <div className="team-colors" role="group" aria-label={t("Cor do time")}>
+          {TEAM_COLORS.map((c) => <button key={c} className="accent-swatch" style={{ background: c }} aria-pressed={teamColor === c} aria-label={t("Cor {color}", { color: c })} onClick={() => void pickColor(c)} />)}
+          <input type="color" value={teamColor} onChange={(e) => void pickColor(e.target.value)} aria-label={t("Outra cor")} title={t("Outra cor")} />
+          <button className="btn text sm" onClick={() => void pickColor(null)}>{t("Cor da facção")}</button>
         </div>
       )}
       {picker && data && <UnitPicker units={data.units} current={data.unit} onPick={choose} onClose={() => setPicker(false)} />}
@@ -104,15 +105,15 @@ function UnitPicker({ units, current, onPick, onClose }: { units: string[]; curr
   const [faction, setFaction] = useState<string>("all");
   const list = units.filter((u) => (faction === "all" || u[1] === faction) && (u.includes(q.toLowerCase()) || unitLabel(u).toLowerCase().includes(q.toLowerCase())));
   return (
-    <Modal title="Unidade da tela inicial" icon="smart_toy" onClose={onClose} wide>
+    <Modal title={t("Unidade da tela inicial")} icon="smart_toy" onClose={onClose} wide>
       <div className="col" style={{ gap: 12 }}>
         <div className="row wrap">
           <div className="search-bar" style={{ flex: 1, minWidth: 220 }}>
             <Icon name="search" />
-            <input className="input dense" autoFocus placeholder="Buscar: acu, uul0101, experimental…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar unidade" />
+            <input className="input dense" autoFocus placeholder={t("Buscar: acu, uul0101, experimental…")} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t("Buscar unidade")} />
           </div>
-          <div className="seg" role="group" aria-label="Facção">
-            {[["all", "Todas"], ["u", "UEF"], ["c", "Cybran"], ["i", "Illuminate"]].map(([k, v]) => <button key={k} className="btn" aria-pressed={faction === k} onClick={() => setFaction(k)}>{v}</button>)}
+          <div className="seg" role="group" aria-label={t("Facção")}>
+            {[["all", "Todas"], ["u", "UEF"], ["c", "Cybran"], ["i", "Illuminate"]].map(([k, v]) => <button key={k} className="btn" aria-pressed={faction === k} onClick={() => setFaction(k)}>{k === "all" ? t(v) : v}</button>)}
           </div>
         </div>
         <div className="unit-grid">
@@ -122,10 +123,10 @@ function UnitPicker({ units, current, onPick, onClose }: { units: string[]; curr
               <span>{unitLabel(u)}</span>
             </button>
           ))}
-          {list.length === 0 && <p className="faint">Nenhuma unidade com esse nome.</p>}
+          {list.length === 0 && <p className="faint">{t("Nenhuma unidade com esse nome.")}</p>}
         </div>
         <footer>
-          <button className="btn text" onClick={() => onPick(null)}><Icon name="restart_alt" /> Voltar ao Comandante</button>
+          <button className="btn text" onClick={() => onPick(null)}><Icon name="restart_alt" /> {t("Voltar ao Comandante")}</button>
         </footer>
       </div>
     </Modal>
@@ -148,28 +149,28 @@ export function EnhancementsCard() {
   const items = [
     {
       icon: "auto_awesome", title: "Shaders", on: !!shaderName,
-      value: shaderName ?? (shaders?.packInstalled ? "Desligados" : "Não instalados"),
+      value: shaderName ?? (shaders?.packInstalled ? t("Desligados") : t("Não instalados")),
       action: () => go("library"),
     },
     {
-      icon: "hd", title: "Texturas HD", on: !!hd?.enabled,
-      value: hd ? (hdOutdated(hd.manifest.version) ? "Gerar de novo" : hd.enabled ? "Ativas" : "Desligadas") : "Gerar no Estúdio",
+      icon: "hd", title: t("Texturas HD"), on: !!hd?.enabled,
+      value: hd ? (hdOutdated(hd.manifest.version) ? t("Gerar de novo") : hd.enabled ? t("Ativas") : t("Desligadas")) : t("Gerar no Estúdio"),
       action: () => { if (hd && !hdOutdated(hd.manifest.version)) go("library"); else { setStudioTab("hd"); go("studio"); } },
     },
     {
-      icon: "format_paint", title: "Menu do jogo", on: !!theme?.enabled,
-      value: theme ? (theme.enabled ? "Moderno" : "Original") : "Repaginar",
+      icon: "format_paint", title: t("Menu do jogo"), on: !!theme?.enabled,
+      value: theme ? (theme.enabled ? t("Moderno") : t("Original")) : t("Repaginar"),
       action: () => go("library"),
     },
     {
-      icon: "memory", title: "Memória", on: !!laa?.enabled,
-      value: laa ? (laa.enabled ? "Até 4 GB" : "Até 2 GB") : "—",
+      icon: "memory", title: t("Memória"), on: !!laa?.enabled,
+      value: laa ? (laa.enabled ? t("Até 4 GB") : t("Até 2 GB")) : "—",
       action: () => useStore.getState().openSettings("jogo"),
     },
   ];
   return (
     <section className="card pad enh-card">
-      <div className="card-title"><Icon name="rocket_launch" style={{ color: "var(--primary)" }} /><h3>Aprimoramentos</h3></div>
+      <div className="card-title"><Icon name="rocket_launch" style={{ color: "var(--primary)" }} /><h3>{t("Aprimoramentos")}</h3></div>
       <div className="enh-grid">
         {items.map((i) => (
           <button key={i.title} className={`enh ${i.on ? "on" : ""}`} onClick={i.action}>

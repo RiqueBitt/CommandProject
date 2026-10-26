@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Drawer, Empty, Field, hueOf, Icon, ModThumb, Notice, TaskProgress } from "../components/ui";
 import { api, openUrl } from "../lib/api";
+import { locale, t, tr } from "../lib/i18n";
 import { errorText, fmtBytes, useStore } from "../lib/store";
 import { CATEGORY_LABEL, type Category, type HubIndex, type HubMod } from "../lib/types";
 import { CATEGORY_ICON } from "./Library";
@@ -69,7 +70,7 @@ export default function Hub() {
   const catList = Array.from(new Set(all.map((i) => i.mod.category)));
 
   const install = async (i: Item, version?: string) => {
-    await run("hub:" + i.mod.id, () => api.hubInstall(i.index.sourceUrl, i.mod.id, version), (m) => `${m.name} ${m.version} instalado e ativado.`);
+    await run("hub:" + i.mod.id, () => api.hubInstall(i.index.sourceUrl, i.mod.id, version), (m) => t("{name} {version} instalado e ativado.", { name: m.name, version: m.version }));
     await refreshMods();
   };
 
@@ -77,14 +78,14 @@ export default function Hub() {
   if (!configured) {
     return (
       <div className="scroll"><div className="page">
-        <h1 className="page-title">Hub de mods</h1>
-        <p className="muted" style={{ marginTop: -6 }}>Instale, configure, ligue e desligue os mods sem mexer nos arquivos do jogo: o launcher cuida de tudo ao jogar.</p>
+        <h1 className="page-title">{t("Hub de mods")}</h1>
+        <p className="muted" style={{ marginTop: -6 }}>{t("Instale, configure, ligue e desligue os mods sem mexer nos arquivos do jogo: o launcher cuida de tudo ao jogar.")}</p>
         <CpModsHub />
         <section>
-          <div className="section-head"><Icon name="public" /><h2>Mods da comunidade</h2></div>
-          {offline && <Notice kind="info">O modo local está ligado: índices de mods da comunidade não são consultados. Os mods do CommandProject acima funcionam sem internet.</Notice>}
-          <div className="card"><Empty icon="store" title="Nenhum índice da comunidade" action={<button className="btn" onClick={() => useStore.getState().openSettings("hub")}>Abrir configurações</button>}>
-            Opcional: adicione o endereço de um índice de mods em Configurações para ver mods feitos por outras pessoas aqui também.
+          <div className="section-head"><Icon name="public" /><h2>{t("Mods da comunidade")}</h2></div>
+          {offline && <Notice kind="info">{t("O modo local está ligado: índices de mods da comunidade não são consultados. Os mods do CommandProject acima funcionam sem internet.")}</Notice>}
+          <div className="card"><Empty icon="store" title={t("Nenhum índice da comunidade")} action={<button className="btn" onClick={() => useStore.getState().openSettings("hub")}>{t("Abrir configurações")}</button>}>
+            {t("Opcional: adicione o endereço de um índice de mods em Configurações para ver mods feitos por outras pessoas aqui também.")}
           </Empty></div>
         </section>
       </div></div>
@@ -96,9 +97,9 @@ export default function Hub() {
     <>
       <aside className="side-panel">
         <div className="group">
-          <div className="overline">Fonte</div>
+          <div className="overline">{t("Fonte")}</div>
           <div className="source-tiles">
-            <button className="source-tile" aria-pressed={source === "all"} onClick={() => setSource("all")}><Icon name="all_inclusive" /><span>Todas</span></button>
+            <button className="source-tile" aria-pressed={source === "all"} onClick={() => setSource("all")}><Icon name="all_inclusive" /><span>{t("Todas")}</span></button>
             {indexes.map((i) => (
               <button key={i.sourceUrl} className="source-tile" aria-pressed={source === i.sourceUrl} onClick={() => setSource(i.sourceUrl)} title={i.sourceUrl}>
                 <Icon name="dns" /><span>{i.name}</span>
@@ -107,66 +108,66 @@ export default function Hub() {
           </div>
         </div>
         <div className="group">
-          <div className="overline">Ordenar por</div>
-          <select className="select dense" value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="Ordenar por">
-            <option value="downloads">Mais baixados</option>
-            <option value="rating">Mais bem avaliados</option>
-            <option value="recent">Atualizados recentemente</option>
-            <option value="name">Nome</option>
+          <div className="overline">{t("Ordenar por")}</div>
+          <select className="select dense" value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label={t("Ordenar por")}>
+            <option value="downloads">{t("Mais baixados")}</option>
+            <option value="rating">{t("Mais bem avaliados")}</option>
+            <option value="recent">{t("Atualizados recentemente")}</option>
+            <option value="name">{t("Nome")}</option>
           </select>
         </div>
         <div className="card pad group">
-          <div className="overline">Categorias</div>
+          <div className="overline">{t("Categorias")}</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 2 }}>
             {catList.map((c) => (
               <button key={c} className="filter-chip" aria-pressed={cats.includes(c)} onClick={() => setCats((x) => (x.includes(c) ? x.filter((y) => y !== c) : [...x, c]))}>
-                <Icon name={CATEGORY_ICON[c]} /> {CATEGORY_LABEL[c]}
+                <Icon name={CATEGORY_ICON[c]} /> {t(CATEGORY_LABEL[c])}
               </button>
             ))}
           </div>
         </div>
         <div className="card pad">
-          <label className="row small" style={{ justifyContent: "space-between" }}>Só o que eu não tenho <input type="checkbox" checked={onlyNew} onChange={(e) => setOnlyNew(e.target.checked)} /></label>
+          <label className="row small" style={{ justifyContent: "space-between" }}>{t("Só o que eu não tenho")} <input type="checkbox" checked={onlyNew} onChange={(e) => setOnlyNew(e.target.checked)} /></label>
         </div>
-        <button className="btn text" onClick={load} disabled={loading}><Icon name="refresh" /> {loading ? "Atualizando…" : "Atualizar lista"}</button>
+        <button className="btn text" onClick={load} disabled={loading}><Icon name="refresh" /> {loading ? t("Atualizando…") : t("Atualizar lista")}</button>
       </aside>
 
       <div className="scroll">
         <div style={{ padding: "18px 32px 0", borderBottom: "1px solid var(--border)", paddingBottom: 18 }}>
           <div className="search-bar" style={{ maxWidth: 620 }}>
             <Icon name="search" />
-            <input className="input dense" placeholder="Buscar mods, autores ou tags" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Buscar no hub" />
+            <input className="input dense" placeholder={t("Buscar mods, autores ou tags")} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("Buscar no hub")} />
           </div>
         </div>
         <div className="page">
           <CpModsHub />
-          <div className="section-head" style={{ marginBottom: -8 }}><Icon name="public" /><h2>Mods da comunidade</h2></div>
-          {errors.map((e) => <Notice key={e.url + e.message} kind="err">{e.url && <b>{e.url}: </b>}{e.message}</Notice>)}
+          <div className="section-head" style={{ marginBottom: -8 }}><Icon name="public" /><h2>{t("Mods da comunidade")}</h2></div>
+          {errors.map((e) => <Notice key={e.url + e.message} kind="err">{e.url && <b>{e.url}: </b>}{tr(e.message)}</Notice>)}
           {!query && !cats.length && hero && (
             <section>
-              <div className="section-head"><Icon name="local_fire_department" style={{ color: "#ff9a3c" }} /><h2>Em alta</h2></div>
+              <div className="section-head"><Icon name="local_fire_department" style={{ color: "#ff9a3c" }} /><h2>{t("Em alta")}</h2></div>
               <div className="hero-carousel" style={{ cursor: "pointer" }} onClick={() => setOpen(hero)}>
                 <div className="art" style={{ background: banner(hero.mod.name) }}>
                   {resolveUrl(hero.mod.icon, hero.index.sourceUrl) ? <img src={resolveUrl(hero.mod.icon, hero.index.sourceUrl)} alt="" style={{ width: 128, height: 128, borderRadius: 24 }} /> : <Icon name={CATEGORY_ICON[hero.mod.category]} />}
                 </div>
                 <div className="info">
-                  <div className="row small"><b className="overline" style={{ color: "var(--text)" }}>{CATEGORY_LABEL[hero.mod.category]}</b><span className="faint">{hero.mod.downloads.toLocaleString("pt-BR")} downloads</span></div>
+                  <div className="row small"><b className="overline" style={{ color: "var(--text)" }}>{t(CATEGORY_LABEL[hero.mod.category])}</b><span className="faint">{t("{n} downloads", { n: hero.mod.downloads.toLocaleString(locale()) })}</span></div>
                   <h2>{hero.mod.name}</h2>
                   <p className="muted">{hero.mod.summary}</p>
                   <div className="row" onClick={(e) => e.stopPropagation()}>
                     <InstallButton item={hero} installedVersion={installed.get(hero.mod.id)?.manifest.version} onInstall={() => install(hero)} />
                   </div>
                 </div>
-                <button className="btn icon-btn nav l" aria-label="Anterior" onClick={(e) => { e.stopPropagation(); setSlide((s) => (s + trending.length - 1) % trending.length); }}><Icon name="chevron_left" /></button>
-                <button className="btn icon-btn nav r" aria-label="Próximo" onClick={(e) => { e.stopPropagation(); setSlide((s) => (s + 1) % trending.length); }}><Icon name="chevron_right" /></button>
+                <button className="btn icon-btn nav l" aria-label={t("Anterior")} onClick={(e) => { e.stopPropagation(); setSlide((s) => (s + trending.length - 1) % trending.length); }}><Icon name="chevron_left" /></button>
+                <button className="btn icon-btn nav r" aria-label={t("Próximo")} onClick={(e) => { e.stopPropagation(); setSlide((s) => (s + 1) % trending.length); }}><Icon name="chevron_right" /></button>
                 <div className="dots" onClick={(e) => e.stopPropagation()}>{trending.map((t, i) => <button key={t.mod.id} aria-label={t.mod.name} aria-current={i === slide % trending.length} onClick={() => setSlide(i)} />)}</div>
               </div>
             </section>
           )}
           <section>
-            <div className="section-head"><Icon name="extension" /><h2>{query || cats.length ? "Resultados" : "Todos os mods"}</h2><span className="muted small">{visible.length} mod(s)</span></div>
+            <div className="section-head"><Icon name="extension" /><h2>{query || cats.length ? t("Resultados") : t("Todos os mods")}</h2><span className="muted small">{t("{n} mod(s)", { n: visible.length })}</span></div>
             {loading && !all.length ? <div className="bar indeterminate"><i /></div> : visible.length === 0 ? (
-              <div className="card"><Empty icon="search_off" title={all.length ? "Nada encontrado" : "Este hub ainda não tem mods"}>{all.length ? "Tente outro termo ou tire filtros." : "Volte mais tarde."}</Empty></div>
+              <div className="card"><Empty icon="search_off" title={all.length ? t("Nada encontrado") : t("Este hub ainda não tem mods")}>{all.length ? t("Tente outro termo ou tire filtros.") : t("Volte mais tarde.")}</Empty></div>
             ) : (
               <div className="store-grid">
                 {visible.map((i) => {
@@ -187,16 +188,16 @@ export default function Hub() {
                           <ModThumb name={i.mod.name} icon={icon} />
                           <div style={{ minWidth: 0 }}>
                             <div className="name">{i.mod.name}</div>
-                            <div className="small faint row" style={{ gap: 4 }}><Icon name="person" size={14} /> {i.mod.authors.join(", ") || "Comunidade"}</div>
+                            <div className="small faint row" style={{ gap: 4 }}><Icon name="person" size={14} /> {i.mod.authors.join(", ") || t("Comunidade")}</div>
                           </div>
                         </div>
                         <p className="desc">{i.mod.summary || i.mod.description}</p>
                         {busy["hub:" + i.mod.id] && <TaskProgress task={"hub:" + i.mod.id} />}
                         <div className="foot">
-                          <span className="row" style={{ gap: 4 }}><Icon name="download" /> {i.mod.downloads.toLocaleString("pt-BR")}</span>
-                          {i.mod.rating != null && <span className="row" style={{ gap: 4 }}><Icon name="star" /> {i.mod.rating.toFixed(1).replace(".", ",")}</span>}
+                          <span className="row" style={{ gap: 4 }}><Icon name="download" /> {i.mod.downloads.toLocaleString(locale())}</span>
+                          {i.mod.rating != null && <span className="row" style={{ gap: 4 }}><Icon name="star" /> {i.mod.rating.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>}
                           <span className="spacer" />
-                          {have && (have.manifest.version === latest.version ? <span className="chip ok">instalado</span> : <span className="chip warn">atualizar</span>)}
+                          {have && (have.manifest.version === latest.version ? <span className="chip ok">{t("instalado")}</span> : <span className="chip warn">{t("atualizar")}</span>)}
                         </div>
                       </div>
                     </article>
@@ -220,8 +221,8 @@ function banner(name: string) {
 function InstallButton({ item, installedVersion, onInstall }: { item: Item; installedVersion?: string; onInstall: () => void }) {
   const busy = useStore((s) => s.busy["hub:" + item.mod.id]);
   const latest = latestOf(item.mod).version;
-  if (installedVersion === latest) return <span className="chip ok"><Icon name="check" /> instalado</span>;
-  return <button className="btn primary sm" disabled={busy} onClick={onInstall}><Icon name="download" /> {installedVersion ? "Atualizar" : "Instalar"}</button>;
+  if (installedVersion === latest) return <span className="chip ok"><Icon name="check" /> {t("instalado")}</span>;
+  return <button className="btn primary sm" disabled={busy} onClick={onInstall}><Icon name="download" /> {installedVersion ? t("Atualizar") : t("Instalar")}</button>;
 }
 
 function HubDrawer({ item, installedVersion, onInstall, onClose }: { item: Item; installedVersion?: string; onInstall: (v: string) => void; onClose: () => void }) {
@@ -232,10 +233,10 @@ function HubDrawer({ item, installedVersion, onInstall, onClose }: { item: Item;
   return (
     <Drawer onClose={onClose} label={item.mod.name}>
       <div className="row wrap" style={{ gap: 6 }}>
-        <span className="chip"><Icon name={CATEGORY_ICON[item.mod.category]} /> {CATEGORY_LABEL[item.mod.category]}</span>
-        {item.mod.authors.length > 0 && <span className="chip">por {item.mod.authors.join(", ")}</span>}
+        <span className="chip"><Icon name={CATEGORY_ICON[item.mod.category]} /> {t(CATEGORY_LABEL[item.mod.category])}</span>
+        {item.mod.authors.length > 0 && <span className="chip">{t("por {authors}", { authors: item.mod.authors.join(", ") })}</span>}
         {item.mod.license && <span className="chip">{item.mod.license}</span>}
-        {installedVersion && <span className="chip ok">você tem a {installedVersion}</span>}
+        {installedVersion && <span className="chip ok">{t("você tem a {version}", { version: installedVersion })}</span>}
       </div>
       <p className="selectable">{item.mod.description || item.mod.summary}</p>
       {item.mod.screenshots.length > 0 && (
@@ -243,27 +244,27 @@ function HubDrawer({ item, installedVersion, onInstall, onClose }: { item: Item;
           {item.mod.screenshots.map((s) => <img key={s} src={resolveUrl(s, item.index.sourceUrl)} alt="" style={{ height: 120, borderRadius: 8 }} />)}
         </div>
       )}
-      <Field label="Versão">
+      <Field label={t("Versão")}>
         <select className="select" value={ver} onChange={(e) => setVer(e.target.value)}>
-          {versions.map((x) => <option key={x.version} value={x.version}>{x.version}{x.releasedAt ? ` — ${new Date(x.releasedAt).toLocaleDateString("pt-BR")}` : ""}</option>)}
+          {versions.map((x) => <option key={x.version} value={x.version}>{x.version}{x.releasedAt ? ` — ${new Date(x.releasedAt).toLocaleDateString(locale())}` : ""}</option>)}
         </select>
       </Field>
-      {v.changelog && <div><div className="overline" style={{ marginBottom: 6 }}>Novidades</div><p className="muted selectable" style={{ whiteSpace: "pre-wrap" }}>{v.changelog}</p></div>}
+      {v.changelog && <div><div className="overline" style={{ marginBottom: 6 }}>{t("Novidades")}</div><p className="muted selectable" style={{ whiteSpace: "pre-wrap" }}>{v.changelog}</p></div>}
       <div className="small col" style={{ gap: 4 }}>
-        <span>Download: {fmtBytes(v.package.size)}</span>
-        <span>{v.multiplayer === "sync" ? "No multiplayer, todos precisam ter este mod." : "Só visual: não interfere na partida dos outros."}</span>
-        {v.requiresDlc && <span>Requer o DLC Infinite War Battle Pack.</span>}
-        {v.dependencies.length > 0 && <span>Precisa de: {v.dependencies.map((d) => d.id).join(", ")}</span>}
-        {v.conflicts.length > 0 && <span>Não combina com: {v.conflicts.join(", ")}</span>}
+        <span>{t("Download: {size}", { size: fmtBytes(v.package.size) })}</span>
+        <span>{v.multiplayer === "sync" ? t("No multiplayer, todos precisam ter este mod.") : t("Só visual: não interfere na partida dos outros.")}</span>
+        {v.requiresDlc && <span>{t("Requer o DLC Infinite War Battle Pack.")}</span>}
+        {v.dependencies.length > 0 && <span>{t("Precisa de: {list}", { list: v.dependencies.map((d) => d.id).join(", ") })}</span>}
+        {v.conflicts.length > 0 && <span>{t("Não combina com: {list}", { list: v.conflicts.join(", ") })}</span>}
         <span className="mono faint selectable">sha256 {v.package.sha256}</span>
       </div>
       {busy && <TaskProgress task={"hub:" + item.mod.id} />}
       <div style={{ flex: 1 }} />
       <footer>
-        {item.mod.homepage && <button className="btn text" onClick={() => openUrl(item.mod.homepage!)}><Icon name="open_in_new" /> Página do mod</button>}
+        {item.mod.homepage && <button className="btn text" onClick={() => openUrl(item.mod.homepage!)}><Icon name="open_in_new" /> {t("Página do mod")}</button>}
         <span className="spacer" />
         <button className="btn primary" disabled={busy || installedVersion === ver} onClick={() => onInstall(ver)}>
-          {installedVersion === ver ? "Instalado" : installedVersion ? `Instalar ${ver}` : "Instalar e ativar"}
+          {installedVersion === ver ? t("Instalado") : installedVersion ? t("Instalar {version}", { version: ver }) : t("Instalar e ativar")}
         </button>
       </footer>
     </Drawer>

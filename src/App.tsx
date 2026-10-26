@@ -1,5 +1,5 @@
 import { Fragment, lazy, Suspense, useEffect } from "react";
-import { useLang } from "./lib/i18n";
+import { locale, t, tr, useLang } from "./lib/i18n";
 import { FP_VERSION, loadFirstPerson } from "./components/dialogs";
 import { FEATURES } from "./lib/features";
 import { CommandPalette, Rail, SystemBar } from "./components/Shell";
@@ -38,7 +38,7 @@ export default function App() {
     (async () => {
       try {
         const recovered = await api.recover();
-        if (recovered) toast("info", `Uma operação interrompida foi resolvida: ${recovered}`);
+        if (recovered) toast("info", t("Uma operação interrompida foi resolvida: {detail}", { detail: tr(recovered) }));
         const info = await api.appInfo();
         useStore.setState({ info });
         await refresh();
@@ -47,7 +47,7 @@ export default function App() {
         if (oldTheme) {
           await api.setModEnabled(oldTheme.manifest.id, false).catch(() => {});
           await refresh();
-          toast("info", "Desliguei o Menu moderno antigo, que fazia o jogo fechar ao abrir. Gere de novo na Biblioteca para usar a versão corrigida.");
+          toast("info", t("Desliguei o Menu moderno antigo, que fazia o jogo fechar ao abrir. Gere de novo na Biblioteca para usar a versão corrigida."));
         }
         // Primeira Pessoa: desligada por enquanto (FEATURES.firstPerson); com ela ligada, a cópia montada
         // por um launcher antigo é montada de novo com as opções salvas
@@ -61,19 +61,19 @@ export default function App() {
           try {
             await api.buildFirstPerson(loadFirstPerson(), fp.enabled);
             await refresh();
-            toast("info", `Primeira Pessoa atualizada para a versão ${FP_VERSION}.`);
+            toast("info", t("Primeira Pessoa atualizada para a versão {version}.", { version: FP_VERSION }));
           } catch (e) {
-            toast("error", `Não deu para atualizar a Primeira Pessoa: ${errorText(e)}. Abra o Hub de mods e clique em Atualizar.`);
+            toast("error", t("Não deu para atualizar a Primeira Pessoa: {error}. Abra o Hub de mods e clique em Atualizar.", { error: errorText(e) }));
           }
         }
         // cópia de segurança automática dos projetos (local, de tempos em tempos)
-        void api.backupAuto().then((b) => { if (b) toast("info", `Cópia de segurança automática dos projetos feita (${b.projects} projeto(s)).`); }).catch(() => {});
+        void api.backupAuto().then((b) => { if (b) toast("info", t("Cópia de segurança automática dos projetos feita ({n} projeto(s)).", { n: b.projects })); }).catch(() => {});
         if (useStore.getState().settings?.checkAppUpdates && !useStore.getState().settings?.offline) {
           // em segundo plano: sem internet ou GitHub lento não atrasa a abertura
           void api.appUpdateCheck().then((up) => {
             if (!up) return;
             useStore.setState({ appUpdate: up });
-            toast("info", `CommandProject ${up.version} disponível. Em Configurações → Atualizações é só clicar em "Atualizar agora".`);
+            toast("info", t("CommandProject {version} disponível. Em Configurações → Atualizações é só clicar em \"Atualizar agora\".", { version: up.version }));
           }).catch(() => {});
         }
       } catch (e) {
@@ -82,19 +82,19 @@ export default function App() {
     })();
     const offs = [
       onEvent<string | null>("cp://game-exited", (e) => {
-        if (e) toast("error", `O jogo fechou, mas não deu para restaurar os arquivos: ${e}`);
-        else toast("ok", "Jogo fechado. A pasta do jogo voltou ao original.");
+        if (e) toast("error", t("O jogo fechou, mas não deu para restaurar os arquivos: {error}", { error: tr(e) }));
+        else toast("ok", t("Jogo fechado. A pasta do jogo voltou ao original."));
         void refresh();
       }),
-      onEvent("cp://game-started", () => toast("info", "Jogo aberto. Os arquivos serão restaurados quando ele fechar.")),
+      onEvent("cp://game-started", () => toast("info", t("Jogo aberto. Os arquivos serão restaurados quando ele fechar."))),
       onEvent<{ dump: string; mods: [string, string][] }>("cp://game-crashed", (c) => {
         useStore.setState({ crash: c });
-        toast("error", "O jogo fechou com erro. Veja na tela inicial o que pode ter causado.");
+        toast("error", t("O jogo fechou com erro. Veja na tela inicial o que pode ter causado."));
       }),
-      onEvent<number>("cp://memory-limited", (mb) => toast("ok", `Memória do jogo limitada a ${(mb / 1024).toLocaleString("pt-BR")} GB.`)),
-      onEvent<string>("cp://priority-set", (p) => toast("ok", `Prioridade do jogo: ${p === "high" ? "alta" : "acima do normal"}.`)),
-      onEvent<string>("cp://priority-failed", (e) => toast("error", `Não deu para mudar a prioridade do jogo: ${e}`)),
-      onEvent<string>("cp://memory-limit-failed", (e) => toast("error", `Não deu para aplicar o limite de memória: ${e}. O jogo está usando até 4 GB.`)),
+      onEvent<number>("cp://memory-limited", (mb) => toast("ok", t("Memória do jogo limitada a {size} GB.", { size: (mb / 1024).toLocaleString(locale()) }))),
+      onEvent<string>("cp://priority-set", (p) => toast("ok", t("Prioridade do jogo: {level}.", { level: p === "high" ? t("alta") : t("acima do normal") }))),
+      onEvent<string>("cp://priority-failed", (e) => toast("error", t("Não deu para mudar a prioridade do jogo: {error}", { error: tr(e) }))),
+      onEvent<string>("cp://memory-limit-failed", (e) => toast("error", t("Não deu para aplicar o limite de memória: {error}. O jogo está usando até 4 GB.", { error: tr(e) }))),
     ];
     return () => offs.forEach((p) => p.then((off) => off()));
   }, [refresh, toast]);
@@ -106,7 +106,7 @@ export default function App() {
       <SystemBar />
       {hasTabs && (
         <div className="project-area" hidden={!activeTab}>
-          <Suspense fallback={<div className="page muted">Abrindo…</div>}><ProjectHost /></Suspense>
+          <Suspense fallback={<div className="page muted">{t("Abrindo…")}</div>}><ProjectHost /></Suspense>
         </div>
       )}
       <Rail />
@@ -117,29 +117,29 @@ export default function App() {
         {page === "hub" && <Hub />}
         {page === "multiplayer" && <Multiplayer />}
         {page === "studio" && (
-          <Suspense fallback={<div className="page muted">Carregando o Estúdio…</div>}>
+          <Suspense fallback={<div className="page muted">{t("Carregando o Estúdio…")}</div>}>
             <Studio />
           </Suspense>
         )}
         {page === "create" && (
-          <Suspense fallback={<div className="page muted">Carregando…</div>}>
+          <Suspense fallback={<div className="page muted">{t("Carregando…")}</div>}>
             <Create />
           </Suspense>
         )}
         {page === "performance" && (
-          <Suspense fallback={<div className="page muted">Carregando…</div>}>
+          <Suspense fallback={<div className="page muted">{t("Carregando…")}</div>}>
             <Performance />
           </Suspense>
         )}
         {page === "bigmatch" && (
-          <Suspense fallback={<div className="page muted">Carregando…</div>}>
+          <Suspense fallback={<div className="page muted">{t("Carregando…")}</div>}>
             <BigMatch />
           </Suspense>
         )}
         {page === "settings" && <SettingsPage />}
         {page === "files" && <Files />}
         {page === "icons" && (
-          <Suspense fallback={<div className="page muted">Carregando…</div>}>
+          <Suspense fallback={<div className="page muted">{t("Carregando…")}</div>}>
             <Icons />
           </Suspense>
         )}

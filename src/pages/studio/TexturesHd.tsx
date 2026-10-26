@@ -3,6 +3,7 @@ import { Compare, Empty, Field, Icon, Notice, TaskProgress } from "../../compone
 import { api } from "../../lib/api";
 import { fmtBytes, load, useStore } from "../../lib/store";
 import { hdOutdated } from "../../lib/hd";
+import { locale, t } from "../../lib/i18n";
 import type { EnhanceGroup, EnhanceMode, EnhanceOptions, EnhancePreview } from "../../lib/types";
 
 const MODE_LABEL: Record<EnhanceMode, string> = { upscale: "Ampliar + nitidez", sharpen: "Só nitidez", skip: "Não mexer" };
@@ -62,7 +63,7 @@ export default function TexturesHd() {
   const hdMod = useStore((s) => s.mods.find((m) => m.manifest.id === "texturas-hd"));
   const [groups, setGroups] = useState<EnhanceGroup[] | null>(null);
   const [modes, setModes] = useState<Record<string, EnhanceMode>>({});
-  const [opts, setOpts] = useState<Omit<EnhanceOptions, "groups">>({ name: "Texturas HD", scale: 2, maxSize: 2048, sharpness: 0.6, deblock: 0.5, quality: "normal" });
+  const [opts, setOpts] = useState<Omit<EnhanceOptions, "groups">>(() => ({ name: t("Texturas HD"), scale: 2, maxSize: 2048, sharpness: 0.6, deblock: 0.5, quality: "normal" }));
   const [sample, setSample] = useState<string | null>(null);
   const [preview, setPreview] = useState<EnhancePreview | null>(null);
   const [limitMb, setLimitMb] = useState(4096);
@@ -111,7 +112,7 @@ export default function TexturesHd() {
   };
 
   if (groups === null) return <div className="card pad"><div className="bar indeterminate"><i /></div></div>;
-  if (!groups.length) return <div className="card"><Empty icon="image_not_supported" title="Nenhuma textura encontrada">Configure a pasta do jogo em Configurações.</Empty></div>;
+  if (!groups.length) return <div className="card"><Empty icon="image_not_supported" title={t("Nenhuma textura encontrada")}>{t("Configure a pasta do jogo em Configurações.")}</Empty></div>;
 
   const extra = totals.after - totals.before;
   const set = <K extends keyof typeof opts>(k: K, v: (typeof opts)[K]) => setOpts((o) => ({ ...o, [k]: v }));
@@ -120,50 +121,50 @@ export default function TexturesHd() {
     <div className="col" style={{ gap: 16 }}>
       {hdOutdated(hdMod?.manifest.version) && (
         <Notice kind="warn">
-          Suas Texturas HD foram geradas por uma versão antiga, que deixava alguns mapas verdes e os ícones de massa gigantes.
-          Clique em <b>Gerar Texturas HD</b> de novo para substituir.
+          {t("Suas Texturas HD foram geradas por uma versão antiga, que deixava alguns mapas verdes e os ícones de massa gigantes.")}
+          {" "}{t("Clique em")} <b>{t("Gerar Texturas HD")}</b> {t("de novo para substituir.")}
         </Notice>
       )}
       <Notice kind="info">
-        Lê as texturas <b>originais</b> do seu jogo, aumenta a resolução e recupera nitidez, sem inventar detalhes falsos, e gera um mod que você liga e desliga na biblioteca.
-        É só visual: <b>não dessincroniza o multiplayer</b>. Ícones, marcadores e a interface nunca são ampliados (o jogo desenha no tamanho da própria textura), e tabelas de cor e iluminação dos mapas ficam intactas.
+        {t("Lê as texturas")} <b>{t("originais")}</b> {t("do seu jogo, aumenta a resolução e recupera nitidez, sem inventar detalhes falsos, e gera um mod que você liga e desliga na biblioteca.")}
+        {" "}{t("É só visual:")} <b>{t("não dessincroniza o multiplayer")}</b>. {t("Ícones, marcadores e a interface nunca são ampliados (o jogo desenha no tamanho da própria textura), e tabelas de cor e iluminação dos mapas ficam intactas.")}
       </Notice>
 
       <div className="grid-2" style={{ gridTemplateColumns: "minmax(340px, 440px) 1fr", alignItems: "start" }}>
         <section className="card pad col">
-          <Field label="Nome do mod"><input className="input" value={opts.name} onChange={(e) => set("name", e.target.value)} /></Field>
+          <Field label={t("Nome do mod")}><input className="input" value={opts.name} onChange={(e) => set("name", e.target.value)} /></Field>
           <div className="grid-2" style={{ gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <Field label="Ampliação">
-              <div className="seg" role="group" aria-label="Ampliação">
+            <Field label={t("Ampliação")}>
+              <div className="seg" role="group" aria-label={t("Ampliação")}>
                 {[2, 4].map((s) => <button key={s} className="btn" aria-pressed={opts.scale === s} onClick={() => set("scale", s)}>{s}x</button>)}
               </div>
             </Field>
-            <Field label="Tamanho máximo">
+            <Field label={t("Tamanho máximo")}>
               <select className="select" value={opts.maxSize} onChange={(e) => set("maxSize", Number(e.target.value))}>
                 {[512, 1024, 2048, 4096].map((s) => <option key={s} value={s}>{s} px</option>)}
               </select>
             </Field>
           </div>
-          <label className="range" style={{ gridTemplateColumns: "110px 1fr 44px" }}><span>Nitidez</span><input type="range" min={0} max={1.5} step={0.05} value={opts.sharpness} onChange={(e) => set("sharpness", Number(e.target.value))} /><output>{Math.round(opts.sharpness * 100)}%</output></label>
-          <label className="range" style={{ gridTemplateColumns: "110px 1fr 44px" }}><span>Tirar blocos DXT</span><input type="range" min={0} max={1} step={0.05} value={opts.deblock} onChange={(e) => set("deblock", Number(e.target.value))} /><output>{Math.round(opts.deblock * 100)}%</output></label>
-          <Field label="Qualidade da compressão" hint="Normal: melhor resultado. Rápida: cerca de 10x mais rápida, com um pouco mais de artefatos.">
-            <div className="seg" role="group" aria-label="Qualidade">
-              {(["fast", "normal", "best"] as const).map((q) => <button key={q} className="btn" aria-pressed={opts.quality === q} onClick={() => set("quality", q)}>{q === "fast" ? "Rápida" : q === "normal" ? "Normal" : "Máxima"}</button>)}
+          <label className="range" style={{ gridTemplateColumns: "110px 1fr 44px" }}><span>{t("Nitidez")}</span><input type="range" min={0} max={1.5} step={0.05} value={opts.sharpness} onChange={(e) => set("sharpness", Number(e.target.value))} /><output>{Math.round(opts.sharpness * 100)}%</output></label>
+          <label className="range" style={{ gridTemplateColumns: "110px 1fr 44px" }}><span>{t("Tirar blocos DXT")}</span><input type="range" min={0} max={1} step={0.05} value={opts.deblock} onChange={(e) => set("deblock", Number(e.target.value))} /><output>{Math.round(opts.deblock * 100)}%</output></label>
+          <Field label={t("Qualidade da compressão")} hint={t("Normal: melhor resultado. Rápida: cerca de 10x mais rápida, com um pouco mais de artefatos.")}>
+            <div className="seg" role="group" aria-label={t("Qualidade")}>
+              {(["fast", "normal", "best"] as const).map((q) => <button key={q} className="btn" aria-pressed={opts.quality === q} onClick={() => set("quality", q)}>{q === "fast" ? t("Rápida") : q === "normal" ? t("Normal") : t("Máxima")}</button>)}
             </div>
           </Field>
 
-          <div className="overline" style={{ marginTop: 6 }}>Pastas do jogo</div>
+          <div className="overline" style={{ marginTop: 6 }}>{t("Pastas do jogo")}</div>
           <div className="hd-groups">
             {groups.map((g) => {
               const m = modes[g.group] ?? g.suggested;
               return (
                 <div key={g.group} className="hd-group">
-                  <button className="txt" onClick={() => setSample(g.sample[0] ?? null)} title="Ver prévia desta pasta">
+                  <button className="txt" onClick={() => setSample(g.sample[0] ?? null)} title={t("Ver prévia desta pasta")}>
                     <b className="mono">{g.group}</b>
-                    <span className="faint small">{g.textures.toLocaleString("pt-BR")} texturas, {fmtBytes(g.bytes)}</span>
+                    <span className="faint small">{t("{n} texturas, {size}", { n: g.textures.toLocaleString(locale()), size: fmtBytes(g.bytes) })}</span>
                   </button>
-                  <select className="select dense" value={m} onChange={(e) => setModes((x) => ({ ...x, [g.group]: e.target.value as EnhanceMode }))} aria-label={`Modo para ${g.group}`}>
-                    {(Object.keys(MODE_LABEL) as EnhanceMode[]).map((k) => <option key={k} value={k}>{MODE_LABEL[k]}</option>)}
+                  <select className="select dense" value={m} onChange={(e) => setModes((x) => ({ ...x, [g.group]: e.target.value as EnhanceMode }))} aria-label={t("Modo para {name}", { name: g.group })}>
+                    {(Object.keys(MODE_LABEL) as EnhanceMode[]).map((k) => <option key={k} value={k}>{t(MODE_LABEL[k])}</option>)}
                   </select>
                 </div>
               );
@@ -171,49 +172,48 @@ export default function TexturesHd() {
           </div>
 
           <div className="hd-total">
-            <span><b>{totals.count.toLocaleString("pt-BR")}</b> texturas, {totals.upscaled.toLocaleString("pt-BR")} ampliadas</span>
-            <span title="Memória de vídeo das texturas alteradas">{fmtBytes(totals.before)} → <b>{fmtBytes(totals.after)}</b></span>
+            <span><b>{totals.count.toLocaleString(locale())}</b> {t("texturas, {n} ampliadas", { n: totals.upscaled.toLocaleString(locale()) })}</span>
+            <span title={t("Memória de vídeo das texturas alteradas")}>{fmtBytes(totals.before)} → <b>{fmtBytes(totals.after)}</b></span>
           </div>
           <p className="faint small">
-            Memória do jogo: até {(limitMb / 1024).toLocaleString("pt-BR")} GB, então cabem uns {fmtBytes(budget)} a mais de texturas
-            ({extra > 0 ? `${Math.round((extra / budget) * 100)}% usado` : "nada usado"}).
+            {t("Memória do jogo: até {gb} GB, então cabem uns {size} a mais de texturas", { gb: (limitMb / 1024).toLocaleString(locale()), size: fmtBytes(budget) })}
+            {" "}({extra > 0 ? t("{pct}% usado", { pct: Math.round((extra / budget) * 100) }) : t("nada usado")}).
           </p>
           {extra > budget && (
             <Notice kind="warn">
-              Isso soma uns {fmtBytes(extra)} de texturas, mais do que cabe com o jogo em até {(limitMb / 1024).toLocaleString("pt-BR")} GB:
-              ele pode fechar por falta de memória. Aumente a memória do jogo em Configurações ou ajuste para caber.
+              {t("Isso soma uns {size} de texturas, mais do que cabe com o jogo em até {gb} GB: ele pode fechar por falta de memória. Aumente a memória do jogo em Configurações ou ajuste para caber.", { size: fmtBytes(extra), gb: (limitMb / 1024).toLocaleString(locale()) })}
               <div className="row" style={{ marginTop: 8 }}>
-                <button className="btn sm" onClick={autoFit}><Icon name="tune" /> Ajustar para caber</button>
-                <button className="btn sm text" onClick={() => useStore.getState().openSettings("jogo")}><Icon name="memory" /> Memória do jogo</button>
+                <button className="btn sm" onClick={autoFit}><Icon name="tune" /> {t("Ajustar para caber")}</button>
+                <button className="btn sm text" onClick={() => useStore.getState().openSettings("jogo")}><Icon name="memory" /> {t("Memória do jogo")}</button>
               </div>
             </Notice>
           )}
-          {busy ? <TaskProgress task="hd" label="Preparando…" /> : (
+          {busy ? <TaskProgress task="hd" label={t("Preparando…")} /> : (
             <button className="btn primary" disabled={!totals.count || !opts.name.trim()} onClick={async () => {
-              const m = await run("hd", () => api.buildEnhance(full, true), (mm) => `"${mm.name}" gerado e ativado na biblioteca.`);
+              const m = await run("hd", () => api.buildEnhance(full, true), (mm) => t("\"{name}\" gerado e ativado na biblioteca.", { name: mm.name }));
               if (m) await refreshMods();
-            }}><Icon name="hd" /> Gerar Texturas HD</button>
+            }}><Icon name="hd" /> {t("Gerar Texturas HD")}</button>
           )}
-          <p className="faint small">Pode levar de alguns minutos a meia hora, conforme o PC e as pastas escolhidas. Os arquivos originais do jogo não são alterados.</p>
+          <p className="faint small">{t("Pode levar de alguns minutos a meia hora, conforme o PC e as pastas escolhidas. Os arquivos originais do jogo não são alterados.")}</p>
         </section>
 
         <section className="card pad col">
           <div className="section-title">
-            <h2>Prévia</h2>
-            <select className="select" style={{ maxWidth: 380 }} value={sample ?? ""} onChange={(e) => setSample(e.target.value)} aria-label="Textura de exemplo">
+            <h2>{t("Prévia")}</h2>
+            <select className="select" style={{ maxWidth: 380 }} value={sample ?? ""} onChange={(e) => setSample(e.target.value)} aria-label={t("Textura de exemplo")}>
               {groups.flatMap((g) => g.sample).map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           {preview ? (
             <>
-              <Compare before={preview.before} after={preview.after} beforeLabel="Original" afterLabel="Texturas HD" pixelated ratio={`${preview.width} / ${preview.height}`} />
+              <Compare before={preview.before} after={preview.after} beforeLabel={t("Original")} afterLabel={t("Texturas HD")} pixelated ratio={`${preview.width} / ${preview.height}`} />
               <div className="chips">
                 <span className="chip">{preview.info.width}×{preview.info.height} {preview.info.format.toUpperCase()}</span>
                 <Icon name="arrow_forward" size={16} />
                 <span className="chip ok">{preview.width}×{preview.height}</span>
-                <span className="chip info">{CLASS_LABEL[preview.class]}</span>
+                <span className="chip info">{t(CLASS_LABEL[preview.class])}</span>
               </div>
-              <p className="faint small">Arraste a divisória. O lado original foi ampliado sem filtro, para comparar no mesmo tamanho.</p>
+              <p className="faint small">{t("Arraste a divisória. O lado original foi ampliado sem filtro, para comparar no mesmo tamanho.")}</p>
             </>
           ) : <div className="bar indeterminate"><i /></div>}
         </section>

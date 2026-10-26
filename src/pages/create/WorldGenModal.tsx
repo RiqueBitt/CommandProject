@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon, Modal, Notice } from "../../components/ui";
 import { BLANK_SIZES, blankLabel } from "../studio/mapEdit";
 import type { Terrain } from "../../lib/types";
+import { t, tr } from "../../lib/i18n";
 import type { Pt } from "../studio/mapEdit";
 import { teamOfSpawn, worldTeams } from "./docs";
 import {
@@ -126,7 +127,7 @@ export default function WorldGenModal(props: Props) {
     setGallery(out);
   };
   const syms = symmetriesFor(wg.players);
-  const terrainName = props.terrains?.find((t) => t.id === props.terrain)?.name ?? props.terrain ?? "—";
+  const terrainName = props.terrains?.find((tn) => tn.id === props.terrain)?.name ?? props.terrain ?? "—";
   const G = grid.grid;
   const svgPt = (p: Pt) => [(p[0] / G) * 100, (p[1] / G) * 100];
 
@@ -141,64 +142,64 @@ export default function WorldGenModal(props: Props) {
   };
 
   return (
-    <Modal title="Gerar mundo" icon="auto_awesome" onClose={props.onClose} wide>
+    <Modal title={t("Gerar mundo")} icon="auto_awesome" onClose={props.onClose} wide>
       <div className="wg">
         <div className="wg-left">
           <div className="wg-presets">
             {WORLD_PRESETS.map((p) => (
-              <button key={p.id} className={`wg-preset ${wg.preset === p.id ? "on" : ""}`} onClick={() => setWg((w) => ({ ...w, ...p.over, preset: p.id }))} title={p.desc}>
+              <button key={p.id} className={`wg-preset ${wg.preset === p.id ? "on" : ""}`} onClick={() => setWg((w) => ({ ...w, ...p.over, preset: p.id }))} title={t(p.desc)}>
                 <Icon name={p.icon} size={22} />
-                <b>{p.label}</b>
-                <small>{p.desc}</small>
+                <b>{t(p.label)}</b>
+                <small>{t(p.desc)}</small>
               </button>
             ))}
           </div>
 
           <div className="wg-row">
-            <label className="field"><span className="label">Terreno base</span>
+            <label className="field"><span className="label">{t("Terreno base")}</span>
               <select className="select" value={props.blank ? `blank:${props.blankSize ?? 1024}` : props.terrain ?? ""} onChange={(e) => props.onTerrain(e.target.value)}>
-                <optgroup label="Em branco (grama lisa)">
-                  {BLANK_SIZES.map((k) => <option key={k} value={`blank:${k}`}>{blankLabel(k)}{k > 2048 ? " · experimental" : ""}</option>)}
+                <optgroup label={t("Em branco (grama lisa)")}>
+                  {BLANK_SIZES.map((k) => <option key={k} value={`blank:${k}`}>{tr(blankLabel(k))}{k > 2048 ? t(" · experimental") : ""}</option>)}
                 </optgroup>
-                <optgroup label="Mapas do jogo">
-                  {(props.terrains ?? []).filter((t) => t.kind === "skirmish").map((t) => <option key={t.id} value={t.id}>{t.name ?? t.id}{t.waterY ? " · com água" : ""}</option>)}
+                <optgroup label={t("Mapas do jogo")}>
+                  {(props.terrains ?? []).filter((tn) => tn.kind === "skirmish").map((tn) => <option key={tn.id} value={tn.id}>{tn.name ?? tn.id}{tn.waterY ? t(" · com água") : ""}</option>)}
                 </optgroup>
               </select>
             </label>
-            <label className="field"><span className="label">Semente</span>
+            <label className="field"><span className="label">{t("Semente")}</span>
               <span className="row" style={{ gap: 6 }}>
                 <input className="input" type="number" value={wg.seed} onChange={(e) => set("seed", Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
-                <button className="btn icon-btn" title="Semente aleatória" aria-label="Semente aleatória" onClick={() => set("seed", Math.floor(Math.random() * 999999))}><Icon name="casino" /></button>
+                <button className="btn icon-btn" title={t("Semente aleatória")} aria-label={t("Semente aleatória")} onClick={() => set("seed", Math.floor(Math.random() * 999999))}><Icon name="casino" /></button>
               </span>
             </label>
           </div>
           <div className="wg-row">
-            <label className="field"><span className="label">Jogadores</span>
+            <label className="field"><span className="label">{t("Jogadores")}</span>
               <select className="select" value={wg.players} onChange={(e) => {
                 const n = Number(e.target.value);
                 setWg((w) => ({ ...w, players: n, symmetry: symmetriesFor(n).includes(w.symmetry) ? w.symmetry : symmetriesFor(n)[symmetriesFor(n).length > 1 ? 1 : 0] }));
               }}>
-                {[2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32].map((n) => <option key={n} value={n}>{n} jogadores{n > 8 ? " (Partida grande)" : ""}</option>)}
+                {[2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32].map((n) => <option key={n} value={n}>{t("{n} jogadores", { n })}{n > 8 ? t(" (Partida grande)") : ""}</option>)}
               </select>
             </label>
-            <label className="field"><span className="label">Simetria</span>
+            <label className="field"><span className="label">{t("Simetria")}</span>
               <select className="select" value={wg.symmetry} onChange={(e) => set("symmetry", e.target.value as WorldGen["symmetry"])}>
-                {syms.map((s) => <option key={s} value={s}>{SYMMETRY_LABEL[s]}</option>)}
+                {syms.map((s) => <option key={s} value={s}>{t(SYMMETRY_LABEL[s])}</option>)}
               </select>
             </label>
           </div>
 
           <div className="wg-row">
-            <label className="field"><span className="label">Estilo do terreno</span>
+            <label className="field"><span className="label">{t("Estilo do terreno")}</span>
               <select className="select" value={wg.style ?? "natural"} onChange={(e) => set("style", e.target.value as WorldGen["style"])}>
-                <option value="natural">Natural (morros, montanhas, água)</option>
-                <option value="platforms">Plataformas sobre um abismo, com pontes</option>
+                <option value="natural">{t("Natural (morros, montanhas, água)")}</option>
+                <option value="platforms">{t("Plataformas sobre um abismo, com pontes")}</option>
               </select>
             </label>
           </div>
           {plat && (
             <section className="wg-group">
-              <h4><Icon name="layers" size={17} /> Plataformas e abismo</h4>
+              <h4><Icon name="layers" size={17} /> {t("Plataformas e abismo")}</h4>
               {([
                 { key: "platformHeight", label: "Altura da queda", min: 60, max: 260, step: 5 },
                 { key: "plateaus", label: "Plataformas de expansão", min: 0, max: 12 },
@@ -207,87 +208,87 @@ export default function WorldGenModal(props: Props) {
                 const v = (wg[it.key] as number | undefined) ?? (it.key === "platformHeight" ? 150 : 0);
                 return (
                   <label key={it.key} className="range">
-                    <span>{it.label}</span>
+                    <span>{t(it.label)}</span>
                     <input type="range" min={it.min} max={it.max} step={it.step ?? 1} value={v} onChange={(e) => set(it.key, Number(e.target.value) as never)} />
                     <output>{v}</output>
                   </label>
                 );
               })}
-              <label className="field"><span className="label">Fundo do abismo</span>
+              <label className="field"><span className="label">{t("Fundo do abismo")}</span>
                 <select className="select" value={wg.abyss ?? "deep"} onChange={(e) => set("abyss", e.target.value as WorldGen["abyss"])}>
-                  <option value="deep">Seco (rocha lá embaixo)</option>
-                  <option value="water" disabled={!hasWater}>Mar lá embaixo{hasWater ? "" : " (precisa de água)"}</option>
+                  <option value="deep">{t("Seco (rocha lá embaixo)")}</option>
+                  <option value="water" disabled={!hasWater}>{t("Mar lá embaixo")}{hasWater ? "" : t(" (precisa de água)")}</option>
                 </select>
               </label>
-              <p className="faint small">As bases, o centro e as expansões ficam em plataformas altas ligadas por pontes; o resto é abismo. Depois de gerar, mova as plataformas e desenhe pontes novas em Formas → Plataformas e abismo.</p>
+              <p className="faint small">{t("As bases, o centro e as expansões ficam em plataformas altas ligadas por pontes; o resto é abismo. Depois de gerar, mova as plataformas e desenhe pontes novas em Formas → Plataformas e abismo.")}</p>
             </section>
           )}
           {SLIDERS.filter((g) => !plat || !["Montanhas", "Água", "Cavidades"].includes(g.group)).map((g) => (
             <section key={g.group} className="wg-group">
-              <h4><Icon name={g.icon} size={17} /> {g.group}</h4>
+              <h4><Icon name={g.icon} size={17} /> {t(g.group)}</h4>
               {g.items.map((it) => {
                 const v = (wg[it.key] as number | undefined) ?? 0;
                 const off = it.water && !hasWater;
                 return (
-                  <label key={it.key} className={`range ${off ? "off" : ""}`} title={off ? "Precisa de um terreno com água" : undefined}>
-                    <span>{it.label}</span>
+                  <label key={it.key} className={`range ${off ? "off" : ""}`} title={off ? t("Precisa de um terreno com água") : undefined}>
+                    <span>{t(it.label)}</span>
                     <input type="range" min={it.min} max={it.max} step={it.step ?? 1} value={v} disabled={off} onChange={(e) => set(it.key, Number(e.target.value) as never)} />
                     <output>{it.fmt ? it.fmt(v) : v}</output>
                   </label>
                 );
               })}
-              {g.group === "Água" && !hasWater && <p className="faint small">{terrainName} não tem água: lagos e rios viram vales e leitos secos.</p>}
+              {g.group === "Água" && !hasWater && <p className="faint small">{t("{name} não tem água: lagos e rios viram vales e leitos secos.", { name: terrainName })}</p>}
             </section>
           ))}
           <section className="wg-group">
-            <h4><Icon name="tune" size={17} /> Acabamento</h4>
+            <h4><Icon name="tune" size={17} /> {t("Acabamento")}</h4>
             <div className="wg-row">
-              <label className="field"><span className="label">Bordas do mapa</span>
+              <label className="field"><span className="label">{t("Bordas do mapa")}</span>
                 <select className="select" value={wg.edge} onChange={(e) => set("edge", e.target.value as WorldGen["edge"])}>
-                  <option value="none">Abertas</option>
-                  <option value="mountains">Cercadas por montanhas</option>
-                  <option value="rugged">Borda rochosa (intransponível)</option>
-                  <option value="water" disabled={!hasWater}>Mar em volta{hasWater ? "" : " (precisa de água)"}</option>
+                  <option value="none">{t("Abertas")}</option>
+                  <option value="mountains">{t("Cercadas por montanhas")}</option>
+                  <option value="rugged">{t("Borda rochosa (intransponível)")}</option>
+                  <option value="water" disabled={!hasWater}>{t("Mar em volta")}{hasWater ? "" : t(" (precisa de água)")}</option>
                 </select>
               </label>
-              <label className="field"><span className="label">Massa</span>
+              <label className="field"><span className="label">{t("Massa")}</span>
                 <select className="select" value={wg.resources ?? "generated"} onChange={(e) => set("resources", e.target.value as WorldGen["resources"])}>
-                  <option value="generated">Gerada aqui (simétrica, editável)</option>
-                  <option value="auto">Automática do toolkit</option>
+                  <option value="generated">{t("Gerada aqui (simétrica, editável)")}</option>
+                  <option value="auto">{t("Automática do toolkit")}</option>
                 </select>
               </label>
-              <label className="field"><span className="label">Economia</span>
+              <label className="field"><span className="label">{t("Economia")}</span>
                 <select className="select" value={wg.economy} onChange={(e) => set("economy", e.target.value as WorldGen["economy"])}>
-                  <option value="poor">Pouca massa</option>
-                  <option value="normal">Normal</option>
-                  <option value="rich">Muita massa</option>
+                  <option value="poor">{t("Pouca massa")}</option>
+                  <option value="normal">{t("Normal")}</option>
+                  <option value="rich">{t("Muita massa")}</option>
                 </select>
               </label>
-              <label className="field"><span className="label">Céu</span>
+              <label className="field"><span className="label">{t("Céu")}</span>
                 <select className="select" value={wg.sky ?? ""} onChange={(e) => set("sky", e.target.value || null)}>
-                  <option value="">O do terreno base</option>
+                  <option value="">{t("O do terreno base")}</option>
                   {props.skies.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
                 </select>
               </label>
-              <label className="field"><span className="label">Bioma (chão, prévia e minimapa)</span>
+              <label className="field"><span className="label">{t("Bioma (chão, prévia e minimapa)")}</span>
                 <select className="select" value={wg.biome} onChange={(e) => set("biome", e.target.value as WorldGen["biome"])}>
-                  {Object.entries(BIOME_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                  {Object.entries(BIOME_LABEL).map(([k, l]) => <option key={k} value={k}>{t(l)}</option>)}
                 </select>
               </label>
             </div>
-            <label className="check"><input type="checkbox" checked={wg.roads !== false} disabled={!(wg.settlements ?? 0)} onChange={(e) => set("roads", e.target.checked)} /> Estradas de terra ligando as vilas às bases</label>
-            <label className="check"><input type="checkbox" checked={wg.paths !== false} disabled={plat} onChange={(e) => set("paths", e.target.checked)} /> Caminhos das bases até o centro e as expansões</label>
-            <label className="check" title="Partes íngremes das montanhas e paredões ficam fechadas para as tropas por terra (dá para mudar depois com o pincel de passagem)."><input type="checkbox" checked={wg.blockSteep !== false} onChange={(e) => set("blockSteep", e.target.checked)} /> Montanhas íngremes bloqueiam as tropas</label>
-            <label className="check"><input type="checkbox" checked={wg.center !== false} disabled={wg.symmetry === "none"} onChange={(e) => set("center", e.target.checked)} /> Centro disputado (área plana com massa no meio)</label>
-            <label className="check" title="Uma serra alta no meio do mapa (no eixo da simetria) separa os times; as tropas passam pelos vãos (um no centro e outros dos lados). Liga sozinha com mais de 8 jogadores."><input type="checkbox" checked={teamWallsOn(wg)} disabled={plat || wg.symmetry === "none"} onChange={(e) => set("teamWalls", e.target.checked)} /> Cordilheira separando os times (com passagens)</label>
-            <label className="check" title="Serras curtas entre as bases vizinhas, com um vão no meio: as bases não ficam coladas num campo aberto. Liga sozinha com mais de 8 jogadores."><input type="checkbox" checked={baseWallsOn(wg)} disabled={plat} onChange={(e) => set("baseWalls", e.target.checked)} /> Serras entre as bases vizinhas</label>
-            <label className="check" title="O chão inteiro ganha as texturas do bioma, a luz e as sombras são refeitas para o relevo novo e as decorações do mapa original saem. Sem isso, o desenho do mapa original aparece por baixo do mundo novo."><input type="checkbox" checked={wg.clearDonor} onChange={(e) => set("clearDonor", e.target.checked)} /> Visual limpo: nada do mapa original por cima (texturas, sombras e decorações) — recomendado</label>
+            <label className="check"><input type="checkbox" checked={wg.roads !== false} disabled={!(wg.settlements ?? 0)} onChange={(e) => set("roads", e.target.checked)} /> {t("Estradas de terra ligando as vilas às bases")}</label>
+            <label className="check"><input type="checkbox" checked={wg.paths !== false} disabled={plat} onChange={(e) => set("paths", e.target.checked)} /> {t("Caminhos das bases até o centro e as expansões")}</label>
+            <label className="check" title={t("Partes íngremes das montanhas e paredões ficam fechadas para as tropas por terra (dá para mudar depois com o pincel de passagem).")}><input type="checkbox" checked={wg.blockSteep !== false} onChange={(e) => set("blockSteep", e.target.checked)} /> {t("Montanhas íngremes bloqueiam as tropas")}</label>
+            <label className="check"><input type="checkbox" checked={wg.center !== false} disabled={wg.symmetry === "none"} onChange={(e) => set("center", e.target.checked)} /> {t("Centro disputado (área plana com massa no meio)")}</label>
+            <label className="check" title={t("Uma serra alta no meio do mapa (no eixo da simetria) separa os times; as tropas passam pelos vãos (um no centro e outros dos lados). Liga sozinha com mais de 8 jogadores.")}><input type="checkbox" checked={teamWallsOn(wg)} disabled={plat || wg.symmetry === "none"} onChange={(e) => set("teamWalls", e.target.checked)} /> {t("Cordilheira separando os times (com passagens)")}</label>
+            <label className="check" title={t("Serras curtas entre as bases vizinhas, com um vão no meio: as bases não ficam coladas num campo aberto. Liga sozinha com mais de 8 jogadores.")}><input type="checkbox" checked={baseWallsOn(wg)} disabled={plat} onChange={(e) => set("baseWalls", e.target.checked)} /> {t("Serras entre as bases vizinhas")}</label>
+            <label className="check" title={t("O chão inteiro ganha as texturas do bioma, a luz e as sombras são refeitas para o relevo novo e as decorações do mapa original saem. Sem isso, o desenho do mapa original aparece por baixo do mundo novo.")}><input type="checkbox" checked={wg.clearDonor} onChange={(e) => set("clearDonor", e.target.checked)} /> {t("Visual limpo: nada do mapa original por cima (texturas, sombras e decorações) — recomendado")}</label>
           </section>
         </div>
 
         <div className="wg-right">
           <div className="wg-preview">
-            {img ? <img src={img} alt="Prévia do mundo" draggable={false} /> : <div className="bar indeterminate"><i /></div>}
+            {img ? <img src={img} alt={t("Prévia do mundo")} draggable={false} /> : <div className="bar indeterminate"><i /></div>}
             {res && (
               <svg viewBox="0 0 100 100" preserveAspectRatio="none">
                 {res.features.filter((f) => LINE_FEATURES.includes(f.kind) && f.kind !== "pass").map((f) => (
@@ -314,29 +315,29 @@ export default function WorldGenModal(props: Props) {
           </div>
           {res && (
             <div className="wg-stats">
-              <span><b>{res.features.filter((f) => f.kind !== "pad").length}</b> formas</span>
-              <span><b>{res.props.length}</b> decorações</span>
-              <span><b>{walkPct}%</b> caminhável</span>
-              <span><b>{wg.players}</b> bases</span>
-              <span><b>{res.mass.length}</b> massa</span>
-              {!!res.life?.villages.length && <span><b>{res.life.villages.length}</b> vilas</span>}
-              {!!res.life?.roads.length && <span><b>{res.life.roads.length}</b> estradas</span>}
+              <span><b>{res.features.filter((f) => f.kind !== "pad").length}</b> {t("formas")}</span>
+              <span><b>{res.props.length}</b> {t("decorações")}</span>
+              <span><b>{walkPct}%</b> {t("caminhável")}</span>
+              <span><b>{wg.players}</b> {t("bases")}</span>
+              <span><b>{res.mass.length}</b> {t("massa")}</span>
+              {!!res.life?.villages.length && <span><b>{res.life.villages.length}</b> {t("vilas")}</span>}
+              {!!res.life?.roads.length && <span><b>{res.life.roads.length}</b> {t("estradas")}</span>}
             </div>
           )}
           <div className="row" style={{ gap: 6 }}>
-            <button className="btn sm" onClick={showGallery}><Icon name="grid_view" size={16} /> Ver 6 variações</button>
+            <button className="btn sm" onClick={showGallery}><Icon name="grid_view" size={16} /> {t("Ver 6 variações")}</button>
             {gallery.length > 0 && <button className="btn sm text" onClick={() => setGallery([])}><Icon name="close" size={16} /></button>}
           </div>
           {gallery.length > 0 && <div className="wg-gallery">{gallery.map((g) => (
-            <button key={g.seed} className={wg.seed === g.seed ? "on" : ""} onClick={() => set("seed", g.seed)} title={`Semente ${g.seed}`}><img src={g.img} alt={`Semente ${g.seed}`} /><small>{g.seed}</small></button>
+            <button key={g.seed} className={wg.seed === g.seed ? "on" : ""} onClick={() => set("seed", g.seed)} title={t("Semente {n}", { n: g.seed })}><img src={g.img} alt={t("Semente {n}", { n: g.seed })} /><small>{g.seed}</small></button>
           ))}</div>}
-          {!hasWater && (wg.lakes > 0 || wg.rivers > 0 || wg.islands > 0 || wg.edge === "water") && <Notice kind="info">Este terreno não tem água: lagos e rios viram vales secos. Para água de verdade, use um mapa do jogo com água como base.</Notice>}
-          {res?.notes.map((n, i) => <Notice key={i} kind="info">{n}</Notice>)}
-          <p className="faint small">Depois de gerar, tudo vira objetos editáveis: mova montanhas e lagos, mude raio e altura, apague, pinte o relevo com o pincel e espalhe mais decorações. A mesma semente sempre gera o mesmo mundo.</p>
-          <p className="faint small">No jogo o chão usa as texturas do terreno base ({terrainName}); troque as camadas em <b>Chão</b>. As cores acima são da prévia e do minimapa.</p>
+          {!hasWater && (wg.lakes > 0 || wg.rivers > 0 || wg.islands > 0 || wg.edge === "water") && <Notice kind="info">{t("Este terreno não tem água: lagos e rios viram vales secos. Para água de verdade, use um mapa do jogo com água como base.")}</Notice>}
+          {res?.notes.map((n, i) => <Notice key={i} kind="info">{tr(n)}</Notice>)}
+          <p className="faint small">{t("Depois de gerar, tudo vira objetos editáveis: mova montanhas e lagos, mude raio e altura, apague, pinte o relevo com o pincel e espalhe mais decorações. A mesma semente sempre gera o mesmo mundo.")}</p>
+          <p className="faint small">{t("No jogo o chão usa as texturas do terreno base ({name}); troque as camadas em", { name: terrainName })} <b>{t("Chão")}</b>{t(". As cores acima são da prévia e do minimapa.")}</p>
           <footer>
-            <button className="btn text" onClick={props.onClose}>Cancelar</button>
-            <button className="btn primary" disabled={busy || !res} onClick={apply}><Icon name="auto_awesome" size={18} /> {busy ? "Gerando…" : "Gerar mundo"}</button>
+            <button className="btn text" onClick={props.onClose}>{t("Cancelar")}</button>
+            <button className="btn primary" disabled={busy || !res} onClick={apply}><Icon name="auto_awesome" size={18} /> {busy ? t("Gerando…") : t("Gerar mundo")}</button>
           </footer>
         </div>
       </div>

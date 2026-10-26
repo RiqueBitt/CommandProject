@@ -17,6 +17,7 @@ import { errorText, load, useStore } from "../../lib/store";
 import { useTabs } from "../../lib/tabs";
 import type { CreationMeta, MapAssets, MapBuildResult, MaptkStatus, SkyInfo, Terrain, TerrainPreview } from "../../lib/types";
 import { useProject } from "../../lib/useProject";
+import { t, tr } from "../../lib/i18n";
 import { GroundPaint, GroundTextures, PropPicker } from "../studio/MapDecor";
 import { biomeChain, chainTile, combinePaint, deckLayer, decodePaint, encodePaint, groundBaseT, paintDab, paintT, resamplePaint, trailPaint, type PaintLayer } from "../studio/biome";
 import { customLayers, customStem, importTexture, isCustomPath, registerCustomTextures, texUrl } from "../studio/customTex";
@@ -82,9 +83,9 @@ const HINT: Record<string, string> = {
   seed: "Ponto de onde a navegação é recalculada.",
   erase: "Clique sobre qualquer item para apagá-lo.",
 };
-const hintOf = (t: Tool) => isBrush(t) ? BRUSH[t.slice(2) as BrushMode].hint
-  : isFeat(t) ? (LINE_FEATURES.includes(featOf(t)) ? `Arraste para desenhar: ${FEATURE_LABEL[featOf(t)].toLowerCase()}.` : `Clique para colocar: ${FEATURE_LABEL[featOf(t)].toLowerCase()}. Raio e altura nos controles do pincel.`)
-  : HINT[t] ?? "";
+const hintOf = (tl: Tool) => isBrush(tl) ? t(BRUSH[tl.slice(2) as BrushMode].hint)
+  : isFeat(tl) ? (LINE_FEATURES.includes(featOf(tl)) ? t("Arraste para desenhar: {name}.", { name: t(FEATURE_LABEL[featOf(tl)]).toLowerCase() }) : t("Clique para colocar: {name}. Raio e altura nos controles do pincel.", { name: t(FEATURE_LABEL[featOf(tl)]).toLowerCase() }))
+  : HINT[tl] ? t(HINT[tl]) : "";
 
 function slugId(name: string) {
   const s = name.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 12);
@@ -240,7 +241,7 @@ export default function MapStudio({ id }: { id: string }) {
   }, [doc.terrain, p.status, blank, blankSize]);
 
   const terrain = terrains?.find((t) => t.id === doc.terrain) ?? null;
-  const baseName = doc.base === "blank" ? `Em branco ${blankSize} (${mapKm(blankSize ?? 1024)} km)` : terrain?.name ?? doc.terrain ?? "sem terreno";
+  const baseName = doc.base === "blank" ? t("Em branco {size} ({km} km)", { size: blankSize, km: mapKm(blankSize ?? 1024) }) : terrain?.name ?? doc.terrain ?? t("sem terreno");
   const grid = relief3d?.grid ?? preview?.grid ?? 1024;
   const water = relief3d?.waterLevel ?? preview?.waterLevel ?? 0;
   const hasWater = water > 0.5;
@@ -616,7 +617,7 @@ export default function MapStudio({ id }: { id: string }) {
                 props: [...d0.edits.props, { bp: kd.bp!, x: round1(kd.x), z: round1(kd.z), yaw: Math.round(kd.yaw), scale: Math.round(kd.scale * 100) / 100 }] } }));
               hit = `prop:${idx}`;
               setSel(new Set([hit]));
-              toast("info", "Decoração do mapa original agora é editável (mover, girar, escala). Ctrl+Z desfaz.");
+              toast("info", t("Decoração do mapa original agora é editável (mover, girar, escala). Ctrl+Z desfaz."));
               moving.current = { from: q, ids: [hit], started: true };
               return;
             }
@@ -1077,20 +1078,20 @@ export default function MapStudio({ id }: { id: string }) {
   const autoFix = () => {
     if (!relief3d || !heights) return;
     const f = autoFixMap(relief3d, heights, water, hasWater, edits.spawns, edits.mass, edits.props);
-    if (!f.changes.length) { toast("info", "Nada para corrigir automaticamente."); return; }
+    if (!f.changes.length) { toast("info", t("Nada para corrigir automaticamente.")); return; }
     p.commit((d) => ({ ...d, edits: { ...d.edits, mass: f.mass, props: f.props } }));
-    toast("ok", `Corrigido: ${f.changes.slice(0, 4).join("; ")}${f.changes.length > 4 ? ` e mais ${f.changes.length - 4}` : ""}. Dá para desfazer com Ctrl+Z.`);
+    toast("ok", t("Corrigido: {list}{more}. Dá para desfazer com Ctrl+Z.", { list: f.changes.slice(0, 4).map((c) => tr(c)).join("; "), more: f.changes.length > 4 ? t(" e mais {n}", { n: f.changes.length - 4 }) : "" }));
     window.setTimeout(() => setIssues(runCheck()), 50);
   };
   const build = async (play: boolean) => {
     const spec = makeSpec();
     if (!spec) return;
-    if (usesWorld && (!relief3d || !composed)) { toast("info", "Espere o relevo do terreno carregar para gerar."); return; }
+    if (usesWorld && (!relief3d || !composed)) { toast("info", t("Espere o relevo do terreno carregar para gerar.")); return; }
     const found = runCheck();
     const errs = found?.filter((x) => x.level === "err") ?? [];
     if (errs.length) {
       setIssues(found);
-      if (!(await confirmDialog(`O mapa tem ${errs.length} problema(s) grave(s):\n\n- ${errs.slice(0, 5).map((x) => x.text).join("\n- ")}\n\nGerar mesmo assim?`, "Gerar mesmo assim", "Revisar"))) return;
+      if (!(await confirmDialog(t("O mapa tem {n} problema(s) grave(s):\n\n- {list}\n\nGerar mesmo assim?", { n: errs.length, list: errs.slice(0, 5).map((x) => tr(x.text)).join("\n- ") }), t("Gerar mesmo assim"), t("Revisar")))) return;
     }
     setLog([]);
     setLastBuild(null);
@@ -1100,26 +1101,26 @@ export default function MapStudio({ id }: { id: string }) {
       const data = encodeDelta(composed, relief3d.heights);
       if (data) full.height_delta = { size: relief3d.size, scale: 1 / 32, data };
     }
-    const r = await run(`map:${id}`, () => api.maptkBuild(full, id), (x) => `"${x.manifest.name}" gerado, verificado e ligado na biblioteca.`);
+    const r = await run(`map:${id}`, () => api.maptkBuild(full, id), (x) => t(`"{name}" gerado, verificado e ligado na biblioteca.`, { name: x.manifest.name }));
     if (!r) return;
     setLastBuild(r.result);
     setBuiltMod(r.manifest.id);
     await refreshMods();
-    if (play) await run("launch", () => api.launchGame(), "Abrindo o jogo com o mapa novo…");
+    if (play) await run("launch", () => api.launchGame(), t("Abrindo o jogo com o mapa novo…"));
   };
 
   const exportScd = async () => {
-    if (!builtMod) { toast("info", "Gere o mapa primeiro: o .scd sai do botão Gerar mapa."); return; }
+    if (!builtMod) { toast("info", t("Gere o mapa primeiro: o .scd sai do botão Gerar mapa.")); return; }
     const dir = await pickFile([], true);
     if (!dir) return;
     await run("export", async () => {
       try { return await api.modExportFiles(builtMod, dir); } catch (e) {
         const m = /EXISTE: (.*)/.exec(String(e));
         if (!m) throw e;
-        if (!(await confirmDialog(`Já existe nessa pasta: ${m[1]}\n\nSubstituir?`, "Substituir"))) throw new Error("Exportação cancelada: o arquivo existente foi mantido.");
+        if (!(await confirmDialog(t("Já existe nessa pasta: {file}\n\nSubstituir?", { file: m[1] }), t("Substituir")))) throw new Error(t("Exportação cancelada: o arquivo existente foi mantido."));
         return api.modExportFiles(builtMod, dir, true);
       }
-    }, (files) => `Mapa salvo em ${files[0] ?? dir}.`);
+    }, (files) => t("Mapa salvo em {path}.", { path: files[0] ?? dir }));
   };
 
   const selIds = [...sel].filter((s) => s !== "map");
@@ -1135,11 +1136,11 @@ export default function MapStudio({ id }: { id: string }) {
     const genMass = (wg.resources ?? "generated") === "generated";
     let replaceMass = true;
     if (genMass && edits.mass.length) {
-      replaceMass = await confirmDialog(`O mapa já tem ${edits.mass.length} ponto(s) de massa. Trocar pelos ${res.mass.length} pontos simétricos do gerador?\n\n(Cancelar mantém os seus e soma os novos.)`, "Trocar", "Manter os meus");
+      replaceMass = await confirmDialog(t("O mapa já tem {n} ponto(s) de massa. Trocar pelos {m} pontos simétricos do gerador?\n\n(Cancelar mantém os seus e soma os novos.)", { n: edits.mass.length, m: res.mass.length }), t("Trocar"), t("Manter os meus"));
     }
     // escultura feita no mundo anterior: num mundo novo ela cai em lugares aleatórios (afunda
     // decorações e entorta o chão da massa)
-    const dropSculpt = !!doc.sculpt && await confirmDialog("O relevo do mundo anterior foi esculpido com o pincel. Num mundo novo essas mudanças caem em lugares aleatórios e podem deixar árvores dentro d'água e massa em chão torto.\n\nApagar a escultura antiga?", "Apagar escultura", "Manter");
+    const dropSculpt = !!doc.sculpt && await confirmDialog(t("O relevo do mundo anterior foi esculpido com o pincel. Num mundo novo essas mudanças caem em lugares aleatórios e podem deixar árvores dentro d'água e massa em chão torto.\n\nApagar a escultura antiga?"), t("Apagar escultura"), t("Manter"));
     p.commit((d) => {
       const props = [...d.edits.props.filter((q) => !q.gen), ...res.props].slice(0, MAX_PROPS);
       const eco = wg.economy === "poor" ? { baseMass: 3, sites: 5, perSite: 2 } : wg.economy === "rich" ? { baseMass: 6, sites: 12, perSite: 4 } : { baseMass: 4, sites: 8, perSite: 3 };
@@ -1163,21 +1164,21 @@ export default function MapStudio({ id }: { id: string }) {
     setGenOpen(false);
     setSkin("relief");
     setSel(new Set(["map"]));
-    toast("ok", `Mundo gerado: ${res.features.filter((f) => f.kind !== "pad").length} formas, ${res.props.length} decorações, ${res.mass.length} pontos de massa e ${res.spawns.length} bases. Tudo pode ser editado.`);
+    toast("ok", t("Mundo gerado: {f} formas, {p} decorações, {m} pontos de massa e {b} bases. Tudo pode ser editado.", { f: res.features.filter((f) => f.kind !== "pad").length, p: res.props.length, m: res.mass.length, b: res.spawns.length }));
   };
   /** muda de onde vem o chão (em branco ⇄ mapa do jogo) */
   const changeBase = async (b: MapDoc["base"]) => {
     if (b === doc.base) return;
     if (b === "blank") {
       const size: BlankSize = BLANK_SIZES.reduce((a, b) => (Math.abs(b - grid) < Math.abs(a - grid) ? b : a), 1024);
-      if (!(await confirmDialog(`O chão vira um plano liso de ${size} × ${size}: o relevo, a água, as texturas e as decorações do mapa do jogo deixam de aparecer. O que você colocou (bases, massa, formas, decorações) fica.`, "Usar mapa em branco"))) return;
+      if (!(await confirmDialog(t("O chão vira um plano liso de {size} × {size}: o relevo, a água, as texturas e as decorações do mapa do jogo deixam de aparecer. O que você colocou (bases, massa, formas, decorações) fica.", { size }), t("Usar mapa em branco")))) return;
       const k = size / grid;
       p.commit((d) => ({ ...scaleDoc(d, k), base: "blank", terrain: blankTerrain(size), mapSize: size, clean: true, minimap: d.minimap === "donor" ? "natural" : d.minimap }));
       setSkin("relief");
       setExag(1);
     } else {
       p.commit((d) => ({ ...d, base: "game" }));
-      toast("info", "Escolha o mapa do jogo em Propriedades → Terreno base. O visual limpo continua ligado; desligue para ver o mapa original.");
+      toast("info", t("Escolha o mapa do jogo em Propriedades → Terreno base. O visual limpo continua ligado; desligue para ver o mapa original."));
     }
   };
   const changeBlankSize = async (size: BlankSize) => {
@@ -1185,13 +1186,13 @@ export default function MapStudio({ id }: { id: string }) {
     if (size === cur) return;
     const k = size / cur;
     const any = edits.spawns.length + edits.mass.length + edits.props.length + doc.features.length + edits.relief.length > 0;
-    const giant = size > 2048 ? ` Mapas acima de 2048 são experimentais (o jogo original vai até 2048) e demoram alguns minutos para gerar.` : "";
-    if ((any || giant) && !(await confirmDialog(`Mudar para ${size} × ${size} (${mapKm(size)} km)?${any ? " Bases, massa, formas e decorações acompanham na mesma proporção." : ""}${giant}`, "Mudar tamanho"))) return;
+    const giant = size > 2048 ? " " + t("Mapas acima de 2048 são experimentais (o jogo original vai até 2048) e demoram alguns minutos para gerar.") : "";
+    if ((any || giant) && !(await confirmDialog(`${t("Mudar para {size} × {size} ({km} km)?", { size, km: mapKm(size) })}${any ? " " + t("Bases, massa, formas e decorações acompanham na mesma proporção.") : ""}${giant}`, t("Mudar tamanho")))) return;
     p.commit((d) => ({ ...scaleDoc(d, k), terrain: blankTerrain(size), mapSize: size }));
   };
 
   const removeWorld = async () => {
-    if (!(await confirmDialog("Tirar o mundo gerado? Formas e decorações criadas pelo gerador saem; as que você colocou ficam.", "Tirar"))) return;
+    if (!(await confirmDialog(t("Tirar o mundo gerado? Formas e decorações criadas pelo gerador saem; as que você colocou ficam."), t("Tirar")))) return;
     p.commit((d) => ({ ...d, world: null, features: d.features.filter((f) => !f.gen), edits: { ...d.edits, props: d.edits.props.filter((q) => !q.gen) } }));
     if (!blank) setSkin("game");
   };
@@ -1263,22 +1264,22 @@ export default function MapStudio({ id }: { id: string }) {
     const count: Partial<Record<FeatureKind, number>> = {};
     const featNodes = doc.features.map((f) => {
       count[f.kind] = (count[f.kind] ?? 0) + 1;
-      return { id: `feat:${f.id}`, label: f.name || `${FEATURE_LABEL[f.kind]} ${count[f.kind]}`, icon: FEATURE_ICON[f.kind], color: FEATURE_COLOR[f.kind], detail: f.gen ? "gerada" : undefined, hidden: hidden.has(`feat:${f.id}`), locked: locked.has(`feat:${f.id}`) };
+      return { id: `feat:${f.id}`, label: f.name ? t(f.name) : `${t(FEATURE_LABEL[f.kind])} ${count[f.kind]}`, icon: FEATURE_ICON[f.kind], color: FEATURE_COLOR[f.kind], detail: f.gen ? t("gerada") : undefined, hidden: hidden.has(`feat:${f.id}`), locked: locked.has(`feat:${f.id}`) };
     });
     return [{
-      id: "map", label: doc.lobbyName || "Mapa", icon: "public", color: "#7bd88f", detail: baseName,
+      id: "map", label: doc.lobbyName || t("Mapa"), icon: "public", color: "#7bd88f", detail: baseName,
       children: [
-        ...(doc.world ? [{ id: "world", label: `Mundo gerado (semente ${doc.world.seed})`, icon: "auto_awesome", color: "#a3e635" }] : []),
-        grp("spawn", "Bases", "flag", "#5aa9e6", edits.spawns.map((q, i) => ({ id: `spawn:${i}`, label: `Base ${i + 1}`, icon: "flag", color: TEAM_COLORS[teamOf(i) % 8], detail: `${Math.round(q[0])}, ${Math.round(q[1])}` }))),
-        grp("mass", "Massa", "diamond", "#7bd88f", edits.mass.map((q, i) => ({ id: `mass:${i}`, label: `Massa ${i + 1}`, icon: "diamond", color: "#7bd88f", detail: `${Math.round(q[0])}, ${Math.round(q[1])}` }))),
-        grp("feat", "Formas do terreno", "landscape", "#b08a62", featNodes),
-        ...(doc.sculpt ? [{ id: "grp:sculpt", label: "Pincel de escultura", icon: "brush", color: "#e3a857", hidden: hidden.has("grp:sculpt") }] : []),
-        grp("relief", "Relevo simples", "terrain", "#e3a857", edits.relief.map((r, i) => ({ id: `relief:${i}`, label: RELIEF_LABEL[r.kind], icon: RELIEF_ICON[r.kind], color: RELIEF_COLOR[r.kind] }))),
-        grp("bridge", "Passagens na água", "route", "#f2b33d", edits.bridges.map((_, i) => ({ id: `bridge:${i}`, label: `Passagem ${i + 1}`, icon: "route", color: "#f2b33d" }))),
-        grp("prop", "Decorações novas", "park", "#4f9a46", edits.props.slice(0, 2000).map((q, i) => ({ id: `prop:${i}`, label: nice(q.bp), icon: decorKind(q.bp) === "tree" ? "park" : decorKind(q.bp) === "rock" ? "landslide" : "domain", color: q.bp.includes("/cp/") ? "#5aa9e6" : "#7fae6b", detail: q.gen ? "gerada" : `${Math.round(q.x)}, ${Math.round(q.z)}` }))),
-        grp("cut", "Decorações retiradas", "content_cut", "#e5534b", edits.cuts.map((c, i) => ({ id: `cut:${i}`, label: `Área ${i + 1}`, icon: "content_cut", color: "#e5534b", detail: `r ${Math.round(c[2])}` }))),
-        ...(edits.seed ? [{ id: "seed", label: "Ponto de partida", icon: "my_location", color: "#fff" }] : []),
-        { id: "grp:reskin", label: "Texturas trocadas", icon: "format_paint", color: "#c78bff", detail: String(Object.keys(edits.reskin).length), children: Object.entries(edits.reskin).map(([k, v]) => ({ id: `reskin:${k}`, label: `${k.split("_").slice(-2, -1)[0] ?? "camada"} → ${v.name}`, icon: "format_paint", color: "#c78bff" })) },
+        ...(doc.world ? [{ id: "world", label: t("Mundo gerado (semente {seed})", { seed: doc.world.seed }), icon: "auto_awesome", color: "#a3e635" }] : []),
+        grp("spawn", t("Bases"), "flag", "#5aa9e6", edits.spawns.map((q, i) => ({ id: `spawn:${i}`, label: t("Base {n}", { n: i + 1 }), icon: "flag", color: TEAM_COLORS[teamOf(i) % 8], detail: `${Math.round(q[0])}, ${Math.round(q[1])}` }))),
+        grp("mass", t("Massa"), "diamond", "#7bd88f", edits.mass.map((q, i) => ({ id: `mass:${i}`, label: t("Massa {n}", { n: i + 1 }), icon: "diamond", color: "#7bd88f", detail: `${Math.round(q[0])}, ${Math.round(q[1])}` }))),
+        grp("feat", t("Formas do terreno"), "landscape", "#b08a62", featNodes),
+        ...(doc.sculpt ? [{ id: "grp:sculpt", label: t("Pincel de escultura"), icon: "brush", color: "#e3a857", hidden: hidden.has("grp:sculpt") }] : []),
+        grp("relief", t("Relevo simples"), "terrain", "#e3a857", edits.relief.map((r, i) => ({ id: `relief:${i}`, label: t(RELIEF_LABEL[r.kind]), icon: RELIEF_ICON[r.kind], color: RELIEF_COLOR[r.kind] }))),
+        grp("bridge", t("Passagens na água"), "route", "#f2b33d", edits.bridges.map((_, i) => ({ id: `bridge:${i}`, label: t("Passagem {n}", { n: i + 1 }), icon: "route", color: "#f2b33d" }))),
+        grp("prop", t("Decorações novas"), "park", "#4f9a46", edits.props.slice(0, 2000).map((q, i) => ({ id: `prop:${i}`, label: nice(q.bp), icon: decorKind(q.bp) === "tree" ? "park" : decorKind(q.bp) === "rock" ? "landslide" : "domain", color: q.bp.includes("/cp/") ? "#5aa9e6" : "#7fae6b", detail: q.gen ? t("gerada") : `${Math.round(q.x)}, ${Math.round(q.z)}` }))),
+        grp("cut", t("Decorações retiradas"), "content_cut", "#e5534b", edits.cuts.map((c, i) => ({ id: `cut:${i}`, label: t("Área {n}", { n: i + 1 }), icon: "content_cut", color: "#e5534b", detail: `r ${Math.round(c[2])}` }))),
+        ...(edits.seed ? [{ id: "seed", label: t("Ponto de partida"), icon: "my_location", color: "#fff" }] : []),
+        { id: "grp:reskin", label: t("Texturas trocadas"), icon: "format_paint", color: "#c78bff", detail: String(Object.keys(edits.reskin).length), children: Object.entries(edits.reskin).map(([k, v]) => ({ id: `reskin:${k}`, label: `${k.split("_").slice(-2, -1)[0] ?? t("camada")} → ${v.name}`, icon: "format_paint", color: "#c78bff" })) },
       ],
     }];
   }, [edits, doc.lobbyName, doc.terrain, doc.world, doc.features, doc.sculpt, terrain, hidden, locked, teamOf]);
@@ -1300,85 +1301,85 @@ export default function MapStudio({ id }: { id: string }) {
     const one = selIds.length === 1 ? selIds[0] : null;
     const setPt = (k: "spawns" | "mass", i: number, q: Pt) => setEdits((e) => ({ ...e, [k]: e[k].map((v, j) => (j === i ? q : v)) }));
     if (sel.has("map") || !selIds.length) {
-      sections.push({ title: "Mapa", props: [
-        { kind: "text", label: "Nome no lobby", value: doc.lobbyName, onChange: (v) => setDoc((d) => ({ ...d, lobbyName: v.slice(0, 48) })), hint: `Aparece como "${lobbyName}". Id: ${scenarioId}` },
-        { kind: "select", label: "Começar de", value: doc.base, onChange: (v) => void changeBase(v as MapDoc["base"]), options: [{ value: "blank", label: "Mapa em branco (grama lisa)" }, { value: "game", label: "Um mapa do jogo" }] },
+      sections.push({ title: t("Mapa"), props: [
+        { kind: "text", label: t("Nome no lobby"), value: doc.lobbyName, onChange: (v) => setDoc((d) => ({ ...d, lobbyName: v.slice(0, 48) })), hint: t(`Aparece como "{name}". Id: {id}`, { name: lobbyName, id: scenarioId }) },
+        { kind: "select", label: t("Começar de"), value: doc.base, onChange: (v) => void changeBase(v as MapDoc["base"]), options: [{ value: "blank", label: t("Mapa em branco (grama lisa)") }, { value: "game", label: t("Um mapa do jogo") }] },
         blank
-          ? { kind: "select", label: "Tamanho", value: String(blankSize ?? 1024), onChange: (v) => void changeBlankSize(Number(v) as BlankSize), options: BLANK_SIZES.map((k) => ({ value: String(k), label: `${blankLabel(k)}${k > 2048 ? " · experimental" : ""}` })), hint: "De 512 a 4096 (80 km). O jogo original vai até 2048; maiores são experimentais, pesam mais e demoram alguns minutos para gerar." }
-          : { kind: "select", label: "Terreno base", value: doc.terrain ?? "", onChange: (v) => setDoc((d) => ({ ...d, terrain: v || null })), options: [{ value: "", label: "— escolha —" }, ...(terrains ?? []).map((t) => ({ value: t.id, label: `${t.name ?? t.id}${t.kind === "campaign" ? " (campanha)" : ""}${t.waterY ? " · água" : ""}` }))] },
-        { kind: "select", label: "Times", value: doc.teams, onChange: (v) => setDoc((d) => ({ ...d, teams: v as MapDoc["teams"] })), options: TEAM_OPTIONS, hint: "Só para conferir o equilíbrio do mapa: na hora de jogar você escolhe os times." },
-        { kind: "select", label: "Simetria ao colocar", value: doc.symmetry, onChange: (v) => setDoc((d) => ({ ...d, symmetry: v as Symmetry })), options: (Object.keys(SYMMETRY_LABEL) as Symmetry[]).map((k) => ({ value: k, label: SYMMETRY_LABEL[k] })), hint: "Bases, massa, decorações, formas e pinceladas são repetidas nos outros lados." },
-        { kind: "number", label: "Raio sem ataque inicial", value: doc.norush, min: 0, max: 200, onChange: (v) => setDoc((d) => ({ ...d, norush: v })) },
-        { kind: "select", label: "Minimapa do lobby", value: doc.minimap, onChange: (v) => setDoc((d) => ({ ...d, minimap: v as MapDoc["minimap"] })), options: [{ value: "donor", label: "Original do terreno" }, { value: "natural", label: "Gerar: cores do relevo" }, { value: "desert", label: "Gerar: deserto" }, { value: "snow", label: "Gerar: neve" }, { value: "dark", label: "Gerar: rocha escura" }] },
+          ? { kind: "select", label: t("Tamanho"), value: String(blankSize ?? 1024), onChange: (v) => void changeBlankSize(Number(v) as BlankSize), options: BLANK_SIZES.map((k) => ({ value: String(k), label: `${tr(blankLabel(k))}${k > 2048 ? t(" · experimental") : ""}` })), hint: t("De 512 a 4096 (80 km). O jogo original vai até 2048; maiores são experimentais, pesam mais e demoram alguns minutos para gerar.") }
+          : { kind: "select", label: t("Terreno base"), value: doc.terrain ?? "", onChange: (v) => setDoc((d) => ({ ...d, terrain: v || null })), options: [{ value: "", label: t("— escolha —") }, ...(terrains ?? []).map((tn) => ({ value: tn.id, label: `${tn.name ?? tn.id}${tn.kind === "campaign" ? t(" (campanha)") : ""}${tn.waterY ? t(" · água") : ""}` }))] },
+        { kind: "select", label: t("Times"), value: doc.teams, onChange: (v) => setDoc((d) => ({ ...d, teams: v as MapDoc["teams"] })), options: TEAM_OPTIONS.map((o) => ({ ...o, label: t(o.label) })), hint: t("Só para conferir o equilíbrio do mapa: na hora de jogar você escolhe os times.") },
+        { kind: "select", label: t("Simetria ao colocar"), value: doc.symmetry, onChange: (v) => setDoc((d) => ({ ...d, symmetry: v as Symmetry })), options: (Object.keys(SYMMETRY_LABEL) as Symmetry[]).map((k) => ({ value: k, label: t(SYMMETRY_LABEL[k]) })), hint: t("Bases, massa, decorações, formas e pinceladas são repetidas nos outros lados.") },
+        { kind: "number", label: t("Raio sem ataque inicial"), value: doc.norush, min: 0, max: 200, onChange: (v) => setDoc((d) => ({ ...d, norush: v })) },
+        { kind: "select", label: t("Minimapa do lobby"), value: doc.minimap, onChange: (v) => setDoc((d) => ({ ...d, minimap: v as MapDoc["minimap"] })), options: [{ value: "donor", label: t("Original do terreno") }, { value: "natural", label: t("Gerar: cores do relevo") }, { value: "desert", label: t("Gerar: deserto") }, { value: "snow", label: t("Gerar: neve") }, { value: "dark", label: t("Gerar: rocha escura") }] },
         { kind: "custom", label: "", node: <button className="btn sm" onClick={() => setLobbyOpen(true)}><Icon name="preview" size={16} /> Prévia do lobby</button> },
       ] });
-      sections.push({ title: "Chão e visual", props: [
+      sections.push({ title: t("Chão e visual"), props: [
         blank
-          ? { kind: "info", label: "Visual", value: "limpo: chão do bioma e luz refeita" }
-          : { kind: "toggle", label: "Visual limpo", value: doc.clean, onChange: (v) => setDoc((d) => ({ ...d, clean: v })), hint: "O chão inteiro ganha as texturas do bioma, a luz e as sombras são refeitas para o relevo novo e as decorações originais saem. Sem isso, o desenho do mapa original aparece por baixo." },
-        { kind: "select", label: "Céu", value: doc.sky ?? "", onChange: (v: string) => setDoc((d) => ({ ...d, sky: v || null })),
-          options: [{ value: "", label: "O do terreno base" }, ...skies.map((x) => ({ value: x.map, label: skyLabel(x) }))],
-          hint: skies.length ? "Caixa do céu, reflexo e cores de outro mapa do jogo." : "Os céus aparecem depois que o catálogo do jogo carregar." } as Prop,
+          ? { kind: "info", label: t("Visual"), value: t("limpo: chão do bioma e luz refeita") }
+          : { kind: "toggle", label: t("Visual limpo"), value: doc.clean, onChange: (v) => setDoc((d) => ({ ...d, clean: v })), hint: t("O chão inteiro ganha as texturas do bioma, a luz e as sombras são refeitas para o relevo novo e as decorações originais saem. Sem isso, o desenho do mapa original aparece por baixo.") },
+        { kind: "select", label: t("Céu"), value: doc.sky ?? "", onChange: (v: string) => setDoc((d) => ({ ...d, sky: v || null })),
+          options: [{ value: "", label: t("O do terreno base") }, ...skies.map((x) => ({ value: x.map, label: skyLabel(x) }))],
+          hint: skies.length ? t("Caixa do céu, reflexo e cores de outro mapa do jogo.") : t("Os céus aparecem depois que o catálogo do jogo carregar.") } as Prop,
         ...(doc.clean ? [
-          { kind: "select", label: "Bioma do chão", value: doc.groundBiome, onChange: (v: string) => setDoc((d) => ({ ...d, groundBiome: v as GroundBiome, groundRoles: {}, groundTex: null })), options: (Object.keys(BIOME_LABEL) as GroundBiome[]).map((k) => ({ value: k, label: BIOME_LABEL[k] })) } as Prop,
-          { kind: "info", label: "Texturas", value: chain.filter(Boolean).length ? `${chain.filter(Boolean).length} (praia, chão, terra, rocha, topo)` : "carregando…" } as Prop,
-          { kind: "toggle", label: "Neve no alto", value: doc.peaks !== false, onChange: (v: boolean) => setDoc((d) => ({ ...d, peaks: v })), hint: "Pontos mais altos com a textura de topo do bioma (neve na grama). Desligue em mapas de plataformas." } as Prop,
-          { kind: "select", label: "Paisagem em volta", value: doc.ring === false ? "off" : String(doc.ringRise ?? 95), onChange: (v: string) => setDoc((d) => (v === "off" ? { ...d, ring: false } : { ...d, ring: true, ringRise: Number(v) })),
-            options: [{ value: "95", label: "Montanhas" }, { value: "40", label: "Morros baixos" }, { value: "0", label: "Abismo (o chão continua lá embaixo)" }, { value: "off", label: "Nenhuma" }],
-            hint: "O que aparece além da borda do mapa, com as texturas do bioma." } as Prop,
+          { kind: "select", label: t("Bioma do chão"), value: doc.groundBiome, onChange: (v: string) => setDoc((d) => ({ ...d, groundBiome: v as GroundBiome, groundRoles: {}, groundTex: null })), options: (Object.keys(BIOME_LABEL) as GroundBiome[]).map((k) => ({ value: k, label: t(BIOME_LABEL[k]) })) } as Prop,
+          { kind: "info", label: t("Texturas"), value: chain.filter(Boolean).length ? t("{n} (praia, chão, terra, rocha, topo)", { n: chain.filter(Boolean).length }) : t("carregando…") } as Prop,
+          { kind: "toggle", label: t("Neve no alto"), value: doc.peaks !== false, onChange: (v: boolean) => setDoc((d) => ({ ...d, peaks: v })), hint: t("Pontos mais altos com a textura de topo do bioma (neve na grama). Desligue em mapas de plataformas.") } as Prop,
+          { kind: "select", label: t("Paisagem em volta"), value: doc.ring === false ? "off" : String(doc.ringRise ?? 95), onChange: (v: string) => setDoc((d) => (v === "off" ? { ...d, ring: false } : { ...d, ring: true, ringRise: Number(v) })),
+            options: [{ value: "95", label: t("Montanhas") }, { value: "40", label: t("Morros baixos") }, { value: "0", label: t("Abismo (o chão continua lá embaixo)") }, { value: "off", label: t("Nenhuma") }],
+            hint: t("O que aparece além da borda do mapa, com as texturas do bioma.") } as Prop,
           { kind: "custom", label: "", node: <button className="btn sm" onClick={() => { setTool("paint"); setLeft("ground"); }}><Icon name="brush" size={16} /> Pincel de textura</button> } as Prop,
         ] : []),
       ] });
-      sections.push({ title: "Gerador de mundo", props: doc.world ? [
-        { kind: "info", label: "Estilo", value: `${WORLD_PRESETS.find((x) => x.id === doc.world!.preset)?.label ?? doc.world.preset} · ${BIOME_LABEL[doc.world.biome]}` },
-        { kind: "info", label: "Semente", value: String(doc.world.seed) },
-        { kind: "custom", label: "", node: <span className="row" style={{ gap: 6, flexWrap: "wrap" }}><button className="btn sm" onClick={() => setGenOpen(true)}><Icon name="auto_awesome" size={16} /> Gerar de novo</button><button className="btn sm text" onClick={() => void removeWorld()}><Icon name="layers_clear" size={16} /> Tirar</button></span> },
+      sections.push({ title: t("Gerador de mundo"), props: doc.world ? [
+        { kind: "info", label: t("Estilo"), value: `${t(WORLD_PRESETS.find((x) => x.id === doc.world!.preset)?.label ?? doc.world.preset)} · ${t(BIOME_LABEL[doc.world.biome])}` },
+        { kind: "info", label: t("Semente"), value: String(doc.world.seed) },
+        { kind: "custom", label: "", node: <span className="row" style={{ gap: 6, flexWrap: "wrap" }}><button className="btn sm" onClick={() => setGenOpen(true)}><Icon name="auto_awesome" size={16} /> {t("Gerar de novo")}</button><button className="btn sm text" onClick={() => void removeWorld()}><Icon name="layers_clear" size={16} /> {t("Tirar")}</button></span> },
       ] : [
-        { kind: "custom", label: "", node: <button className="btn sm primary" disabled={!relief3d} onClick={() => setGenOpen(true)}><Icon name="auto_awesome" size={16} /> Gerar mundo</button> },
-        { kind: "info", label: "", value: "Relevo, montanhas, lagos, rios, florestas e estruturas, editáveis depois." },
+        { kind: "custom", label: "", node: <button className="btn sm primary" disabled={!relief3d} onClick={() => setGenOpen(true)}><Icon name="auto_awesome" size={16} /> {t("Gerar mundo")}</button> },
+        { kind: "info", label: "", value: t("Relevo, montanhas, lagos, rios, florestas e estruturas, editáveis depois.") },
       ] });
-      sections.push({ title: "Economia", props: [
-        { kind: "number", label: "Massa na base", value: doc.economy.baseMass, min: 0, max: 8, onChange: (v) => setDoc((d) => ({ ...d, economy: { ...d.economy, baseMass: v } })) },
-        { kind: "number", label: "Expansões", value: doc.economy.sites, min: 0, max: 20, onChange: (v) => setDoc((d) => ({ ...d, economy: { ...d.economy, sites: v } })) },
-        { kind: "number", label: "Massa por expansão", value: doc.economy.perSite, min: 1, max: 6, onChange: (v) => setDoc((d) => ({ ...d, economy: { ...d.economy, perSite: v } })) },
-        { kind: "info", label: "Massa manual", value: `${edits.mass.length} ponto(s)` },
+      sections.push({ title: t("Economia"), props: [
+        { kind: "number", label: t("Massa na base"), value: doc.economy.baseMass, min: 0, max: 8, onChange: (v) => setDoc((d) => ({ ...d, economy: { ...d.economy, baseMass: v } })) },
+        { kind: "number", label: t("Expansões"), value: doc.economy.sites, min: 0, max: 20, onChange: (v) => setDoc((d) => ({ ...d, economy: { ...d.economy, sites: v } })) },
+        { kind: "number", label: t("Massa por expansão"), value: doc.economy.perSite, min: 1, max: 6, onChange: (v) => setDoc((d) => ({ ...d, economy: { ...d.economy, perSite: v } })) },
+        { kind: "info", label: t("Massa manual"), value: t("{n} ponto(s)", { n: edits.mass.length }) },
       ] });
-      sections.push({ title: "Terreno e navegação", props: [
-        { kind: "toggle", label: "Borda rochosa", value: doc.rugged, onChange: (v) => setDoc((d) => ({ ...d, rugged: v })), hint: "Fecha o mapa com uma faixa de rochas intransponível." },
-        { kind: "toggle", label: "Aplainar para construir", value: doc.smooth, onChange: (v) => setDoc((d) => ({ ...d, smooth: v })) },
-        { kind: "toggle", label: "Abrir terreno (refazer navegação)", value: usePatch, onChange: (v) => setDoc((d) => ({ ...d, patch: v })), hint: editsTerrain ? "Ligado sozinho: o relevo mudou." : "Obrigatório em mapas de campanha." },
+      sections.push({ title: t("Terreno e navegação"), props: [
+        { kind: "toggle", label: t("Borda rochosa"), value: doc.rugged, onChange: (v) => setDoc((d) => ({ ...d, rugged: v })), hint: t("Fecha o mapa com uma faixa de rochas intransponível.") },
+        { kind: "toggle", label: t("Aplainar para construir"), value: doc.smooth, onChange: (v) => setDoc((d) => ({ ...d, smooth: v })) },
+        { kind: "toggle", label: t("Abrir terreno (refazer navegação)"), value: usePatch, onChange: (v) => setDoc((d) => ({ ...d, patch: v })), hint: editsTerrain ? t("Ligado sozinho: o relevo mudou.") : t("Obrigatório em mapas de campanha.") },
         ...(usePatch ? [
-          { kind: "number", label: "Inclinação máxima", value: doc.maxSlope, step: 0.5, min: 1, max: 20, onChange: (v: number) => setDoc((d) => ({ ...d, maxSlope: v })) } as Prop,
-          { kind: "number", label: "Margem da água", value: doc.waterMargin, step: 0.5, min: 0, max: 20, onChange: (v: number) => setDoc((d) => ({ ...d, waterMargin: v })) } as Prop,
-          { kind: "select", label: "Objetos animados", value: doc.strip, onChange: (v: string) => setDoc((d) => ({ ...d, strip: v as MapDoc["strip"] })), options: [{ value: "moving", label: "Parar os que se movem" }, { value: "all", label: "Remover todos" }, { value: "none", label: "Manter" }] } as Prop,
+          { kind: "number", label: t("Inclinação máxima"), value: doc.maxSlope, step: 0.5, min: 1, max: 20, onChange: (v: number) => setDoc((d) => ({ ...d, maxSlope: v })) } as Prop,
+          { kind: "number", label: t("Margem da água"), value: doc.waterMargin, step: 0.5, min: 0, max: 20, onChange: (v: number) => setDoc((d) => ({ ...d, waterMargin: v })) } as Prop,
+          { kind: "select", label: t("Objetos animados"), value: doc.strip, onChange: (v: string) => setDoc((d) => ({ ...d, strip: v as MapDoc["strip"] })), options: [{ value: "moving", label: t("Parar os que se movem") }, { value: "all", label: t("Remover todos") }, { value: "none", label: t("Manter") }] } as Prop,
         ] : []),
-        { kind: "info", label: "Água", value: hasWater ? `nível ${round1(water)}${waterNew ? " · lagos e rios novos (experimental)" : ""}` : "este terreno não tem água" },
+        { kind: "info", label: t("Água"), value: hasWater ? `${t("nível {n}", { n: round1(water) })}${waterNew ? t(" · lagos e rios novos (experimental)") : ""}` : t("este terreno não tem água") },
       ] });
-      sections.push({ title: "Anotações", props: [{ kind: "text", label: "Notas do projeto", value: doc.notes, multiline: true, onChange: (v) => setDoc((d) => ({ ...d, notes: v })) }] });
+      sections.push({ title: t("Anotações"), props: [{ kind: "text", label: t("Notas do projeto"), value: doc.notes, multiline: true, onChange: (v) => setDoc((d) => ({ ...d, notes: v })) }] });
       return sections;
     }
     if (one) {
       const [k, iS] = one.split(":");
       const i = Number(iS);
-      if (k === "spawn" && edits.spawns[i]) sections.push({ title: `Base ${i + 1}`, props: [
+      if (k === "spawn" && edits.spawns[i]) sections.push({ title: t("Base {n}", { n: i + 1 }), props: [
         { kind: "number", label: "X", value: edits.spawns[i][0], min: 0, max: grid, onChange: (v) => setPt("spawns", i, [v, edits.spawns[i][1]]) },
         { kind: "number", label: "Z", value: edits.spawns[i][1], min: 0, max: grid, onChange: (v) => setPt("spawns", i, [edits.spawns[i][0], v]) },
-        { kind: "info", label: "Time", value: doc.teams === "ffa" ? "sozinho" : `time ${teamOf(i) + 1} (na conferência)` },
-        { kind: "info", label: "Altura do chão", value: round1(hAt(edits.spawns[i])) },
+        { kind: "info", label: t("Time"), value: doc.teams === "ffa" ? t("sozinho") : t("time {n} (na conferência)", { n: teamOf(i) + 1 }) },
+        { kind: "info", label: t("Altura do chão"), value: round1(hAt(edits.spawns[i])) },
       ] });
-      if (k === "mass" && edits.mass[i]) sections.push({ title: `Massa ${i + 1}`, props: [
+      if (k === "mass" && edits.mass[i]) sections.push({ title: t("Massa {n}", { n: i + 1 }), props: [
         { kind: "number", label: "X", value: edits.mass[i][0], min: 0, max: grid, onChange: (v) => setPt("mass", i, [v, edits.mass[i][1]]) },
         { kind: "number", label: "Z", value: edits.mass[i][1], min: 0, max: grid, onChange: (v) => setPt("mass", i, [edits.mass[i][0], v]) },
       ] });
       if (k === "prop" && edits.props[i]) {
         const q = edits.props[i];
         const setQ = (patch: Partial<PlacedProp>) => setEdits((e) => ({ ...e, props: e.props.map((v, j) => (j === i ? { ...v, ...patch } : v)) }));
-        sections.push({ title: "Decoração", props: [
-          { kind: "info", label: "Modelo", value: q.bp.split("/").pop() },
+        sections.push({ title: t("Decoração"), props: [
+          { kind: "info", label: t("Modelo"), value: q.bp.split("/").pop() },
           { kind: "number", label: "X", value: q.x, min: 0, max: grid, onChange: (v) => setQ({ x: v }) },
           { kind: "number", label: "Z", value: q.z, min: 0, max: grid, onChange: (v) => setQ({ z: v }) },
-          { kind: "slider", label: "Giro", value: q.yaw, min: 0, max: 359, unit: "°", onChange: (v) => setQ({ yaw: v }) },
-          { kind: "number", label: "Escala", value: q.scale, step: 0.05, min: 0.2, max: 5, onChange: (v) => setQ({ scale: v }) },
+          { kind: "slider", label: t("Giro"), value: q.yaw, min: 0, max: 359, unit: "°", onChange: (v) => setQ({ yaw: v }) },
+          { kind: "number", label: t("Escala"), value: q.scale, step: 0.05, min: 0.2, max: 5, onChange: (v) => setQ({ scale: v }) },
         ] });
       }
       if (k === "feat") {
@@ -1388,85 +1389,85 @@ export default function MapStudio({ id }: { id: string }) {
           const isLine = LINE_FEATURES.includes(f.kind);
           const depth = f.kind === "lake" || f.kind === "river" || f.kind === "canyon" || f.kind === "crater";
           const fields: Prop[] = [
-            { kind: "text", label: "Nome", value: f.name ?? "", placeholder: FEATURE_LABEL[f.kind], onChange: (v) => setF({ name: v.slice(0, 40) || undefined }) },
-            { kind: "select", label: "Tipo", value: f.kind, onChange: (v) => setF({ kind: v as FeatureKind }), options: (Object.keys(FEATURE_LABEL) as FeatureKind[]).filter((x) => LINE_FEATURES.includes(x) === isLine).map((x) => ({ value: x, label: FEATURE_LABEL[x] })) },
+            { kind: "text", label: t("Nome"), value: f.name ?? "", placeholder: t(FEATURE_LABEL[f.kind]), onChange: (v) => setF({ name: v.slice(0, 40) || undefined }) },
+            { kind: "select", label: t("Tipo"), value: f.kind, onChange: (v) => setF({ kind: v as FeatureKind }), options: (Object.keys(FEATURE_LABEL) as FeatureKind[]).filter((x) => LINE_FEATURES.includes(x) === isLine).map((x) => ({ value: x, label: t(FEATURE_LABEL[x]) })) },
           ];
           if (!isLine) fields.push(
-            { kind: "number", label: "Centro X", value: f.pts[0][0], min: 0, max: grid, onChange: (v) => setF({ pts: [[v, f.pts[0][1]]] }) },
-            { kind: "number", label: "Centro Z", value: f.pts[0][1], min: 0, max: grid, onChange: (v) => setF({ pts: [[f.pts[0][0], v]] }) },
+            { kind: "number", label: t("Centro X"), value: f.pts[0][0], min: 0, max: grid, onChange: (v) => setF({ pts: [[v, f.pts[0][1]]] }) },
+            { kind: "number", label: t("Centro Z"), value: f.pts[0][1], min: 0, max: grid, onChange: (v) => setF({ pts: [[f.pts[0][0], v]] }) },
           );
-          else fields.push({ kind: "info", label: "Linha", value: `${f.pts.length} pontos, ${Math.round(f.pts.slice(1).reduce((a, q, k2) => a + Math.hypot(q[0] - f.pts[k2][0], q[1] - f.pts[k2][1]), 0))} de comprimento` });
-          fields.push({ kind: "slider", label: isLine ? "Largura" : "Raio", value: f.r, min: isLine ? 6 : 15, max: isLine ? 120 : 320, onChange: (v) => setF({ r: v }) });
-          if (f.kind !== "pad" && f.kind !== "pass") fields.push({ kind: "slider", label: depth ? "Profundidade" : "Altura", value: f.h, min: 1, max: depth ? 60 : 160, onChange: (v) => setF({ h: v }) });
+          else fields.push({ kind: "info", label: t("Linha"), value: t("{n} pontos, {len} de comprimento", { n: f.pts.length, len: Math.round(f.pts.slice(1).reduce((a, q, k2) => a + Math.hypot(q[0] - f.pts[k2][0], q[1] - f.pts[k2][1]), 0)) }) });
+          fields.push({ kind: "slider", label: isLine ? t("Largura") : t("Raio"), value: f.r, min: isLine ? 6 : 15, max: isLine ? 120 : 320, onChange: (v) => setF({ r: v }) });
+          if (f.kind !== "pad" && f.kind !== "pass") fields.push({ kind: "slider", label: depth ? t("Profundidade") : t("Altura"), value: f.h, min: 1, max: depth ? 60 : 160, onChange: (v) => setF({ h: v }) });
           fields.push(
-            { kind: "slider", label: "Irregularidade", value: Math.round(f.rough * 100), min: 0, max: 100, unit: "%", onChange: (v) => setF({ rough: v / 100 }) },
-            { kind: "custom", label: "Forma", node: <button className="btn sm" onClick={() => setF({ seed: Math.floor(Math.random() * 1e6) })}><Icon name="casino" size={16} /> Variar</button> },
+            { kind: "slider", label: t("Irregularidade"), value: Math.round(f.rough * 100), min: 0, max: 100, unit: "%", onChange: (v) => setF({ rough: v / 100 }) },
+            { kind: "custom", label: t("Forma"), node: <button className="btn sm" onClick={() => setF({ seed: Math.floor(Math.random() * 1e6) })}><Icon name="casino" size={16} /> {t("Variar")}</button> },
           );
-          if ((f.kind === "lake" || f.kind === "river") && !hasWater) fields.push({ kind: "info", label: "Água", value: "Este terreno não tem água: vira um vale seco." });
-          if (f.gen) fields.push({ kind: "info", label: "", value: "Criada pelo gerador. Ao mudar algo ela passa a ser sua (fica ao gerar de novo)." });
-          sections.push({ title: FEATURE_LABEL[f.kind], props: fields });
+          if ((f.kind === "lake" || f.kind === "river") && !hasWater) fields.push({ kind: "info", label: t("Água"), value: t("Este terreno não tem água: vira um vale seco.") });
+          if (f.gen) fields.push({ kind: "info", label: "", value: t("Criada pelo gerador. Ao mudar algo ela passa a ser sua (fica ao gerar de novo).") });
+          sections.push({ title: t(FEATURE_LABEL[f.kind]), props: fields });
         }
       }
       if (k === "relief" && edits.relief[i]) {
         const r = edits.relief[i];
         const op = r.op;
         const setOp = (fn: (o: typeof op) => typeof op) => setEdits((e) => ({ ...e, relief: e.relief.map((v, j) => (j === i ? { ...v, op: fn([...v.op] as typeof op) } : v)) }));
-        const fields: Prop[] = [{ kind: "info", label: "Tipo", value: RELIEF_LABEL[r.kind] }];
+        const fields: Prop[] = [{ kind: "info", label: t("Tipo"), value: t(RELIEF_LABEL[r.kind]) }];
         if (op[0] === "disc" || op[0] === "cone") {
           fields.push(
-            { kind: "number", label: "Centro X", value: op[1], min: 0, max: grid, onChange: (v) => setOp((o) => { o[1] = v; return o; }) },
-            { kind: "number", label: "Centro Z", value: op[2], min: 0, max: grid, onChange: (v) => setOp((o) => { o[2] = v; return o; }) },
-            { kind: "number", label: "Raio", value: op[3], min: 4, max: 400, onChange: (v) => setOp((o) => { o[3] = v; return o; }) },
-            { kind: "number", label: "Altura alvo", value: op[4], step: 0.5, min: 0, max: 512, onChange: (v) => setOp((o) => { o[4] = v; return o; }) },
+            { kind: "number", label: t("Centro X"), value: op[1], min: 0, max: grid, onChange: (v) => setOp((o) => { o[1] = v; return o; }) },
+            { kind: "number", label: t("Centro Z"), value: op[2], min: 0, max: grid, onChange: (v) => setOp((o) => { o[2] = v; return o; }) },
+            { kind: "number", label: t("Raio"), value: op[3], min: 4, max: 400, onChange: (v) => setOp((o) => { o[3] = v; return o; }) },
+            { kind: "number", label: t("Altura alvo"), value: op[4], step: 0.5, min: 0, max: 512, onChange: (v) => setOp((o) => { o[4] = v; return o; }) },
           );
         } else {
           fields.push(
-            { kind: "number", label: "X inicial", value: op[1], min: 0, max: grid, onChange: (v) => setOp((o) => { o[1] = v; return o; }) },
-            { kind: "number", label: "Z inicial", value: op[2], min: 0, max: grid, onChange: (v) => setOp((o) => { o[2] = v; return o; }) },
-            { kind: "number", label: "X final", value: op[3], min: 0, max: grid, onChange: (v) => setOp((o) => { o[3] = v; return o; }) },
-            { kind: "number", label: "Z final", value: op[4], min: 0, max: grid, onChange: (v) => setOp((o) => { o[4] = v; return o; }) },
+            { kind: "number", label: t("X inicial"), value: op[1], min: 0, max: grid, onChange: (v) => setOp((o) => { o[1] = v; return o; }) },
+            { kind: "number", label: t("Z inicial"), value: op[2], min: 0, max: grid, onChange: (v) => setOp((o) => { o[2] = v; return o; }) },
+            { kind: "number", label: t("X final"), value: op[3], min: 0, max: grid, onChange: (v) => setOp((o) => { o[3] = v; return o; }) },
+            { kind: "number", label: t("Z final"), value: op[4], min: 0, max: grid, onChange: (v) => setOp((o) => { o[4] = v; return o; }) },
           );
         }
-        sections.push({ title: "Relevo", props: fields });
+        sections.push({ title: t("Relevo"), props: fields });
       }
       if (k === "cut" && edits.cuts[i]) {
         const c = edits.cuts[i];
         const setC = (n: [number, number, number]) => setEdits((e) => ({ ...e, cuts: e.cuts.map((v, j) => (j === i ? n : v)) }));
-        sections.push({ title: "Área sem decorações", props: [
+        sections.push({ title: t("Área sem decorações"), props: [
           { kind: "number", label: "X", value: c[0], min: 0, max: grid, onChange: (v) => setC([v, c[1], c[2]]) },
           { kind: "number", label: "Z", value: c[1], min: 0, max: grid, onChange: (v) => setC([c[0], v, c[2]]) },
-          { kind: "number", label: "Raio", value: c[2], min: 1, max: 300, onChange: (v) => setC([c[0], c[1], v]) },
+          { kind: "number", label: t("Raio"), value: c[2], min: 1, max: 300, onChange: (v) => setC([c[0], c[1], v]) },
         ] });
       }
       if (k === "bridge" && edits.bridges[i]) {
         const b = edits.bridges[i];
         const setB = (n: [number, number, number, number]) => setEdits((e) => ({ ...e, bridges: e.bridges.map((v, j) => (j === i ? n : v)) }));
-        sections.push({ title: "Passagem sobre a água", props: [
-          { kind: "number", label: "X de", value: b[0], min: 0, max: grid, onChange: (v) => setB([v, b[1], b[2], b[3]]) },
-          { kind: "number", label: "X até", value: b[1], min: 0, max: grid, onChange: (v) => setB([b[0], v, b[2], b[3]]) },
-          { kind: "number", label: "Z de", value: b[2], min: 0, max: grid, onChange: (v) => setB([b[0], b[1], v, b[3]]) },
-          { kind: "number", label: "Z até", value: b[3], min: 0, max: grid, onChange: (v) => setB([b[0], b[1], b[2], v]) },
+        sections.push({ title: t("Passagem sobre a água"), props: [
+          { kind: "number", label: t("X de"), value: b[0], min: 0, max: grid, onChange: (v) => setB([v, b[1], b[2], b[3]]) },
+          { kind: "number", label: t("X até"), value: b[1], min: 0, max: grid, onChange: (v) => setB([b[0], v, b[2], b[3]]) },
+          { kind: "number", label: t("Z de"), value: b[2], min: 0, max: grid, onChange: (v) => setB([b[0], b[1], v, b[3]]) },
+          { kind: "number", label: t("Z até"), value: b[3], min: 0, max: grid, onChange: (v) => setB([b[0], b[1], b[2], v]) },
         ] });
       }
-      if (one === "seed" && edits.seed) sections.push({ title: "Ponto de partida", props: [
+      if (one === "seed" && edits.seed) sections.push({ title: t("Ponto de partida"), props: [
         { kind: "number", label: "X", value: edits.seed[0], min: 0, max: grid, onChange: (v) => setEdits((e) => ({ ...e, seed: [v, e.seed![1]] })) },
         { kind: "number", label: "Z", value: edits.seed[1], min: 0, max: grid, onChange: (v) => setEdits((e) => ({ ...e, seed: [e.seed![0], v] })) },
       ] });
-      if (one === "grp:sculpt") sections.push({ title: "Pincel de escultura", props: [
-        { kind: "custom", label: "", node: <button className="btn sm" onClick={() => p.commit((d) => ({ ...d, sculpt: null, sculptSize: 0 }))}><Icon name="layers_clear" size={16} /> Apagar tudo que foi pintado</button> },
+      if (one === "grp:sculpt") sections.push({ title: t("Pincel de escultura"), props: [
+        { kind: "custom", label: "", node: <button className="btn sm" onClick={() => p.commit((d) => ({ ...d, sculpt: null, sculptSize: 0 }))}><Icon name="layers_clear" size={16} /> {t("Apagar tudo que foi pintado")}</button> },
       ] });
       if (k === "reskin") {
         const oldD = one.slice(7);
-        sections.push({ title: "Textura do chão trocada", props: [
-          { kind: "info", label: "Camada", value: oldD.split("/").pop() },
-          { kind: "info", label: "Nova", value: edits.reskin[oldD]?.d.split("/").pop() },
-          { kind: "custom", label: "", node: <button className="btn sm" onClick={() => setEdits((e) => { const r = { ...e.reskin }; delete r[oldD]; return { ...e, reskin: r }; })}><Icon name="undo" size={16} /> Voltar ao original</button> },
+        sections.push({ title: t("Textura do chão trocada"), props: [
+          { kind: "info", label: t("Camada"), value: oldD.split("/").pop() },
+          { kind: "info", label: t("Nova"), value: edits.reskin[oldD]?.d.split("/").pop() },
+          { kind: "custom", label: "", node: <button className="btn sm" onClick={() => setEdits((e) => { const r = { ...e.reskin }; delete r[oldD]; return { ...e, reskin: r }; })}><Icon name="undo" size={16} /> {t("Voltar ao original")}</button> },
         ] });
       }
     } else {
-      sections.push({ title: `${selIds.length} objetos selecionados`, props: [
-        { kind: "custom", label: "Ações", node: <span className="row" style={{ gap: 6 }}><button className="btn sm" onClick={doDuplicate}><Icon name="content_copy" size={16} /> Duplicar</button><button className="btn sm" onClick={doDelete}><Icon name="delete" size={16} /> Apagar</button></span> },
-        { kind: "info", label: "Dica", value: "Arraste qualquer um deles para mover todos juntos." },
+      sections.push({ title: t("{n} objetos selecionados", { n: selIds.length }), props: [
+        { kind: "custom", label: t("Ações"), node: <span className="row" style={{ gap: 6 }}><button className="btn sm" onClick={doDuplicate}><Icon name="content_copy" size={16} /> {t("Duplicar")}</button><button className="btn sm" onClick={doDelete}><Icon name="delete" size={16} /> {t("Apagar")}</button></span> },
+        { kind: "info", label: t("Dica"), value: t("Arraste qualquer um deles para mover todos juntos.") },
       ] });
     }
     return sections;
@@ -1477,7 +1478,7 @@ export default function MapStudio({ id }: { id: string }) {
   const useModel = async (m: CreationMeta) => {
     const baked = await api.modelBaked(m.id).catch(() => null);
     if (!baked) {
-      toast("info", `Abra o modelo "${m.name}" e clique em "Preparar para o jogo" antes de usar no mapa.`);
+      toast("info", t(`Abra o modelo "{name}" e clique em "Preparar para o jogo" antes de usar no mapa.`, { name: m.name }));
       useTabs.getState().open(m);
       return;
     }
@@ -1501,7 +1502,7 @@ export default function MapStudio({ id }: { id: string }) {
 
   // ------------------------------------------------------------ interface
   if (p.status === "loading") return <div className="studio-root"><div className="bar indeterminate" style={{ margin: 30 }}><i /></div></div>;
-  if (p.status === "error") return <div className="studio-root"><Empty icon="error" title="Não deu para abrir o projeto">{p.error}</Empty></div>;
+  if (p.status === "error") return <div className="studio-root"><Empty icon="error" title={t("Não deu para abrir o projeto")}>{p.error}</Empty></div>;
 
   const brushTool = isBrush(tool);
   const circleBrush = (isRelief(tool) && tool !== "ramp") || tool === "uncut" || tool === "paint" || isNav(tool) || (tool === "decor" && density > 1) || brushTool || (isFeat(tool) && POINT_FEATS.includes(featOf(tool)));
@@ -1518,159 +1519,159 @@ export default function MapStudio({ id }: { id: string }) {
   };
   const sizeSliders = (
     <div className="ribbon-stack" style={{ width: 210 }}>
-      <label className="range" style={{ gridTemplateColumns: "48px 1fr 34px" }}><span>Raio</span><input type="range" min={8} max={260} value={radius} onChange={(e) => setRadius(Number(e.target.value))} /><output>{radius}</output></label>
-      <label className="range" style={{ gridTemplateColumns: "48px 1fr 34px" }}><span>{brushTool ? "Força" : "Altura"}</span><input type="range" min={2} max={120} value={strength} onChange={(e) => setStrength(Number(e.target.value))} /><output>{strength}</output></label>
+      <label className="range" style={{ gridTemplateColumns: "48px 1fr 34px" }}><span>{t("Raio")}</span><input type="range" min={8} max={260} value={radius} onChange={(e) => setRadius(Number(e.target.value))} /><output>{radius}</output></label>
+      <label className="range" style={{ gridTemplateColumns: "48px 1fr 34px" }}><span>{brushTool ? t("Força") : t("Altura")}</span><input type="range" min={2} max={120} value={strength} onChange={(e) => setStrength(Number(e.target.value))} /><output>{strength}</output></label>
     </div>
   );
   const symSelect = (
     <div className="ribbon-stack" style={{ width: 190 }}>
-      <select className="pinput" value={doc.symmetry} onChange={(e) => setDoc((d) => ({ ...d, symmetry: e.target.value as Symmetry }))} aria-label="Simetria">
-        {(Object.keys(SYMMETRY_LABEL) as Symmetry[]).map((k) => <option key={k} value={k}>{SYMMETRY_LABEL[k]}</option>)}
+      <select className="pinput" value={doc.symmetry} onChange={(e) => setDoc((d) => ({ ...d, symmetry: e.target.value as Symmetry }))} aria-label={t("Simetria")}>
+        {(Object.keys(SYMMETRY_LABEL) as Symmetry[]).map((k) => <option key={k} value={k}>{t(SYMMETRY_LABEL[k])}</option>)}
       </select>
-      <span className="faint small">{doc.symmetry === "none" ? "Coloca só onde clicar" : "Repete nos outros lados"}</span>
+      <span className="faint small">{doc.symmetry === "none" ? t("Coloca só onde clicar") : t("Repete nos outros lados")}</span>
     </div>
   );
-  const genBtn = <RibbonButton icon="auto_awesome" label="Gerar mundo" onClick={() => setGenOpen(true)} disabled={!relief3d} color="#a3e635" hint="Relevo, montanhas, lagos, rios, florestas e estruturas a partir de uma semente (G)" />;
+  const genBtn = <RibbonButton icon="auto_awesome" label={t("Gerar mundo")} onClick={() => setGenOpen(true)} disabled={!relief3d} color="#a3e635" hint={t("Relevo, montanhas, lagos, rios, florestas e estruturas a partir de uma semente (G)")} />;
 
   return (
     <div className="studio-root">
       <div className="studio-top">
         <Ribbon active={ribbon} onTab={setRibbon}
-          tabs={[{ id: "home", label: "Início" }, { id: "terrain", label: "Terreno" }, { id: "shapes", label: "Formas" }, { id: "objects", label: "Objetos" }, { id: "view", label: "Exibir" }, { id: "game", label: "Jogo" }]}>
+          tabs={[{ id: "home", label: t("Início") }, { id: "terrain", label: t("Terreno") }, { id: "shapes", label: t("Formas") }, { id: "objects", label: t("Objetos") }, { id: "view", label: t("Exibir") }, { id: "game", label: t("Jogo") }]}>
           {ribbon === "home" && <>
-            <RibbonGroup label="Ferramentas">
-              {toolBtn("select", "near_me", "Selecionar")}
-              {toolBtn("orbit", "3d_rotation", "Câmera")}
-              {toolBtn("erase", "layers_clear", "Apagar", "#e5534b")}
+            <RibbonGroup label={t("Ferramentas")}>
+              {toolBtn("select", "near_me", t("Selecionar"))}
+              {toolBtn("orbit", "3d_rotation", t("Câmera"))}
+              {toolBtn("erase", "layers_clear", t("Apagar"), "#e5534b")}
             </RibbonGroup>
-            <RibbonGroup label="Mundo">{genBtn}</RibbonGroup>
-            <RibbonGroup label="Transformar">
-              <RibbonButton icon="open_with" label="Mover" active={tool === "select" && xform === "move"} onClick={() => { setTool("select"); setXform("move"); }} hint="Arraste a seleção para mover. Setas: 2 unidades (Shift: 10)." />
-              <RibbonButton icon="rotate_right" label="Girar" active={tool === "select" && xform === "rotate"} onClick={() => { setTool("select"); setXform("rotate"); }} hint="Arraste em volta da seleção para girar (Shift: de 15 em 15°). Teclas , e . giram 15°." />
-              <RibbonButton icon="open_in_full" label="Escala" active={tool === "select" && xform === "scale"} onClick={() => { setTool("select"); setXform("scale"); }} hint="Arraste para longe/perto do centro para aumentar/diminuir. Teclas - e + mudam 10%." />
+            <RibbonGroup label={t("Mundo")}>{genBtn}</RibbonGroup>
+            <RibbonGroup label={t("Transformar")}>
+              <RibbonButton icon="open_with" label={t("Mover")} active={tool === "select" && xform === "move"} onClick={() => { setTool("select"); setXform("move"); }} hint={t("Arraste a seleção para mover. Setas: 2 unidades (Shift: 10).")} />
+              <RibbonButton icon="rotate_right" label={t("Girar")} active={tool === "select" && xform === "rotate"} onClick={() => { setTool("select"); setXform("rotate"); }} hint={t("Arraste em volta da seleção para girar (Shift: de 15 em 15°). Teclas , e . giram 15°.")} />
+              <RibbonButton icon="open_in_full" label={t("Escala")} active={tool === "select" && xform === "scale"} onClick={() => { setTool("select"); setXform("scale"); }} hint={t("Arraste para longe/perto do centro para aumentar/diminuir. Teclas - e + mudam 10%.")} />
             </RibbonGroup>
-            <RibbonGroup label="Editar">
-              <RibbonButton icon="content_copy" label="Duplicar" onClick={doDuplicate} disabled={!selIds.length} hint="Ctrl+D" />
-              <RibbonButton icon="delete" label="Excluir" onClick={doDelete} disabled={!selIds.length} hint="Del" />
-              <RibbonButton icon="deselect" label="Limpar seleção" onClick={() => setSel(new Set(["map"]))} disabled={!selIds.length} />
+            <RibbonGroup label={t("Editar")}>
+              <RibbonButton icon="content_copy" label={t("Duplicar")} onClick={doDuplicate} disabled={!selIds.length} hint="Ctrl+D" />
+              <RibbonButton icon="delete" label={t("Excluir")} onClick={doDelete} disabled={!selIds.length} hint="Del" />
+              <RibbonButton icon="deselect" label={t("Limpar seleção")} onClick={() => setSel(new Set(["map"]))} disabled={!selIds.length} />
             </RibbonGroup>
-            <RibbonGroup label="Inserir">
-              {toolBtn("spawn", "flag", `Bases ${edits.spawns.length}`, "#5aa9e6")}
-              {toolBtn("mass", "diamond", "Massa", "#7bd88f")}
-              {toolBtn("f-mountain", FEATURE_ICON.mountain, "Montanha", FEATURE_COLOR.mountain)}
-              {toolBtn("f-lake", FEATURE_ICON.lake, "Lago", FEATURE_COLOR.lake)}
-              {toolBtn("decor", "park", "Decorar", "#7fae6b")}
+            <RibbonGroup label={t("Inserir")}>
+              {toolBtn("spawn", "flag", t("Bases {n}", { n: edits.spawns.length }), "#5aa9e6")}
+              {toolBtn("mass", "diamond", t("Massa"), "#7bd88f")}
+              {toolBtn("f-mountain", FEATURE_ICON.mountain, t("Montanha"), FEATURE_COLOR.mountain)}
+              {toolBtn("f-lake", FEATURE_ICON.lake, t("Lago"), FEATURE_COLOR.lake)}
+              {toolBtn("decor", "park", t("Decorar"), "#7fae6b")}
             </RibbonGroup>
-            <RibbonGroup label="Testar">
-              <RibbonButton icon="construction" label={busy ? "Gerando…" : "Gerar mapa"} onClick={() => void build(false)} disabled={!canBuild || edits.spawns.length < 2 || busy} color="#a3e635" hint="Gera o .scd, verifica e liga o mapa na biblioteca" />
-              <RibbonButton icon="play_circle" label="Gerar e jogar" onClick={() => void build(true)} disabled={!canBuild || edits.spawns.length < 2 || busy} color="#a3e635" />
+            <RibbonGroup label={t("Testar")}>
+              <RibbonButton icon="construction" label={busy ? t("Gerando…") : t("Gerar mapa")} onClick={() => void build(false)} disabled={!canBuild || edits.spawns.length < 2 || busy} color="#a3e635" hint={t("Gera o .scd, verifica e liga o mapa na biblioteca")} />
+              <RibbonButton icon="play_circle" label={t("Gerar e jogar")} onClick={() => void build(true)} disabled={!canBuild || edits.spawns.length < 2 || busy} color="#a3e635" />
             </RibbonGroup>
           </>}
           {ribbon === "terrain" && <>
-            <RibbonGroup label="Mundo">{genBtn}</RibbonGroup>
-            <RibbonGroup label="Pincel">
-              {(Object.keys(BRUSH) as BrushMode[]).map((m) => toolBtn(`b-${m}`, BRUSH[m].icon, BRUSH[m].label, BRUSH[m].color))}
+            <RibbonGroup label={t("Mundo")}>{genBtn}</RibbonGroup>
+            <RibbonGroup label={t("Pincel")}>
+              {(Object.keys(BRUSH) as BrushMode[]).map((m) => toolBtn(`b-${m}`, BRUSH[m].icon, t(BRUSH[m].label), BRUSH[m].color))}
             </RibbonGroup>
-            <RibbonGroup label="Textura">
-              <RibbonButton icon="brush" label="Pintar chão" active={tool === "paint"} disabled={!doc.clean} color="#a3e635"
-                hint={doc.clean ? hintOf("paint") : "Ligue o visual limpo (Propriedades → Chão e visual) para pintar o chão"}
+            <RibbonGroup label={t("Textura")}>
+              <RibbonButton icon="brush" label={t("Pintar chão")} active={tool === "paint"} disabled={!doc.clean} color="#a3e635"
+                hint={doc.clean ? hintOf("paint") : t("Ligue o visual limpo (Propriedades → Chão e visual) para pintar o chão")}
                 onClick={() => { setTool("paint"); setLeft("ground"); }} />
             </RibbonGroup>
-            <RibbonGroup label="Passagem das tropas">
-              {toolBtn("nav-block", "block", "Bloquear", "#e5534b")}
-              {toolBtn("nav-allow", "directions_walk", "Liberar", "#7bd88f")}
-              {toolBtn("nav-erase", "auto_fix_high", "Automático", "#c9d1d9")}
-              <RibbonButton icon="layers" label="Mostrar" active={showPass || isNav(tool)} onClick={() => setShowPass((v) => !v)} hint="Vermelho: as tropas por terra não passam (íngreme, água ou bloqueado à mão). Verde: liberado à mão." />
+            <RibbonGroup label={t("Passagem das tropas")}>
+              {toolBtn("nav-block", "block", t("Bloquear"), "#e5534b")}
+              {toolBtn("nav-allow", "directions_walk", t("Liberar"), "#7bd88f")}
+              {toolBtn("nav-erase", "auto_fix_high", t("Automático"), "#c9d1d9")}
+              <RibbonButton icon="layers" label={t("Mostrar")} active={showPass || isNav(tool)} onClick={() => setShowPass((v) => !v)} hint={t("Vermelho: as tropas por terra não passam (íngreme, água ou bloqueado à mão). Verde: liberado à mão.")} />
             </RibbonGroup>
-            <RibbonGroup label="Tamanho">{sizeSliders}</RibbonGroup>
-            <RibbonGroup label="Simetria">{symSelect}</RibbonGroup>
-            <RibbonGroup label="Mapa inteiro">
-              <RibbonButton icon="fence" label="Borda rochosa" active={doc.rugged} onClick={() => setDoc((d) => ({ ...d, rugged: !d.rugged }))} />
-              <RibbonButton icon="horizontal_rule" label="Aplainar tudo" active={doc.smooth} onClick={() => setDoc((d) => ({ ...d, smooth: !d.smooth }))} />
-              <RibbonButton icon="format_paint" label={doc.clean ? "Chão e biomas" : "Texturas do chão"} onClick={() => setLeft("ground")} />
-              <RibbonButton icon="clear_all" label="Limpar relevo" onClick={async () => {
-                if (!(await confirmDialog("Apagar o relevo simples, as formas, o que foi pintado e as passagens? (Ctrl+Z desfaz.)", "Limpar"))) return;
+            <RibbonGroup label={t("Tamanho")}>{sizeSliders}</RibbonGroup>
+            <RibbonGroup label={t("Simetria")}>{symSelect}</RibbonGroup>
+            <RibbonGroup label={t("Mapa inteiro")}>
+              <RibbonButton icon="fence" label={t("Borda rochosa")} active={doc.rugged} onClick={() => setDoc((d) => ({ ...d, rugged: !d.rugged }))} />
+              <RibbonButton icon="horizontal_rule" label={t("Aplainar tudo")} active={doc.smooth} onClick={() => setDoc((d) => ({ ...d, smooth: !d.smooth }))} />
+              <RibbonButton icon="format_paint" label={doc.clean ? t("Chão e biomas") : t("Texturas do chão")} onClick={() => setLeft("ground")} />
+              <RibbonButton icon="clear_all" label={t("Limpar relevo")} onClick={async () => {
+                if (!(await confirmDialog(t("Apagar o relevo simples, as formas, o que foi pintado e as passagens? (Ctrl+Z desfaz.)"), t("Limpar")))) return;
                 p.commit((d) => ({ ...d, features: d.features.filter((f) => f.kind === "pad"), sculpt: null, edits: { ...d.edits, relief: [], bridges: [] } }));
               }} disabled={!edits.relief.length && !edits.bridges.length && !doc.features.length && !doc.sculpt} />
             </RibbonGroup>
           </>}
           {ribbon === "shapes" && <>
-            <RibbonGroup label="Elevações">
+            <RibbonGroup label={t("Elevações")}>
               {(["mountain", "hill", "ridge", "plateau", "dunes", "island"] as FeatureKind[]).filter((k) => k !== "island" || hasWater)
-                .map((k) => toolBtn(`f-${k}`, FEATURE_ICON[k], FEATURE_LABEL[k], FEATURE_COLOR[k]))}
+                .map((k) => toolBtn(`f-${k}`, FEATURE_ICON[k], t(FEATURE_LABEL[k]), FEATURE_COLOR[k]))}
             </RibbonGroup>
-            <RibbonGroup label="Água, cavidades e caminhos">
-              {(["lake", "river", "canyon", "crater", "pass", "trail"] as FeatureKind[]).map((k) => toolBtn(`f-${k}`, FEATURE_ICON[k], FEATURE_LABEL[k], FEATURE_COLOR[k]))}
+            <RibbonGroup label={t("Água, cavidades e caminhos")}>
+              {(["lake", "river", "canyon", "crater", "pass", "trail"] as FeatureKind[]).map((k) => toolBtn(`f-${k}`, FEATURE_ICON[k], t(FEATURE_LABEL[k]), FEATURE_COLOR[k]))}
             </RibbonGroup>
-            <RibbonGroup label="Plataformas e abismo">
-              {(["platform", "span", "chasm", "rift"] as FeatureKind[]).map((k) => toolBtn(`f-${k}`, FEATURE_ICON[k], FEATURE_LABEL[k], FEATURE_COLOR[k]))}
+            <RibbonGroup label={t("Plataformas e abismo")}>
+              {(["platform", "span", "chasm", "rift"] as FeatureKind[]).map((k) => toolBtn(`f-${k}`, FEATURE_ICON[k], t(FEATURE_LABEL[k]), FEATURE_COLOR[k]))}
             </RibbonGroup>
-            <RibbonGroup label="Tamanho">{sizeSliders}</RibbonGroup>
-            <RibbonGroup label="Relevo simples">
-              {(["hill", "valley", "plateau", "flatten", "ramp"] as ReliefKind[]).map((k) => toolBtn(k, RELIEF_ICON[k], RELIEF_LABEL[k], RELIEF_COLOR[k]))}
-              {toolBtn("bridge", "route", "Vau", "#f2b33d")}
+            <RibbonGroup label={t("Tamanho")}>{sizeSliders}</RibbonGroup>
+            <RibbonGroup label={t("Relevo simples")}>
+              {(["hill", "valley", "plateau", "flatten", "ramp"] as ReliefKind[]).map((k) => toolBtn(k, RELIEF_ICON[k], t(RELIEF_LABEL[k]), RELIEF_COLOR[k]))}
+              {toolBtn("bridge", "route", t("Vau"), "#f2b33d")}
             </RibbonGroup>
           </>}
           {ribbon === "objects" && <>
-            <RibbonGroup label="Jogo">
-              {toolBtn("spawn", "flag", "Bases", "#5aa9e6")}
-              {toolBtn("mass", "diamond", "Massa", "#7bd88f")}
-              {toolBtn("f-pad", FEATURE_ICON.pad, "Área plana", FEATURE_COLOR.pad)}
-              {toolBtn("seed", "my_location", "Partida")}
+            <RibbonGroup label={t("Jogo")}>
+              {toolBtn("spawn", "flag", t("Bases"), "#5aa9e6")}
+              {toolBtn("mass", "diamond", t("Massa"), "#7bd88f")}
+              {toolBtn("f-pad", FEATURE_ICON.pad, t("Área plana"), FEATURE_COLOR.pad)}
+              {toolBtn("seed", "my_location", t("Partida"))}
             </RibbonGroup>
-            <RibbonGroup label="Decorações">
-              {toolBtn("decor", "park", "Decorar", "#7fae6b")}
-              {toolBtn("uncut", "content_cut", "Tirar", "#e5534b")}
-              <RibbonButton icon="inventory_2" label="Meus modelos" onClick={() => setLeft("mine")} color="#5aa9e6" />
+            <RibbonGroup label={t("Decorações")}>
+              {toolBtn("decor", "park", t("Decorar"), "#7fae6b")}
+              {toolBtn("uncut", "content_cut", t("Tirar"), "#e5534b")}
+              <RibbonButton icon="inventory_2" label={t("Meus modelos")} onClick={() => setLeft("mine")} color="#5aa9e6" />
             </RibbonGroup>
-            <RibbonGroup label="Espalhar">
+            <RibbonGroup label={t("Espalhar")}>
               <div className="ribbon-stack" style={{ width: 230 }}>
-                <label className="range" style={{ gridTemplateColumns: "70px 1fr 30px" }}><span>Por clique</span><input type="range" min={1} max={40} value={density} onChange={(e) => setDensity(Number(e.target.value))} /><output>{density}</output></label>
-                <label className="range" style={{ gridTemplateColumns: "70px 1fr 30px" }}><span>Variação</span><input type="range" min={0} max={60} step={5} value={sizeVar} onChange={(e) => setSizeVar(Number(e.target.value))} /><output>{sizeVar}%</output></label>
-                <label className="range" style={{ gridTemplateColumns: "70px 1fr 30px" }}><span>Área</span><input type="range" min={8} max={260} value={radius} onChange={(e) => setRadius(Number(e.target.value))} /><output>{radius}</output></label>
+                <label className="range" style={{ gridTemplateColumns: "70px 1fr 30px" }}><span>{t("Por clique")}</span><input type="range" min={1} max={40} value={density} onChange={(e) => setDensity(Number(e.target.value))} /><output>{density}</output></label>
+                <label className="range" style={{ gridTemplateColumns: "70px 1fr 30px" }}><span>{t("Variação")}</span><input type="range" min={0} max={60} step={5} value={sizeVar} onChange={(e) => setSizeVar(Number(e.target.value))} /><output>{sizeVar}%</output></label>
+                <label className="range" style={{ gridTemplateColumns: "70px 1fr 30px" }}><span>{t("Área")}</span><input type="range" min={8} max={260} value={radius} onChange={(e) => setRadius(Number(e.target.value))} /><output>{radius}</output></label>
               </div>
               <div className="ribbon-stack">
-                <label className="check small"><input type="checkbox" checked={avoidWater} onChange={(e) => setAvoidWater(e.target.checked)} /> Evitar água</label>
-                <label className="check small"><input type="checkbox" checked={avoidSteep} onChange={(e) => setAvoidSteep(e.target.checked)} /> Evitar encostas</label>
+                <label className="check small"><input type="checkbox" checked={avoidWater} onChange={(e) => setAvoidWater(e.target.checked)} /> {t("Evitar água")}</label>
+                <label className="check small"><input type="checkbox" checked={avoidSteep} onChange={(e) => setAvoidSteep(e.target.checked)} /> {t("Evitar encostas")}</label>
               </div>
             </RibbonGroup>
-            <RibbonGroup label="Simetria">{symSelect}</RibbonGroup>
-            <RibbonGroup label="Limpar">
-              <RibbonButton icon="delete_sweep" label="Tirar as novas" onClick={() => setEdits((e) => ({ ...e, props: [] }))} disabled={!edits.props.length} />
-              <RibbonButton icon="restore" label="Devolver as do terreno" onClick={() => setEdits((e) => ({ ...e, cuts: [] }))} disabled={!edits.cuts.length} />
+            <RibbonGroup label={t("Simetria")}>{symSelect}</RibbonGroup>
+            <RibbonGroup label={t("Limpar")}>
+              <RibbonButton icon="delete_sweep" label={t("Tirar as novas")} onClick={() => setEdits((e) => ({ ...e, props: [] }))} disabled={!edits.props.length} />
+              <RibbonButton icon="restore" label={t("Devolver as do terreno")} onClick={() => setEdits((e) => ({ ...e, cuts: [] }))} disabled={!edits.cuts.length} />
             </RibbonGroup>
           </>}
           {ribbon === "view" && <>
-            <RibbonGroup label="Vista">
+            <RibbonGroup label={t("Vista")}>
               <RibbonButton icon="view_in_ar" label="3D" active={view === "3d"} disabled={!relief3d} onClick={() => setView("3d")} />
               <RibbonButton icon="map" label="2D" active={view === "2d"} onClick={() => { setView("2d"); if (tool === "orbit") setTool("select"); }} />
             </RibbonGroup>
-            <RibbonGroup label="Camadas">
-              <RibbonButton icon="texture" label="Mapa original" active={skin === "game"} disabled={!relief3d?.texture || doc.clean} onClick={() => setSkin("game")} hint={doc.clean ? "Com o visual limpo, nada do mapa original aparece" : "Minimapa do terreno base (o relevo antigo, antes das suas mudanças)"} />
-              <RibbonButton icon="landscape" label={doc.clean ? "Chão do jogo" : "Cores do relevo"} active={skin === "relief"} onClick={() => setSkin("relief")} hint={doc.clean ? "O chão como vai ficar no jogo: a textura escolhida com luz e sombra do relevo" : "Água, areia, grama, rocha e neve pela altura e inclinação"} />
-              <RibbonButton icon="grid_on" label="Navegação" active={skin === "nav"} disabled={blank} onClick={() => setSkin("nav")} hint={blank ? "A navegação é calculada ao gerar o mapa" : undefined} />
-              <RibbonButton icon="insights" label="Análise" active={skin === "analysis"} onClick={() => setSkin("analysis")} hint="Território de cada base, caminhos e gargalos" color="#ffd166" />
-              <RibbonButton icon={showDecor ? "park" : "visibility_off"} label="Decorações" active={showDecor} onClick={() => setShowDecor((v) => !v)} />
+            <RibbonGroup label={t("Camadas")}>
+              <RibbonButton icon="texture" label={t("Mapa original")} active={skin === "game"} disabled={!relief3d?.texture || doc.clean} onClick={() => setSkin("game")} hint={doc.clean ? t("Com o visual limpo, nada do mapa original aparece") : t("Minimapa do terreno base (o relevo antigo, antes das suas mudanças)")} />
+              <RibbonButton icon="landscape" label={doc.clean ? t("Chão do jogo") : t("Cores do relevo")} active={skin === "relief"} onClick={() => setSkin("relief")} hint={doc.clean ? t("O chão como vai ficar no jogo: a textura escolhida com luz e sombra do relevo") : t("Água, areia, grama, rocha e neve pela altura e inclinação")} />
+              <RibbonButton icon="grid_on" label={t("Navegação")} active={skin === "nav"} disabled={blank} onClick={() => setSkin("nav")} hint={blank ? t("A navegação é calculada ao gerar o mapa") : undefined} />
+              <RibbonButton icon="insights" label={t("Análise")} active={skin === "analysis"} onClick={() => setSkin("analysis")} hint={t("Território de cada base, caminhos e gargalos")} color="#ffd166" />
+              <RibbonButton icon={showDecor ? "park" : "visibility_off"} label={t("Decorações")} active={showDecor} onClick={() => setShowDecor((v) => !v)} />
             </RibbonGroup>
-            <RibbonGroup label="Relevo">
+            <RibbonGroup label={t("Relevo")}>
               <div className="ribbon-stack" style={{ width: 200 }}>
-                <label className="range" style={{ gridTemplateColumns: "60px 1fr 34px" }}><span>Exagero</span><input type="range" min={1} max={4} step={0.25} value={exag} onChange={(e) => setExag(Number(e.target.value))} /><output>{exag}×</output></label>
+                <label className="range" style={{ gridTemplateColumns: "60px 1fr 34px" }}><span>{t("Exagero")}</span><input type="range" min={1} max={4} step={0.25} value={exag} onChange={(e) => setExag(Number(e.target.value))} /><output>{exag}×</output></label>
               </div>
             </RibbonGroup>
-            <RibbonGroup label="Lobby">
-              <RibbonButton icon="preview" label="Prévia do lobby" onClick={() => setLobbyOpen(true)} disabled={!relief3d} />
+            <RibbonGroup label={t("Lobby")}>
+              <RibbonButton icon="preview" label={t("Prévia do lobby")} onClick={() => setLobbyOpen(true)} disabled={!relief3d} />
             </RibbonGroup>
           </>}
           {ribbon === "game" && <>
-            <RibbonGroup label="Gerar">
-              <RibbonButton icon="construction" label={busy ? "Gerando…" : "Gerar mapa"} onClick={() => void build(false)} disabled={!canBuild || edits.spawns.length < 2 || busy} color="#a3e635" />
-              <RibbonButton icon="play_circle" label="Gerar e jogar" onClick={() => void build(true)} disabled={!canBuild || edits.spawns.length < 2 || busy} color="#a3e635" />
-              <RibbonButton icon="save_alt" label="Exportar .scd" onClick={() => void exportScd()} disabled={!builtMod} hint="Salva o arquivo .scd do mapa gerado numa pasta (para compartilhar ou instalar à mão)" />
+            <RibbonGroup label={t("Gerar")}>
+              <RibbonButton icon="construction" label={busy ? t("Gerando…") : t("Gerar mapa")} onClick={() => void build(false)} disabled={!canBuild || edits.spawns.length < 2 || busy} color="#a3e635" />
+              <RibbonButton icon="play_circle" label={t("Gerar e jogar")} onClick={() => void build(true)} disabled={!canBuild || edits.spawns.length < 2 || busy} color="#a3e635" />
+              <RibbonButton icon="save_alt" label={t("Exportar .scd")} onClick={() => void exportScd()} disabled={!builtMod} hint={t("Salva o arquivo .scd do mapa gerado numa pasta (para compartilhar ou instalar à mão)")} />
             </RibbonGroup>
-            <RibbonGroup label="Configurar">
-              <RibbonButton icon="tune" label="Propriedades do mapa" onClick={() => setSel(new Set(["map"]))} />
-              <RibbonButton icon="insights" label="Análise" onClick={() => setSkin("analysis")} />
-              <RibbonButton icon="fact_check" label="Validar" onClick={() => setIssues(runCheck())} disabled={!relief3d || !heights} hint="Bases, massa, decorações e equilíbrio" />
+            <RibbonGroup label={t("Configurar")}>
+              <RibbonButton icon="tune" label={t("Propriedades do mapa")} onClick={() => setSel(new Set(["map"]))} />
+              <RibbonButton icon="insights" label={t("Análise")} onClick={() => setSkin("analysis")} />
+              <RibbonButton icon="fact_check" label={t("Validar")} onClick={() => setIssues(runCheck())} disabled={!relief3d || !heights} hint={t("Bases, massa, decorações e equilíbrio")} />
             </RibbonGroup>
           </>}
         </Ribbon>
@@ -1679,11 +1680,11 @@ export default function MapStudio({ id }: { id: string }) {
 
       <StudioLayout id="map"
         left={<>
-          <Panel title="Caixa de recursos" icon="widgets" grow id="map-toolbox" collapsible={false}>
+          <Panel title={t("Caixa de recursos")} icon="widgets" grow id="map-toolbox" collapsible={false}>
             <div className="chips" style={{ padding: "8px 8px 0" }}>
-              <button className="chip" aria-pressed={left === "decor"} onClick={() => setLeft("decor")}><Icon name="park" size={15} /> Do jogo</button>
-              <button className="chip" aria-pressed={left === "mine"} onClick={() => setLeft("mine")}><Icon name="inventory_2" size={15} /> Meus modelos</button>
-              <button className="chip" aria-pressed={left === "ground"} onClick={() => setLeft("ground")}><Icon name="format_paint" size={15} /> Chão</button>
+              <button className="chip" aria-pressed={left === "decor"} onClick={() => setLeft("decor")}><Icon name="park" size={15} /> {t("Do jogo")}</button>
+              <button className="chip" aria-pressed={left === "mine"} onClick={() => setLeft("mine")}><Icon name="inventory_2" size={15} /> {t("Meus modelos")}</button>
+              <button className="chip" aria-pressed={left === "ground"} onClick={() => setLeft("ground")}><Icon name="format_paint" size={15} /> {t("Chão")}</button>
             </div>
             <div className="spanel-pad">
               {left === "decor" && (
@@ -1693,10 +1694,10 @@ export default function MapStudio({ id }: { id: string }) {
               )}
               {left === "mine" && (
                 models === null ? <div className="bar indeterminate"><i /></div> : models.length === 0 ? (
-                  <p className="faint small">Você ainda não tem modelos 3D. Crie um em <b>Criar → Criar modelo 3D</b> e use aqui como decoração.</p>
+                  <p className="faint small">{t("Você ainda não tem modelos 3D. Crie um em")} <b>{t("Criar → Criar modelo 3D")}</b> {t("e use aqui como decoração.")}</p>
                 ) : (
                   <div className="col" style={{ gap: 6 }}>
-                    <p className="faint small">Modelos feitos no editor 3D. Eles vão dentro do mapa como decorações (experimental).</p>
+                    <p className="faint small">{t("Modelos feitos no editor 3D. Eles vão dentro do mapa como decorações (experimental).")}</p>
                     {models.map((m) => {
                       const slug = customSlug(m.id);
                       const bp = `/props/cp/${slug}/${slug}_prop.bp`;
@@ -1720,10 +1721,10 @@ export default function MapStudio({ id }: { id: string }) {
                   onClearPaint={() => setDoc((d) => ({ ...d, paint: null, worldPaint: null }))}
                   onRing={(v) => setDoc((d) => ({ ...d, ring: v }))} onRadius={setRadius} onStrength={setStrength}
                   onImport={async (file, seamless) => {
-                    const t = await importTexture(id, file, seamless);
-                    setDoc((d) => ({ ...d, customTex: [...d.customTex.filter((x) => x.slug !== t.slug), t] }));
-                    toast("ok", `Textura "${t.name}" importada.`);
-                    return `${customStem(t)}_d.dds`;
+                    const tx = await importTexture(id, file, seamless);
+                    setDoc((d) => ({ ...d, customTex: [...d.customTex.filter((x) => x.slug !== tx.slug), tx] }));
+                    toast("ok", t(`Textura "{name}" importada.`, { name: tx.name }));
+                    return `${customStem(tx)}_d.dds`;
                   }}
                   onForget={(dPath) => setDoc((d) => {
                     const keep = d.customTex.filter((t) => `${customStem(t)}_d.dds`.toLowerCase() !== dPath.toLowerCase());
@@ -1741,17 +1742,17 @@ export default function MapStudio({ id }: { id: string }) {
           <div className="viewport">
             {!doc.terrain ? (
               <div style={{ display: "grid", placeItems: "center", height: "100%" }}>
-                <Empty icon="terrain" title="Comece o mapa">
+                <Empty icon="terrain" title={t("Comece o mapa")}>
                   <span className="col" style={{ gap: 10, alignItems: "center" }}>
-                    <span>Um chão liso de grama, pronto para esculpir, ou um mapa do jogo como base.</span>
+                    <span>{t("Um chão liso de grama, pronto para esculpir, ou um mapa do jogo como base.")}</span>
                     <span className="row" style={{ gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
                       {[512, 1024, 2048, 4096].map((k) => (
                         <button key={k} className={`btn ${k <= 2048 ? "primary" : ""}`} onClick={() => p.commit((d) => ({ ...d, base: "blank", terrain: blankTerrain(k), mapSize: k, clean: true, minimap: d.minimap === "donor" ? "natural" : d.minimap }))}>
-                          <Icon name="grass" size={18} /> Em branco · {blankLabel(k)}
+                          <Icon name="grass" size={18} /> {t("Em branco")} · {tr(blankLabel(k))}
                         </button>
                       ))}
                     </span>
-                    <span className="faint small">Para usar um mapa do jogo, escolha o terreno em Propriedades → Terreno base.</span>
+                    <span className="faint small">{t("Para usar um mapa do jogo, escolha o terreno em Propriedades → Terreno base.")}</span>
                   </span>
                 </Empty>
               </div>
@@ -1768,7 +1769,7 @@ export default function MapStudio({ id }: { id: string }) {
                 onPointerDown={(e) => { if (e.button !== 0) return; e.currentTarget.setPointerCapture(e.pointerId); onPointer("down", toWorld(e)); }}
                 onPointerMove={(e) => { const q = toWorld(e); setCursor(q); if (e.buttons & 1) onPointer("move", q); }}
                 onPointerUp={(e) => onPointer("up", toWorld(e))}
-                role="application" aria-label="Mapa em 2D">
+                role="application" aria-label={t("Mapa em 2D")}>
                 {image2d ? <img src={image2d} alt="" draggable={false} /> : <div className="bar indeterminate" style={{ margin: 20 }}><i /></div>}
                 <svg viewBox={`0 0 ${grid} ${grid}`}>
                   {activeFeatures.map((f) => LINE_FEATURES.includes(f.kind) && f.pts.length > 1
@@ -1788,21 +1789,21 @@ export default function MapStudio({ id }: { id: string }) {
             )}
             <div className="viewport-overlay">
               <span className="vp-chip"><Icon name={tool === "select" ? "near_me" : "edit"} size={15} /> {hintOf(tool).split(".")[0]}.</span>
-              {selIds.length > 0 && <span className="vp-chip"><Icon name="select_all" size={15} /> {selIds.length} selecionado{selIds.length > 1 ? "s" : ""}</span>}
-              {doc.symmetry !== "none" && <span className="vp-chip"><Icon name="flip" size={15} /> {SYMMETRY_LABEL[doc.symmetry]}</span>}
-              {skin === "relief" && <span className="vp-chip faint" title="No jogo o chão usa as texturas do terreno base (troque em Chão)"><Icon name="info" size={15} /> Cores da prévia</span>}
+              {selIds.length > 0 && <span className="vp-chip"><Icon name="select_all" size={15} /> {selIds.length > 1 ? t("{n} selecionados", { n: selIds.length }) : t("1 selecionado")}</span>}
+              {doc.symmetry !== "none" && <span className="vp-chip"><Icon name="flip" size={15} /> {t(SYMMETRY_LABEL[doc.symmetry])}</span>}
+              {skin === "relief" && <span className="vp-chip faint" title={t("No jogo o chão usa as texturas do terreno base (troque em Chão)")}><Icon name="info" size={15} /> {t("Cores da prévia")}</span>}
             </div>
             {skin === "analysis" && (
               <div className="analysis-panel">
                 {!analysis ? <div className="bar indeterminate"><i /></div> : <>
-                  <Notice kind={analysis.verdict === "ok" ? "ok" : analysis.verdict === "warn" ? "warn" : "err"}>{analysis.text}</Notice>
+                  <Notice kind={analysis.verdict === "ok" ? "ok" : analysis.verdict === "warn" ? "warn" : "err"}>{tr(analysis.text)}</Notice>
                   <table className="an-table">
-                    <thead><tr><th>Base</th><th>Território</th><th>Até o inimigo</th><th>Massa</th></tr></thead>
+                    <thead><tr><th>{t("Base")}</th><th>{t("Território")}</th><th>{t("Até o inimigo")}</th><th>{t("Massa")}</th></tr></thead>
                     <tbody>{analysis.bases.map((b) => (
-                      <tr key={b.index}><td><span className="an-dot" style={{ background: TEAM_COLORS[b.team % 8] }} />{b.index + 1}</td><td>{b.territory}%</td><td>{b.enemy < 0 ? "sem caminho" : b.enemy}</td><td>{b.mass}</td></tr>
+                      <tr key={b.index}><td><span className="an-dot" style={{ background: TEAM_COLORS[b.team % 8] }} />{b.index + 1}</td><td>{b.territory}%</td><td>{b.enemy < 0 ? t("sem caminho") : b.enemy}</td><td>{b.mass}</td></tr>
                     ))}</tbody>
                   </table>
-                  <p className="faint small">{analysis.walkable}% caminhável · {analysis.chokes} pontos de gargalo. <span style={{ color: "#ffa03c" }}>■</span> caminhos <span style={{ color: "#ffd666" }}>■</span> fronteira <span style={{ color: "#ff2840" }}>■</span> gargalos. A massa automática do toolkit entra só no mapa gerado.</p>
+                  <p className="faint small">{t("{w}% caminhável · {c} pontos de gargalo.", { w: analysis.walkable, c: analysis.chokes })} <span style={{ color: "#ffa03c" }}>■</span> {t("caminhos")} <span style={{ color: "#ffd666" }}>■</span> {t("fronteira")} <span style={{ color: "#ff2840" }}>■</span> {t("gargalos.")} {t("A massa automática do toolkit entra só no mapa gerado.")}</p>
                 </>}
               </div>
             )}
@@ -1810,44 +1811,44 @@ export default function MapStudio({ id }: { id: string }) {
               <div className="build-log">
                 {lastBuild && (
                   <Notice kind={lastBuild.warnings?.length ? "warn" : "ok"}>
-                    {typeof lastBuild.mass === "number" ? <><b>{lastBuild.mass + (lastBuild.extraMass ?? 0)}</b> pontos de massa. </> : null}
-                    {lastBuild.propsAdded || lastBuild.propsRemoved ? <>{lastBuild.propsAdded ?? 0} decorações novas, {lastBuild.propsRemoved ?? 0} retiradas. </> : null}
-                    {lastBuild.warnings?.length ? <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>{lastBuild.warnings.slice(0, 6).map((w, i) => <li key={i}>{w}</li>)}</ul> : "Tudo verificado e alcançável."}
+                    {typeof lastBuild.mass === "number" ? <><b>{lastBuild.mass + (lastBuild.extraMass ?? 0)}</b> {t("pontos de massa.")} </> : null}
+                    {lastBuild.propsAdded || lastBuild.propsRemoved ? <>{t("{a} decorações novas, {b} retiradas.", { a: lastBuild.propsAdded ?? 0, b: lastBuild.propsRemoved ?? 0 })} </> : null}
+                    {lastBuild.warnings?.length ? <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>{lastBuild.warnings.slice(0, 6).map((w, i) => <li key={i}>{tr(w)}</li>)}</ul> : t("Tudo verificado e alcançável.")}
                   </Notice>
                 )}
                 {log.length > 0 && <div className="log mono small">{log.slice(-8).map((l, i) => <div key={i}>{l}</div>)}</div>}
                 <span className="row" style={{ gap: 6 }}>
-                  {lastBuild && builtMod && <button className="btn sm" onClick={() => void exportScd()}><Icon name="save_alt" size={16} /> Exportar .scd</button>}
-                  <button className="btn text sm" onClick={() => { setLog([]); setLastBuild(null); }}>Fechar</button>
+                  {lastBuild && builtMod && <button className="btn sm" onClick={() => void exportScd()}><Icon name="save_alt" size={16} /> {t("Exportar .scd")}</button>}
+                  <button className="btn text sm" onClick={() => { setLog([]); setLastBuild(null); }}>{t("Fechar")}</button>
                 </span>
               </div>
             )}
           </div>
         }
         right={<>
-          <Panel title="Explorador" icon="account_tree" grow id="map-explorer">
-            <div className="tree-filter"><input placeholder="Filtrar objetos…" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filtrar objetos" /></div>
+          <Panel title={t("Explorador")} icon="account_tree" grow id="map-explorer">
+            <div className="tree-filter"><input placeholder={t("Filtrar objetos…")} value={filter} onChange={(e) => setFilter(e.target.value)} aria-label={t("Filtrar objetos")} /></div>
             <Tree nodes={nodes} selected={sel} filter={filter} onSelect={onTreeSelect}
               onToggleHidden={(nid) => toggleLayer("hidden", nid)} onToggleLocked={(nid) => toggleLayer("locked", nid)}
               onContext={(nid, x, y) => { if (!nid.startsWith("grp:") && nid !== "map" && nid !== "world") { setSel(new Set([nid])); setCtx({ x, y, id: nid }); } }} />
           </Panel>
-          <Panel title="Propriedades" icon="tune" grow id="map-props">
+          <Panel title={t("Propriedades")} icon="tune" grow id="map-props">
             <PropertyGrid sections={props} />
           </Panel>
         </>}
       />
       <StatusBar>
         <span><Icon name="terrain" size={13} /> <b>{baseName}</b></span>
-        <span>{edits.spawns.length} bases · {edits.mass.length} massa · {doc.features.length} formas · {edits.props.length} decorações novas{removedCount ? ` · ${removedCount} retiradas` : ""}</span>
+        <span>{t("{b} bases · {m} massa · {f} formas · {p} decorações novas", { b: edits.spawns.length, m: edits.mass.length, f: doc.features.length, p: edits.props.length })}{removedCount ? ` · ${t("{n} retiradas", { n: removedCount })}` : ""}</span>
         <span className="grow" />
-        {cursor && <span>x {Math.round(cursor[0])} · z {Math.round(cursor[1])} · altura {round1(hAt(cursor))}</span>}
-        {status && !status.ready && <span style={{ color: "var(--warn)" }}>{status.message}</span>}
-        {edits.spawns.length < 2 && <span style={{ color: "var(--warn)" }}>coloque pelo menos 2 bases para gerar</span>}
+        {cursor && <span>x {Math.round(cursor[0])} · z {Math.round(cursor[1])} · {t("altura")} {round1(hAt(cursor))}</span>}
+        {status && !status.ready && <span style={{ color: "var(--warn)" }}>{tr(status.message)}</span>}
+        {edits.spawns.length < 2 && <span style={{ color: "var(--warn)" }}>{t("coloque pelo menos 2 bases para gerar")}</span>}
       </StatusBar>
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} onClose={() => setCtx(null)} items={[
-        { icon: "content_copy", label: "Duplicar", shortcut: "Ctrl+D", onClick: doDuplicate },
-        { icon: locked.has(ctx.id) ? "lock_open" : "lock", label: locked.has(ctx.id) ? "Destravar" : "Travar", onClick: () => toggleLayer("locked", ctx.id) },
-        { icon: "delete", label: "Excluir", shortcut: "Del", danger: true, onClick: doDelete },
+        { icon: "content_copy", label: t("Duplicar"), shortcut: "Ctrl+D", onClick: doDuplicate },
+        { icon: locked.has(ctx.id) ? "lock_open" : "lock", label: locked.has(ctx.id) ? t("Destravar") : t("Travar"), onClick: () => toggleLayer("locked", ctx.id) },
+        { icon: "delete", label: t("Excluir"), shortcut: "Del", danger: true, onClick: doDelete },
       ] as CtxItem[]} />}
       {genOpen && relief3d && (
         <Suspense fallback={null}>
@@ -1860,32 +1861,32 @@ export default function MapStudio({ id }: { id: string }) {
         </Suspense>
       )}
       {issues && (
-        <Modal title="Validação do mapa" icon="fact_check" onClose={() => setIssues(null)}>
+        <Modal title={t("Validação do mapa")} icon="fact_check" onClose={() => setIssues(null)}>
           <div className="col" style={{ gap: 6 }}>
             {issues.map((x, i) => (
-              <button key={i} className={`check-item ${x.level}`} disabled={!x.sel} onClick={() => { if (x.sel) { setSel(new Set([x.sel])); setIssues(null); } }}>{x.text}</button>
+              <button key={i} className={`check-item ${x.level}`} disabled={!x.sel} onClick={() => { if (x.sel) { setSel(new Set([x.sel])); setIssues(null); } }}>{tr(x.text)}</button>
             ))}
-            <p className="faint small">Clique num item para selecionar o objeto. A correção automática move a massa para o chão plano mais perto e tira decorações sobrepostas, em cima das bases ou da massa. Bases e relevo não são alterados.</p>
+            <p className="faint small">{t("Clique num item para selecionar o objeto. A correção automática move a massa para o chão plano mais perto e tira decorações sobrepostas, em cima das bases ou da massa. Bases e relevo não são alterados.")}</p>
             <footer>
-              <button className="btn text" onClick={() => setIssues(runCheck())}><Icon name="refresh" size={16} /> Conferir de novo</button>
-              <button className="btn primary" disabled={!issues.some((x) => x.fixable)} onClick={autoFix}><Icon name="auto_fix_high" size={16} /> Corrigir automaticamente</button>
+              <button className="btn text" onClick={() => setIssues(runCheck())}><Icon name="refresh" size={16} /> {t("Conferir de novo")}</button>
+              <button className="btn primary" disabled={!issues.some((x) => x.fixable)} onClick={autoFix}><Icon name="auto_fix_high" size={16} /> {t("Corrigir automaticamente")}</button>
             </footer>
           </div>
         </Modal>
       )}
       {lobbyOpen && (
-        <Modal title="Prévia do lobby" icon="preview" onClose={() => setLobbyOpen(false)}>
+        <Modal title={t("Prévia do lobby")} icon="preview" onClose={() => setLobbyOpen(false)}>
           <div className="lobby-prev">
             <div className="lobby-map">
-              {lobbyImage ? <img src={lobbyImage} alt="Minimapa" /> : <div className="bar indeterminate"><i /></div>}
+              {lobbyImage ? <img src={lobbyImage} alt={t("Minimapa")} /> : <div className="bar indeterminate"><i /></div>}
               <svg viewBox={`0 0 ${grid} ${grid}`}>
                 {edits.spawns.map((q, i) => <g key={i}><circle cx={q[0]} cy={q[1]} r={34} fill={TEAM_COLORS[teamOf(i) % 8]} stroke="#000" strokeWidth={6} /><text x={q[0]} y={q[1] + 13} textAnchor="middle" fontSize={40} fontWeight={700} fill="#000">{i + 1}</text></g>)}
               </svg>
             </div>
             <div className="col" style={{ gap: 4 }}>
               <b>{lobbyName}</b>
-              <span className="faint small">{edits.spawns.length} jogadores · {TEAM_OPTIONS.find((t) => t.value === doc.teams)?.label.toLowerCase() ?? "times"} · minimapa: {doc.minimap === "donor" ? "original do terreno" : doc.minimap === "natural" ? "cores do relevo" : doc.minimap}</span>
-              {doc.minimap === "donor" && usesWorld && <Notice kind="warn">O minimapa original mostra o relevo antigo do terreno. Para um mundo gerado use "Gerar: cores do relevo".</Notice>}
+              <span className="faint small">{t("{n} jogadores", { n: edits.spawns.length })} · {t(TEAM_OPTIONS.find((o) => o.value === doc.teams)?.label ?? "times").toLowerCase()} · {t("minimapa:")} {doc.minimap === "donor" ? t("original do terreno") : doc.minimap === "natural" ? t("cores do relevo") : doc.minimap}</span>
+              {doc.minimap === "donor" && usesWorld && <Notice kind="warn">{t(`O minimapa original mostra o relevo antigo do terreno. Para um mundo gerado use "Gerar: cores do relevo".`)}</Notice>}
             </div>
           </div>
         </Modal>

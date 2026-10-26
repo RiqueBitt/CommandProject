@@ -2,31 +2,32 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
 import type { AiMemoryReport, AiOptions, AiPersonality, CheatOptions, ConflictReport, FirstPersonOptions, OptimizeOptions, OptimizeState } from "../lib/types";
+import { t, tr } from "../lib/i18n";
 import { Field, Icon, Modal, Notice, Switch, TaskProgress } from "./ui";
 
 export function ConflictsModal({ report, onClose }: { report: ConflictReport; onClose: () => void }) {
   return (
-    <Modal title="Conflitos do perfil" icon="compare_arrows" onClose={onClose}>
+    <Modal title={t("Conflitos do perfil")} icon="compare_arrows" onClose={onClose}>
       <p className="muted small">
-        O jogo monta os arquivos .scd em ordem alfabética e o último vence. Abaixo, quem sobrescreve quem — confirme sempre numa partida de teste.
+        {t("O jogo monta os arquivos .scd em ordem alfabética e o último vence. Abaixo, quem sobrescreve quem — confirme sempre numa partida de teste.")}
       </p>
-      {report.betweenMods.length === 0 ? <Notice kind="ok">Nenhum mod ativo sobrescreve outro mod.</Notice> : report.betweenMods.map((c) => (
+      {report.betweenMods.length === 0 ? <Notice kind="ok">{t("Nenhum mod ativo sobrescreve outro mod.")}</Notice> : report.betweenMods.map((c) => (
         <details key={c.loser + c.winner} className="card pad">
-          <summary style={{ cursor: "pointer" }}><b>{c.winnerMod}</b> sobrescreve <b>{c.loserMod}</b> em {c.count} arquivo(s)</summary>
+          <summary style={{ cursor: "pointer" }}><b>{c.winnerMod}</b> {t("sobrescreve")} <b>{c.loserMod}</b> {t("em {n} arquivo(s)", { n: c.count })}</summary>
           <div className="mono faint selectable" style={{ marginTop: 8 }}>{c.samples.map((s) => <div key={s}>{s}</div>)}</div>
         </details>
       ))}
       {report.overridesStock.length > 0 && (
         <>
-          <h3>Mudanças em arquivos do jogo</h3>
+          <h3>{t("Mudanças em arquivos do jogo")}</h3>
           {report.overridesStock.map((c) => (
             <div key={c.loser + c.winner} className="row small">
-              <span style={{ flex: 1 }}><b>{c.winnerMod ?? c.winner}</b> altera {c.count} arquivo(s) de <span className="mono">{c.loser}</span></span>
+              <span style={{ flex: 1 }}><b>{c.winnerMod ?? c.winner}</b> {t("altera {n} arquivo(s) de", { n: c.count })} <span className="mono">{c.loser}</span></span>
             </div>
           ))}
         </>
       )}
-      <footer><button className="btn primary" onClick={onClose}>Fechar</button></footer>
+      <footer><button className="btn primary" onClick={onClose}>{t("Fechar")}</button></footer>
     </Modal>
   );
 }
@@ -37,23 +38,23 @@ export function InstallLinkModal({ onClose }: { onClose: () => void }) {
   const [url, setUrl] = useState("");
   const valid = /^https:\/\/\S+$/i.test(url.trim());
   return (
-    <Modal title="Instalar de um link" icon="link" onClose={onClose}>
+    <Modal title={t("Instalar de um link")} icon="link" onClose={onClose}>
       <form className="col" style={{ gap: 14 }} onSubmit={async (e) => {
         e.preventDefault();
-        const m = await run("link", () => api.installFromUrl(url.trim(), true), (m) => `"${m.name}" instalado e ativado.`);
+        const m = await run("link", () => api.installFromUrl(url.trim(), true), (m) => t('"{name}" instalado e ativado.', { name: m.name }));
         if (m) {
           await refreshMods();
           onClose();
         }
       }}>
-        <Field label="Link direto do arquivo" hint="Precisa terminar no arquivo (.zip ou .scd). Links de página (ModDB, Drive “visualizar”) não funcionam — use o botão de download direto.">
-          <input className="input" placeholder="https://…/meu-mod.zip" value={url} onChange={(e) => setUrl(e.target.value)} />
+        <Field label={t("Link direto do arquivo")} hint={t("Precisa terminar no arquivo (.zip ou .scd). Links de página (ModDB, Drive “visualizar”) não funcionam — use o botão de download direto.")}>
+          <input className="input" placeholder={t("https://…/meu-mod.zip")} value={url} onChange={(e) => setUrl(e.target.value)} />
         </Field>
-        <Notice kind="warn">Este arquivo não passa pela verificação de um hub. Só instale mods de quem você confia.</Notice>
-        {busy && <TaskProgress task="link" label="Baixando…" />}
+        <Notice kind="warn">{t("Este arquivo não passa pela verificação de um hub. Só instale mods de quem você confia.")}</Notice>
+        {busy && <TaskProgress task="link" label={t("Baixando…")} />}
         <footer>
-          <button type="button" className="btn text" onClick={onClose}>Cancelar</button>
-          <button className="btn primary" disabled={!valid || busy}>Baixar e instalar</button>
+          <button type="button" className="btn text" onClick={onClose}>{t("Cancelar")}</button>
+          <button className="btn primary" disabled={!valid || busy}>{t("Baixar e instalar")}</button>
         </footer>
       </form>
     </Modal>
@@ -91,11 +92,11 @@ export function CheatsModal({ installed, onClose }: { installed: boolean; onClos
   const set = (patch: Partial<CheatOptions>) => setO((v) => ({ ...v, ...patch }));
   const any = o.menu || CHEAT_ROWS.some((r) => r.key !== "aiToo" && o[r.key]) || o.buildSpeed > 1;
   return (
-    <Modal title="Trapaças para jogar sozinho" icon="auto_fix_high" onClose={onClose}>
+    <Modal title={t("Trapaças para jogar sozinho")} icon="auto_fix_high" onClose={onClose}>
       <form className="col" style={{ gap: 14 }} onSubmit={async (e) => {
         e.preventDefault();
         try { localStorage.setItem(CHEATS_KEY, JSON.stringify(o)); } catch { /* ok */ }
-        const m = await run("cheats", () => api.buildCheats(o, true), () => installed ? "Trapaças atualizadas." : "Trapaças instaladas e ativadas.");
+        const m = await run("cheats", () => api.buildCheats(o, true), () => installed ? t("Trapaças atualizadas.") : t("Trapaças instaladas e ativadas."));
         if (m) {
           await refreshMods();
           onClose();
@@ -106,43 +107,43 @@ export function CheatsModal({ installed, onClose }: { installed: boolean; onClos
             <div key={r.key} className="row" style={{ gap: 12 }}>
               <Icon name={r.icon} size={20} />
               <div className="grow">
-                <div>{r.label}</div>
-                <div className="small faint">{r.hint}</div>
+                <div>{t(r.label)}</div>
+                <div className="small faint">{t(r.hint)}</div>
               </div>
-              <Switch label={r.label} checked={o[r.key]} onChange={(v) => set({ [r.key]: v } as Partial<CheatOptions>)} />
+              <Switch label={t(r.label)} checked={o[r.key]} onChange={(v) => set({ [r.key]: v } as Partial<CheatOptions>)} />
             </div>
           ))}
         </div>
-        <Field label="Velocidade de construção" hint="Multiplica a velocidade de construção de todas as suas unidades e fábricas.">
-          <div className="seg" role="group" aria-label="Velocidade de construção">
-            {SPEEDS.map((s) => <button type="button" key={s} className="btn" aria-pressed={o.buildSpeed === s} onClick={() => set({ buildSpeed: s })}>{s === 1 ? "Normal" : `${s}×`}</button>)}
+        <Field label={t("Velocidade de construção")} hint={t("Multiplica a velocidade de construção de todas as suas unidades e fábricas.")}>
+          <div className="seg" role="group" aria-label={t("Velocidade de construção")}>
+            {SPEEDS.map((s) => <button type="button" key={s} className="btn" aria-pressed={o.buildSpeed === s} onClick={() => set({ buildSpeed: s })}>{s === 1 ? t("Normal") : `${s}×`}</button>)}
           </div>
         </Field>
         <div className="row" style={{ gap: 12 }}>
           <Icon name="menu_open" size={20} />
           <div className="grow">
-            <div>Menu dentro do jogo</div>
-            <div className="small faint">Uma tecla abre um menu na partida para ligar e desligar cada trapaça quando quiser. As opções acima viram o estado inicial.</div>
+            <div>{t("Menu dentro do jogo")}</div>
+            <div className="small faint">{t("Uma tecla abre um menu na partida para ligar e desligar cada trapaça quando quiser. As opções acima viram o estado inicial.")}</div>
           </div>
-          <Switch label="Menu dentro do jogo" checked={o.menu} onChange={(v) => set({ menu: v })} />
+          <Switch label={t("Menu dentro do jogo")} checked={o.menu} onChange={(v) => set({ menu: v })} />
         </div>
         {o.menu && (
           <div className="row wrap" style={{ gap: 16 }}>
-            <Field label="Tecla do menu">
-              <div className="seg" role="group" aria-label="Tecla do menu">
+            <Field label={t("Tecla do menu")}>
+              <div className="seg" role="group" aria-label={t("Tecla do menu")}>
                 {MENU_KEYS.map((k) => <button type="button" key={k} className="btn" aria-pressed={o.key === k} onClick={() => set({ key: k })}>{k}</button>)}
               </div>
             </Field>
             <label className="row" style={{ gap: 8 }}>
-              <Switch label="Botão CP na tela" checked={o.tab} onChange={(v) => set({ tab: v })} /> Botão "CP" na borda da tela
+              <Switch label={t("Botão CP na tela")} checked={o.tab} onChange={(v) => set({ tab: v })} /> {t('Botão "CP" na borda da tela')}
             </label>
           </div>
         )}
-        <Notice kind="info">O mod é montado agora com os arquivos do seu jogo e só vale em partidas com um único jogador humano (escaramuça contra a IA). Em multiplayer ele se desliga sozinho. Desligue o mod na lista quando quiser jogar normal.</Notice>
-        {busy && <TaskProgress task="cheats" label="Montando o mod…" />}
+        <Notice kind="info">{t("O mod é montado agora com os arquivos do seu jogo e só vale em partidas com um único jogador humano (escaramuça contra a IA). Em multiplayer ele se desliga sozinho. Desligue o mod na lista quando quiser jogar normal.")}</Notice>
+        {busy && <TaskProgress task="cheats" label={t("Montando o mod…")} />}
         <footer>
-          <button type="button" className="btn text" onClick={onClose}>Cancelar</button>
-          <button className="btn primary" disabled={!any || busy}>{installed ? "Atualizar trapaças" : "Instalar e ativar"}</button>
+          <button type="button" className="btn text" onClick={onClose}>{t("Cancelar")}</button>
+          <button className="btn primary" disabled={!any || busy}>{installed ? t("Atualizar trapaças") : t("Instalar e ativar")}</button>
         </footer>
       </form>
     </Modal>
@@ -197,26 +198,30 @@ export function AiModal({ installed, onClose }: { installed: boolean; onClose: (
   const set = (patch: Partial<AiOptions>) => setO((v) => ({ ...v, ...patch }));
   const any = o.naval || o.economy || o.commander;
   return (
-    <Modal title="IA mais esperta" icon="psychology" onClose={onClose}>
+    <Modal title={t("IA mais esperta")} icon="psychology" onClose={onClose}>
       <form className="col" style={{ gap: 14 }} onSubmit={async (e) => {
         e.preventDefault();
         try { localStorage.setItem("cp-ai", JSON.stringify(o)); } catch { /* ok */ }
-        const r = await run("ai", () => api.buildAi(o, true), (r) =>
-          `${installed ? "IA atualizada" : "IA instalada e ativada"}: ${r.applied} ajustes${r.skipped.length ? ` (${r.skipped.length} não serviram nesta versão do jogo)` : ""}.`);
+        const r = await run("ai", () => api.buildAi(o, true), (r) => {
+          const head = installed ? t("IA atualizada") : t("IA instalada e ativada");
+          return r.skipped.length
+            ? t("{head}: {n} ajustes ({k} não serviram nesta versão do jogo).", { head, n: r.applied, k: r.skipped.length })
+            : t("{head}: {n} ajustes.", { head, n: r.applied });
+        });
         if (r) {
           await refreshMods();
           onClose();
         }
       }}>
-        <Field label="Nível" hint="Vale para todas as dificuldades da escaramuça (Fácil continua mais fácil que Difícil).">
-          <div className="seg" role="group" aria-label="Nível da IA">
-            <button type="button" className="btn" aria-pressed={o.level === 1} onClick={() => set({ level: 1 })}>Esperta</button>
-            <button type="button" className="btn" aria-pressed={o.level === 2} onClick={() => set({ level: 2 })}>Brutal</button>
+        <Field label={t("Nível")} hint={t("Vale para todas as dificuldades da escaramuça (Fácil continua mais fácil que Difícil).")}>
+          <div className="seg" role="group" aria-label={t("Nível da IA")}>
+            <button type="button" className="btn" aria-pressed={o.level === 1} onClick={() => set({ level: 1 })}>{t("Esperta")}</button>
+            <button type="button" className="btn" aria-pressed={o.level === 2} onClick={() => set({ level: 2 })}>{t("Brutal")}</button>
           </div>
         </Field>
-        <Field label="Personalidade" hint={AI_PERSONALITIES.find((p) => p.key === o.personality)?.hint}>
-          <div className="seg wrap" role="group" aria-label="Personalidade da IA">
-            {AI_PERSONALITIES.map((p) => <button type="button" key={p.key} className="btn" aria-pressed={o.personality === p.key} disabled={!o.commander} onClick={() => set({ personality: p.key })}>{p.label}</button>)}
+        <Field label={t("Personalidade")} hint={t(AI_PERSONALITIES.find((p) => p.key === o.personality)?.hint ?? "")}>
+          <div className="seg wrap" role="group" aria-label={t("Personalidade da IA")}>
+            {AI_PERSONALITIES.map((p) => <button type="button" key={p.key} className="btn" aria-pressed={o.personality === p.key} disabled={!o.commander} onClick={() => set({ personality: p.key })}>{t(p.label)}</button>)}
           </div>
         </Field>
         <div className="col" style={{ gap: 10 }}>
@@ -226,28 +231,28 @@ export function AiModal({ installed, onClose }: { installed: boolean; onClose: (
               <div key={r.key} className="row" style={{ gap: 12, opacity: off ? 0.5 : 1 }}>
                 <Icon name={r.icon} size={20} />
                 <div className="grow">
-                  <div>{r.label}</div>
-                  <div className="small faint">{r.hint}</div>
+                  <div>{t(r.label)}</div>
+                  <div className="small faint">{t(r.hint)}</div>
                 </div>
-                <Switch label={r.label} checked={o[r.key]} disabled={off} onChange={(v) => set({ [r.key]: v } as Partial<AiOptions>)} />
+                <Switch label={t(r.label)} checked={o[r.key]} disabled={off} onChange={(v) => set({ [r.key]: v } as Partial<AiOptions>)} />
               </div>
             );
           })}
         </div>
         {o.commander && o.panel && (
-          <Field label="Tecla do painel" hint='Também abre pelo botão "IA" na borda esquerda da tela. Use uma tecla diferente da do menu de trapaças.'>
-            <div className="seg" role="group" aria-label="Tecla do painel">
+          <Field label={t("Tecla do painel")} hint={t('Também abre pelo botão "IA" na borda esquerda da tela. Use uma tecla diferente da do menu de trapaças.')}>
+            <div className="seg" role="group" aria-label={t("Tecla do painel")}>
               {MENU_KEYS.map((k) => <button type="button" key={k} className="btn" aria-pressed={o.panelKey === k} onClick={() => set({ panelKey: k })}>{k}</button>)}
             </div>
           </Field>
         )}
-        {o.commander && o.learn && <Notice kind="info">Se você usa as Trapaças, clique em Atualizar trapaças depois desta versão: os dois mods dividem um arquivo do jogo e as trapaças antigas não levam o canal da memória da IA.</Notice>}
+        {o.commander && o.learn && <Notice kind="info">{t("Se você usa as Trapaças, clique em Atualizar trapaças depois desta versão: os dois mods dividem um arquivo do jogo e as trapaças antigas não levam o canal da memória da IA.")}</Notice>}
         {o.commander && o.learn && <AiMemoryCard />}
-        <Notice kind="info">O mod é montado agora com os arquivos de IA do seu jogo (incluindo os da expansão). Mexe no comportamento da IA, então todos numa partida multiplayer precisam ter o mesmo mod. Desligue na lista para voltar à IA original.</Notice>
-        {busy && <TaskProgress task="ai" label="Montando a IA…" />}
+        <Notice kind="info">{t("O mod é montado agora com os arquivos de IA do seu jogo (incluindo os da expansão). Mexe no comportamento da IA, então todos numa partida multiplayer precisam ter o mesmo mod. Desligue na lista para voltar à IA original.")}</Notice>
+        {busy && <TaskProgress task="ai" label={t("Montando a IA…")} />}
         <footer>
-          <button type="button" className="btn text" onClick={onClose}>Cancelar</button>
-          <button className="btn primary" disabled={!any || busy}>{installed ? "Atualizar IA" : "Instalar e ativar"}</button>
+          <button type="button" className="btn text" onClick={onClose}>{t("Cancelar")}</button>
+          <button className="btn primary" disabled={!any || busy}>{installed ? t("Atualizar IA") : t("Instalar e ativar")}</button>
         </footer>
       </form>
     </Modal>
@@ -271,16 +276,16 @@ export function AiMemoryCard() {
   const profile = report.profiles.find((p) => p.current) ?? report.profiles[0];
   return (
     <div className="col" style={{ gap: 8 }}>
-      <div className="row" style={{ gap: 8 }}><Icon name="school" size={18} /><strong>O que a IA aprendeu sobre você</strong></div>
-      {report.error && <div className="small faint">{report.error}</div>}
-      {!report.error && !profile && <div className="small faint">Ainda nada: jogue uma escaramuça sozinho contra a IA com "Aprende o seu jeito de jogar" ligado.</div>}
+      <div className="row" style={{ gap: 8 }}><Icon name="school" size={18} /><strong>{t("O que a IA aprendeu sobre você")}</strong></div>
+      {report.error && <div className="small faint">{tr(report.error)}</div>}
+      {!report.error && !profile && <div className="small faint">{t('Ainda nada: jogue uma escaramuça sozinho contra a IA com "Aprende o seu jeito de jogar" ligado.')}</div>}
       {profile && (
         <>
-          <div className="small faint">Perfil {profile.name} · {profile.games} {profile.games === 1 ? "partida lembrada" : "partidas lembradas"}{profile.firstAttack ? ` · primeiro ataque perto de ${mmss(profile.firstAttack)}` : ""}</div>
+          <div className="small faint">{t("Perfil {name}", { name: profile.name })} · {profile.games === 1 ? t("1 partida lembrada") : t("{n} partidas lembradas", { n: profile.games })}{profile.firstAttack ? ` · ${t("primeiro ataque perto de {time}", { time: mmss(profile.firstAttack) })}` : ""}</div>
           <div className="col" style={{ gap: 4 }}>
             {profile.style.filter(([, v]) => v >= 0.05).slice(0, 5).map(([k, v]) => (
               <div key={k} className="row" style={{ gap: 8 }}>
-                <span className="small" style={{ width: 190 }}>{STYLE_LABEL[k] ?? k}</span>
+                <span className="small" style={{ width: 190 }}>{STYLE_LABEL[k] ? t(STYLE_LABEL[k]) : k}</span>
                 <div className="grow" style={{ height: 6, borderRadius: 3, background: "var(--surface-bright)" }}>
                   <div style={{ width: `${Math.round(v * 100)}%`, height: "100%", borderRadius: 3, background: "var(--primary)" }} />
                 </div>
@@ -289,7 +294,7 @@ export function AiMemoryCard() {
             ))}
           </div>
           {profile.maps.length > 0 && (
-            <div className="small faint">Mapas: {profile.maps.slice(0, 4).map((m) => `${m.map} (${m.games}× · ${m.routes} rotas, ${m.hits} pontos que você ataca)`).join(" · ")}</div>
+            <div className="small faint">{t("Mapas: {list}", { list: profile.maps.slice(0, 4).map((m) => t("{map} ({games}× · {routes} rotas, {hits} pontos que você ataca)", { map: m.map, games: m.games, routes: m.routes, hits: m.hits })).join(" · ") })}</div>
           )}
         </>
       )}
@@ -299,7 +304,7 @@ export function AiMemoryCard() {
 
 // ------------------------------------------------------------------ otimização
 
-const fpsLabel = (f: number) => (f === 0 ? "100 FPS (o do jogo)" : `${f} FPS`);
+const fpsLabel = (f: number) => (f === 0 ? t("100 FPS (o do jogo)") : `${f} FPS`);
 
 /** Monta o mod de otimização: limite de FPS no jogo e ajustes do Windows para o executável. */
 export function OptimizeModal({ onClose }: { onClose: () => void }) {
@@ -313,38 +318,38 @@ export function OptimizeModal({ onClose }: { onClose: () => void }) {
   const set = (patch: Partial<OptimizeOptions>) => setO((v) => (v ? { ...v, ...patch } : v));
   const win = st?.windows.supported !== false;
   const rows: { key: "gpu" | "fullscreenFix" | "noThrottle" | "largeAddress"; icon: string; label: string; hint: string; win?: boolean; now?: boolean }[] = [
-    { key: "gpu", icon: "developer_board", label: "Usar a placa de vídeo dedicada", hint: "Em notebooks e PCs com duas placas (integrada + dedicada), o Windows passa a abrir o jogo sempre na mais forte. É a mesma opção de Configurações → Sistema → Tela → Gráficos.", win: true, now: st?.windows.gpu },
-    { key: "fullscreenFix", icon: "fullscreen", label: "Desligar as \"otimizações de tela cheia\" do Windows", hint: "Jogos DirectX 9 costumam rodar mais lisos e com menos atraso no mouse assim. É a caixa de Propriedades → Compatibilidade do executável.", win: true, now: st?.windows.fullscreenFix },
-    { key: "noThrottle", icon: "bolt", label: "Sem economia de energia no jogo", hint: "O Windows não reduz a velocidade do jogo quando acha que ele está em segundo plano (Windows 10/11, principalmente em notebooks).", win: true, now: st?.noThrottle },
-    { key: "largeAddress", icon: "memory", label: "Modo 4 GB", hint: "O jogo (32 bits) passa a poder usar até 4 GB de memória em vez de 2 GB: menos travamentos em mapas grandes e partidas com muitos jogadores.", now: st?.largeAddress },
+    { key: "gpu", icon: "developer_board", label: t("Usar a placa de vídeo dedicada"), hint: t("Em notebooks e PCs com duas placas (integrada + dedicada), o Windows passa a abrir o jogo sempre na mais forte. É a mesma opção de Configurações → Sistema → Tela → Gráficos."), win: true, now: st?.windows.gpu },
+    { key: "fullscreenFix", icon: "fullscreen", label: t('Desligar as "otimizações de tela cheia" do Windows'), hint: t("Jogos DirectX 9 costumam rodar mais lisos e com menos atraso no mouse assim. É a caixa de Propriedades → Compatibilidade do executável."), win: true, now: st?.windows.fullscreenFix },
+    { key: "noThrottle", icon: "bolt", label: t("Sem economia de energia no jogo"), hint: t("O Windows não reduz a velocidade do jogo quando acha que ele está em segundo plano (Windows 10/11, principalmente em notebooks)."), win: true, now: st?.noThrottle },
+    { key: "largeAddress", icon: "memory", label: t("Modo 4 GB"), hint: t("O jogo (32 bits) passa a poder usar até 4 GB de memória em vez de 2 GB: menos travamentos em mapas grandes e partidas com muitos jogadores."), now: st?.largeAddress },
   ];
   return (
-    <Modal title="Otimização" icon="speed" onClose={onClose}>
+    <Modal title={t("Otimização")} icon="speed" onClose={onClose}>
       {!st || !o ? <div className="bar indeterminate"><i /></div> : (
         <form className="col" style={{ gap: 14 }} onSubmit={async (e) => {
           e.preventDefault();
-          const r = await run("optimize", () => api.buildOptimize(o, true), () => st.installed ? "Otimização atualizada." : "Otimização instalada e ativada.");
+          const r = await run("optimize", () => api.buildOptimize(o, true), () => st.installed ? t("Otimização atualizada.") : t("Otimização instalada e ativada."));
           if (r) {
             setSt(r);
             await refreshMods();
             onClose();
           }
         }}>
-          <p className="muted small">Ajustes que deixam o jogo mais leve sem tirar nada dele: nenhuma unidade, efeito ou textura é removida. O ganho depende do seu PC; compare no monitor do Otimizador.</p>
-          <Field label="Limite de FPS nas partidas" hint="O jogo vem travado em 100 FPS. Com monitor de 120/144 Hz ou mais, um limite maior deixa a imagem mais lisa; um limite menor alivia a placa de vídeo e o processador.">
+          <p className="muted small">{t("Ajustes que deixam o jogo mais leve sem tirar nada dele: nenhuma unidade, efeito ou textura é removida. O ganho depende do seu PC; compare no monitor do Otimizador.")}</p>
+          <Field label={t("Limite de FPS nas partidas")} hint={t("O jogo vem travado em 100 FPS. Com monitor de 120/144 Hz ou mais, um limite maior deixa a imagem mais lisa; um limite menor alivia a placa de vídeo e o processador.")}>
             <select className="select" value={o.fps} onChange={(e) => set({ fps: Number(e.target.value) })}>
               {st.fpsChoices.map((f) => <option key={f} value={f}>{fpsLabel(f)}</option>)}
             </select>
           </Field>
-          <Field label="Limite nas partidas grandes (mais de 8 jogadores)" hint="Com muitas IAs quem pesa é a simulação: menos quadros desenhados sobram processador para ela e a partida fica mais estável.">
+          <Field label={t("Limite nas partidas grandes (mais de 8 jogadores)")} hint={t("Com muitas IAs quem pesa é a simulação: menos quadros desenhados sobram processador para ela e a partida fica mais estável.")}>
             <select className="select" value={o.bigFps} onChange={(e) => set({ bigFps: Number(e.target.value) })}>
-              <option value={0}>O mesmo das outras partidas</option>
+              <option value={0}>{t("O mesmo das outras partidas")}</option>
               {st.fpsChoices.filter((f) => f > 0).map((f) => <option key={f} value={f}>{f} FPS</option>)}
             </select>
           </Field>
-          <Field label="Prioridade do jogo" hint="O Windows dá mais tempo de processador ao jogo do que a programas em segundo plano. “Alta” pode deixar o resto do PC lento enquanto joga.">
-            <div className="seg" role="group" aria-label="Prioridade do jogo">
-              {[["normal", "Normal"], ["above_normal", "Acima do normal"], ["high", "Alta"]].map(([k, l]) => <button type="button" key={k} className="btn" aria-pressed={o.priority === k} onClick={() => set({ priority: k })}>{l}</button>)}
+          <Field label={t("Prioridade do jogo")} hint={t("O Windows dá mais tempo de processador ao jogo do que a programas em segundo plano. “Alta” pode deixar o resto do PC lento enquanto joga.")}>
+            <div className="seg" role="group" aria-label={t("Prioridade do jogo")}>
+              {[["normal", "Normal"], ["above_normal", "Acima do normal"], ["high", "Alta"]].map(([k, l]) => <button type="button" key={k} className="btn" aria-pressed={o.priority === k} onClick={() => set({ priority: k })}>{t(l)}</button>)}
             </div>
           </Field>
           <div className="col" style={{ gap: 10 }}>
@@ -354,26 +359,26 @@ export function OptimizeModal({ onClose }: { onClose: () => void }) {
                 <div key={r.key} className="row" style={{ gap: 12, opacity: off ? 0.5 : 1 }}>
                   <Icon name={r.icon} size={20} />
                   <div className="grow">
-                    <div>{r.label} {r.now && <span className="chip ok">ligado</span>}</div>
-                    <div className="small faint">{off ? "Só no Windows." : r.hint}</div>
+                    <div>{r.label} {r.now && <span className="chip ok">{t("ligado")}</span>}</div>
+                    <div className="small faint">{off ? t("Só no Windows.") : r.hint}</div>
                   </div>
                   <Switch label={r.label} checked={o[r.key]} disabled={off} onChange={(v) => set({ [r.key]: v } as Partial<OptimizeOptions>)} />
                 </div>
               );
             })}
           </div>
-          <Notice kind="info">O limite de FPS vai num mod pequeno montado com o arquivo de interface do seu jogo (vale só no seu PC, não muda a simulação). Os ajustes do Windows valem só para o executável do Supreme Commander 2 e podem ser desfeitos aqui.</Notice>
-          {busy && <TaskProgress task="optimize" label="Montando a otimização…" />}
+          <Notice kind="info">{t("O limite de FPS vai num mod pequeno montado com o arquivo de interface do seu jogo (vale só no seu PC, não muda a simulação). Os ajustes do Windows valem só para o executável do Supreme Commander 2 e podem ser desfeitos aqui.")}</Notice>
+          {busy && <TaskProgress task="optimize" label={t("Montando a otimização…")} />}
           <footer>
             {st.installed && win && (st.windows.gpu || st.windows.fullscreenFix || st.noThrottle) && (
               <button type="button" className="btn text" onClick={async () => {
-                const r = await run("optimize", () => api.optimizeUndoWindows(), "Ajustes do Windows desfeitos.");
+                const r = await run("optimize", () => api.optimizeUndoWindows(), t("Ajustes do Windows desfeitos."));
                 if (r) { setSt(r); set({ gpu: false, fullscreenFix: false, noThrottle: false }); }
-              }}>Desfazer ajustes do Windows</button>
+              }}>{t("Desfazer ajustes do Windows")}</button>
             )}
             <span className="grow" />
-            <button type="button" className="btn text" onClick={onClose}>Cancelar</button>
-            <button className="btn primary" disabled={busy}>{st.installed ? "Atualizar otimização" : "Instalar e ativar"}</button>
+            <button type="button" className="btn text" onClick={onClose}>{t("Cancelar")}</button>
+            <button className="btn primary" disabled={busy}>{st.installed ? t("Atualizar otimização") : t("Instalar e ativar")}</button>
           </footer>
         </form>
       )}
@@ -404,17 +409,17 @@ export function FirstPersonModal({ installed, onClose }: { installed: boolean; o
   const [o, setO] = useState<FirstPersonOptions>(loadFirstPerson);
   const set = (patch: Partial<FirstPersonOptions>) => setO((v) => ({ ...v, ...patch }));
   const modes: { icon: string; title: string; text: string }[] = [
-    { icon: "visibility", title: "Primeira pessoa", text: `Uma unidade selecionada + ${o.key}: a câmera fica na cabeça da unidade (robô, tanque, avião, navio ou construtor), no tamanho do modelo dela, e vira junto quando ela anda. W A S D andam para onde você olha, como num jogo de ação; segure o botão do meio do mouse e mova para olhar em volta (ou use Q/E).` },
-    { icon: "3d_rotation", title: "Terceira pessoa", text: `${o.key} de novo: a câmera fica atrás da unidade e a segue pelo terreno; botão do meio + mouse (ou Q/E) giram a vista e a roda do mouse dá zoom.` },
-    { icon: "groups", title: "Câmera de comando", text: "Várias unidades selecionadas: câmera acima e atrás da formação, acompanhando o grupo, e as ordens vão para todos." },
-    { icon: "construction", title: "Construtores", text: "O menu de construção, o posicionamento dos prédios e as habilidades funcionam em qualquer câmera, como no jogo." },
+    { icon: "visibility", title: t("Primeira pessoa"), text: t("Uma unidade selecionada + {key}: a câmera fica na cabeça da unidade (robô, tanque, avião, navio ou construtor), no tamanho do modelo dela, e vira junto quando ela anda. W A S D andam para onde você olha, como num jogo de ação; segure o botão do meio do mouse e mova para olhar em volta (ou use Q/E).", { key: o.key }) },
+    { icon: "3d_rotation", title: t("Terceira pessoa"), text: t("{key} de novo: a câmera fica atrás da unidade e a segue pelo terreno; botão do meio + mouse (ou Q/E) giram a vista e a roda do mouse dá zoom.", { key: o.key }) },
+    { icon: "groups", title: t("Câmera de comando"), text: t("Várias unidades selecionadas: câmera acima e atrás da formação, acompanhando o grupo, e as ordens vão para todos.") },
+    { icon: "construction", title: t("Construtores"), text: t("O menu de construção, o posicionamento dos prédios e as habilidades funcionam em qualquer câmera, como no jogo.") },
   ];
   return (
-    <Modal title="Primeira Pessoa" icon="videocam" onClose={onClose}>
+    <Modal title={t("Primeira Pessoa")} icon="videocam" onClose={onClose}>
       <form className="col" style={{ gap: 14 }} onSubmit={async (e) => {
         e.preventDefault();
         try { localStorage.setItem(FP_KEY, JSON.stringify(o)); } catch { /* ok */ }
-        const m = await run("fp", () => api.buildFirstPerson(o, true), () => installed ? "Primeira Pessoa atualizada." : "Primeira Pessoa instalada e ativada.");
+        const m = await run("fp", () => api.buildFirstPerson(o, true), () => installed ? t("Primeira Pessoa atualizada.") : t("Primeira Pessoa instalada e ativada."));
         if (m) {
           await refreshMods();
           onClose();
@@ -428,32 +433,32 @@ export function FirstPersonModal({ installed, onClose }: { installed: boolean; o
             </div>
           ))}
         </div>
-        <Field label="Tecla que troca a câmera" hint={`Sem nada selecionado, ${o.key} continua fazendo o que fazia no jogo.`}>
-          <div className="seg" role="group" aria-label="Tecla da câmera">
+        <Field label={t("Tecla que troca a câmera")} hint={t("Sem nada selecionado, {key} continua fazendo o que fazia no jogo.", { key: o.key })}>
+          <div className="seg" role="group" aria-label={t("Tecla da câmera")}>
             {FP_KEYS.map((k) => <button type="button" key={k} className="btn" aria-pressed={o.key === k} onClick={() => set({ key: k })}>{k}</button>)}
           </div>
         </Field>
         <div className="row" style={{ gap: 12 }}>
           <Icon name="keyboard" size={20} />
           <div className="grow">
-            <div>Controle direto pelo teclado</div>
-            <div className="small faint">Enquanto a câmera está ligada: W A S D andam para onde a câmera olha (a unidade ou o grupo inteiro), botão do meio + mouse ou Q/E olham em volta, F atira no que está sob o mouse, X para, R troca 1ª/3ª pessoa e Esc volta. Desligado, essas teclas mantêm as funções do jogo e você comanda com o botão direito.</div>
+            <div>{t("Controle direto pelo teclado")}</div>
+            <div className="small faint">{t("Enquanto a câmera está ligada: W A S D andam para onde a câmera olha (a unidade ou o grupo inteiro), botão do meio + mouse ou Q/E olham em volta, F atira no que está sob o mouse, X para, R troca 1ª/3ª pessoa e Esc volta. Desligado, essas teclas mantêm as funções do jogo e você comanda com o botão direito.")}</div>
           </div>
-          <Switch label="Controle pelo teclado" checked={o.drive} onChange={(v) => set({ drive: v })} />
+          <Switch label={t("Controle pelo teclado")} checked={o.drive} onChange={(v) => set({ drive: v })} />
         </div>
         <div className="row" style={{ gap: 12 }}>
           <Icon name="center_focus_strong" size={20} />
-          <div className="grow"><div>Mira e painel na tela</div><div className="small faint">Mira no centro em primeira pessoa e um painel com o modo, a unidade, a vida e as teclas.</div></div>
-          <Switch label="Mira e painel" checked={o.hud} onChange={(v) => set({ hud: v })} />
+          <div className="grow"><div>{t("Mira e painel na tela")}</div><div className="small faint">{t("Mira no centro em primeira pessoa e um painel com o modo, a unidade, a vida e as teclas.")}</div></div>
+          <Switch label={t("Mira e painel")} checked={o.hud} onChange={(v) => set({ hud: v })} />
         </div>
-        <Field label={`Distância em terceira pessoa: ${o.thirdZoom}`}>
-          <input type="range" min={15} max={120} step={1} value={o.thirdZoom} onChange={(e) => set({ thirdZoom: Number(e.target.value) })} aria-label="Distância em terceira pessoa" />
+        <Field label={t("Distância em terceira pessoa: {n}", { n: o.thirdZoom })}>
+          <input type="range" min={15} max={120} step={1} value={o.thirdZoom} onChange={(e) => set({ thirdZoom: Number(e.target.value) })} aria-label={t("Distância em terceira pessoa")} />
         </Field>
-        <Notice kind="info">O mod é montado agora com os arquivos de interface e de simulação do seu jogo. As ordens passam pela simulação como as do próprio jogo (valem em multiplayer, mas todos na partida precisam ter o mod). Desligue na lista para voltar ao normal.</Notice>
-        {busy && <TaskProgress task="fp" label="Montando a primeira pessoa…" />}
+        <Notice kind="info">{t("O mod é montado agora com os arquivos de interface e de simulação do seu jogo. As ordens passam pela simulação como as do próprio jogo (valem em multiplayer, mas todos na partida precisam ter o mod). Desligue na lista para voltar ao normal.")}</Notice>
+        {busy && <TaskProgress task="fp" label={t("Montando a primeira pessoa…")} />}
         <footer>
-          <button type="button" className="btn text" onClick={onClose}>Cancelar</button>
-          <button className="btn primary" disabled={busy}>{installed ? "Atualizar" : "Instalar e ativar"}</button>
+          <button type="button" className="btn text" onClick={onClose}>{t("Cancelar")}</button>
+          <button className="btn primary" disabled={busy}>{installed ? t("Atualizar") : t("Instalar e ativar")}</button>
         </footer>
       </form>
     </Modal>
