@@ -313,8 +313,8 @@ export function useHotkeys(active: boolean, map: Record<string, (e: KeyboardEven
 
 // ------------------------------------------------------------------ cabeçalho do projeto
 
-const ago = (t: number) => {
-  const s = Math.round((Date.now() - t) / 1000);
+const ago = (at: number) => {
+  const s = Math.round((Date.now() - at) / 1000);
   if (s < 10) return t("agora");
   if (s < 60) return t("há {n} s", { n: s });
   if (s < 3600) return t("há {n} min", { n: Math.round(s / 60) });
