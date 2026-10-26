@@ -41,7 +41,9 @@ jobs:
           name: shaders-hlsl
           path: target/shaders/*.hlsl
       - name: Ponte do toolkit de mapas (jogo sintético)
-        run: python tools/test_maptk_bridge.py
+        run: |
+          python tools/test_maptk_bridge.py
+          python tools/test_maptk_fast.py
       - name: Arquivos que entram no instalador
         run: python tools/check_resources.py
       - name: Comandante da IA (Lua num mundo falso)

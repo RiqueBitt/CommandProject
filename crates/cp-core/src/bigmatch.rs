@@ -20,7 +20,7 @@ const ENTRY: &str = "function StartCommandLineSession(mapName, isPerfTest)\n";
 const HOOK: &str = "\tif CPBigMatchStart and CPBigMatchStart(mapName) then return end -- CommandProject big match\n";
 
 /// Versão do código do mod: quando muda, o launcher monta o mod de novo.
-pub const MOD_VERSION: &str = "1.7.0";
+pub const MOD_VERSION: &str = "1.8.0";
 /// Cores de exército na partida grande: as 10 do jogo e mais 14 (o mod acrescenta só com `/cpmatch`).
 pub const COLORS: i32 = 32;
 /// Mapas com mais de 8 bases são gravados com este tipo: o lobby do jogo (8 posições, que trava com
@@ -31,8 +31,13 @@ const COLORS_FILE: &str = "lua/common/GameColors.lua";
 const COLORS_MARK: &str = "CommandProject big match: 22 more army colors";
 /// Dificuldades da IA do jogo (chaves de `aitypes.lua`).
 pub const AI_LEVELS: &[&str] = &["Easy", "Normal", "Hard", "Cheat"];
-/// Limite de vagas que o launcher aceita (o motor do jogo pode ter um limite menor: veja o README).
+/// Limite de vagas que o launcher aceita num mapa (o editor faz até 64 bases).
 pub const MAX_SLOTS: usize = 64;
+/// Exércitos que o motor do jogo aguenta numa partida, contando os civis do mapa: 24 jogadores e os
+/// civis (25) jogaram normalmente; 32 jogadores e os civis (33) fecharam o jogo ao carregar, como
+/// esperado de um motor que guarda os exércitos em máscaras de 32 bits. O mod deixa os civis de fora
+/// quando eles passariam do limite, e o launcher não começa partidas com mais jogadores que isso.
+pub const MAX_ARMIES: usize = 32;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -144,6 +149,12 @@ pub fn encode(m: &BigMatch) -> Result<String> {
         return Err(Error::Other("escolha exatamente uma vaga para você".into()));
     }
     let players = m.slots.iter().filter(|s| s.kind != SlotKind::Empty).count();
+    if players > MAX_ARMIES {
+        return Err(Error::Other(format!(
+            "o jogo aguenta no máximo {MAX_ARMIES} jogadores numa partida ({players} escolhidos): deixe {} base(s) vazia(s)",
+            players - MAX_ARMIES
+        )));
+    }
     if players < 2 {
         return Err(Error::Other("a partida precisa de pelo menos 2 jogadores".into()));
     }
@@ -222,6 +233,85 @@ pub fn launch_args(m: &BigMatch) -> Result<Vec<String>> {
         return Err(Error::Other(format!("cenário inválido: {map}")));
     }
     Ok(vec!["/map".into(), map.to_string(), "/cpmatch".into(), encode(m)?])
+}
+
+// ---------------------------------------------------------------- log do jogo
+
+/// Nome do log que o jogo grava nas partidas grandes (`/log`), na pasta de dados do launcher.
+pub const LOG_FILE: &str = "partida-grande.log";
+
+/// O que o log do jogo diz sobre uma partida grande que fechou.
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LogReport {
+    /// o jogo terminou normalmente (grava "Run time:" ao sair)
+    pub finished: bool,
+    /// a partida grande montou a partida (antes disso o jogo ainda estava abrindo)
+    pub started: bool,
+    /// jogadores e tamanho do mapa que a partida grande registrou
+    pub players: Option<u32>,
+    pub size: Option<u32>,
+    /// avisos e erros do jogo (sem os que ele sempre escreve)
+    pub problems: Vec<String>,
+    /// últimas linhas antes de fechar
+    pub tail: Vec<String>,
+    /// o que tentar (textos do launcher, traduzidos na tela)
+    pub hints: Vec<String>,
+}
+
+/// O arquivo de `/log` que o usuário já pôs nos argumentos extras, se houver.
+pub fn user_log(args: &[String]) -> Option<String> {
+    let i = args.iter().position(|a| a.eq_ignore_ascii_case("/log"))?;
+    args.get(i + 1).cloned()
+}
+
+/// Lê o log do jogo (texto) e diz se ele fechou no meio e o que dá para tentar.
+pub fn read_log(text: &str) -> LogReport {
+    let mut r = LogReport::default();
+    // linhas que o jogo sempre escreve e não ajudam a achar o problema
+    let noise = |l: &str| l.contains("DISK: AddSearchPath") || l.contains("GRN:") || l.contains("checking ") || l.trim().is_empty();
+    let lines: Vec<&str> = text.lines().map(|l| l.trim_end()).collect();
+    for l in &lines {
+        if l.contains("Run time:") {
+            r.finished = true;
+        }
+        if let Some(i) = l.find("*CommandProject big match: ") {
+            let rest = &l[i + 27..];
+            if let Some(n) = rest.split(' ').next().and_then(|n| n.parse::<u32>().ok()) {
+                r.started = true;
+                r.players = Some(n);
+                // "... on /maps/x_scenario.lua (4096x4096)"
+                r.size = rest.rsplit_once('(').and_then(|(_, b)| b.split('x').next()).and_then(|n| n.trim().parse().ok());
+            }
+        }
+        let low = l.to_ascii_lowercase();
+        if (low.starts_with("warning:") || low.starts_with("error:")) && !noise(l) && r.problems.len() < 12 && !r.problems.iter().any(|p| p == l) {
+            r.problems.push(l.to_string());
+        }
+    }
+    r.tail = lines.iter().rev().filter(|l| !noise(l)).take(12).map(|l| l.to_string()).collect();
+    r.tail.reverse();
+    let all = text.to_ascii_lowercase();
+    if all.contains("out of memory") || all.contains("bad_alloc") || all.contains("not enough memory") {
+        r.hints.push("Faltou memória para o jogo: use um mapa menor, menos jogadores ou um limite de unidades menor.".into());
+    }
+    if !r.started {
+        r.hints.push("O jogo fechou antes de montar a partida grande (ainda abrindo ou carregando os mods).".into());
+    }
+    if let Some(size) = r.size.filter(|s| *s > 2048) {
+        r.hints.push(format!("Mapa de {size}: acima de 2048 é experimental. Teste os mesmos jogadores num mapa de 2048 para saber se o tamanho é o problema."));
+    }
+    if let Some(n) = r.players.filter(|n| *n > 24) {
+        r.hints.push(format!("Com {n} jogadores: até 24 já foi testado. Deixe algumas bases vazias para achar o limite do seu computador."));
+    }
+    r
+}
+
+/// Quanto a partida pesa perto do que já foi testado (24 jogadores num mapa de 1024 = 1): cresce
+/// com os jogadores e com a área do mapa.
+pub fn weight(players: usize, size: u32) -> f64 {
+    let area = (size.max(256) as f64 / 1024.0).powi(2);
+    players as f64 / 24.0 * area
 }
 
 // ---------------------------------------------------------------- o mod
@@ -422,6 +512,32 @@ pub fn maps_in(archives: &[PathBuf], source: &str, out: &mut Vec<MatchMap>) {
     }
 }
 
+/// Minimapa do cenário (a imagem de cima do mapa que o jogo usa no canto da tela) em PNG, com o
+/// lado até `max`. Procura primeiro nos `.scd` dos mods de mapa e depois nos arquivos do jogo.
+pub fn minimap_png(mods: &[PathBuf], stock: &[PathBuf], scenario: &str, max: u32) -> Result<Vec<u8>> {
+    let key = crate::scd::normalize_key(scenario);
+    let (dir, file) = key.rsplit_once('/').ok_or_else(|| Error::Other(format!("cenário inválido: {scenario}")))?;
+    let id = file.strip_suffix("_scenario.lua").ok_or_else(|| Error::Other(format!("cenário inválido: {scenario}")))?;
+    let names = [format!("{dir}/{id}.minimap.win.dds"), format!("{dir}/{id}.minimap.dds")];
+    let from_mods = mods.iter().find_map(|a| {
+        let mut scd = crate::scd::Scd::open(a).ok()?;
+        names.iter().find_map(|n| scd.read(n).ok())
+    });
+    let data = match from_mods {
+        Some(d) => d,
+        None => read_game_file(stock, &names[1])?,
+    };
+    let mut img = crate::dds::decode_max(&data, max.max(64))?;
+    while img.width > max.max(64) || img.height > max.max(64) {
+        img = crate::dds::downsample(&img);
+    }
+    // o canal alfa do minimapa guarda outra coisa (não é transparência)
+    for px in img.pixels.chunks_exact_mut(4) {
+        px[3] = 255;
+    }
+    crate::dds::to_png(&img)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,6 +613,36 @@ mod tests {
         colored.slots[0].color = 3;
         let e = encode(&colored).unwrap();
         assert!(e.contains("|H,1,0,,3|A,1,0,Normal,31"), "{e}");
+    }
+
+    #[test]
+    fn reads_game_log() {
+        let crashed = "info: DISK: AddSearchPath: 'x.scd'\nwarning: GRN: 1\ninfo: *CommandProject big match: 32 players on /maps/a/a_scenario.lua (4096x4096)\nwarning: something odd\ninfo: loading\n";
+        let r = read_log(crashed);
+        assert!(!r.finished && r.started);
+        assert_eq!((r.players, r.size), (Some(32), Some(4096)));
+        assert_eq!(r.problems, vec!["warning: something odd"]);
+        assert_eq!(r.tail.last().map(|s| s.as_str()), Some("info: loading"));
+        assert_eq!(r.hints.len(), 2, "{:?}", r.hints);
+        let ok = read_log("info: *CommandProject big match: 8 players on /maps/a/a_scenario.lua (1024x1024)\ninfo: Run time: 0h19m50s\n");
+        assert!(ok.finished && ok.hints.is_empty());
+        let early = read_log("info: checking C:\\mods\nerror: Out of memory\n");
+        assert!(!early.started && early.hints.len() == 2);
+        assert_eq!(user_log(&["/windowed".into(), "/LOG".into(), "a.log".into()]), Some("a.log".into()));
+        assert!(weight(24, 1024) == 1.0 && weight(32, 4096) > 20.0);
+    }
+
+    /// Com `CP_TEST_MAP_SCD` (um mapa feito pelo editor): o minimapa sai em PNG.
+    #[test]
+    fn minimap_from_map_mod() {
+        let Some(scd) = std::env::var_os("CP_TEST_MAP_SCD") else { return };
+        let scd = PathBuf::from(scd);
+        let mut maps = Vec::new();
+        maps_in(std::slice::from_ref(&scd), "Mod", &mut maps);
+        let png = minimap_png(std::slice::from_ref(&scd), &[], &maps[0].path, 512).unwrap();
+        let img = crate::dds::from_png(&png).unwrap();
+        assert_eq!((img.width, img.height), (512, 512));
+        assert!(img.pixels.chunks_exact(4).all(|p| p[3] == 255));
     }
 
     #[test]

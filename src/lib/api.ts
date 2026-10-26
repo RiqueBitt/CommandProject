@@ -132,6 +132,8 @@ export const api = {
   launchGame: () => call<{ plan: unknown; applied?: T.Plan | null; watching: boolean }>("launch_game"),
   killGame: () => call<number>("kill_game"),
   bigMatchMaps: () => call<T.MatchMap[]>("big_match_maps"),
+  /** Minimapa do cenário em data URL (null quando o mapa não tem). */
+  bigMatchPreview: (path: string, size = 512) => call<string | null>("big_match_preview", { path, size }),
   launchBigMatch: (spec: T.BigMatch) => call<{ plan: unknown; applied?: T.Plan | null; watching: boolean }>("launch_big_match", { spec }),
 
   fingerprint: () => call<T.Fingerprint>("fingerprint"),

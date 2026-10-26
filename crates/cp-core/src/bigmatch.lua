@@ -31,6 +31,10 @@ local function CPOff(name)
     return ok and on
 end
 
+-- the engine keeps armies in 32-bit masks: 32 armies at most, counting the map's civilians.
+-- 24 players + civilians played fine, 32 + civilians closed the game while loading
+local CPMaxArmies = 32
+
 function CPBigMatchSession(mapName, spec)
     if FixupMapName then mapName = FixupMapName(mapName) end
     local scenario = import('/lua/ui/maputil.lua').LoadScenario(mapName)
@@ -134,12 +138,21 @@ function CPBigMatchSession(mapName, spec)
         if human then table.insert(sessionInfo.teamInfo, human) end
         for _, p in others do table.insert(sessionInfo.teamInfo, p) end
     end
-    LOG('*CommandProject big match: ' .. table.getn(sessionInfo.teamInfo) .. ' players on ' .. tostring(mapName))
+    if table.getn(sessionInfo.teamInfo) > CPMaxArmies then
+        error('CommandProject: ' .. table.getn(sessionInfo.teamInfo) .. ' players, the game takes ' .. CPMaxArmies .. ' at most')
+    end
+    local size = scenario.size or {}
+    LOG('*CommandProject big match: ' .. table.getn(sessionInfo.teamInfo) .. ' players on ' .. tostring(mapName) .. ' (' .. tostring(size[1]) .. 'x' .. tostring(size[2]) .. ')')
     if not human then options.FullAI = true end
 
+    -- the civilians (empty on maps made by the launcher) stay out when there is no room for them
     local extras = MapUtils.GetExtraArmies(scenario)
     if extras then
         for _, armyName in extras do
+            if table.getn(sessionInfo.teamInfo) >= CPMaxArmies then
+                WARN('*CommandProject big match: no room for the civilian army ' .. tostring(armyName) .. ' (' .. CPMaxArmies .. ' armies at most)')
+                break
+            end
             local p = import('/lua/ui/lobby/lobbyComm.lua').GetDefaultPlayerOptions('civilian')
             p.PlayerName = 'civilian'
             p.Civilian = true

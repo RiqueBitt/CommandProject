@@ -90,11 +90,13 @@ def check(cond, msg):
 
 
 def run(source: str, label: str, real: bool):
-    def session(spec, map_name="/maps/big/big_scenario.lua"):
+    def session(spec, map_name="/maps/big/big_scenario.lua", bases=24):
         lua = LuaRuntime(unpack_returned_tuples=True)
         lua.execute(HARNESS)
         lua.execute(moho_to_lua(source))
         g = lua.globals()
+        if bases != 24:
+            lua.execute(f"for i = 25, {bases} do World.scenario.Configurations.standard.teams[1].armies[i] = 'ARMY_' .. i end")
         if spec is not None:
             g.World.args = lua.table_from({"/cpmatch": lua.table_from([spec])})
         g.StartCommandLineSession(map_name, False)
@@ -136,6 +138,17 @@ def run(source: str, label: str, real: bool):
     check(list(o.RestrictedCategories.values()) == ["AIR", "NUKE", "ALL_RESEARCH"], f"{label}: restrições viram uma lista ({list(o.RestrictedCategories.values())})")
     check(o.DoNotShareUnitCap is False and o.CheatsEnabled == "true", f"{label}: limite dividido e trapaças do jogo")
     check(o.PreBuiltUnits == "On" and o.PrebuiltUnits == "On", f"{label}: base montada nas duas grafias")
+
+    # 32 jogadores: o motor guarda os exércitos em máscaras de 32 bits, os civis ficam de fora
+    full = "Victory=demoralization|H,2,0,," + "|A,3,0,Normal," * 31
+    g, info = session(full, bases=32)
+    teams = list(info.teamInfo.values()) if info else []
+    check(info and not info["normal"] and len(teams) == 32 and not any(p.Civilian for p in teams),
+          f"{label}: 32 jogadores sem os civis ({len(teams)} exércitos)")
+    check(g.World.warn and "civilian" in g.World.warn, f"{label}: aviso no log quando os civis ficam de fora")
+    g, info = session("Victory=demoralization|H,2,0,," + "|A,3,0,Normal," * 30 + "|X", bases=32)
+    teams = list(info.teamInfo.values())
+    check(len(teams) == 32 and teams[-1].Civilian, f"{label}: 31 jogadores e os civis cabem nos 32 exércitos")
 
     # vagas vazias e você no meio
     g, info = session("Victory=demoralization|A,1,0,Easy|X|H,1,2,|X|A,1,0,Normal" + "|X" * 19)

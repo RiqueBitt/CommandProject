@@ -173,9 +173,28 @@ class Biome:
         return blend_of(self.t(x, z))
 
 
+RING_LATTICE = 4.0
+
+
 def ring_height(inner, grid, rise=95.0, seed=4242):
     """Altura em qualquer ponto: dentro do mapa, `inner`; fora, a altura da borda mais próxima
-    subindo em montanhas (com picos e vales) conforme se afasta."""
+    subindo em montanhas (com picos e vales) conforme se afasta.
+
+    O ruído das montanhas é lido de uma grade de pontos a cada RING_LATTICE unidades (calculados
+    uma vez, quando pedidos) e interpolado: a malha da paisagem tem vértices a cada 16 ou 32
+    unidades e a luz é amostrada a cada ~5, então o resultado é o mesmo à vista, e a luz dos mapas
+    grandes (milhões de amostras) deixa de recalcular o ruído inteiro em cada uma."""
+    lat = {}
+    L = RING_LATTICE
+
+    def noise(ix, iz):
+        v = lat.get((ix, iz))
+        if v is None:
+            x, z = ix * L, iz * L
+            v = (0.55 + 0.45 * fbm(x / 260.0, z / 260.0, seed), 1 - abs(fbm(x / 70.0, z / 70.0, seed + 7)))
+            lat[(ix, iz)] = v
+        return v
+
     def h(x, z):
         cx, cz = min(grid, max(0.0, x)), min(grid, max(0.0, z))
         base = inner(cx, cz)
@@ -183,8 +202,12 @@ def ring_height(inner, grid, rise=95.0, seed=4242):
         if d <= 0:
             return base
         k = _smooth(clamp01(d / 220.0))
-        big = 0.55 + 0.45 * fbm(x / 260.0, z / 260.0, seed)
-        crag = 1 - abs(fbm(x / 70.0, z / 70.0, seed + 7))
+        fx, fz = x / L, z / L
+        ix, iz = math.floor(fx), math.floor(fz)
+        u, v = fx - ix, fz - iz
+        a, b, c, e = noise(ix, iz), noise(ix + 1, iz), noise(ix, iz + 1), noise(ix + 1, iz + 1)
+        big = (a[0] + (b[0] - a[0]) * u) * (1 - v) + (c[0] + (e[0] - c[0]) * u) * v
+        crag = (a[1] + (b[1] - a[1]) * u) * (1 - v) + (c[1] + (e[1] - c[1]) * u) * v
         return base + rise * k * big + 22.0 * k * crag * crag
     return h
 

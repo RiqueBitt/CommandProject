@@ -98,7 +98,10 @@ disponível em Sistema → Visual.
   tiver** — 12 contra 12, três times de 5, todos contra todos. Cada base vira você, uma IA (Fácil,
   Normal, Difícil ou Trapaceira) ou fica vazia, com time e facção à escolha; os times se dividem
   sozinhos pelo lado do mapa ou pela ordem das bases, e clicar numa base da prévia põe você nela.
-  Até um time por base (24 bases, até 24 times) e **32 cores de exército** (as 10 do jogo e mais 22
+  A prévia mostra o **terreno do mapa** (o minimapa do jogo) com as bases por cima, e a lista de
+  mapas tem uma miniatura de cada um. Até **32 jogadores** por partida (o limite de exércitos do
+  motor do jogo; os civis do mapa ficam de fora quando não cabem) e até um time por base
+  (24 bases, até 24 times), com **32 cores de exército** (as 10 do jogo e mais 22
   só nas partidas grandes): **cada jogador com uma cor diferente, mesmo no mesmo time** (padrão), ou
   uma cor por time; cores já usadas por outra base aparecem bloqueadas na escolha à mão.
   Regras: todas as da escaramuça normal — tipo de vitória, limite de unidades (até 2000), visão do
@@ -217,7 +220,10 @@ disponível em Sistema → Visual.
     terreno de 2048 na hora de gerar: relevo, navegação das tropas, colisão, malha do chão, luz,
     água, minimapa e área jogável são refeitos no tamanho novo, e o gerador de mundos põe mais
     montanhas, lagos e rios na proporção da área. Acima de 2048 é experimental (o jogo original
-    vai até 2048), pesa mais e leva alguns minutos para gerar;
+    vai até 2048) e pesa mais. A geração conta as regiões de passagem por trechos de linha (e não
+    célula a célula), confere todas as bases com uma única contagem e só monta a malha do chão
+    quando ela cabe no jogo: um mapa de 4096 com 32 bases sai em menos de um minuto (antes, perto
+    de dez), e um de 2048 em uns 30 segundos;
   - **visual limpo**: a malha do chão (e a colisão) é refeita para o relevo novo, a luz e as
     sombras também, e as decorações originais saem — nada do mapa original aparece por cima;
   - **chão por biomas** (praia, chão, terra, rocha e topo misturados pelo relevo) e **pincel de
@@ -398,9 +404,12 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
   `SimCallbacks.lua` do seu jogo e, com o menu, também do `gamemain.lua` e do `UserSync.lua` (o
   código vai dentro desses arquivos, que o jogo já conhece); outro mod que mexa neles entra em
   conflito (veja Conflitos). Ao começar a partida aparece no alto da tela "trapacas ligadas". Os textos do menu ficam sem acento para não depender da fonte do jogo. As unidades criadas viram invencíveis em até 1 s.
-- **Partida grande** (experimental: confirme no jogo): o jogo foi feito para até 8 jogadores e o
-  limite do motor com mais exércitos ainda não foi testado. Se o jogo não abrir ou fechar ao carregar,
-  tente com menos bases. Cada IA a mais pesa: com muitas, a IA esperta olha o mapa e decide com
+- **Partida grande** (experimental: confirme no jogo): o jogo foi feito para até 8 jogadores. 24
+  jogadores num mapa de 1024 jogaram normalmente; 32 jogadores com os civis do mapa (33 exércitos)
+  fecharam o jogo ao carregar, como esperado de um motor que guarda os exércitos em máscaras de 32
+  bits, então a partida aceita até 32 jogadores e deixa os civis de fora quando não cabem. O jogo
+  grava um log em `logs/partida-grande.log` (pasta de dados do launcher); se ele fechar no meio, a
+  tela da partida mostra onde parou e o que tentar. Mapas acima de 2048 também são experimentais. Cada IA a mais pesa: com muitas, a IA esperta olha o mapa e decide com
   menos frequência, e o painel dela mostra uma linha por IA. O lobby do jogo desenha só 8 posições e
   **fecha o jogo** com um mapa maior: por isso mapas com mais de 8 bases saem do editor com um tipo
   próprio, que o lobby não lista (mapas feitos na 0.25.0 precisam ser gerados de novo).

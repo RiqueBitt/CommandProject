@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import CrashNotice from "../components/CrashNotice";
 import { ConflictsModal, InstallLinkModal } from "../components/dialogs";
 import { Empty, Field, Icon, Menu, MenuItem, Modal, ModThumb, Notice, Switch, TaskProgress } from "../components/ui";
 import { api, confirmDialog, openUrl, pickFile } from "../lib/api";
@@ -267,36 +268,6 @@ export default function Home() {
   );
 }
 
-/** O jogo travou ao abrir: mostra os mods ligados e deixa desligar com um clique. */
-function CrashNotice() {
-  const crash = useStore((s) => s.crash);
-  const busy = useStore((s) => s.busy);
-  const { run, refresh } = useStore.getState();
-  if (!crash) return null;
-  // mods gerados no launcher primeiro: são os que mexem em arquivos do motor (fontes, texturas)
-  const order = (id: string) => (id === "menu-moderno" ? 0 : id === "texturas-hd" ? 1 : 2);
-  const mods = [...crash.mods].sort((a, b) => order(a[0]) - order(b[0]));
-  return (
-    <Notice kind="err">
-      <b>{t("O jogo fechou com erro")}</b> {t("(relatório {name}).", { name: crash.dump })}
-      {mods.length ? " " + t("Se começou depois de ligar um mod, desligue-o e tente de novo:") : " " + t("Nenhum mod estava ligado: tente verificar os arquivos do jogo na Steam.")}
-      {mods.length > 0 && (
-        <div className="row wrap" style={{ marginTop: 8, gap: 6 }}>
-          {mods.slice(0, 6).map(([id, name]) => (
-            <button key={id} className="btn sm" disabled={busy["mod:" + id]} onClick={async () => {
-              const ok = await run("mod:" + id, () => api.setModEnabled(id, false), t("{name} desligado.", { name }));
-              if (ok !== undefined) {
-                useStore.setState((s) => ({ crash: s.crash && { ...s.crash, mods: s.crash.mods.filter((m) => m[0] !== id) } }));
-                await refresh();
-              }
-            }}><Icon name="toggle_off" /> {t("Desligar {name}", { name })}</button>
-          ))}
-          <button className="btn text sm" onClick={() => useStore.setState({ crash: null })}>{t("Dispensar")}</button>
-        </div>
-      )}
-    </Notice>
-  );
-}
 
 /** Aba "Mods" da tela inicial: o que está ligado no perfil, com atalho para desligar. */
 function ActiveMods({ mods, shaderName }: { mods: ModView[]; shaderName: string | null }) {

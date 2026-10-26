@@ -385,6 +385,8 @@ pub async fn kill_game() -> R<usize> {
 /// Mapas de escaramuça para a partida grande: os do jogo e os dos mods de mapa ligados no perfil.
 #[tauri::command]
 pub async fn big_match_maps(state: State<'_, AppState>) -> R<Vec<cp_core::bigmatch::MatchMap>> {
+    // um mapa gerado de novo com o mesmo nome troca o minimapa: a prévia é lida outra vez
+    *BIG_MATCH_PREVIEWS.lock().unwrap_or_else(|p| p.into_inner()) = None;
     with_ws(&state.ws, |ws| {
         let mut out = Vec::new();
         cp_core::bigmatch::maps_in(&ws.stock_sources()?, "Jogo", &mut out);
@@ -400,6 +402,41 @@ pub async fn big_match_maps(state: State<'_, AppState>) -> R<Vec<cp_core::bigmat
         Ok(out)
     })
     .await
+}
+
+/// Minimapas já convertidos para a prévia da partida grande (cenário → PNG em data URL).
+static BIG_MATCH_PREVIEWS: std::sync::Mutex<Option<std::collections::HashMap<String, Option<String>>>> = std::sync::Mutex::new(None);
+
+/// Imagem do mapa (o minimapa do jogo, visto de cima) para a prévia das bases na partida grande e
+/// as miniaturas da lista (`size` = lado máximo, 64 a 1024). `None` quando o mapa não tem minimapa.
+#[tauri::command]
+pub async fn big_match_preview(state: State<'_, AppState>, path: String, size: Option<u32>) -> R<Option<String>> {
+    let size = size.unwrap_or(512).clamp(64, 1024);
+    let key = format!("{}#{size}", path.to_ascii_lowercase());
+    if let Some(hit) = BIG_MATCH_PREVIEWS.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(|m| m.get(&key)) {
+        return Ok(hit.clone());
+    }
+    // só a lista de arquivos com o workspace travado; ler e converter a imagem fica fora da trava
+    let (mods, stock) = with_ws(&state.ws, |ws| {
+        let stock = ws.stock_sources()?;
+        let active = ws.profiles.active().clone();
+        let mut mods: Vec<std::path::PathBuf> = Vec::new();
+        for m in ws.mods()? {
+            if active.mods.iter().any(|x| x.id == m.manifest.id && x.enabled) {
+                mods.extend(m.manifest.files.iter().map(|f| m.file_path(&f.name)));
+            }
+        }
+        Ok((mods, stock))
+    })
+    .await?;
+    let url = off_lock(move || Ok(cp_core::bigmatch::minimap_png(&mods, &stock, &path, size).ok().map(|png| data_url("image/png", &png)))).await?;
+    let mut g = BIG_MATCH_PREVIEWS.lock().unwrap_or_else(|p| p.into_inner());
+    let cache = g.get_or_insert_with(Default::default);
+    if cache.len() > 256 {
+        cache.clear();
+    }
+    cache.insert(key, url.clone());
+    Ok(url)
 }
 
 /// Liga o mod do jogo em português quando o idioma do launcher (`ui_prefs.lang`) é português e o
@@ -467,7 +504,8 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
     })
     .await
     .ok();
-    let (plan, applied, restore, memory_mb, priority, no_throttle) = with_ws(&state.ws, move |ws| {
+    let (plan, applied, restore, memory_mb, priority, no_throttle, log_path) = with_ws(&state.ws, move |ws| {
+        let mut log_path: Option<std::path::PathBuf> = None;
         if let Err(e) = ws.ensure_large_address() {
             eprintln!("modo 4 GB não reaplicado: {e}");
         }
@@ -514,6 +552,17 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             }
             // um /map ou /cpmatch esquecido nos argumentos extras trocaria o mapa e as vagas da partida
             let mut args = cp_core::bigmatch::clean_user_args(&ws.settings.launch_args);
+            // log do jogo: se ele fechar no meio, o launcher mostra onde parou
+            if cp_core::bigmatch::user_log(&args).is_none() {
+                let log = ws.data_dir.join("logs").join(cp_core::bigmatch::LOG_FILE);
+                if let Some(dir) = log.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                let _ = std::fs::remove_file(&log);
+                args.push("/log".into());
+                args.push(log.to_string_lossy().into_owned());
+            }
+            log_path = cp_core::bigmatch::user_log(&args).map(std::path::PathBuf::from);
             args.extend(cp_core::bigmatch::launch_args(b)?);
             plan = Some(cp_core::game::launch_plan(&game, cp_core::game::LaunchMode::Direct, &args)?);
         }
@@ -538,7 +587,7 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             Some(p) => p,
             None => ws.launch_plan()?,
         };
-        Ok((plan, applied, ws.settings.restore_on_exit, ws.settings.memory_mb(), ws.settings.game_priority.clone(), ws.settings.game_no_throttle))
+        Ok((plan, applied, ws.settings.restore_on_exit, ws.settings.memory_mb(), ws.settings.game_priority.clone(), ws.settings.game_no_throttle, log_path))
     })
     .await?;
     match &plan {
@@ -552,20 +601,34 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
         let app6 = app.clone();
         tauri::async_runtime::spawn(async move {
             let mut seen_running = false;
-            for tick in 0..400u32 {
+            // o log da partida grande: lido quando o jogo fecha (sem "Run time:" = fechou no meio)
+            let report = |log: &Option<std::path::PathBuf>| {
+                log.as_ref()
+                    .and_then(|p| std::fs::read(p).ok())
+                    .map(|b| cp_core::bigmatch::read_log(&String::from_utf8_lossy(&b)))
+            };
+            let crashed = |dump: Option<&String>, log: Option<cp_core::bigmatch::LogReport>| {
+                serde_json::json!({ "dump": dump, "mods": mods, "log": log, "logPath": log_path })
+            };
+            for tick in 0..2400u32 {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 let now = crash_dumps(&bin);
                 if let Some(new) = now.iter().find(|d| !before.contains(*d)) {
-                    let _ = app6.emit("cp://game-crashed", serde_json::json!({ "dump": new, "mods": mods }));
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    let _ = app6.emit("cp://game-crashed", crashed(Some(new), report(&log_path)));
                     return;
                 }
                 let running = tauri::async_runtime::spawn_blocking(cp_core::game::is_running).await.unwrap_or(false);
                 seen_running |= running;
-                // fechou normalmente (sem relatório novo) ou nem chegou a abrir em 2 min
-                if (seen_running && !running && tick > 2) || (!seen_running && tick > 40) {
+                // fechou (com ou sem relatório) ou nem chegou a abrir em 2 min
+                if (seen_running && !running) || (!seen_running && tick > 40) {
                     tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                    let log = report(&log_path);
                     if let Some(new) = crash_dumps(&bin).iter().find(|d| !before.contains(*d)) {
-                        let _ = app6.emit("cp://game-crashed", serde_json::json!({ "dump": new, "mods": mods }));
+                        let _ = app6.emit("cp://game-crashed", crashed(Some(new), log));
+                    } else if let Some(log) = log.filter(|l| !l.finished) {
+                        // sem relatório de travamento, mas o jogo não terminou a partida normalmente
+                        let _ = app6.emit("cp://game-crashed", crashed(None, Some(log)));
                     }
                     return;
                 }

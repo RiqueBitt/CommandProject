@@ -600,20 +600,30 @@ def _hooks(sm, spec, state):
         wl = wl if wl is not None else sm._water_level(terrain)
         dry_raw = int((wl + 0.5) * 128)
         blocked = allowed = 0
+        # célula da pintura de cada linha/coluna (mesma conta de antes) e, por coluna da pintura, o
+        # trecho de colunas do mapa que ela cobre: só as partes pintadas são percorridas
+        idx = [min(n, round(v * scale / terrain.grid * n)) for v in range(G)]
+        spans = {}
+        for x in range(1, G - 1):
+            a, b = spans.get(idx[x], (x, x))
+            spans[idx[x]] = (min(a, x), max(b, x + 1))
+        cols = sorted(spans.items())
+        H, HW = terrain.H, terrain.HW
         for z in range(1, G - 1):
-            pj = min(n, round(z * scale / terrain.grid * n)) * (n + 1)
-            for x in range(1, G - 1):
-                k2 = pj + min(n, round(x * scale / terrain.grid * n))
+            pj = idx[z] * (n + 1)
+            for k, (xa, xb) in cols:
+                k2 = pj + k
                 if power[k2] < 128:
                     continue
-                i = z * G + x
+                i0 = z * G
                 if roles[k2] == 1:
-                    if m[i]:
-                        m[i] = 0
-                        blocked += 1
-                elif roles[k2] == 2 and not m[i] and terrain.H[z * terrain.HW + x] > dry_raw:
-                    m[i] = 1
-                    allowed += 1
+                    blocked += sum(m[i0 + xa:i0 + xb])
+                    m[i0 + xa:i0 + xb] = bytes(xb - xa)
+                elif roles[k2] == 2:
+                    for x in range(xa, xb):
+                        if not m[i0 + x] and H[z * HW + x] > dry_raw:
+                            m[i0 + x] = 1
+                            allowed += 1
         emit("progress", message=f"passagem pintada: {blocked} células bloqueadas, {allowed} liberadas")
         return m
 
@@ -665,6 +675,10 @@ def _hooks(sm, spec, state):
     def set_hfield(self, new):
         old = self.raw["hfield.win.bdf"]
         try:
+            if state.get("resized"):
+                # terreno redimensionado: a malha original é do tamanho antigo e não acompanha o
+                # relevo (a conferência recusaria depois de percorrer milhões de pontos)
+                raise ValueError("terreno redimensionado")
             H1, _ = sm.hfield_heights(new)
             tb, moved = sm.resample_mesh_heights(self.raw["terrain.win.bdf"], old, new,
                                                  bvh_min_y=min(H1) / 128.0 - 5, bvh_max_y=max(H1) / 128.0 + 5)
@@ -714,6 +728,10 @@ def _hooks(sm, spec, state):
         # decorações novas/removidas: entram antes do strip_props do toolkit
         clean = spec.get("clean") or {}
         clear = clean.get("clear_props", False)
+        # a malha nova primeiro: o passo dela (que pode ficar mais grosso para caber no jogo) é o que
+        # as decorações usam para assentar no chão que aparece
+        if clean and terrain.raw.get("terrain.win.bdf"):
+            _clean_visual(sm, spec, state, terrain, a[0])
         if (spec.get("props_add") or spec.get("props_remove") or clear) and terrain.raw.get("mapobjs.win.bdf"):
             import cp_mapobjs
             grid = terrain.grid
@@ -722,9 +740,9 @@ def _hooks(sm, spec, state):
             # com a malha nova, a altura é a da superfície que aparece (malha mais grossa que o relevo):
             # nada flutua nem afunda em encostas e bordas
             height = ground
-            if clean and clean.get("relight") and terrain.raw.get("terrain.win.bdf"):
+            if state.get("mesh_step"):  # malha nova feita logo acima (sem ela, o chão é o relevo)
                 import cp_regrid
-                height = cp_regrid.mesh_height(ground, _mesh_step(grid))
+                height = cp_regrid.mesh_height(ground, state["mesh_step"])
             data, na, nr = cp_mapobjs.edit(terrain.raw["mapobjs.win.bdf"], spec.get("props_add") or [],
                                            spec.get("props_remove") or [], height, clear=clear)
             terrain.raw["mapobjs.win.bdf"] = data
@@ -732,8 +750,6 @@ def _hooks(sm, spec, state):
             emit("progress", message=f"decorações: {na} novas, {nr} removidas")
             if k.get("strip_props") == "all":
                 k["strip_props"] = "moving"  # "remover todos" apagaria as novas também
-        if clean and terrain.raw.get("terrain.win.bdf"):
-            _clean_visual(sm, spec, state, terrain, a[0])
         if state.get("hf_changed"):
             _regrid_collision(sm, state, terrain)
         water = False
@@ -871,18 +887,22 @@ def _clean_visual(sm, spec, state, terrain, new_id):
             path = f"/maps/{new_id}/lighting/cpgrid.dds"
             wpath = f"/maps/{new_id}/{new_id}.waterDepth.dds" if water and terrain.raw.get("waterDepth.dds") else None
             ring_step = 16.0
-            for _try in range(4):
+            for _try in range(6):
+                # os mapas do jogo nunca passam de ~61 mil vértices num material: fica abaixo de 65 mil.
+                # A conferência vem antes das árvores e do pacote: uma tentativa grande demais custa pouco
                 tb2, info = cp_regrid.rebuild_terrain(tb, height, g, step=step, mask_path=path, margin=margin, ring_step=ring_step,
                                                       zones=zones, zone_t=zone_t, uv_scale=clean.get("uv_tile"),
-                                                      water_y=wl, water_mask_path=wpath, log=lambda m: emit("progress", message=m))
-                # os mapas do jogo nunca passam de ~61 mil vértices num material: fica abaixo de 65 mil
-                if info.get("max_rec", 0) <= 65000:
+                                                      water_y=wl, water_mask_path=wpath, log=lambda m: emit("progress", message=m),
+                                                      max_verts=65000)
+                if tb2 is not None:
                     break
                 if ring_step < 32:
                     ring_step = 32.0
                 else:
                     step *= 2
-                emit("progress", message=f"malha grande demais num material ({info['max_rec']} vértices): refazendo mais leve")
+                emit("progress", message=f"malha grande demais num material ({info['max_rec']} vértices): montando mais leve")
+            if tb2 is None:
+                raise ValueError("malha do chão grande demais mesmo na versão mais leve")
             state["mesh_step"] = step
             if zones and info["zones"] < len(zones):
                 state["warnings"].append(f"o terreno base só tem {info['zones']} material(is) de mistura: o chão usa {info['zones'] + 1} texturas")
@@ -959,6 +979,24 @@ def _apply_delta(sm, hfield_bytes, hd):
         D.byteswap()
         H.byteswap()
     k = n / max(1, w - 1)
+    np = sm._numpy() if hasattr(sm, "_numpy") else None
+    if np is not None:
+        # mesma conta (float64, arredondamento par como o round do Python), sem laço em Python
+        Dm = np.frombuffer(D.tobytes(), dtype=np.int16).astype(np.float64).reshape(n + 1, n + 1)
+        Hm = np.frombuffer(H.tobytes(), dtype=np.uint16).astype(np.int64).reshape(h, w)
+        fx = np.arange(w, dtype=np.float64) * k
+        ii = np.minimum(n - 1, fx.astype(np.int64))
+        uu = fx - ii
+        fz = np.arange(h, dtype=np.float64) * k
+        jj = np.minimum(n - 1, fz.astype(np.int64))
+        vv = (fz - jj)[:, None]
+        r0, r1 = Dm[jj], Dm[jj + 1]
+        a0 = r0[:, ii] + (r0[:, ii + 1] - r0[:, ii]) * uu
+        a1 = r1[:, ii] + (r1[:, ii + 1] - r1[:, ii]) * uu
+        d = a0 + (a1 - a0) * vv
+        Hm = np.clip(Hm + np.rint(d * sc).astype(np.int64), 0, 65535).astype("<u2")
+        pl[off:off + w * h * 2] = Hm.tobytes()
+        return sm.rebuild_bdf(hfield_bytes, bytes(pl))
     cols = []
     for x in range(w):
         fx = x * k

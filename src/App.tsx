@@ -7,6 +7,7 @@ import { Toasts } from "./components/ui";
 import { api, onEvent } from "./lib/api";
 import { errorText, useStore } from "./lib/store";
 import { useTabs } from "./lib/tabs";
+import type { GameCrash } from "./lib/types";
 import Home from "./pages/Home";
 import Hub from "./pages/Hub";
 import Files from "./pages/Files";
@@ -90,9 +91,9 @@ export default function App() {
         void refresh();
       }),
       onEvent("cp://game-started", () => toast("info", t("Jogo aberto. Os arquivos serão restaurados quando ele fechar."))),
-      onEvent<{ dump: string; mods: [string, string][] }>("cp://game-crashed", (c) => {
+      onEvent<GameCrash>("cp://game-crashed", (c) => {
         useStore.setState({ crash: c });
-        toast("error", t("O jogo fechou com erro. Veja na tela inicial o que pode ter causado."));
+        toast("error", c.log ? t("O jogo fechou no meio da partida grande. Veja na tela da partida o que o log do jogo diz.") : t("O jogo fechou com erro. Veja na tela inicial o que pode ter causado."));
       }),
       onEvent<number>("cp://memory-limited", (mb) => toast("ok", t("Memória do jogo limitada a {size} GB.", { size: (mb / 1024).toLocaleString(locale()) }))),
       onEvent<string>("cp://priority-set", (p) => toast("ok", t("Prioridade do jogo: {level}.", { level: p === "high" ? t("alta") : t("acima do normal") }))),

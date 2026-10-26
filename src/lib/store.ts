@@ -24,8 +24,9 @@ interface State {
   history: Page[];
   palette: boolean;
   appUpdate: AppUpdate | null;
-  /** O jogo travou na última vez que foi aberto (relatório .mdmp novo na pasta bin). */
-  crash: { dump: string; mods: [string, string][] } | null;
+  /** O jogo travou na última vez que foi aberto (relatório .mdmp novo na pasta bin, ou o log da
+   *  partida grande sem o fim normal). */
+  crash: T.GameCrash | null;
   go: (p: Page) => void;
   /** Filtro da biblioteca de projetos (Mapas, Tropas, Modelos) */
   createKind: T.CreationKind | "all";

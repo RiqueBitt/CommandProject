@@ -353,6 +353,11 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       const map = (id: string, name: string, n: number, size: number, source = "Jogo"): T.MatchMap => ({ path: `/maps/${id.toLowerCase()}/${id.toLowerCase()}_scenario.lua`, id, name, armies: Array.from({ length: n }, (_, i) => `ARMY_${i + 1}`), starts: ring(n, size), size: [size, size], source, lobbyRisk: false });
       return r([map("CP_GUERRA24", "[24] Guerra total", 24, 2048, "Mapa Guerra total"), map("SC2_MP_801", "[8] Cerberus", 8, 1024), map("SC2_MP_402", "[4] Finn's Revenge", 4, 1024), map("SC2_MP_101", "[2] Duel", 2, 512)]);
     }
+    case "big_match_preview": {
+      // terreno de mentira para ver a prévia no navegador
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><radialGradient id="g"><stop offset="0" stop-color="#5f8a3a"/><stop offset="1" stop-color="#3d5f2c"/></radialGradient></defs><rect width="64" height="64" fill="url(#g)"/><circle cx="20" cy="40" r="7" fill="#3a6ea8"/><path d="M40 0 C38 20 50 30 46 64" stroke="#3a6ea8" stroke-width="3" fill="none"/></svg>`;
+      return r("data:image/svg+xml;base64," + btoa(svg));
+    }
     case "launch_big_match": {
       const p = plan();
       await progress("apply", ["Montando a partida grande", "Instalando arquivos", "Pronto"]);

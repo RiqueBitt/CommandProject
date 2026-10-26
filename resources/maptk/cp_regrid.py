@@ -72,10 +72,13 @@ def write_bdf(head, fix, sec, payload):
 def build_bvh(pos, tris, leaf=6):
     """Árvore no formato do jogo. pos = [(x, y, z)], tris = [(a, b, c)].
     Devolve (ordem dos vértices [índice antigo], triângulos com índices novos, nós) onde cada nó é
-    (caixa6, é_folha, vmin, vmax, primeiro_índice, n_tri, esquerda, direita) com filhos por índice."""
+    (caixa6, é_folha, vmin, vmax, primeiro_índice, n_tri, esquerda, direita) com filhos por índice.
+    (As contas por coordenada usam listas separadas e chaves de `list.__getitem__`: o mesmo
+    resultado de antes, sem chamar uma função Python por triângulo em cada nível da árvore.)"""
     n = len(tris)
-    cen = [((pos[a][0] + pos[b][0] + pos[c][0]) / 3, (pos[a][1] + pos[b][1] + pos[c][1]) / 3,
-            (pos[a][2] + pos[b][2] + pos[c][2]) / 3) for a, b, c in tris]
+    cen = ([(pos[a][0] + pos[b][0] + pos[c][0]) / 3 for a, b, c in tris],
+           [(pos[a][1] + pos[b][1] + pos[c][1]) / 3 for a, b, c in tris],
+           [(pos[a][2] + pos[b][2] + pos[c][2]) / 3 for a, b, c in tris])
     order = []
     raw = []  # (é_folha, início_tri, n_tri, esquerda, direita)
 
@@ -87,10 +90,10 @@ def build_bvh(pos, tris, leaf=6):
             order.extend(ids)
             raw[k] = (True, start, len(ids), -1, -1)
             return k
-        mn = [min(cen[i][d] for i in ids) for d in range(3)]
-        mx = [max(cen[i][d] for i in ids) for d in range(3)]
+        mn = [min(map(c.__getitem__, ids)) for c in cen]
+        mx = [max(map(c.__getitem__, ids)) for c in cen]
         ax = max(range(3), key=lambda d: mx[d] - mn[d])
-        ids = sorted(ids, key=lambda i: cen[i][ax])
+        ids = sorted(ids, key=cen[ax].__getitem__)
         h = len(ids) // 2
         left = rec(ids[:h])
         right = rec(ids[h:])
@@ -116,12 +119,14 @@ def build_bvh(pos, tris, leaf=6):
                 vorder.append(v)
             tri.append(vmap[v])
         new_tris.append(tuple(tri))
+    PX = [pos[v][0] for v in vorder]
+    PY = [pos[v][1] for v in vorder]
+    PZ = [pos[v][2] for v in vorder]
     nodes = []
     for is_leaf, start, cnt, left, right in raw:
         vs = [v for t in new_tris[start:start + cnt] for v in t]
-        ps = [pos[vorder[v]] for v in vs]
-        box = (min(p[0] for p in ps), min(p[1] for p in ps), min(p[2] for p in ps),
-               max(p[0] for p in ps), max(p[1] for p in ps), max(p[2] for p in ps))
+        box = (min(map(PX.__getitem__, vs)), min(map(PY.__getitem__, vs)), min(map(PZ.__getitem__, vs)),
+               max(map(PX.__getitem__, vs)), max(map(PY.__getitem__, vs)), max(map(PZ.__getitem__, vs)))
         nodes.append((box, is_leaf, min(vs), max(vs), start * 3, cnt, left, right))
     return vorder, new_tris, nodes
 
@@ -295,7 +300,8 @@ def regrid_terrain(data, height, grid, new_mask_path, step=4.0, log=None):
 
 
 def rebuild_terrain(data, height, grid, *, step=4.0, mask_path, margin=0.0, ring_step=16.0,
-                    zones=None, zone_t=None, water_y=None, water_mask_path=None, log=None, uv_scale=None):
+                    zones=None, zone_t=None, water_y=None, water_mask_path=None, log=None, uv_scale=None,
+                    max_verts=None):
     """Troca a malha do chão por uma grade regular que segue `height` (com um anel de paisagem em
     volta quando `margin` > 0) e devolve (bytes novos, info).
 
@@ -303,7 +309,9 @@ def rebuild_terrain(data, height, grid, *, step=4.0, mask_path, margin=0.0, ring
               — a camada b de uma zona é a camada a da seguinte (areia→grama, grama→terra, …);
     zone_t  = função (x, z) → posição na cadeia (0..len(zones)): a zona de cada triângulo é int(t);
     water_y = altura nova da lâmina d'água do terreno (e `water_mask_path`, a máscara de água nova).
-    Todos os materiais usam a máscara `mask_path` (luz e mistura das camadas)."""
+    Todos os materiais usam a máscara `mask_path` (luz e mistura das camadas).
+    max_verts = limite de vértices num material: acima dele devolve (None, {"max_rec": n}) logo depois
+    de montar a grade, sem gastar tempo com as árvores e o pacote (o chamador tenta mais leve)."""
     head, fix, sec, pl = read_bdf(data)
     if len(sec) != 2:
         raise ValueError("terreno sem a seção da malha")
@@ -368,6 +376,11 @@ def rebuild_terrain(data, height, grid, *, step=4.0, mask_path, margin=0.0, ring
         cx = (gp[t[0]][0] + gp[t[1]][0] + gp[t[2]][0]) / 3
         cz = (gp[t[0]][2] + gp[t[1]][2] + gp[t[2]][2]) / 3
         parts[max(0, min(nz - 1, int(zone_t(cx, cz))))].append(t)
+    if max_verts:
+        # vértices usados por material (o que build_bvh vai contar): conferido antes do trabalho pesado
+        biggest = max(len({v for t in part for v in t}) for part in parts)
+        if biggest > max_verts:
+            return None, dict(max_rec=biggest, grid_tris=len(gt))
     for k, r in enumerate(hosts):
         recs[r] = [gp, gv, parts[k], True, len(parts[k])]
     # lâmina d'água na altura nova

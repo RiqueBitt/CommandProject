@@ -619,5 +619,10 @@
  "senha incorreta": "wrong password",
  "devagar: muitas mensagens seguidas": "slow down: too many messages in a row",
  "hub: {0}": "hub: {0}",
- "{0}, {1}": "{0}, {1}"
+ "{0}, {1}": "{0}, {1}",
+ "o jogo aguenta no máximo {0} jogadores numa partida ({1} escolhidos): deixe {2} base(s) vazia(s)": "the game handles at most {0} players in a match ({1} chosen): leave {2} base(s) empty",
+ "Faltou memória para o jogo: use um mapa menor, menos jogadores ou um limite de unidades menor.": "The game ran out of memory: use a smaller map, fewer players or a lower unit cap.",
+ "O jogo fechou antes de montar a partida grande (ainda abrindo ou carregando os mods).": "The game closed before setting up the big match (still opening or loading the mods).",
+ "Mapa de {0}: acima de 2048 é experimental. Teste os mesmos jogadores num mapa de 2048 para saber se o tamanho é o problema.": "{0} map: above 2048 is experimental. Try the same players on a 2048 map to find out whether the size is the problem.",
+ "Com {0} jogadores: até 24 já foi testado. Deixe algumas bases vazias para achar o limite do seu computador.": "With {0} players: up to 24 has been tested. Leave a few bases empty to find your computer's limit."
 }

@@ -215,6 +215,17 @@ class Terrain:
         """Index of the land-only movement layer (fewest underwater-navigable cells)."""
         if self.n_layers == 3:
             return 0
+        # CommandProject: the scan reads a quarter of a million cells per layer (a million on 4096
+        # maps) and is asked several times per build; it only changes with the navmesh or the water
+        key = (id(self.costs_payload), id(self._wd), tuple(self.layers), GRID)
+        memo = getattr(self, "_land_memo", None)
+        if memo and memo[0] == key:
+            return memo[1]
+        bi = self._land_layer_scan()
+        self._land_memo = (key, bi)
+        return bi
+
+    def _land_layer_scan(self):
         best, bi = 1e18, 0
         for li, rec in enumerate(self.layers):
             oA = rec[2]; under = 0
@@ -271,11 +282,27 @@ def dry_gentle_mask(terrain, max_slope_world=6.0, water_margin=4.0, water_level=
     wl = _water_level(terrain) if water_level is None else water_level
     dry_raw = int((wl + water_margin) * 128)
     slope_raw = int(max_slope_world * 128)
-    m = bytearray(GRID*GRID)
-    for z in range(1, GRID-1):
-        for x in range(1, GRID-1):
-            if terrain.H[z*terrain.HW + x] > dry_raw and terrain.slope_raw(x, z) < slope_raw:
-                m[z*GRID + x] = 1
+    G, HW, H = GRID, terrain.HW, terrain.H
+    np = _numpy()
+    if np is not None:
+        A = np.frombuffer(H, dtype=np.uint16).reshape(-1, HW).astype(np.int32)
+        c = A[1:G - 1, 1:G - 1]
+        ok = (c > dry_raw)
+        for nb in (A[1:G - 1, 2:G], A[1:G - 1, 0:G - 2], A[0:G - 2, 1:G - 1], A[2:G, 1:G - 1]):
+            ok &= np.abs(nb - c) < slope_raw
+        out = np.zeros((G, G), dtype=np.uint8)
+        out[1:G - 1, 1:G - 1] = ok
+        return bytearray(out.tobytes())
+    # CommandProject: one row at a time with zip (the per-cell method calls took most of the time)
+    m = bytearray(G*G)
+    for z in range(1, G-1):
+        r = z * HW
+        c = H[r + 1:r + G - 1]
+        m[z*G + 1:z*G + G - 1] = bytes(
+            1 if (v > dry_raw and abs(e - v) < slope_raw and abs(w - v) < slope_raw
+                  and abs(n - v) < slope_raw and abs(so - v) < slope_raw) else 0
+            for v, e, w, n, so in zip(c, H[r + 2:r + G], H[r:r + G - 2],
+                                      H[r - HW + 1:r - HW + G - 1], H[r + HW + 1:r + HW + G - 1]))
     return m
 
 def carve_box(terrain, mask, x0, x1, z0, z1, min_world=10.0):
@@ -301,15 +328,17 @@ def component_of(mask, seed_x, seed_z):
                     if done: break
                 if done: break
             if done: break
-    q = deque([sz*GRID+sx]); comp[sz*GRID+sx] = 1; n = 1
-    while q:
-        i = q.popleft(); x, z = i % GRID, i // GRID
-        for dx, dz in ((1,0),(-1,0),(0,1),(0,-1)):
-            nx, nz = x+dx, z+dz
-            if 0 <= nx < GRID and 0 <= nz < GRID:
-                j = nz*GRID+nx
-                if mask[j] and not comp[j]:
-                    comp[j] = 1; n += 1; q.append(j)
+    # CommandProject: labelled by runs of cells (C-speed scans) instead of a cell-by-cell flood
+    lab = RunLabels(mask, 0, GRID, ONE_TABLE)
+    root = lab.at(sx, sz)
+    if root is None:
+        comp[sz*GRID+sx] = 1
+        return comp, 1
+    n = 0
+    one = b"\x01" * GRID
+    for z, a, b in lab.runs_of(root):
+        comp[z*GRID + a:z*GRID + b] = one[:b - a]
+        n += b - a
     return comp, n
 
 def open_extended_land(terrain, max_slope_world=6.0, water_margin=4.0, water_level=None):
@@ -352,10 +381,13 @@ def patch_costs(terrain, component):
     island-less cells, overlapping/stale bboxes) is a classic desync trigger — single-
     player tolerates it, multiplayer diverges. _recompute_islands fixes that."""
     payload = bytearray(terrain.costs_payload)
-    cells = [i for i in range(GRID*GRID) if component[i]]
+    one = b"\x01" * GRID
+    # CommandProject: whole runs of the component at a time (slice writes) instead of cell by cell
+    spans = [(z * GRID + a, b - a) for z in range(GRID)
+             for a, b in _runs(bytes(component[z*GRID:(z+1)*GRID]), ONE_TABLE)]
     for (_lid, _cA, oA, _cB, oB, _cS, oS) in terrain.layers:
-        for i in cells:
-            payload[oA + i] = 1                  # open the play area on every layer
+        for i, n in spans:
+            payload[oA + i:oA + i + n] = one[:n]   # open the play area on every layer
     _recompute_islands(payload, terrain.layers)  # consistent island grid + bbox per layer
     return rebuild_bdf(terrain.raw["costs.win.bdf"], payload), payload
 
@@ -365,74 +397,145 @@ def _recompute_islands(payload, layers):
     The bbox table can't be resized (it sits mid-payload with container fixups pointing
     past it), so components beyond the table's capacity are blocked (cost=255) — these
     are tiny unreachable patches. Result: cost!=255  <=>  island in 0..k-1, every island
-    contiguous with a correct bbox, no orphans. (Slower: a BFS over each layer.)"""
-    import array
-    N = GRID * GRID
+    contiguous with a correct bbox, no orphans.
+    CommandProject: components are labelled by runs of navigable cells (same labels, order and
+    boxes as the cell-by-cell flood it replaces, a few hundred times faster on big maps)."""
+    blocked = b"\xff" * GRID
     for (_lid, _cA, oA, _cB, oB, cS, oS) in layers:
         cap = cS // 4
         if cap < 1:
             continue
-        lbl = array.array('i', bytes(4 * N))     # 0 = unvisited/blocked
-        comps = []                               # [size, x0, z0, x1, z1, temp_id]
-        cid = 0
-        for s in range(N):
-            if payload[oA + s] != 255 and lbl[s] == 0:
-                cid += 1
-                q = deque([s]); lbl[s] = cid
-                size = 0; x0 = x1 = s % GRID; z0 = z1 = s // GRID
-                while q:
-                    i = q.popleft(); size += 1
-                    x = i % GRID; z = i // GRID
-                    if x < x0: x0 = x
-                    if x > x1: x1 = x
-                    if z < z0: z0 = z
-                    if z > z1: z1 = z
-                    if x > 0 and payload[oA+i-1] != 255 and lbl[i-1] == 0:
-                        lbl[i-1] = cid; q.append(i-1)
-                    if x < GRID-1 and payload[oA+i+1] != 255 and lbl[i+1] == 0:
-                        lbl[i+1] = cid; q.append(i+1)
-                    if z > 0 and payload[oA+i-GRID] != 255 and lbl[i-GRID] == 0:
-                        lbl[i-GRID] = cid; q.append(i-GRID)
-                    if z < GRID-1 and payload[oA+i+GRID] != 255 and lbl[i+GRID] == 0:
-                        lbl[i+GRID] = cid; q.append(i+GRID)
-                comps.append([size, x0, z0, x1, z1, cid])
-        comps.sort(key=lambda c: -c[0])
-        keep = {c[5]: rank for rank, c in enumerate(comps[:cap])}
-        for i in range(N):
-            if payload[oA + i] == 255:
-                payload[oB + i] = 255
+        lab = RunLabels(payload, oA, GRID, NAV_TABLE)
+        # same order as the flood: biggest first, ties by the first cell in raster order
+        comps = sorted(lab.components().items(), key=lambda kv: (-kv[1][0], kv[1][5]))
+        keep = {root: rank for rank, (root, _c) in enumerate(comps[:cap])}
+        for z in range(GRID):
+            payload[oB + z*GRID:oB + (z+1)*GRID] = blocked
+        for k, (z, a, b) in enumerate(lab.runs):
+            r = keep.get(lab.root(k))
+            o = z * GRID + a
+            if r is None:                        # excess tiny component -> block (consistent)
+                payload[oA + o:oA + o + b - a] = blocked[:b - a]
             else:
-                r = keep.get(lbl[i])
-                if r is None:                    # excess tiny component -> block (consistent)
-                    payload[oA + i] = 255; payload[oB + i] = 255
-                else:
-                    payload[oB + i] = r
+                payload[oB + o:oB + o + b - a] = bytes((r,)) * (b - a)
         for rank in range(cap):
             if rank < len(comps):
-                _, x0, z0, x1, z1, _ = comps[rank]
+                _size, x0, z0, x1, z1, _first = comps[rank][1]
                 struct.pack_into("<4I", payload, oS + 16*rank, x0, z0, x1, z1)
             else:
                 struct.pack_into("<4I", payload, oS + 16*rank, 0, 0, 0, 0)
 
 def reachable(payload, layers, a, b, layer=0):
-    """BFS over a costs payload: can land units walk from a to b?"""
-    oA = layers[layer][2]; seen = bytearray(GRID*GRID)
-    s = round(a[1])*GRID + round(a[0]); t = round(b[1])*GRID + round(b[0])
-    if payload[oA+s] == 255:
-        return False
-    q = deque([s]); seen[s] = 1
-    while q:
-        i = q.popleft()
-        if i == t:
-            return True
-        x, z = i % GRID, i // GRID
-        for dx, dz in ((1,0),(-1,0),(0,1),(0,-1)):
-            nx, nz = x+dx, z+dz
-            if 0 <= nx < GRID and 0 <= nz < GRID:
-                j = nz*GRID+nx
-                if not seen[j] and payload[oA+j] != 255:
-                    seen[j] = 1; q.append(j)
-    return seen[t] == 1
+    """Can land units walk from a to b? (one labelling of the layer; see reachable_from)"""
+    return not reachable_from(payload, layers, a, [b], layer)
+
+def reachable_from(payload, layers, a, targets, layer=0):
+    """CommandProject: the targets that land units CANNOT reach from a — one labelling of the
+    layer for all of them (a flood per target took minutes on 4096 maps with many players)."""
+    lab = RunLabels(payload, layers[layer][2], GRID, NAV_TABLE)
+    src = lab.at(round(a[0]), round(a[1]))
+    return [t for t in targets if src is None or lab.at(round(t[0]), round(t[1])) != src]
+
+# ---------------------------------------------------------------------------
+# CommandProject: connected regions by runs (rows scanned at C speed, runs joined by union-find)
+# ---------------------------------------------------------------------------
+NAV_TABLE = bytes(0 if v == 255 else 1 for v in range(256))   # cost grid: navigable = not 255
+ONE_TABLE = bytes(1 if v else 0 for v in range(256))          # masks: set = not 0
+_RUN = re.compile(rb"\x01+")
+
+
+def _runs(row, table):
+    """(start, end) of each run of cells that `table` maps to 1 in a row of bytes"""
+    return [m.span() for m in _RUN.finditer(row.translate(table))]
+
+
+def _numpy():
+    """numpy when installed (the launcher's Python has it), unless CP_NO_NUMPY is set"""
+    if os.environ.get("CP_NO_NUMPY"):
+        return None
+    try:
+        import numpy
+        return numpy
+    except ImportError:
+        return None
+
+
+class RunLabels:
+    """4-connected components of a G×G byte grid (at `off` in `buf`) where `table` maps a cell's
+    byte to 1. `runs[k]` = (z, a, b): cells a..b-1 of row z."""
+
+    def __init__(self, buf, off, G, table):
+        self.G = G
+        runs, parent, rows = [], [], []
+        mv = memoryview(buf)
+        prev = []
+        for z in range(G):
+            cur = []
+            for a, b in _runs(bytes(mv[off + z*G:off + (z+1)*G]), table):
+                k = len(runs)
+                runs.append((z, a, b))
+                parent.append(k)
+                cur.append(k)
+            # join with the runs of the row above that touch (share a column)
+            i = j = 0
+            while i < len(prev) and j < len(cur):
+                _, pa, pb = runs[prev[i]]
+                _, ca, cb = runs[cur[j]]
+                if pa < cb and ca < pb:
+                    x, y = prev[i], cur[j]
+                    while parent[x] != x:
+                        parent[x] = parent[parent[x]]
+                        x = parent[x]
+                    while parent[y] != y:
+                        parent[y] = parent[parent[y]]
+                        y = parent[y]
+                    if x != y:
+                        parent[max(x, y)] = min(x, y)
+                if pb <= cb:
+                    i += 1
+                else:
+                    j += 1
+            rows.append(cur)
+            prev = cur
+        self.runs, self._parent, self._rows = runs, parent, rows
+
+    def root(self, k):
+        p = self._parent
+        while p[k] != k:
+            p[k] = p[p[k]]
+            k = p[k]
+        return k
+
+    def at(self, x, z):
+        """component (root run) of the cell, None when it is not set"""
+        if not (0 <= x < self.G and 0 <= z < self.G):
+            return None
+        for k in self._rows[z]:
+            _, a, b = self.runs[k]
+            if a <= x < b:
+                return self.root(k)
+            if a > x:
+                break
+        return None
+
+    def runs_of(self, root):
+        return [r for k, r in enumerate(self.runs) if self.root(k) == root]
+
+    def components(self):
+        """{root: [size, x0, z0, x1, z1, first cell]}"""
+        out = {}
+        G = self.G
+        for k, (z, a, b) in enumerate(self.runs):
+            r = self.root(k)
+            c = out.get(r)
+            if c is None:
+                out[r] = [b - a, a, z, b - 1, z, z * G + a]
+            else:
+                c[0] += b - a
+                if a < c[1]: c[1] = a
+                if b - 1 > c[3]: c[3] = b - 1
+                if z > c[4]: c[4] = z
+        return out
 
 def _water_level(terrain):
     """Water-plane height. A non-zero catalog value wins; otherwise read the value baked in

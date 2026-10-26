@@ -292,6 +292,7 @@
  "O jogo está perto do limite de memória de um programa de 32 bits. Se travar, ligue o modo 4 GB (acima) ou desligue mods de texturas HD.": "The game is close to the memory limit of a 32-bit program. If it crashes, turn on 4 GB mode (above) or disable HD texture mods.",
  "O jogo fechou com erro": "The game closed with an error",
  "O jogo fechou com erro. Veja na tela inicial o que pode ter causado.": "The game closed with an error. See on the home screen what might have caused it.",
+ "O jogo fechou no meio da partida grande. Veja na tela da partida o que o log do jogo diz.": "The game closed in the middle of the big match. See what the game log says on the match screen.",
  "O jogo fechou, mas não deu para restaurar os arquivos: {error}": "The game closed, but the files couldn't be restored: {error}",
  "O jogo ganha preferência quando há programas disputando a CPU (navegador, gravação).": "The game gets priority when other programs compete for the CPU (browser, recording).",
  "O jogo já está com o perfil “{name}”.": "The game already uses the profile “{name}”.",

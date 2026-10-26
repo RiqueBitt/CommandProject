@@ -322,4 +322,8 @@ export interface MatchOptions {
   spawn: "fixed" | "team" | "all";
 }
 export interface BigMatch { map: string; slots: MatchSlot[]; options: MatchOptions }
+/** O que o log do jogo diz sobre uma partida grande que fechou no meio. */
+export interface GameLogReport { finished: boolean; started: boolean; players: number | null; size: number | null; problems: string[]; tail: string[]; hints: string[] }
+/** O jogo fechou com erro: relatório do Windows (.mdmp), mods ligados e o log (partida grande). */
+export interface GameCrash { dump: string | null; mods: [string, string][]; log?: GameLogReport | null; logPath?: string | null }
 export interface MatchMap { path: string; id: string; name: string; armies: string[]; starts: [number, number][]; size: [number, number]; source: string; lobbyRisk: boolean }

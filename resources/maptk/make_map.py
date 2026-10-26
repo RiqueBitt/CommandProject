@@ -172,12 +172,6 @@ def build_map(spec, verbose=True, install=True):
         # fallback (rare — cliffy base): independent placement, may not be a perfect square
         return [place(sx+dx, sz+dz) for dx, dz in ((-d0,-d0),(d0,-d0),(-d0,d0),(d0,d0))]
 
-    # ---- placeable cells (navigable, dry, flat) ----
-    _hi = t.grid - 71                      # was hardcoded 953 (=1024-71); generalize for 512-grid maps
-    placeable = [(cx, cz) for cx in range(72, _hi, 6) for cz in range(72, _hi, 6)
-                 if nav(cx, cz) and t.dry(cx, cz) and _spread(t, cx, cz) < 2.5]
-    log(f"placeable cells: {len(placeable)}")
-
     # ---- spawns: snap each anchor into the navigable area ----
     spawns = {a: snap(*xz) for a, xz in spec["anchors"].items()}
     armies = sorted(spawns)
@@ -197,15 +191,33 @@ def build_map(spec, verbose=True, install=True):
 
     # ---- expansion sites: max-spread across navigable flats, away from spawns ----
     nsites = eco.get("sites", 10); per = eco.get("per_site", 3)
-    cand = [p for p in placeable if all(_dist(p, spawns[a]) > 140 for a in armies)]
     sites = []
-    while len(sites) < nsites and cand:
-        if not sites:
-            pick = max(cand, key=lambda p: min(_dist(p, spawns[a]) for a in armies))
-        else:
-            pick = max(cand, key=lambda p: min([_dist(p, s) for s in sites]
-                       + [_dist(p, spawns[a])*0.7 for a in armies]))
-        sites.append(pick); cand = [p for p in cand if _dist(p, pick) > 105]
+    if nsites > 0:
+        # ---- placeable cells (navigable, dry, flat) ----
+        # CommandProject: only scanned when there are expansion sites to place (maps from the world
+        # generator bring their own mass points), and far from the spawns first (cheap test)
+        _hi = t.grid - 71                  # was hardcoded 953 (=1024-71); generalize for 512-grid maps
+        sp = [spawns[a] for a in armies]
+        placeable = [(cx, cz) for cx in range(72, _hi, 6) for cz in range(72, _hi, 6)
+                     if nav(cx, cz) and t.dry(cx, cz) and _spread(t, cx, cz) < 2.5]
+        log(f"placeable cells: {len(placeable)}")
+        cand = [p for p in placeable if all(_dist(p, q) > 140 for q in sp)]
+        # same picks as before (farthest from the spawns, then from spawns ×0.7 and the sites
+        # already picked), with each candidate's distance kept up to date instead of recomputed
+        near = [min(_dist(p, q) for q in sp) for p in cand]
+        score = near
+        while len(sites) < nsites and cand:
+            best = max(range(len(cand)), key=score.__getitem__)
+            pick = cand[best]
+            sites.append(pick)
+            keep = [k for k in range(len(cand)) if _dist(cand[k], pick) > 105]
+            if len(sites) == 1:
+                score = [min(near[k] * 0.7, _dist(cand[k], pick)) for k in keep]
+            else:
+                score = [min(score[k], _dist(cand[k], pick)) for k in keep]
+            cand = [cand[k] for k in keep]
+    else:
+        log("placeable cells: 0 (no expansion sites)")
     site_off = [(0,-10),(-9,8),(9,8),(0,12),(-12,-4),(12,-4)][:per]
     exp_mass = [place(cx+dx, cz+dz) for (cx, cz) in sites for dx, dz in site_off]
 
@@ -262,16 +274,20 @@ def build_map(spec, verbose=True, install=True):
     bad = [p for p in allpts if not navok(*p)]
     assert not bad, f"VERIFY FAILED — blocked positions: {bad[:8]}"
     if spec.get("teams_connected", True):
+        # CommandProject: one labelling of the land layer for every spawn (a flood per army took
+        # minutes on big maps with many players)
+        far = sm.reachable_from(payload, t.layers, spawns[armies[0]], [spawns[a] for a in armies[1:]], landL)
         for a in armies[1:]:
-            assert sm.reachable(payload, t.layers, spawns[armies[0]], spawns[a], landL), \
+            assert spawns[a] not in far, \
                 f"VERIFY FAILED — ARMY_{a} not reachable from ARMY_{armies[0]} by land"
         log(f"VERIFIED: all {len(allpts)} positions navigable; all spawns mutually reachable")
     else:
         # naval map: teams sit on water-separated landmasses, so only require each TEAM's own
         # spawns to be mutually land-reachable (cross-team contact is by sea/air).
         for team in spec.get("teams", [armies]):
+            far = sm.reachable_from(payload, t.layers, spawns[team[0]], [spawns[a] for a in team[1:]], landL)
             for a in team[1:]:
-                assert sm.reachable(payload, t.layers, spawns[team[0]], spawns[a], landL), \
+                assert spawns[a] not in far, \
                     f"VERIFY FAILED — ARMY_{a} not reachable from teammate ARMY_{team[0]} by land"
         log(f"VERIFIED: all {len(allpts)} navigable; intra-team reachable (teams water-separated)")
 

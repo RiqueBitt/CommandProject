@@ -1,7 +1,8 @@
 // Partida grande: escaramuça com todas as bases do mapa (12 contra 12, vários times, todos contra
 // todos...). O lobby do jogo só tem 8 vagas; aqui cada base vira você, uma IA ou fica vazia, e o
 // launcher abre o jogo direto na partida.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import CrashNotice from "../components/CrashNotice";
 import { Empty, Field, Icon, Notice, Switch, TaskProgress } from "../components/ui";
 import { api } from "../lib/api";
 import { t, tr } from "../lib/i18n";
@@ -11,6 +12,48 @@ import { assignColors, GAME_COLORS, groupOf, type ColorMode } from "../lib/teamC
 import type { MatchMap, MatchOptions, MatchSlot, SlotKind } from "../lib/types";
 
 let mapCache: MatchMap[] | null = null;
+
+/** Minimapas já pedidos (cenário#lado → data URL ou null), guardados enquanto o launcher está aberto. */
+const images = new Map<string, Promise<string | null>>();
+function mapImage(path: string, size: number): Promise<string | null> {
+  const key = `${path}#${size}`;
+  let p = images.get(key);
+  if (!p) {
+    p = api.bigMatchPreview(path, size).catch(() => null);
+    images.set(key, p);
+  }
+  return p;
+}
+/** Minimapa do cenário; com `lazy`, só quando o elemento aparece na tela (lista com dezenas de mapas). */
+function useMapImage(path: string | null, size: number, lazy?: React.RefObject<Element | null>): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    setUrl(null);
+    if (!path) return;
+    let alive = true;
+    const load = () => void mapImage(path, size).then((u) => { if (alive) setUrl(u); });
+    const el = lazy?.current;
+    if (!el || typeof IntersectionObserver === "undefined") { load(); return () => { alive = false; }; }
+    const io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) { io.disconnect(); load(); } }, { rootMargin: "120px" });
+    io.observe(el);
+    return () => { alive = false; io.disconnect(); };
+  }, [path, size, lazy]);
+  return url;
+}
+
+/** Um mapa da lista: miniatura do terreno com o número de bases por cima. */
+function MapItem({ m, on, onPick }: { m: MatchMap; on: boolean; onPick: () => void }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const img = useMapImage(m.path, 128, ref);
+  return (
+    <button role="option" aria-selected={on} className={`bm-map ${on ? "on" : ""}`} onClick={onPick}>
+      <span ref={ref} className={`bm-thumb ${img ? "has" : ""}`} style={img ? { backgroundImage: `url(${img})` } : undefined}>
+        <span className={`bm-count ${m.armies.length > 8 ? "big" : ""}`}>{m.armies.length}</span>
+      </span>
+      <span className="grow"><span className="title">{m.name}</span><span className="sub">{tr(m.source)} · {m.size[0]}×{m.size[1]}</span></span>
+    </button>
+  );
+}
 
 const FACTIONS = ["Aleatória", "UEF", "Cybran", "Illuminate"];
 const AI_LEVELS = [{ key: "Easy", label: "Fácil" }, { key: "Normal", label: "Normal" }, { key: "Hard", label: "Difícil" }, { key: "Cheat", label: "Trapaceira" }];
@@ -71,9 +114,14 @@ function splitTeams(m: MatchMap, n: number, by: "side" | "order"): number[] {
   return team;
 }
 
+/** Exércitos que o motor do jogo aguenta numa partida (contando os civis do mapa, que ficam de fora
+ *  quando não cabem). Igual a `MAX_ARMIES` no cp-core. */
+const MAX_PLAYERS = 32;
+
 function defaultSlots(m: MatchMap): MatchSlot[] {
   const teams = m.armies.length >= 4 && m.armies.length % 2 === 0 ? splitTeams(m, 2, "side") : m.armies.map(() => 0);
-  return m.armies.map((_, i) => ({ kind: i === 0 ? "you" : "ai", team: teams[i], faction: 0, ai: "Normal", color: -1 }));
+  // mapas com mais bases que o jogo aguenta: as do fim começam vazias
+  return m.armies.map((_, i) => ({ kind: i === 0 ? "you" : i < MAX_PLAYERS ? "ai" : "empty", team: teams[i], faction: 0, ai: "Normal", color: -1 }));
 }
 
 /** "12 contra 12", "6 x 6 x 6", "todos contra todos (8)"... e o erro, se houver. */
@@ -86,6 +134,7 @@ function summary(slots: MatchSlot[]): { text: string; error: string | null; play
   let error: string | null = null;
   if (you !== 1) error = you === 0 ? t("Escolha uma base para você.") : t("Só uma base pode ser sua.");
   else if (on.length < 2) error = t("A partida precisa de pelo menos 2 jogadores.");
+  else if (on.length > MAX_PLAYERS) error = t("O jogo aguenta até {max} jogadores numa partida: deixe {n} base(s) vazia(s).", { max: MAX_PLAYERS, n: on.length - MAX_PLAYERS });
   else if (groups.size < 2) error = t("Todos estão no mesmo time: separe em pelo menos dois.");
   const same = sizes.length > 2 && sizes.every((n) => n === sizes[0]);
   const text = on.every((s) => s.team === 0) ? t("todos contra todos ({n})", { n: on.length })
@@ -121,6 +170,7 @@ export default function BigMatch() {
     return () => window.clearInterval(t);
   }, [running, refresh]);
   const map = useMemo(() => maps?.find((m) => m.path === path) ?? null, [maps, path]);
+  const terrain = useMapImage(map?.path ?? null, 512);
   useEffect(() => {
     if (!maps?.length) return;
     if (!map) { setPath(maps[0].path); return; }
@@ -181,13 +231,23 @@ export default function BigMatch() {
     if (r) await refresh();
   };
 
-  // prévia das bases: posição no mapa, cor do time, você marcado
+  // prévia das bases: o terreno do mapa (minimapa do jogo), posição de cada base, cor e você marcado
   const preview = map && map.starts.length === map.armies.length ? (() => {
     const [w, h] = [map.size[0] || 1024, map.size[1] || 1024];
     const r = Math.max(9, Math.min(16, 220 / Math.sqrt(map.armies.length)));
+    const rx = w * 0.02;
     return (
-      <svg className="bm-preview" viewBox={`0 0 ${w} ${h}`} role="img" aria-label={t("Bases de {map}", { map: map.name })}>
-        <rect x={0} y={0} width={w} height={h} rx={w * 0.02} className="bm-ground" />
+      <svg className={`bm-preview ${terrain ? "has-image" : ""}`} viewBox={`0 0 ${w} ${h}`} role="img" aria-label={t("Bases de {map}", { map: map.name })}>
+        <defs><clipPath id="bm-clip"><rect x={0} y={0} width={w} height={h} rx={rx} /></clipPath></defs>
+        <rect x={0} y={0} width={w} height={h} rx={rx} className="bm-ground" />
+        {terrain && (
+          <g clipPath="url(#bm-clip)">
+            <image href={terrain} x={0} y={0} width={w} height={h} preserveAspectRatio="none" className="bm-terrain" />
+            {/* escurece um pouco o terreno para as bases se destacarem */}
+            <rect x={0} y={0} width={w} height={h} className="bm-shade" />
+          </g>
+        )}
+        <rect x={0} y={0} width={w} height={h} rx={rx} className="bm-frame" />
         {map.starts.map((p, i) => {
           const s = slots[i];
           if (!s) return null;
@@ -195,7 +255,8 @@ export default function BigMatch() {
           return (
             <g key={i} className={`bm-base ${s.kind}`} onClick={() => setSlot(i, { kind: "you" })} style={{ cursor: "pointer" }}>
               <title>{t("Base {n}: {who}{team} (clique para jogar aqui)", { n: i + 1, who: s.kind === "you" ? t("você") : s.kind === "ai" ? t("IA") : t("vazia"), team: s.team ? t(", time {n}", { n: s.team }) : "" })}</title>
-              <circle cx={p[0]} cy={p[1]} r={R} fill={s.kind === "empty" ? "transparent" : colorOf(i)} stroke={s.kind === "you" ? "#fff" : s.kind === "empty" ? "#6b707c" : colorOf(i)} strokeWidth={s.kind === "you" ? R * 0.35 : R * 0.15} />
+              <circle cx={p[0]} cy={p[1]} r={R * 1.12} className="bm-halo" />
+              <circle cx={p[0]} cy={p[1]} r={R} fill={s.kind === "empty" ? "rgba(11,15,20,.55)" : colorOf(i)} stroke={s.kind === "you" ? "#fff" : s.kind === "empty" ? "#6b707c" : colorOf(i)} strokeWidth={s.kind === "you" ? R * 0.35 : R * 0.15} />
               <text x={p[0]} y={p[1] + R * 0.38} textAnchor="middle" fontSize={R * 1.05} className="bm-label">{s.kind === "you" ? "★" : i + 1}</text>
             </g>
           );
@@ -225,12 +286,7 @@ export default function BigMatch() {
             <input className="input" placeholder={t("Procurar mapa…")} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("Procurar mapa")} />
             <label className="row small" style={{ gap: 8, margin: "10px 0" }}><Switch label={t("Só mapas com mais de 8 bases")} checked={onlyBig} onChange={setOnlyBig} /> {t("Só mapas com mais de 8 bases")}</label>
             <div className="bm-map-list" role="listbox" aria-label={t("Mapas")}>
-              {list.map((m) => (
-                <button key={m.path} role="option" aria-selected={m.path === path} className={`bm-map ${m.path === path ? "on" : ""}`} onClick={() => setPath(m.path)}>
-                  <span className={`bm-count ${m.armies.length > 8 ? "big" : ""}`}>{m.armies.length}</span>
-                  <span className="grow"><span className="title">{m.name}</span><span className="sub">{tr(m.source)} · {m.size[0]}×{m.size[1]}</span></span>
-                </button>
-              ))}
+              {list.map((m) => <MapItem key={m.path} m={m} on={m.path === path} onPick={() => setPath(m.path)} />)}
               {!list.length && <p className="faint small">{t("Nenhum mapa com esse filtro.")}</p>}
             </div>
             <button className="btn sm text" style={{ marginTop: 10 }} onClick={() => goCreate("map")}><Icon name="add" size={16} /> {t("Criar mapa com mais bases")}</button>
@@ -238,6 +294,8 @@ export default function BigMatch() {
 
           {map && (
             <div className="col bm-main" style={{ gap: 16 }}>
+              {/* o jogo fechou no meio da última partida: o que o log disse, no alto da tela */}
+              <CrashNotice />
               <section className="card pad">
                 <div className="card-title"><Icon name="flag" /><h3>{map.name}</h3><span className={`chip ${error ? "warn" : "ok"}`}>{sum.text}</span></div>
                 <div className="bm-setup">
@@ -275,7 +333,11 @@ export default function BigMatch() {
                         <select className="select dense" value="" onChange={(e) => e.target.value !== "" && setAll({ faction: Number(e.target.value) })} aria-label={t("Facção de todas as IAs")}>
                           <option value="">{t("facção…")}</option>{FACTIONS.map((f, i) => <option key={f} value={i}>{t(f)}</option>)}
                         </select>
-                        <button type="button" className="btn sm" onClick={() => setSlots((l) => l.map((s) => (s.kind === "empty" ? { ...s, kind: "ai" } : s)))}>{t("Encher as vazias")}</button>
+                        <button type="button" className="btn sm" disabled={sum.players >= MAX_PLAYERS} title={sum.players >= MAX_PLAYERS ? t("O jogo aguenta até {max} jogadores numa partida.", { max: MAX_PLAYERS }) : undefined} onClick={() => setSlots((l) => {
+                          // até o limite do jogo: as vazias do fim continuam vazias
+                          let free = MAX_PLAYERS - l.filter((s) => s.kind !== "empty").length;
+                          return l.map((s) => (s.kind === "empty" && free-- > 0 ? { ...s, kind: "ai" } : s));
+                        })}>{t("Encher as vazias")}</button>
                       </div>
                     </Field>
                     <p className="faint small">{t("Clique numa base da prévia para jogar nela.")}</p>
@@ -390,7 +452,14 @@ export default function BigMatch() {
                 </div>
               </section>
 
-              {sum.players > 8 && <Notice kind="info">{t("O jogo foi feito para até 8 jogadores. Com mais, a partida fica mais pesada (cada IA pensa sozinha) e ainda não foi testada com tantos: se o jogo não abrir ou fechar ao carregar, tente com menos bases ou um limite de unidades menor e me conte quantos jogadores deram certo.")}</Notice>}
+              {(map.size[0] > 2048 || sum.players > 24) ? (
+                <Notice kind="warn">
+                  {map.size[0] > 2048 && t("Mapa de {size}: acima de 2048 é experimental (os mapas do jogo vão até 2048) e pesa bem mais para carregar.", { size: map.size[0] })}
+                  {map.size[0] > 2048 && sum.players > 24 && " "}
+                  {sum.players > 24 && t("Mais de 24 jogadores ainda não foi testado; o jogo aguenta até {max} exércitos e os civis do mapa ficam de fora quando não cabem.", { max: MAX_PLAYERS })}
+                  {" "}{t("Se o jogo fechar, o launcher mostra aqui o que o log do jogo disse.")}
+                </Notice>
+              ) : sum.players > 8 && <Notice kind="info">{t("O jogo foi feito para até 8 jogadores. Com mais, a partida fica mais pesada (cada IA pensa sozinha): se o jogo fechar ao carregar, o launcher mostra aqui o que o log do jogo disse.")}</Notice>}
               {busy && <TaskProgress task="apply" label={t("Preparando a partida…")} />}
               <div className="row bm-launch">
                 <span className="grow">{error ? <span className="chip warn"><Icon name="error_outline" size={14} /> {tr(error)}</span> : <span className="muted">{sum.text} · {map.name}</span>}</span>

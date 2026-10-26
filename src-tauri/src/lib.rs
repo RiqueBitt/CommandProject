@@ -127,6 +127,7 @@ pub fn run() {
             commands::conflicts,
             commands::launch_game,
             commands::big_match_maps,
+            commands::big_match_preview,
             commands::kill_game,
             commands::launch_big_match,
             commands::fingerprint,
