@@ -198,6 +198,8 @@ export const api = {
   forjaTemplates: () => call<{ key: string; name: string; description: string }[]>("forja_templates"),
   forjaDevMods: (dir: string) => call<T.ForjaDevMod[]>("forja_dev_mods", { dir }),
   forjaReadFile: (root: string, file: string) => call<string>("forja_read_file", { root, file }),
+  forjaPack: (root: string, dest: string) => call<{ path: string; size: number; sha256: string; hub: unknown }>("forja_pack", { root, dest }),
+  forjaGameErrors: () => call<{ mod: string; file: string; line: number; text: string }[]>("forja_game_errors"),
   forjaWriteFile: (root: string, file: string, text: string, reload: boolean) => call<T.ForjaOverview | null>("forja_write_file", { root, file, text, reload }),
   forjaCheck: (path: string) => call<T.ForjaCheck>("forja_check", { path }),
   buildFirstPerson: (opts: T.FirstPersonOptions, enable = true) => call<T.Manifest>("build_first_person", { opts, enable }),

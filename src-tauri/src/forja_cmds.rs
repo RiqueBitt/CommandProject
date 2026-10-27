@@ -248,3 +248,102 @@ pub struct Template {
 pub fn forja_templates() -> Vec<Template> {
     forja::TEMPLATES.iter().map(|t| Template { key: t.0, name: t.1, description: t.2 }).collect()
 }
+
+// ---------------------------------------------------------------- empacotar e erros do jogo
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Packed {
+    path: String,
+    size: u64,
+    sha256: String,
+    /// entrada pronta para o índice do Hub (tag "forja")
+    hub: Value,
+}
+
+/// Empacota o mod (pasta forja/<id>/) num .scd em `dest` e devolve a entrada do Hub.
+#[tauri::command]
+pub async fn forja_pack(root: String, dest: String) -> R<Packed> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (path, mods) = forja::pack(&PathBuf::from(&root), &PathBuf::from(&dest))?;
+        let bytes = std::fs::read(&path).map_err(|e| cp_core::Error::io(&path, e))?;
+        use sha2::Digest;
+        let sha = hex_string(&sha2::Sha256::digest(&bytes));
+        let m = &mods[0].manifest;
+        let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let hub = serde_json::json!({
+            "id": m.id, "name": m.name, "summary": m.description, "description": m.description,
+            "authors": m.authors, "category": "gameplay", "tags": ["forja"],
+            "versions": [{ "version": m.version, "changelog": "", "multiplayer": "sync",
+                "dependencies": m.dependencies,
+                "package": { "url": file, "sha256": sha, "size": bytes.len(), "kind": "scd", "fileName": file } }],
+        });
+        Ok(Packed { path: path.to_string_lossy().into_owned(), size: bytes.len() as u64, sha256: sha, hub })
+    })
+    .await
+    .map_err(err)?
+    .map_err(|e: cp_core::Error| err(e))
+}
+
+fn hex_string(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameError {
+    #[serde(rename = "mod")]
+    mod_id: String,
+    file: String,
+    line: u32,
+    text: String,
+}
+
+/// Erros dos mods da Forja no log da última partida aberta pelo launcher (com arquivo e linha).
+#[tauri::command]
+pub async fn forja_game_errors(state: State<'_, AppState>) -> R<Vec<GameError>> {
+    let log = with_ws(&state.ws, |ws| Ok(ws.data_dir.join("logs").join(cp_core::bigmatch::LOG_FILE))).await?;
+    let text = match std::fs::read(&log) {
+        Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+        Err(_) => return Ok(Vec::new()),
+    };
+    Ok(parse_errors(&text))
+}
+
+fn parse_errors(text: &str) -> Vec<GameError> {
+    let mut out: Vec<GameError> = Vec::new();
+    for line in text.lines() {
+        // "forja/<id>/<arquivo>.lua:<linha>: <mensagem>" (o nome dos pedaços de código dos mods)
+        let Some(at) = line.find("forja/") else { continue };
+        let rest = &line[at + 6..];
+        let Some((id, after)) = rest.split_once('/') else { continue };
+        let Some(lua) = after.find(".lua:") else { continue };
+        let file = &after[..lua + 4];
+        let tail = &after[lua + 5..];
+        let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let Ok(n) = digits.parse::<u32>() else { continue };
+        let msg = tail[digits.len()..].trim_start_matches(':').trim().to_string();
+        if id.is_empty() || id.contains(' ') {
+            continue;
+        }
+        let e = GameError { mod_id: id.into(), file: file.into(), line: n, text: msg };
+        if !out.iter().any(|x| x.mod_id == e.mod_id && x.file == e.file && x.line == e.line && x.text == e.text) {
+            out.push(e);
+        }
+    }
+    out.truncate(50);
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn finds_mod_errors_in_the_log() {
+        let log = "INFO: x\nWARNING: [Forja] vida-dupla (sim): forja/vida-dupla/sim.lua:12: attempt to call a nil value\n  stack traceback: forja/vida-dupla/lib/util.lua:3: in function x\nnada";
+        let e = super::parse_errors(log);
+        assert_eq!(e.len(), 2);
+        assert_eq!((e[0].mod_id.as_str(), e[0].file.as_str(), e[0].line), ("vida-dupla", "sim.lua", 12));
+        assert_eq!(e[0].text, "attempt to call a nil value");
+        assert_eq!(e[1].file, "lib/util.lua");
+    }
+}

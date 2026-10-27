@@ -186,6 +186,8 @@ pub fn run() {
             forja_cmds::forja_read_file,
             forja_cmds::forja_write_file,
             forja_cmds::forja_templates,
+            forja_cmds::forja_pack,
+            forja_cmds::forja_game_errors,
             commands::build_optimize,
             commands::build_first_person,
             commands::optimize_status,

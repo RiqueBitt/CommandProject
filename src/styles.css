@@ -1343,3 +1343,31 @@ textarea.pinput { height: auto; padding: 4px 6px; resize: vertical; }
 .party-room { width: 100%; }
 /* na sala, os botões de começar são os da sala */
 .bigmatch-page:has(.bm-invite.in-room) .bm-launch { display: none; }
+
+/* Forja: barra, abas, painel lateral e formulário do mod */
+.forja-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.forja-toolbar .select { max-width: 220px; }
+.forja-editor-body.with-side { grid-template-columns: 200px minmax(0, 1fr) 280px; }
+.forja-tabs { display: flex; align-items: center; gap: 4px; overflow-x: auto; min-height: 32px; }
+.forja-tab { display: inline-flex; align-items: center; border-radius: 8px 8px 0 0; border: 1px solid var(--border); border-bottom: none; background: var(--surface-2, transparent); font: 12.5px ui-monospace, Consolas, monospace; white-space: nowrap; }
+.forja-tab.on { background: rgba(var(--primary-rgb), .12); border-color: rgba(var(--primary-rgb), .5); }
+.forja-tab button { border: 0; background: none; color: inherit; font: inherit; padding: 6px 8px; cursor: pointer; }
+.forja-tab .x { padding: 6px 8px 6px 2px; color: var(--muted); }
+.forja-tab .x:hover { color: #ff8b84; }
+.forja-side { border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--surface-2, transparent); min-width: 0; max-height: 540px; overflow: auto; }
+.forja-snippet, .forja-err, .forja-unit, .forja-hit { display: flex; gap: 8px; align-items: center; text-align: left; width: 100%; padding: 6px 8px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--text); cursor: pointer; font: inherit; font-size: 13px; }
+.forja-snippet:hover, .forja-err:hover, .forja-unit:hover, .forja-hit:hover { background: rgba(255, 255, 255, .04); border-color: var(--border); }
+.forja-snippet:disabled { opacity: .45; cursor: default; }
+.forja-err { flex-direction: column; align-items: flex-start; border-color: rgba(229, 83, 75, .3); }
+.forja-units { display: flex; flex-direction: column; max-height: 260px; overflow: auto; }
+.forja-unit { display: grid; grid-template-columns: 74px 1fr auto; }
+.forja-unit.on { background: rgba(var(--primary-rgb), .12); }
+.forja-unit-card { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.forja-hits { display: flex; flex-direction: column; max-height: 420px; overflow: auto; }
+.forja-hit { display: grid; grid-template-columns: 140px 1fr; }
+.forja-hit .mono:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.forja-form { height: 100%; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; background: var(--surface); }
+.forja-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.forja-opt { border: 1px solid var(--border); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.forja-json { max-height: 260px; overflow: auto; font-size: 12px; background: var(--surface-2, #0a1620); border-radius: 8px; padding: 10px; margin: 0; }
+@media (max-width: 1100px) { .forja-editor-body.with-side { grid-template-columns: 1fr; } }

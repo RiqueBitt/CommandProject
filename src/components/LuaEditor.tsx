@@ -86,7 +86,15 @@ const forjaHover = hoverTooltip((view, pos) => {
 
 const lua50 = linter((view) => lintLua50(view.state.doc.toString()).map((i) => ({ from: i.from, to: i.to, severity: i.severity, message: i.message })), { delay: 400 });
 
-export default function LuaEditor({ value, onChange, onSave, readOnly = false, forja = false }: { value: string; onChange?: (v: string) => void; onSave?: () => void; readOnly?: boolean; /** API da Forja no autocompletar, ajuda e avisos do Lua 5.0 */ forja?: boolean }) {
+/** Comandos do editor para quem está em volta (inserir trecho, ir para uma linha). */
+export interface EditorApi { insert: (text: string) => void; goto: (line: number) => void }
+
+export default function LuaEditor({ value, onChange, onSave, readOnly = false, forja = false, apiRef, line }: {
+  value: string; onChange?: (v: string) => void; onSave?: () => void; readOnly?: boolean;
+  /** API da Forja no autocompletar, ajuda e avisos do Lua 5.0 */ forja?: boolean;
+  apiRef?: React.MutableRefObject<EditorApi | null>;
+  /** linha para abrir (ao vir de um erro ou da busca) */ line?: number;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const cb = useRef({ onChange, onSave });
@@ -114,8 +122,28 @@ export default function LuaEditor({ value, onChange, onSave, readOnly = false, f
         EditorView.updateListener.of((u) => u.docChanged && cb.current.onChange?.(u.state.doc.toString())),
       ],
     });
-    view.current = new EditorView({ state, parent: host.current! });
-    return () => view.current?.destroy();
+    const v = new EditorView({ state, parent: host.current! });
+    view.current = v;
+    const goto = (n: number) => {
+      const ln = v.state.doc.line(Math.max(1, Math.min(v.state.doc.lines, n)));
+      v.dispatch({ selection: { anchor: ln.from }, effects: EditorView.scrollIntoView(ln.from, { y: "center" }) });
+      v.focus();
+    };
+    if (apiRef) apiRef.current = {
+      insert: (text) => {
+        const at = v.state.selection.main;
+        // no começo de uma linha nova, com a indentação da linha atual
+        const cur = v.state.doc.lineAt(at.from);
+        const indent = /^\s*/.exec(cur.text)?.[0] ?? "";
+        const block = (cur.text.trim() ? "\n" : "") + text.split("\n").map((l, i) => (i === 0 || !l ? l : indent + l)).join("\n");
+        const pos = cur.text.trim() ? cur.to : at.from;
+        v.dispatch({ changes: { from: pos, insert: (cur.text.trim() ? "" : "") + block }, selection: { anchor: pos + block.length } });
+        v.focus();
+      },
+      goto,
+    };
+    if (line) requestAnimationFrame(() => goto(line));
+    return () => { v.destroy(); if (apiRef) apiRef.current = null; };
     // o editor é recriado quando o arquivo muda (key no componente pai)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readOnly, forja]);

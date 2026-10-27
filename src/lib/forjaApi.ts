@@ -1,3 +1,5 @@
+import luaparse from "luaparse";
+
 // A API da Forja (carregador de mods) para o editor: autocompletar, ajuda ao passar o mouse e os
 // avisos das armadilhas do Lua 5.0 do jogo. Os textos seguem a wiki da Forja.
 
@@ -89,7 +91,7 @@ export function apiAt(word: string): ApiEntry | undefined {
   return byLabel.get(word);
 }
 
-export interface LuaIssue { line: number; from: number; to: number; message: string; severity: "warning" | "error" }
+export interface LuaIssue { line: number; from: number; to: number; message: string; severity: "warning" | "error"; /** o código nem compila */ syntax?: boolean }
 
 /** Tira comentários e textos (mantendo as posições) para os avisos não pegarem nada dentro deles. */
 function blank(src: string): string {
@@ -136,10 +138,34 @@ const RULES: { re: RegExp; message: string; severity?: "warning" | "error" }[] =
   { re: /!=/g, message: "Em Lua, diferente é ~=.", severity: "error" },
 ];
 
-/** Avisos das armadilhas do Lua 5.0 do jogo (linha a linha, sem comentários e textos). */
+/** Erro de sintaxe de verdade (o código não compila): onde e o que, em português. */
+export function syntaxError(src: string): LuaIssue | null {
+  try {
+    luaparse.parse(src, { luaVersion: "5.1", comments: false, scope: false, locations: false });
+    return null;
+  } catch (e) {
+    const err = e as { line?: number; column?: number; index?: number; message?: string };
+    if (typeof err.index !== "number") return null;
+    const raw = String(err.message ?? "").replace(/^\[\d+:\d+\]\s*/, "");
+    const near = /near '(.*)'/.exec(raw)?.[1];
+    const msg = /expected 'end'/.test(raw) ? "Falta um end (fecha function, if, for, while ou do)."
+      : /'\)' expected|expected '\)'/.test(raw) ? "Falta fechar um parêntese."
+      : /'}' expected|expected '}'/.test(raw) ? "Falta fechar uma chave }."
+      : /unfinished string/.test(raw) ? "Texto sem fechar as aspas."
+      : /unexpected symbol|unexpected identifier/.test(raw) ? `Código inesperado${near ? ` perto de '${near}'` : ""}.`
+      : /'=' expected/.test(raw) ? "Era esperado um = aqui."
+      : `Erro de sintaxe: ${raw}`;
+    const at = Math.max(0, Math.min(src.length, err.index));
+    return { line: err.line ?? 1, from: at, to: Math.min(src.length, at + 1), message: msg, severity: "error", syntax: true };
+  }
+}
+
+/** Avisos das armadilhas do Lua 5.0 do jogo (linha a linha, sem comentários e textos) e erro de sintaxe. */
 export function lintLua50(src: string): LuaIssue[] {
   const clean = blank(src);
   const issues: LuaIssue[] = [];
+  const syn = syntaxError(src);
+  if (syn) issues.push(syn);
   let offset = 0;
   clean.split("\n").forEach((line, n) => {
     for (const r of RULES) {
@@ -154,3 +180,23 @@ export function lintLua50(src: string): LuaIssue[] {
   });
   return issues;
 }
+
+/** Trechos prontos para inserir no código (menu "Inserir"). */
+export interface Snippet { label: string; side: "sim" | "ui" | "blueprints" | "any"; code: string }
+
+export const SNIPPETS: Snippet[] = [
+  { label: "Quando uma unidade morrer", side: "sim", code: "Forja.On('UnitKilled', function(unit, instigator)\n    -- unit: quem morreu; instigator: quem matou (pode ser nil)\n    if instigator and instigator.GetArmy then\n        mod.Log('exército ' .. instigator:GetArmy() .. ' destruiu uma unidade')\n    end\nend)\n" },
+  { label: "Quando uma unidade ficar pronta", side: "sim", code: "Forja.On('UnitBuilt', function(unit)\n    -- a unidade acabou de ser construída\nend)\n" },
+  { label: "Quando a partida começar", side: "sim", code: "Forja.On('SessionStart', function()\n    mod.Log('a partida começou com ' .. Forja.Sim.HumanCount() .. ' jogador(es)')\nend)\n" },
+  { label: "A cada X segundos", side: "any", code: "Forja.Every(10, function()\n    -- roda a cada 10 segundos (devolva false para parar)\nend)\n" },
+  { label: "Depois de X segundos", side: "any", code: "Forja.After(30, function()\n    -- roda uma vez, 30 segundos depois\nend)\n" },
+  { label: "Comando da interface para a simulação", side: "sim", code: "-- na interface: Forja.UI.SendToSim(mod.Id .. ':acao', { valor = 1 })\nForja.Sim.OnCommand(mod.Id .. ':acao', function(data, units)\n    -- data: o que a interface mandou; units: as unidades selecionadas\nend)\n" },
+  { label: "Mensagem da simulação para a interface", side: "ui", code: "-- na simulação: Forja.Sim.SendToUI(mod.Id .. ':aviso', { texto = 'oi' })\nForja.UI.OnSim(mod.Id .. ':aviso', function(data)\n    Forja.UI.Notify(data.texto, 4)\nend)\n" },
+  { label: "Painel com botão e tecla", side: "ui", code: "local panel = Forja.UI.Panel({ title = mod.Name, subtitle = 'F7 abre e fecha' })\npanel:Button('Fazer algo', function()\n    Forja.UI.Notify('feito!', 3)\nend)\npanel:Button('Tempo', nil, function() return tostring(math.floor(GetGameTimeSeconds())) end)\nForja.UI.AddKey('F7', mod.Name, function() panel:Toggle() end)\n" },
+  { label: "Aviso na tela", side: "ui", code: "Forja.UI.Notify('Olá!', 4)\n" },
+  { label: "Mudar todas as unidades de uma categoria", side: "blueprints", code: "Forja.BP.EachUnit('LAND', function(bp, id)\n    Forja.BP.Scale(bp, 'Defense.MaxHealth', 1.5)\nend)\n" },
+  { label: "Mudar uma unidade", side: "blueprints", code: "Forja.BP.Patch('uul0101', {\n    Defense = { MaxHealth = 500 },\n})\n" },
+  { label: "Unidade nova copiando outra", side: "blueprints", code: "Forja.BP.Modify(function(B)\n    local bp = B.Clone('uul0101', 'cpx0101', { Defense = { MaxHealth = 900 } })\n    B.Set(bp, 'Economy.BuildTime', 20)\nend)\n" },
+  { label: "Opção do launcher", side: "any", code: "local valor = mod.Option('chave', 1) -- crie a opção no mod.json (aba Mod)\n" },
+  { label: "Usar outro mod (dependência)", side: "any", code: "local lib = Forja.Use('outro-mod') -- ponha 'outro-mod' nas dependências\nif lib then\n    -- lib.Funcao()\nend\n" },
+];

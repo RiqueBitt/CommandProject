@@ -821,6 +821,8 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     ]);
     case "forja_new_mod": return r(`${String(a.dir)}/forja/${String(a.id)}`);
     case "forja_dev_mods": return r([{ id: "vida-dupla", name: "Vida dupla", path: "C:/CommandProject/forja-dev/forja/vida-dupla", files: ["mod.json", "blueprints.lua", "sim.lua", "ui.lua", "lib/util.lua"] }]);
+    case "forja_game_errors": return r([{ mod: "vida-dupla", file: "sim.lua", line: 2, text: "attempt to call field `Foo' (a nil value)" }]);
+    case "forja_pack": return r({ path: String(a.dest), size: 4096, sha256: "ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12", hub: { id: "vida-dupla", name: "Vida dupla", tags: ["forja"] } });
     case "forja_read_file": return r(forjaFiles[String(a.file)] ?? "");
     case "forja_write_file": forjaFiles[String(a.file)] = String(a.text); return r(a.reload ? forjaOv() : null);
     // ---------------------------------------------------------------- sala de convite (simulada)
