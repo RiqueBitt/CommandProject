@@ -527,6 +527,14 @@ export default function BigMatch() {
                     <Icon name="close" /> {t("Fechar o jogo travado")}
                   </button>
                 )}
+                <button className="btn" disabled={!!error || !spec || !!useStore.getState().busy.shortcut} title={t("Vira um botão no submenu Escaramuça da tela inicial do jogo: começa esta partida direto de lá")} onClick={async () => {
+                  if (!spec || !map) return;
+                  const label = window.prompt(t("Nome do botão no jogo:"), `MEGA: ${sum.text} · ${map.name}`.slice(0, 40));
+                  if (!label) return;
+                  await run("shortcut", () => api.startScreenAddShortcut(label, spec), t("Atalho criado: aparece no submenu Escaramuça do jogo na próxima vez que você jogar."));
+                }}>
+                  <Icon name="add_to_home_screen" /> {t("Pôr na tela inicial do jogo")}
+                </button>
                 <button className="btn primary" disabled={!!error || busy || !!running} onClick={() => void play()}>
                   <Icon name="play_arrow" /> {busy ? t("Abrindo…") : running ? t("Jogo aberto") : t("Jogar partida grande")}
                 </button>

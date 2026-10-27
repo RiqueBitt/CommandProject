@@ -42,6 +42,35 @@ pub struct Settings {
     pub custom_video: bool,
     /// Nome do vídeo escolhido (para a tela).
     pub video_name: String,
+    /// Partidas grandes prontas no submenu da Escaramuça do jogo.
+    pub shortcuts: Vec<Shortcut>,
+}
+
+/// Uma partida grande salva como botão no jogo (Escaramuça): o cenário e as vagas/opções no formato
+/// de `/cpmatch` ([`crate::bigmatch::encode`]).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Shortcut {
+    pub label: String,
+    pub map: String,
+    pub spec: String,
+}
+
+/// Atalhos no jogo, no máximo.
+pub const MAX_SHORTCUTS: usize = 5;
+
+impl Shortcut {
+    /// O código do botão: monta a partida com o código da Partida grande e começa.
+    pub fn lua(&self) -> Result<String> {
+        let ok = |t: &str| !t.is_empty() && t.len() < 4000 && t.chars().all(|c| c.is_ascii_graphic() && !matches!(c, '\'' | '"' | '\\'));
+        if !ok(&self.map) || !self.map.starts_with("/maps/") || !ok(&self.spec) {
+            return Err(Error::Other(format!("atalho \"{}\" inválido", self.label)));
+        }
+        Ok(format!(
+            "local m = import('/lua/SinglePlayerLaunch.lua') if m.CPBigMatchSession then LaunchSinglePlayerSession(m.CPBigMatchSession('{}', '{}')) end",
+            self.map, self.spec
+        ))
+    }
 }
 
 impl Default for Settings {
@@ -54,6 +83,7 @@ impl Default for Settings {
             custom_logo: false,
             custom_video: false,
             video_name: String::new(),
+            shortcuts: Vec::new(),
         }
     }
 }

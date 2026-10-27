@@ -131,6 +131,16 @@ export default function StartScreenCard() {
             <TaskProgress task="ffmpeg" />
           </div>
           <div className="col" style={{ gap: 6 }}>
+            <b className="small">{t("Atalhos de partida grande (submenu Escaramuça)")}</b>
+            {draft.shortcuts.length === 0 && <span className="faint small">{t("Monte uma partida na tela Partida grande e use \"Pôr na tela inicial do jogo\".")}</span>}
+            {draft.shortcuts.map((sc, i) => (
+              <div key={i} className="row" style={{ gap: 8 }}>
+                <Icon name="groups" size={16} /><span className="small grow">{sc.label}</span>
+                <button className="btn icon-btn sm" aria-label={t("Tirar")} title={t("Tirar")} onClick={async () => after(await run("shortcut", () => api.startScreenRemoveShortcut(i)))}><Icon name="close" size={16} /></button>
+              </div>
+            ))}
+          </div>
+          <div className="col" style={{ gap: 6 }}>
             <b className="small">{t("Notícias")}</b>
             <input className="input" value={draft.newsTitle} maxLength={60} placeholder={t("Título")} onChange={(e) => set({ newsTitle: e.target.value })} />
             <input className="input" value={draft.newsText} maxLength={90} placeholder={t("Texto (vazio = sem painel)")} onChange={(e) => set({ newsText: e.target.value })} />

@@ -80,6 +80,39 @@ pub async fn start_screen_save(state: State<'_, AppState>, settings: Settings) -
     .await
 }
 
+/// Salva uma partida grande como botão no submenu da Escaramuça do jogo.
+#[tauri::command]
+pub async fn start_screen_add_shortcut(state: State<'_, AppState>, label: String, spec: cp_core::bigmatch::BigMatch) -> R<StartScreenView> {
+    with_ws(&state.ws, move |ws| {
+        let mut s = Settings::load(&ws.data_dir);
+        if s.shortcuts.len() >= ss::MAX_SHORTCUTS {
+            return Err(cp_core::Error::Other(format!("no máximo {} atalhos: tire um na tela Recursos (Tela inicial nova)", ss::MAX_SHORTCUTS)));
+        }
+        let mut spec = spec;
+        spec.net = None;
+        let sc = ss::Shortcut { label: label.trim().to_uppercase().chars().take(40).collect(), map: spec.map.trim().to_string(), spec: cp_core::bigmatch::encode(&spec)? };
+        sc.lua()?;
+        s.shortcuts.push(sc);
+        s.save(&ws.data_dir)?;
+        view(ws)
+    })
+    .await
+}
+
+/// Tira um atalho.
+#[tauri::command]
+pub async fn start_screen_remove_shortcut(state: State<'_, AppState>, index: usize) -> R<StartScreenView> {
+    with_ws(&state.ws, move |ws| {
+        let mut s = Settings::load(&ws.data_dir);
+        if index < s.shortcuts.len() {
+            s.shortcuts.remove(index);
+        }
+        s.save(&ws.data_dir)?;
+        view(ws)
+    })
+    .await
+}
+
 /// Escolhe (ou tira, com `path` nulo) o logo do jogador.
 #[tauri::command]
 pub async fn start_screen_logo(state: State<'_, AppState>, path: Option<String>) -> R<StartScreenView> {

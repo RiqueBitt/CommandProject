@@ -317,14 +317,63 @@ impl Workspace {
         Ok(Some(status))
     }
 
+    /// O mod da Partida grande montado (com os arquivos do jogo do usuário) e ligado no perfil ativo.
+    pub fn ensure_bigmatch_mod(&mut self) -> Result<()> {
+        const ID: &str = "cp-partida-grande";
+        let installed = self.mods()?.iter().any(|m| m.manifest.id == ID && m.manifest.version == crate::bigmatch::MOD_VERSION);
+        if installed {
+            let active = self.profiles.active().id.clone();
+            return self.profiles.set_enabled(&active, ID, true);
+        }
+        let dir = self.data_dir.join("cache").join("bigmatch");
+        std::fs::create_dir_all(&dir).at(&dir)?;
+        let archive = crate::bigmatch::build(&self.stock_sources()?, &dir.join("zz_cp_partida_grande.scd"))?;
+        let import = ImportOptions {
+            id: Some(ID.into()),
+            name: Some("Partida grande (mais de 8 jogadores)".into()),
+            version: Some(crate::bigmatch::MOD_VERSION.into()),
+            category: Some(Category::Gameplay),
+            description: Some(
+                "Deixa o launcher começar escaramuças com todas as bases do mapa (12 contra 12, vários times...). Sem a Partida grande do launcher o jogo segue como sempre."
+                    .into(),
+            ),
+            replace: true,
+            move_source: true,
+            ..Default::default()
+        };
+        self.import_mod(&archive, &import, true)?;
+        let _ = std::fs::remove_file(&archive);
+        Ok(())
+    }
+
     /// Tela inicial: monta o mod `cp-tela-inicial` com o visual novo (se ligado) e os botões dos mods
     /// da Forja, ou o desliga quando não há nada. Só remonta quando algo mudou. Devolve os avisos.
     pub fn prepare_start_screen(&mut self) -> Result<Vec<String>> {
         use crate::startscreen as ss;
         let settings = ss::Settings::load(&self.data_dir);
         let plan = self.forja_plan()?;
-        let (edit, _, problems) = crate::forja::menu_edit(&plan);
+        let (mut edit, _, problems) = crate::forja::menu_edit(&plan);
         let mut warnings: Vec<String> = problems.into_iter().map(|p| p.message).collect();
+        // partidas grandes prontas no submenu da Escaramuça
+        for (i, sc) in settings.shortcuts.iter().take(ss::MAX_SHORTCUTS).enumerate() {
+            match sc.lua() {
+                Ok(code) => edit.buttons.push(crate::mainmenu::NewButton {
+                    key: format!("cp:atalho{i}"),
+                    label: sc.label.trim().chars().take(40).collect(),
+                    place: crate::mainmenu::Place::Skirmish,
+                    native: None,
+                    lua: false,
+                    code: Some(code),
+                }),
+                Err(e) => warnings.push(e.to_string()),
+            }
+        }
+        if !settings.shortcuts.is_empty() {
+            // o código que monta a partida grande precisa estar no jogo
+            if let Err(e) = self.ensure_bigmatch_mod() {
+                warnings.push(format!("atalhos de partida grande sem o mod da Partida grande: {e}"));
+            }
+        }
         let active = self.profiles.active().id.clone();
         if !settings.enabled && edit.is_empty() {
             if self.profiles.active().mods.iter().any(|m| m.id == ss::MOD_ID && m.enabled) {

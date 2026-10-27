@@ -612,34 +612,7 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
         let mut plan = None;
         if let Some(b) = &big {
             // o mod da partida grande, montado com os arquivos do jogo do usuário
-            const ID: &str = "cp-partida-grande";
-            let installed = ws
-                .mods()?
-                .iter()
-                .any(|m| m.manifest.id == ID && m.manifest.version == cp_core::bigmatch::MOD_VERSION);
-            if !installed {
-                let dir = ws.data_dir.join("cache").join("bigmatch");
-                std::fs::create_dir_all(&dir).map_err(|e| cp_core::Error::io(&dir, e))?;
-                let archive = cp_core::bigmatch::build(&ws.stock_sources()?, &dir.join("zz_cp_partida_grande.scd"))?;
-                let import = ImportOptions {
-                    id: Some(ID.into()),
-                    name: Some("Partida grande (mais de 8 jogadores)".into()),
-                    version: Some(cp_core::bigmatch::MOD_VERSION.into()),
-                    category: Some(Category::Gameplay),
-                    description: Some(
-                        "Deixa o launcher começar escaramuças com todas as bases do mapa (12 contra 12, vários times...). Sem a Partida grande do launcher o jogo segue como sempre."
-                            .into(),
-                    ),
-                    replace: true,
-                    move_source: true,
-                    ..Default::default()
-                };
-                ws.import_mod(&archive, &import, true)?;
-                let _ = std::fs::remove_file(&archive);
-            } else {
-                let active = ws.profiles.active().id.clone();
-                ws.profiles.set_enabled(&active, ID, true)?;
-            }
+            ws.ensure_bigmatch_mod()?;
             // clima: o mod é montado para a partida (o mapa e o clima entram nos arquivos)
             apply_weather(ws, b, &app2)?;
             let game = ws.game()?.clone();
@@ -683,7 +656,12 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             // os mods da partida grande e do clima só servem para ela: nas partidas comuns (pelo lobby
             // do jogo) ficam de fora
             let active = ws.profiles.active().clone();
+            // (a Partida grande fica quando há atalhos dela na tela inicial do jogo)
+            let shortcuts = !cp_core::startscreen::Settings::load(&ws.data_dir).shortcuts.is_empty();
             for id in ["cp-partida-grande", cp_core::weather::MOD_ID, cp_core::weather::MODELS_ID] {
+                if shortcuts && id == "cp-partida-grande" {
+                    continue;
+                }
                 if active.mods.iter().any(|m| m.id == id && m.enabled) {
                     ws.profiles.set_enabled(&active.id, id, false)?;
                 }

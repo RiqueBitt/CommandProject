@@ -377,6 +377,7 @@ export interface ForjaMenu { buttons?: ForjaMenuButton[]; rename?: Record<string
 /** "Tela inicial nova" (cp-core startscreen::Settings) */
 export interface StartScreenSettings {
   enabled: boolean; accent: string; newsTitle: string; newsText: string; customLogo: boolean; customVideo: boolean; videoName: string;
+  shortcuts: { label: string; map: string; spec: string }[];
 }
 export interface StartScreenView {
   settings: StartScreenSettings; logo: string | null; video: { name: string; size: number } | null; ffmpeg: string | null; active: boolean;

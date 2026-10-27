@@ -915,5 +915,9 @@
  "Sair do jogo": "Quit the game",
  "Clique num botão da tela inicial": "Click on a start-screen button",
  "Contador salvo nas preferências": "Counter saved in the preferences",
- "Abrir um site": "Open a website"
+ "Abrir um site": "Open a website",
+ "Vira um botão no submenu Escaramuça da tela inicial do jogo: começa esta partida direto de lá": "Becomes a button in the Skirmish submenu of the game's start screen: starts this match straight from there",
+ "Nome do botão no jogo:": "Button name in the game:",
+ "Atalho criado: aparece no submenu Escaramuça do jogo na próxima vez que você jogar.": "Shortcut created: it shows up in the game's Skirmish submenu the next time you play.",
+ "Pôr na tela inicial do jogo": "Put on the game's start screen"
 }

@@ -63,6 +63,24 @@ pub enum Place {
     /// submenu Extras
     #[default]
     Extras,
+    /// submenu da Campanha
+    Campaign,
+    /// submenu da Escaramuça
+    Skirmish,
+    /// submenu do Multijogador
+    Multiplayer,
+}
+
+impl Place {
+    /// o grupo do submenu e o botão da coluna que o abre
+    fn submenu(self) -> Option<(&'static str, &'static str)> {
+        match self {
+            Place::Campaign => Some(("g_campaign_options", "campaign")),
+            Place::Skirmish => Some(("g_skirmish_options", "skirmish")),
+            Place::Multiplayer => Some(("g_multiplayer_options", "multiplayer")),
+            _ => None,
+        }
+    }
 }
 
 /// Um botão novo, como a montagem recebe (já com a chave única e o Lua do clique).
@@ -76,7 +94,12 @@ pub struct NewButton {
     pub native: Option<String>,
     /// Chama o motor da Forja no clique.
     pub lua: bool,
+    /// Código Lua próprio do clique (atalhos do launcher), no lugar do motor da Forja.
+    pub code: Option<String>,
 }
+
+/// Máximo de botões num submenu (Campanha, Escaramuça, Multijogador).
+pub const MAX_SUBMENU: usize = 7;
 
 /// O que montar.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -261,7 +284,28 @@ pub fn build_with(data: &[u8], edit: &MenuEdit, look: &Look) -> Result<Built> {
     let stock_extras: Vec<&str> = EXTRAS.iter().map(|(k, _)| *k).filter(|k| !hidden(k)).collect();
     let extras_open = !hidden("extras");
     let (mut to_main, mut to_extras): (Vec<&NewButton>, Vec<&NewButton>) = (Vec::new(), Vec::new());
+    // submenus da Campanha, da Escaramuça e do Multijogador
+    let mut to_sub: Vec<(Place, Vec<&NewButton>)> = Vec::new();
     for b in &edit.buttons {
+        if let Some((group, owner)) = b.place.submenu() {
+            if !hidden(owner) {
+                let count = s.children(find(&s, group)?)?.len();
+                let slot = match to_sub.iter().position(|(p, _)| *p == b.place) {
+                    Some(i) => i,
+                    None => {
+                        to_sub.push((b.place, Vec::new()));
+                        to_sub.len() - 1
+                    }
+                };
+                if count + to_sub[slot].1.len() < MAX_SUBMENU {
+                    to_sub[slot].1.push(b);
+                } else {
+                    warnings.push(format!("\"{}\" ficou de fora: o submenu está cheio", b.label));
+                }
+                continue;
+            }
+            warnings.push(format!("\"{}\" foi para o submenu Extras (o botão do submenu dele está escondido)", b.label));
+        }
         let want_main = b.place == Place::Main || !extras_open;
         let main_free = stock_main.len() + to_main.len() < MAX_MAIN;
         let extras_free = extras_open && stock_extras.len() + to_extras.len() < MAX_EXTRAS;
@@ -283,7 +327,9 @@ pub fn build_with(data: &[u8], edit: &MenuEdit, look: &Look) -> Result<Built> {
     let events_for = |s: &Scene, template: u32, b: &NewButton, main: bool| -> Result<Vec<Event>> {
         // sons do botão modelo; as ações dele não vêm junto
         let mut evs: Vec<Event> = s.events(template)?.into_iter().filter(|e| e.name == "PlaySound").collect();
-        if b.lua {
+        if let Some(code) = &b.code {
+            evs.push(Event::new(event::SELECT, "ConsoleExecute", &format!("UI_Lua {code}")));
+        } else if b.lua {
             evs.push(Event::new(event::SELECT, "ConsoleExecute", &click_lua(&b.key)));
         }
         if let Some(n) = &b.native {
@@ -385,6 +431,39 @@ pub fn build_with(data: &[u8], edit: &MenuEdit, look: &Look) -> Result<Built> {
             s.set_rect(extras_group, Rect::new(x0, x1, base, base + geo.sub_step * count + 2))?;
         }
         s.set_children(extras_group, &items)?;
+    }
+
+    // itens novos nos submenus da Campanha, da Escaramuça e do Multijogador (depois dos do jogo)
+    for (place, list) in &to_sub {
+        let Some((gname, _)) = place.submenu() else { continue };
+        let g = find(&s, gname)?;
+        let mut kids = s.children(g)?;
+        let mut items: Vec<(i32, u32)> = Vec::new();
+        for &c in &kids {
+            if kinds.get(&c) == Some(&kind::RADIO_BUTTON) {
+                items.push((s.rect(c)?.map(|r| r.y0).unwrap_or(0), c));
+            }
+        }
+        let Some(&(_, template)) = items.iter().min() else { continue };
+        let tr = s.rect(template)?.ok_or_else(|| Error::Other("botão sem posição".into()))?;
+        let mut y = items.iter().map(|i| i.0).max().unwrap_or(tr.y0);
+        for b in list {
+            let id = make(&mut s, template, b, false)?;
+            y += STEP;
+            s.set_rect(id, Rect { y0: y, y1: y + tr.height(), ..tr })?;
+            moved.push(id);
+            kids.push(id);
+            placed.push((b.key.clone(), *place));
+        }
+        s.set_children(g, &kids)?;
+        if let Some(r) = s.rect(g)? {
+            let r = Rect { y1: r.y1.max(y + tr.height()), ..r };
+            s.set_rect(g, r)?;
+            if r.y1 > geo.bottom {
+                let mut seen = BTreeSet::new();
+                shift_tree(&mut s, g, 0, geo.bottom - r.y1, &kinds, &mut seen, &mut moved)?;
+            }
+        }
     }
 
     // o texto de cada botão que mudou de lugar fica na mesma posição dentro dele
@@ -625,7 +704,7 @@ mod tests {
     }
 
     fn button(key: &str, label: &str, place: Place) -> NewButton {
-        NewButton { key: key.into(), label: label.into(), place, native: None, lua: true }
+        NewButton { key: key.into(), label: label.into(), place, native: None, lua: true, code: None }
     }
 
     #[test]
@@ -669,6 +748,19 @@ mod tests {
         assert!(ev.iter().any(|e| e.name == "RequestLanGame"));
         assert!(!ev.iter().any(|e| e.name == "ConsoleExecute"));
         assert_eq!(out.placed.len(), 3);
+        // item novo no submenu da Campanha, embaixo do tutorial, com código próprio
+        let mut edit = MenuEdit::default();
+        edit.buttons.push(NewButton { code: Some("LOG('oi')".into()), lua: false, ..button("cp:x", "ATALHO", Place::Campaign) });
+        let out = build(&data, &edit).unwrap();
+        let s = Scene::parse(&out.scene).unwrap();
+        let g = s.by_name("g_campaign_options").unwrap().id;
+        let kids = s.children(g).unwrap();
+        assert_eq!(kids.len(), 2);
+        let new = s.by_name("rb_forja_cp_x").unwrap().id;
+        assert_eq!(*kids.last().unwrap(), new);
+        let tut = s.rect(s.by_name("rb_tutorial").unwrap().id).unwrap().unwrap();
+        assert_eq!(s.rect(new).unwrap().unwrap().y0, tut.y0 + STEP);
+        assert!(s.events(new).unwrap().iter().any(|e| e.name == "ConsoleExecute" && e.param == "UI_Lua LOG('oi')"));
         let _ = NONE;
     }
 
@@ -712,11 +804,12 @@ fn real_scene_when_available() {
     assert_eq!(main.len(), 6);
     assert_eq!(extras.len(), 2);
     let mut edit = MenuEdit::default();
-    edit.buttons.push(NewButton { key: "t:a".into(), label: "MODS (DIRETO)".into(), place: Place::Main, native: None, lua: true });
+    edit.buttons.push(NewButton { key: "t:a".into(), label: "MODS (DIRETO)".into(), place: Place::Main, native: None, lua: true, code: None });
     for i in 0..3 {
-        edit.buttons.push(NewButton { key: format!("t:x{i}"), label: format!("FORJA: ITEM {}", i + 1), place: Place::Extras, native: None, lua: true });
+        edit.buttons.push(NewButton { key: format!("t:x{i}"), label: format!("FORJA: ITEM {}", i + 1), place: Place::Extras, native: None, lua: true, code: None });
     }
-    edit.buttons.push(NewButton { key: "t:lan".into(), label: "REDE LOCAL (LAN)".into(), place: Place::Extras, native: Some("RequestLanGame".into()), lua: false });
+    edit.buttons.push(NewButton { key: "t:lan".into(), label: "REDE LOCAL (LAN)".into(), place: Place::Extras, native: Some("RequestLanGame".into()), lua: false, code: None });
+    edit.buttons.push(NewButton { key: "cp:mega0".into(), label: "MEGA: 6 CONTRA 6".into(), place: Place::Skirmish, native: None, lua: false, code: Some("LOG('mega')".into()) });
     edit.rename.insert("extras".into(), "EXTRAS E MODS".into());
     let out = build(&data, &edit).unwrap();
     assert!(out.warnings.is_empty(), "{:?}", out.warnings);

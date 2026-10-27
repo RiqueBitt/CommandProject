@@ -198,6 +198,8 @@ pub fn run() {
             startscreen_cmds::start_screen_logo,
             startscreen_cmds::start_screen_video,
             startscreen_cmds::start_screen_get_ffmpeg,
+            startscreen_cmds::start_screen_add_shortcut,
+            startscreen_cmds::start_screen_remove_shortcut,
             forja_cmds::forja_set_option,
             forja_cmds::forja_reset_options,
             forja_cmds::forja_set_key,

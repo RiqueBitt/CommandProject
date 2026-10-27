@@ -6,12 +6,13 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
-    version: "0.39.0",
+    version: "0.39.1",
     title: "Tela inicial nova e botões de mods no menu do jogo",
     items: [
       { icon: "space_dashboard", title: "Tela inicial nova", text: "Logo em cima, botões grandes com ícone e borda neon, submenus ao lado, caixa do jogador e notícias, na cor que você quiser (azul por padrão). Dá para usar o seu logo e o seu vídeo de fundo.", page: "features" },
       { icon: "smart_button", title: "Botões de mods na tela inicial", text: "Mods da Forja põem botões no menu principal ou no Extras, trocam nomes e escondem botões, com código em menu.lua ou só mensagem, site ou uma tela do jogo (como a partida em rede local).", page: "forja" },
       { icon: "build", title: "Vários mods juntos sem travar", text: "Mods com texturas e cenas da interface não brigam mais pelo índice do jogo (o jogo fechava ao abrir com três desses ligados).", page: "library" },
+      { icon: "groups", title: "Partida grande na tela inicial", text: "Na tela Partida grande, \"Pôr na tela inicial do jogo\" vira um botão no submenu Escaramuça que começa aquela partida direto do jogo.", page: "bigmatch" },
       { icon: "play_arrow", title: "Perfil aplicado antes de jogar", text: "Com \"mods só pelo launcher\", o perfil é aplicado sempre antes de abrir o jogo.", page: "home" },
     ],
   },

@@ -594,5 +594,10 @@
  "Vários mods juntos sem travar": "Many mods together without crashing",
  "Mods com texturas e cenas da interface não brigam mais pelo índice do jogo (o jogo fechava ao abrir com três desses ligados).": "Mods with textures and interface scenes no longer fight over the game's index (the game closed at startup with three of them on).",
  "Perfil aplicado antes de jogar": "Profile applied before playing",
- "Com \"mods só pelo launcher\", o perfil é aplicado sempre antes de abrir o jogo.": "With \"mods only through the launcher\", the profile is always applied before the game opens."
+ "Com \"mods só pelo launcher\", o perfil é aplicado sempre antes de abrir o jogo.": "With \"mods only through the launcher\", the profile is always applied before the game opens.",
+ "Atalhos de partida grande (submenu Escaramuça)": "Big match shortcuts (Skirmish submenu)",
+ "Monte uma partida na tela Partida grande e use \"Pôr na tela inicial do jogo\".": "Set up a match on the Big match screen and use \"Put on the game's start screen\".",
+ "Tirar": "Remove",
+ "Partida grande na tela inicial": "Big match on the start screen",
+ "Na tela Partida grande, \"Pôr na tela inicial do jogo\" vira um botão no submenu Escaramuça que começa aquela partida direto do jogo.": "On the Big match screen, \"Put on the game's start screen\" becomes a button in the Skirmish submenu that starts that match straight from the game."
 }

@@ -961,7 +961,7 @@ pub fn menu_edit(plan: &Plan) -> (crate::mainmenu::MenuEdit, Vec<(String, String
             let native = b.native.as_deref().and_then(|n| crate::mainmenu::NATIVE.iter().find(|x| x.0 == n)).map(|x| x.1.to_string());
             // sem código, mensagem nem site, o botão só chama a ação do jogo
             let lua = native.is_none() || b.message.is_some() || b.url.is_some() || m.has("menu.lua");
-            edit.buttons.push(crate::mainmenu::NewButton { key: format!("{id}:{}", b.id), label: b.label.trim().to_string(), place: b.place, native, lua });
+            edit.buttons.push(crate::mainmenu::NewButton { key: format!("{id}:{}", b.id), label: b.label.trim().to_string(), place: b.place, native, lua, code: None });
             owners.push((b.label.trim().to_string(), id.clone()));
         }
         for (k, v) in &menu.rename {

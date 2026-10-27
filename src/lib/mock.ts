@@ -817,6 +817,8 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     case "start_screen_logo": startScreen.customLogo = !!a.path; return r(startScreenView());
     case "start_screen_video": startScreen.customVideo = !!a.path; startScreen.videoName = a.path ? String(a.path).split(/[\\/]/).pop() ?? "" : ""; return r(startScreenView());
     case "start_screen_get_ffmpeg": return r(startScreenView());
+    case "start_screen_add_shortcut": startScreen.shortcuts.push({ label: String(a.label).toUpperCase(), map: "/maps/X/X_scenario.lua", spec: "x" }); return r(startScreenView());
+    case "start_screen_remove_shortcut": startScreen.shortcuts.splice(Number(a.index), 1); return r(startScreenView());
     case "forja_overview": return r(forjaOv());
     case "forja_set_option": case "forja_reset_options": case "forja_set_key": return r(forjaOv());
     case "forja_templates": return r([
@@ -951,7 +953,7 @@ const forjaFiles: Record<string, string> = {
   "ui.lua": "local panel = Forja.UI.Panel({ title = mod.Name })\n",
   "lib/util.lua": "local M = {}\nreturn M\n",
 };
-let startScreen: T.StartScreenSettings = { enabled: true, accent: "#2b8cff", newsTitle: "Bem-vindo ao CommandProject", newsText: "Mods, partidas grandes e mais pelo launcher.", customLogo: false, customVideo: false, videoName: "" };
+let startScreen: T.StartScreenSettings = { enabled: true, accent: "#2b8cff", newsTitle: "Bem-vindo ao CommandProject", newsText: "Mods, partidas grandes e mais pelo launcher.", customLogo: false, customVideo: false, videoName: "", shortcuts: [{ label: "MEGA: 6 CONTRA 6 · VALE", map: "/maps/X/X_scenario.lua", spec: "x" }] };
 function startScreenView(): T.StartScreenView {
   return { settings: { ...startScreen }, logo: null, video: startScreen.customVideo ? { name: startScreen.videoName, size: 129_000_000 } : null, ffmpeg: "ffmpeg", active: startScreen.enabled };
 }
