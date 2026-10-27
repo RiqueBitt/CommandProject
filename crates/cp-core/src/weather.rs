@@ -1561,8 +1561,8 @@ mod tests {
                 let mut bg = img.clone();
                 for p in bg.pixels.chunks_exact_mut(4) {
                     let a = p[3] as f32 / 255.0;
-                    for c in 0..3 {
-                        p[c] = (p[c] as f32 * a + 40.0 * (1.0 - a)) as u8;
+                    for c in p.iter_mut().take(3) {
+                        *c = (*c as f32 * a + 40.0 * (1.0 - a)) as u8;
                     }
                     p[3] = 255;
                 }
