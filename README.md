@@ -179,6 +179,8 @@ disponível em Sistema → Visual.
   comando; guia completo em <https://commandproject.gitbook.io/forja/> e exemplo em `examples/forja-exemplo`.
   - **Editor de mods** na tela da Forja: os arquivos do mod, autocompletar da API da Forja, ajuda ao
     passar o mouse e avisos do que não existe no **Lua 5.0** do jogo (`#`, `%`, `gmatch`, `!=`…).
+    O autocompletar também conhece as **461 funções e 51 tabelas globais** da simulação do jogo
+    (`IssueMove`, `CreateLightParticle`, `ArmyIsOutOfGame`…).
     Com **Recarregar ao salvar**, cada Ctrl+S monta o mod de novo e substitui o instalado.
   - **Modelos** para começar: completo, balanceamento (vida, custo, velocidade e alcance com opções),
     painel, regra de jogo e biblioteca (`mod.Export`).
@@ -225,6 +227,15 @@ disponível em Sistema → Visual.
   **assinatura da pasta** (ex.: `7F3A-91C2-0B5E`) para comparar antes do lobby.
 - **Código de perfil** (`CP1-…`): seu amigo cola e fica com exatamente os mesmos mods.
 - A partida em si continua no lobby da Steam, que o launcher abre para você.
+- **Jogar por IP, sem a Steam** (aba *Por IP*): partidas privadas pela rede local, por VPN
+  (Radmin, ZeroTier, Hamachi, Tailscale) ou pela internet com a porta aberta, usando o
+  [SC2-Proxima](https://github.com/Rackover/sc2-proxima) (Rackover, GPL-3.0). O launcher baixa o
+  lançamento oficial quando você pede, coloca o `steam_api.dll` dele só enquanto o jogo aberto pelo
+  launcher está rodando e devolve o original quando ele fecha — pela Steam, nada muda.
+  Quem hospeda vê os endereços para mandar (o da internet fica escondido até você pedir); quem
+  entra cola o endereço e o launcher copia e abre o jogo.
+- **Prender o mouse na janela do jogo** (Configurações → Jogo): no modo janela, o mouse não sai
+  da janela enquanto o jogo está na frente; Alt+Tab solta.
 
 **Estúdio de criação**
 - **Arquivos do jogo**: navega por todos os `.scd` (sempre os originais), com prévia de Lua,
@@ -342,6 +353,9 @@ disponível em Sistema → Visual.
   - **chão por biomas** (praia, chão, terra, rocha e topo misturados pelo relevo) e **pincel de
     textura** para pintar partes do mapa; **texturas próprias** importadas de .png/.jpg (contínuas,
     com relevo e brilho gerados); **paisagem em volta** do mapa com montanhas;
+  - **atmosfera** do mapa (pôr do sol, amanhecer, noite, nublado, neblina densa, deserto, frio
+    polar, vulcânico, planeta alienígena) com força ajustável, e **vento** (força e direção): mexe
+    na cor do sol e das sombras, da água e da neblina no `info.bdf`, sobre a luz do mapa base;
   - gerador de **mapas de plataformas sobre um abismo** (pontes, torres, fundo de rocha ou mar) e
     **céu** de qualquer mapa do jogo;
   - gerador com **vilas, estradas de terra e plantações**, matas com espécies e chão próprio,
@@ -554,7 +568,10 @@ A CLI usa a mesma pasta de dados do app (`%APPDATA%\io.github.riquebitt.commandp
 
 ## Créditos
 
-Veja [THIRD_PARTY.md](THIRD_PARTY.md). Supreme Commander 2 é marca registrada de seus respectivos
+Pesquisa e código de outros projetos de Supreme Commander 2 usados aqui: SC2 Map Toolkit
+(plutonics72), SupCom2-map-editor (maksing — campos do `info.bdf` da atmosfera), supcom2reversal
+(Synraw — lista de funções do motor na Forja) e SC2-Proxima (Rackover — jogar por IP, baixado à
+parte). Veja [THIRD_PARTY.md](THIRD_PARTY.md). Supreme Commander 2 é marca registrada de seus respectivos
 donos; este projeto não contém nem distribui arquivos do jogo.
 
 Licença: MIT.

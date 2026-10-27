@@ -6,6 +6,16 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.37.0",
+    title: "Jogar por IP, atmosfera dos mapas e a Forja conhecendo o jogo",
+    items: [
+      { icon: "lan", title: "Jogar por IP, sem a Steam", text: "Partidas privadas pela rede local, VPN ou internet com o SC2-Proxima. O launcher baixa e coloca só enquanto você joga por aqui; pela Steam o jogo continua o de sempre.", page: "multiplayer" },
+      { icon: "wb_twilight", title: "Atmosfera dos mapas", text: "Pôr do sol, noite, neblina, deserto, vulcânico e mais no editor de mapas, com força ajustável e vento.", page: "create" },
+      { icon: "code", title: "Forja conhece o jogo", text: "O autocompletar e a ajuda da Forja agora mostram as 461 funções e 51 tabelas do próprio motor.", page: "forja" },
+      { icon: "mouse", title: "Mouse preso na janela", text: "No modo janela, o mouse fica dentro do jogo enquanto ele está na frente (Configurações).", page: "settings" },
+    ],
+  },
+  {
     version: "0.36.0",
     title: "Mods só pelo launcher e recursos já incluídos",
     items: [

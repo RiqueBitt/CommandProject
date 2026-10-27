@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import IpPlay from "../components/IpPlay";
 import { CopyButton, Empty, Field, Icon, Modal, monogram, Notice } from "../components/ui";
 import { api } from "../lib/api";
 import { locale, t } from "../lib/i18n";
@@ -7,7 +8,7 @@ import { useStore } from "../lib/store";
 import type { HubIndex, Room, ServerInfo, SyncItem, SyncPayload } from "../lib/types";
 import { NickModal } from "./Me";
 
-type Tab = "rooms" | "codes";
+type Tab = "rooms" | "codes" | "ip";
 
 export default function Multiplayer() {
   const settings = useStore((s) => s.settings);
@@ -74,6 +75,7 @@ export default function Multiplayer() {
           </div>
           <div className="tabs" role="tablist">
             <button role="tab" className="tab" aria-selected={tab === "rooms"} onClick={() => setTab("rooms")}>{t("Salas e chat")}</button>
+            <button role="tab" className="tab" aria-selected={tab === "ip"} onClick={() => setTab("ip")}><Icon name="lan" size={16} /> {t("Por IP (sem Steam)")}</button>
             <button role="tab" className="tab" aria-selected={tab === "codes"} onClick={() => setTab("codes")}>{t("Códigos e assinatura")}</button>
           </div>
           {tab === "rooms" ? (
@@ -99,7 +101,7 @@ export default function Multiplayer() {
                 </section>
               </div>
             )
-          ) : <Codes />}
+          ) : tab === "ip" ? <IpPlay nick={nick} /> : <Codes />}
         </div>
       </div>
       {editNick && <NickModal onClose={() => setEditNick(false)} />}

@@ -562,6 +562,25 @@ def _clean_spec(spec):
         spec["sky"] = clean_sky
     else:
         spec.pop("sky", None)
+    # atmosfera (cores do sol, sombra, água e neblina, brilho e vento) sobre a do terreno base
+    atm = spec.get("atmosphere")
+    if atm:
+        if not isinstance(atm, dict):
+            raise ValueError("atmosfera inválida")
+        allowed = {"sun", "sun_power", "shadow", "water", "fog", "fog_amount", "bloom", "wind_dir", "wind"}
+        extra = set(atm) - allowed
+        if extra:
+            raise ValueError(f"atmosfera: campo desconhecido {sorted(extra)[0]}")
+        for k in ("sun", "shadow", "water", "fog"):
+            v = atm.get(k)
+            if v is not None and not (isinstance(v, list) and len(v) == 3 and all(isinstance(x, (int, float)) for x in v)):
+                raise ValueError(f"atmosfera: {k} precisa de 3 números")
+        for k in ("sun_power", "fog_amount", "bloom", "wind_dir", "wind"):
+            v = atm.get(k)
+            if v is not None and not isinstance(v, (int, float)):
+                raise ValueError(f"atmosfera: {k} precisa ser número")
+    else:
+        spec.pop("atmosphere", None)
     if spec.get("minimap") not in (None, "donor", "desert", "snow", "dark", "natural"):
         raise ValueError("minimapa inválido")
     # mapa gigante: o terreno base é redimensionado para este tamanho (lado em unidades do mundo).
@@ -665,6 +684,13 @@ def _hooks(sm, spec, state):
                 emit("progress", message=f"céu trocado: {spec['sky']['sky']}")
             except Exception as e:  # noqa: BLE001 — sem a troca, fica o céu do terreno base
                 state["warnings"].append(f"o céu não foi trocado ({e})")
+        if spec.get("atmosphere") and self.raw.get("info.win.bdf"):
+            try:
+                import cp_world
+                self.raw["info.win.bdf"] = cp_world.set_info_env(self.raw["info.win.bdf"], spec["atmosphere"])
+                emit("progress", message="atmosfera do mapa ajustada")
+            except Exception as e:  # noqa: BLE001 — sem o ajuste, fica a atmosfera do terreno base
+                state["warnings"].append(f"a atmosfera não foi ajustada ({e})")
         if fb is not None or hd:
             self.set_hfield(hf)
             if fb is not None:

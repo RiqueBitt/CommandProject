@@ -57,7 +57,7 @@ let profiles: T.ProfileSet = {
 };
 
 let settings: T.Settings = {
-  gamePath: null, launchMode: "steam", launchArgs: [], applyBeforeLaunch: true, restoreOnExit: false, modsOnlyLauncher: true,
+  gamePath: null, launchMode: "steam", launchArgs: [], applyBeforeLaunch: true, restoreOnExit: false, modsOnlyLauncher: true, lockCursor: false,
   hubUrls: ["https://hub.exemplo.com/index.json"], pythonPath: null, checkModUpdates: true, onboarded: true,
   serverUrl: "http://localhost:8787", nickname: "Rique", checkAppUpdates: true, keepLargeAddress: false, showcaseUnit: null, showcase: true,
 };
@@ -70,6 +70,7 @@ const game: T.GameInstall = {
 };
 
 let deployed: string[] = ["storm", "littlepatch", "kael-maps"];
+let mockProxima: T.ProximaStatus = { version: null, active: false, name: "", port: 16010 };
 
 const mem = { limitMb: 2048 };
 function memStatus(): T.MemoryStatus {
@@ -834,6 +835,10 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     case "party_read": return r({ host: "Ana", game: { map: "/maps/Gigante/Gigante_scenario.lua", size: 4096, slots: [{ kind: "you", team: 1, faction: 1, ai: "Normal", color: -1 }, { kind: "guest", team: 1, faction: 2, ai: "Normal", color: -1 }, { kind: "ai", team: 2, faction: 0, ai: "Hard", color: -1 }], options: {} }, mods: [{ id: "vida-dupla", name: "Vida dupla", version: "1.0.0", status: "download", size: 3_400_000 }], download: 3_400_000, capacity: 3, members: 2, started: false, room: "ws://127.0.0.1:9/room", address: "x" });
     case "party_prepare": await progress("party", ["Baixando Vida dupla do PC de Ana…", "Pronto"]); return r(undefined);
     case "ensure_vanilla": return r(false);
+    case "proxima_status": return r(mockProxima);
+    case "proxima_download": mockProxima = { ...mockProxima, version: "v1.0.1" }; return r(mockProxima);
+    case "proxima_address": { const v = String(a.input ?? "").trim(); if (!/^[\w.-]+(:\d{1,5})?$/.test(v)) throw "endereço inválido: use IP ou IP:porta"; return r(v.replace(/:16010$/, "")); }
+    case "launch_ip": return r({ plan: { url: "steam://run/40100" }, applied: null, watching: true });
     default:
       throw new Error(`mock: comando não simulado: ${cmd}`);
   }

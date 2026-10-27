@@ -373,7 +373,7 @@ pub struct LaunchResult {
 
 #[tauri::command]
 pub async fn launch_game(app: AppHandle, state: State<'_, AppState>) -> R<LaunchResult> {
-    launch_inner(app, state, None).await
+    launch_inner(app, state, None, None).await
 }
 
 /// Fecha o jogo travado (o processo fica aberto sem janela).
@@ -575,10 +575,11 @@ fn apply_weather(ws: &mut Workspace, b: &cp_core::bigmatch::BigMatch, app: &AppH
 /// Começa uma partida grande: monta o mod (uma vez), aplica o perfil e abre o jogo direto com as vagas.
 #[tauri::command]
 pub async fn launch_big_match(app: AppHandle, state: State<'_, AppState>, spec: cp_core::bigmatch::BigMatch) -> R<LaunchResult> {
-    launch_inner(app, state, Some(spec)).await
+    launch_inner(app, state, Some(spec), None).await
 }
 
-async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp_core::bigmatch::BigMatch>) -> R<LaunchResult> {
+async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp_core::bigmatch::BigMatch>, ip: Option<IpPlay>) -> R<LaunchResult> {
+    let ip_on = ip.is_some();
     if let Some(b) = &big {
         // confere antes de mexer em qualquer coisa
         cp_core::bigmatch::launch_args(b).map_err(err)?;
@@ -663,6 +664,17 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             args.extend(cp_core::bigmatch::launch_args(b)?);
             plan = Some(cp_core::game::launch_plan(&game, cp_core::game::LaunchMode::Direct, &args)?);
         }
+        // jogar por IP: o steam_api.dll do Proxima só fica no jogo nesta sessão; nas outras, o original
+        let px = ws.proxima()?;
+        match &ip {
+            Some(ip) => {
+                px.set_player_data(&ip.name, ip.port)?;
+                px.install()?;
+            }
+            None => {
+                px.restore()?;
+            }
+        }
         // jogo em português quando o launcher está em português (Brasil); em inglês, o jogo original
         if let Err(e) = apply_game_language(ws) {
             eprintln!("tradução do jogo não aplicada: {e}");
@@ -686,7 +698,7 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             Some(p) => p,
             None => ws.launch_plan()?,
         };
-        Ok((plan, applied, ws.settings.restore_on_exit || ws.settings.mods_only_launcher, ws.settings.memory_mb(), ws.settings.game_priority.clone(), ws.settings.game_no_throttle, log_path))
+        Ok((plan, applied, ws.settings.restore_on_exit || ws.settings.mods_only_launcher || ip_on, ws.settings.memory_mb(), ws.settings.game_priority.clone(), ws.settings.game_no_throttle, log_path))
     })
     .await?;
     match &plan {
@@ -771,6 +783,45 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
                 match tauri::async_runtime::spawn_blocking(cp_core::perf::set_game_no_throttle).await {
                     Ok(Err(cp_core::Error::Other(m))) if m.contains("não está aberto") => continue,
                     _ => return,
+                }
+            }
+        });
+    }
+    let lock_cursor = with_ws(&state.ws, |ws| Ok(ws.settings.lock_cursor)).await.unwrap_or(false);
+    if lock_cursor {
+        // mouse preso na janela do jogo (modo janela) enquanto ela está em primeiro plano
+        tauri::async_runtime::spawn(async move {
+            let mut pid = None;
+            for _ in 0..120 {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                pid = tauri::async_runtime::spawn_blocking(cp_core::perf::game_pid).await.ok().flatten();
+                if pid.is_some() {
+                    break;
+                }
+            }
+            let Some(pid) = pid else { return };
+            let mut clipped = false;
+            let mut tick = 0u32;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                match cp_core::perf::game_window_rect(pid) {
+                    Some(r) => {
+                        cp_core::perf::clip_cursor(Some(r));
+                        clipped = true;
+                    }
+                    None if clipped => {
+                        // outra janela na frente (Alt+Tab): solta o mouse
+                        cp_core::perf::clip_cursor(None);
+                        clipped = false;
+                    }
+                    None => {}
+                }
+                tick += 1;
+                if tick % 16 == 0 && !tauri::async_runtime::spawn_blocking(cp_core::game::is_running).await.unwrap_or(false) {
+                    if clipped {
+                        cp_core::perf::clip_cursor(None);
+                    }
+                    return;
                 }
             }
         });
@@ -2469,9 +2520,10 @@ pub async fn mod_export_files(state: State<'_, AppState>, id: String, dir: Strin
 
 // ---------------------------------------------------------------- mods só pelo launcher
 
-/// Há mods do launcher na pasta do jogo agora?
+/// Há mods do launcher (ou o Proxima) na pasta do jogo agora?
 fn deployed(ws: &Workspace) -> bool {
-    std::fs::read(ws.data_dir.join("deploy").join("journal.json"))
+    ws.proxima().is_ok_and(|p| p.is_active())
+        || std::fs::read(ws.data_dir.join("deploy").join("journal.json"))
         .ok()
         .and_then(|b| serde_json::from_slice::<cp_core::deploy::Journal>(&b).ok())
         .is_some_and(|j| !j.entries.is_empty())
@@ -2531,4 +2583,89 @@ pub(crate) fn on_close(app: &AppHandle) -> bool {
         app2.exit(0);
     });
     false
+}
+
+// ===================================================================== jogar por IP (SC2-Proxima)
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpPlay {
+    name: String,
+    port: u16,
+}
+
+#[tauri::command]
+pub async fn proxima_status(state: State<'_, AppState>) -> R<cp_core::proxima::Status> {
+    with_ws(&state.ws, |ws| Ok(ws.proxima()?.status())).await
+}
+
+/// Baixa o lançamento oficial mais recente do SC2-Proxima (GitHub) para a pasta de dados.
+#[tauri::command]
+pub async fn proxima_download(state: State<'_, AppState>) -> R<cp_core::proxima::Status> {
+    #[derive(Deserialize)]
+    struct Asset {
+        name: String,
+        browser_download_url: String,
+    }
+    #[derive(Deserialize)]
+    struct Release {
+        tag_name: String,
+        assets: Vec<Asset>,
+    }
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("CommandProject/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(err)?;
+    let url = format!("https://api.github.com/repos/{}/releases/latest", cp_core::proxima::REPO);
+    let rel: Release = client
+        .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("não consegui falar com o GitHub: {e}"))?
+        .json()
+        .await
+        .map_err(err)?;
+    let names: Vec<String> = rel.assets.iter().map(|a| a.name.clone()).collect();
+    let name = cp_core::proxima::pick_asset(&names)
+        .ok_or_else(|| format!("o lançamento {} do Proxima não tem o steam_api.dll", rel.tag_name))?
+        .clone();
+    let asset = rel.assets.iter().find(|a| a.name == name).ok_or("arquivo do lançamento sumiu")?;
+    let bytes = client
+        .get(&asset.browser_download_url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("download do Proxima falhou: {e}"))?
+        .bytes()
+        .await
+        .map_err(err)?;
+    if bytes.len() > 64 * 1024 * 1024 {
+        return Err("arquivo do Proxima grande demais".into());
+    }
+    with_ws(&state.ws, move |ws| {
+        let p = ws.proxima()?;
+        p.store_download(&name, &bytes, &rel.tag_name)?;
+        Ok(p.status())
+    })
+    .await
+}
+
+/// Abre o jogo com o Proxima (hospedar ou entrar por IP). O original volta quando o jogo fecha.
+#[tauri::command]
+pub async fn launch_ip(app: AppHandle, state: State<'_, AppState>, name: String, port: u16) -> R<LaunchResult> {
+    let name = cp_core::proxima::clean_name(&name);
+    if port < 1024 {
+        return Err("porta inválida (use de 1024 a 65535)".into());
+    }
+    launch_inner(app, state, None, Some(IpPlay { name, port })).await
+}
+
+/// Confere um endereço digitado ("IP" ou "IP:porta") e devolve como o jogo entende.
+#[tauri::command]
+pub fn proxima_address(input: String) -> R<String> {
+    let (host, port) = cp_core::proxima::parse_address(&input).ok_or("endereço inválido: use IP ou IP:porta")?;
+    Ok(if port == cp_core::proxima::DEFAULT_PORT { host } else { format!("{host}:{port}") })
 }

@@ -66,6 +66,8 @@ export interface Settings {
   restoreOnExit: boolean;
   /** os mods só entram no jogo aberto pelo launcher */
   modsOnlyLauncher: boolean;
+  /** prende o mouse na janela do jogo (modo janela) */
+  lockCursor: boolean;
   hubUrls: string[];
   pythonPath?: string | null;
   checkModUpdates: boolean;
@@ -392,6 +394,8 @@ export const CATEGORY_ICON: Record<Category, string> = {
 
 /** Sala de convite: um caminho de rede deste PC (o IP só aparece no "avançado" de quem convida). */
 export interface PartyRoute { kind: string; label: string; ip: string }
+/** jogar por IP (SC2-Proxima) */
+export interface ProximaStatus { version: string | null; active: boolean; name: string; port: number }
 export interface PartyHosted { code: string; room: string; port: number; mods: [string, string][] }
 export interface PartyMod { id: string; name: string; version: string; status: "ok" | "download" | "update"; size: number }
 export interface PartyJoined {

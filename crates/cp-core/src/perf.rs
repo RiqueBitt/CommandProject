@@ -572,8 +572,66 @@ pub fn set_game_priority(level: &str) -> Result<Option<u32>> {
     Err(Error::Other("a prioridade do processo só é aplicada no Windows".into()))
 }
 
+/// Retângulo (na tela) da área do jogo, se a janela dele está em primeiro plano e não minimizada.
+#[cfg(windows)]
+pub fn game_window_rect(pid: u32) -> Option<(i32, i32, i32, i32)> {
+    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, GetForegroundWindow, GetWindowThreadProcessId, IsIconic};
+    // SAFETY: só leitura de estado de janelas; ponteiros apontam para variáveis locais.
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return None;
+        }
+        let mut owner = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut owner);
+        if owner != pid || IsIconic(hwnd) != 0 {
+            return None;
+        }
+        let mut rc = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        if GetClientRect(hwnd, &mut rc) == 0 || rc.right - rc.left < 64 || rc.bottom - rc.top < 64 {
+            return None;
+        }
+        let mut tl = POINT { x: rc.left, y: rc.top };
+        let mut br = POINT { x: rc.right, y: rc.bottom };
+        if ClientToScreen(hwnd, &mut tl) == 0 || ClientToScreen(hwnd, &mut br) == 0 {
+            return None;
+        }
+        Some((tl.x, tl.y, br.x, br.y))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn game_window_rect(_pid: u32) -> Option<(i32, i32, i32, i32)> {
+    None
+}
+
+/// Prende o mouse no retângulo (ou solta, com None).
+#[cfg(windows)]
+pub fn clip_cursor(rect: Option<(i32, i32, i32, i32)>) {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::ClipCursor;
+    // SAFETY: o RECT vive até o fim da chamada; null solta o mouse.
+    unsafe {
+        match rect {
+            Some((left, top, right, bottom)) => {
+                let rc = RECT { left, top, right, bottom };
+                ClipCursor(&rc);
+            }
+            None => {
+                ClipCursor(std::ptr::null());
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn clip_cursor(_rect: Option<(i32, i32, i32, i32)>) {}
+
+/// Processo do jogo aberto agora.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn game_pid() -> Option<u32> {
+pub fn game_pid() -> Option<u32> {
     use sysinfo::{ProcessRefreshKind, RefreshKind, System};
     let sys = System::new_with_specifics(RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()));
     sys.processes()

@@ -1,6 +1,6 @@
 [package]
 name = "commandproject"
-version = "0.36.0"
+version = "0.37.0"
 description = "CommandProject — launcher e hub de mods do Supreme Commander 2"
 authors = ["RiqueBitt"]
 license = "MIT"

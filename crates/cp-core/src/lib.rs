@@ -34,6 +34,7 @@ pub mod optimize;
 pub mod modelgen;
 pub mod net;
 pub mod profile;
+pub mod proxima;
 pub mod scd;
 pub mod scm;
 pub mod settings;

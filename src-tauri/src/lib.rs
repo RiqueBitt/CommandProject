@@ -58,6 +58,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::ensure_vanilla,
+            commands::proxima_status,
+            commands::proxima_download,
+            commands::launch_ip,
+            commands::proxima_address,
             commands::mod_export_files,
             perf_cmds::perf_report,
             perf_cmds::perf_process,

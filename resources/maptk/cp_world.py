@@ -295,6 +295,87 @@ def set_info_sky(info_bytes, sky):
     return cp_regrid.write_bdf(head, fix, sec, pl)
 
 
+# Campos do ambiente no info.win.bdf (EnvironmentHeader, 508 bytes no começo do conteúdo).
+# Deslocamentos documentados pelo SupCom2-map-editor (maksing, licença MIT, InfoBdf.cs).
+INFO_SUN_COLOR = 16        # 3 floats
+INFO_SUN_INTENSITY = 28
+INFO_SHADOW_COLOR = 32     # 4 floats (rgba)
+INFO_WATER_COLOR = 100     # 4 floats (rgba)
+INFO_CORE_FOG_COLOR = 260  # 4 floats
+INFO_HORIZON_FOG_COLOR = 276
+INFO_CORE_FOG_AMOUNTS = 292     # 3 floats (0..1)
+INFO_HORIZON_FOG_AMOUNTS = 304  # 3 floats (0..1)
+INFO_CORE_FOG_DISTS = 316       # 2 floats
+INFO_HORIZON_FOG_DISTS = 324    # 2 floats
+INFO_BLOOM_WEIGHT = 412
+INFO_WIND = 496            # dirX, dirZ, speed
+INFO_ENV_SIZE = 508
+
+
+def _mul3(v, k):
+    try:
+        k = [float(x) for x in k][:3]
+    except (TypeError, ValueError):
+        raise ValueError("atmosfera: multiplicador de cor inválido")
+    if len(k) != 3:
+        raise ValueError("atmosfera: cor precisa de 3 valores")
+    return [max(0.0, min(4.0, a * max(0.0, min(3.0, b)))) for a, b in zip(v, k)]
+
+
+def set_info_env(info_bytes, env):
+    """Muda a atmosfera do mapa no info.win.bdf: cor e força do sol, cor das sombras, da água e da
+    neblina, densidade da neblina, brilho (bloom) e vento. As cores são MULTIPLICADORES sobre os
+    valores do mapa base (que já combinam com a luz assada do terreno); o vento é absoluto.
+    `env` = {sun, sun_power, shadow, water, fog, fog_amount, bloom, wind_dir (graus), wind}."""
+    import struct
+    import cp_regrid
+    head, fix, sec, pl = cp_regrid.read_bdf(info_bytes)
+    pl = bytearray(pl)
+    if len(pl) < INFO_ENV_SIZE:
+        raise ValueError("info.win.bdf em formato desconhecido")
+
+    def rd(off, n):
+        return list(struct.unpack_from(f"<{n}f", pl, off))
+
+    def wr(off, vals):
+        struct.pack_into(f"<{len(vals)}f", pl, off, *vals)
+
+    def num(key, lo, hi):
+        v = float(env[key])
+        if not math.isfinite(v):
+            raise ValueError(f"atmosfera: {key} inválido")
+        return max(lo, min(hi, v))
+
+    if env.get("sun") is not None:
+        wr(INFO_SUN_COLOR, _mul3(rd(INFO_SUN_COLOR, 3), env["sun"]))
+    if env.get("sun_power") is not None:
+        wr(INFO_SUN_INTENSITY, [max(0.0, min(2.0, rd(INFO_SUN_INTENSITY, 1)[0] * num("sun_power", 0.1, 3.0)))])
+    if env.get("shadow") is not None:
+        c = rd(INFO_SHADOW_COLOR, 4)
+        wr(INFO_SHADOW_COLOR, _mul3(c[:3], env["shadow"]) + [c[3]])
+    if env.get("water") is not None:
+        c = rd(INFO_WATER_COLOR, 4)
+        wr(INFO_WATER_COLOR, _mul3(c[:3], env["water"]) + [c[3]])
+    if env.get("fog") is not None:
+        for off in (INFO_CORE_FOG_COLOR, INFO_HORIZON_FOG_COLOR):
+            c = rd(off, 4)
+            wr(off, _mul3(c[:3], env["fog"]) + [c[3]])
+    if env.get("fog_amount") is not None:
+        k = num("fog_amount", 0.0, 4.0)
+        for off in (INFO_CORE_FOG_AMOUNTS, INFO_HORIZON_FOG_AMOUNTS):
+            wr(off, [max(0.0, min(1.0, a * k)) for a in rd(off, 3)])
+        # mais neblina = começa mais perto (distâncias divididas, entre 50 e 5000)
+        if k > 0:
+            for off in (INFO_CORE_FOG_DISTS, INFO_HORIZON_FOG_DISTS):
+                wr(off, [max(50.0, min(5000.0, d / max(0.25, k))) if d > 0 else d for d in rd(off, 2)])
+    if env.get("bloom") is not None:
+        wr(INFO_BLOOM_WEIGHT, [max(0.0, min(5.0, rd(INFO_BLOOM_WEIGHT, 1)[0] * num("bloom", 0.0, 3.0)))])
+    if env.get("wind") is not None:
+        a = math.radians(num("wind_dir", -720.0, 720.0) if env.get("wind_dir") is not None else 0.0)
+        wr(INFO_WIND, [round(math.cos(a), 4), round(math.sin(a), 4), num("wind", 0.0, 2.0)])
+    return cp_regrid.write_bdf(head, fix, sec, bytes(pl))
+
+
 def deck_tester(segs, grid_cell=32.0):
     """(x, z) → está no tabuleiro de alguma ponte? segs = [(x0, z0, x1, z1, meia_largura)].
     Índice por células para não testar todas as pontes em cada ponto."""

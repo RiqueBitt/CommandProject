@@ -311,7 +311,18 @@ impl Workspace {
 
     pub fn purge(&mut self, progress: &mut dyn FnMut(Progress)) -> Result<Plan> {
         self.guard_not_running()?;
+        // jogar por IP: o steam_api.dll original volta junto com o resto
+        if let Ok(p) = self.proxima() {
+            if let Err(e) = p.restore() {
+                eprintln!("steam_api.dll original não restaurado: {e}");
+            }
+        }
         self.deployer()?.purge(progress)
+    }
+
+    /// Jogar por IP (SC2-Proxima), na pasta `bin` do jogo.
+    pub fn proxima(&self) -> Result<crate::proxima::Proxima> {
+        Ok(crate::proxima::Proxima::new(self.game_bin_dir()?, &self.data_dir))
     }
 
     pub fn recover(&mut self) -> Result<Option<String>> {

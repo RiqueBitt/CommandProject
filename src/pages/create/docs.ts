@@ -1,3 +1,4 @@
+import type { Atmosphere } from "./atmosphere";
 // Formato dos documentos de cada tipo de projeto (salvos como JSON pelo núcleo) e os modelos
 // iniciais. Sem three.js aqui: a biblioteca de projetos usa isto sem carregar os editores.
 import { EMPTY_EDITS, type Edits, type GroundBiome } from "../studio/mapEdit";
@@ -91,6 +92,8 @@ export interface MapDoc {
   customTex: CustomTex[];
   /** céu de outro mapa do jogo (id do mapa); null = o céu do terreno base */
   sky: string | null;
+  /** atmosfera (cor do sol, sombras, água, neblina, vento) sobre a do terreno base; null = a dele */
+  atmosphere: Atmosphere | null;
   /** neve/"topo" do bioma nos pontos mais altos (desligado nos mapas de plataformas) */
   peaks: boolean;
   /** textura do tabuleiro das pontes (difusa de qualquer mapa: metal, piso…); null = automática */
@@ -111,7 +114,7 @@ export const newMapDoc = (over: Partial<MapDoc> = {}): MapDoc => ({
   patch: false, maxSlope: 6, waterMargin: 4, smooth: false, rugged: false, minimap: "donor", strip: "moving",
   edits: EMPTY_EDITS, models: [], notes: "", world: null, features: [], sculpt: null, sculptSize: 0, symmetry: "none",
   layers: { hidden: [], locked: [] }, base: "game", clean: false, groundBiome: "temperate", groundTex: null,
-  groundRoles: {}, paint: null, paintSize: 512, worldPaint: null, ring: true, customTex: [], sky: null, peaks: true, deckTex: null, ringRise: 95, nav: null, worldNav: null, ...over,
+  groundRoles: {}, paint: null, paintSize: 512, worldPaint: null, ring: true, customTex: [], sky: null, atmosphere: null, peaks: true, deckTex: null, ringRise: 95, nav: null, worldNav: null, ...over,
 });
 
 export function migrateMap(raw: unknown): MapDoc {
@@ -122,7 +125,7 @@ export function migrateMap(raw: unknown): MapDoc {
     features: d.features ?? [], layers: { hidden: d.layers?.hidden ?? [], locked: d.layers?.locked ?? [] }, schema: 1,
     // projetos antigos: mundo gerado sobre um mapa do jogo já ganha o visual limpo
     base: d.base ?? "game", clean: d.clean ?? !!d.world, groundBiome: d.groundBiome ?? d.world?.biome ?? "temperate", groundTex: d.groundTex ?? null,
-    groundRoles: d.groundRoles ?? (d.groundTex ? { low: d.groundTex } : {}), paint: d.paint ?? null, paintSize: d.paintSize ?? 256, worldPaint: d.worldPaint ?? null, ring: d.ring ?? true, customTex: d.customTex ?? [], sky: d.sky ?? null, peaks: d.peaks ?? true, deckTex: d.deckTex ?? null, ringRise: d.ringRise ?? 95, nav: d.nav ?? null, worldNav: d.worldNav ?? null,
+    groundRoles: d.groundRoles ?? (d.groundTex ? { low: d.groundTex } : {}), paint: d.paint ?? null, paintSize: d.paintSize ?? 256, worldPaint: d.worldPaint ?? null, ring: d.ring ?? true, customTex: d.customTex ?? [], sky: d.sky ?? null, atmosphere: d.atmosphere ?? null, peaks: d.peaks ?? true, deckTex: d.deckTex ?? null, ringRise: d.ringRise ?? 95, nav: d.nav ?? null, worldNav: d.worldNav ?? null,
   };
 }
 

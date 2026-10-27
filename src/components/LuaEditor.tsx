@@ -9,6 +9,7 @@ import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutt
 import { tags as t } from "@lezer/highlight";
 import { useEffect, useRef } from "react";
 import { apiAt, FORJA_API, lintLua50 } from "../lib/forjaApi";
+import { SIM_FUNCTIONS, SIM_TABLES, simHelp } from "../lib/sc2Globals";
 
 const theme = EditorView.theme(
   {
@@ -65,6 +66,11 @@ const forjaHover = hoverTooltip((view, pos) => {
   const parts = word.split(".");
   let entry;
   for (let n = parts.length; n > 0 && !entry; n--) entry = apiAt(parts.slice(0, n).join("."));
+  if (!entry) {
+    // funções e tabelas do próprio jogo (lista do supcom2reversal)
+    const help = simHelp(parts[0]);
+    if (help) entry = { label: parts[0], sig: SIM_TABLES.includes(parts[0]) ? parts[0] : `${parts[0]}(…)`, info: help, kind: "function" as const };
+  }
   if (!entry) return null;
   const e = entry;
   return {
@@ -110,7 +116,13 @@ export default function LuaEditor({ value, onChange, onSave, readOnly = false, f
           const w = ctx.matchBefore(/[\w.]+/);
           if (!w || (w.from === w.to && !ctx.explicit)) return null;
           const api = forja ? FORJA_API.map((e) => ({ label: e.label, type: e.kind, detail: e.sig.startsWith(e.label) ? e.sig.slice(e.label.length) : e.sig, info: e.info, boost: 1 })) : [];
-          return { from: w.from, options: [...api, ...MOHO_WORDS.filter((m) => !api.some((a) => a.label === m)).map((label) => ({ label, type: "function" }))] };
+          const known = new Set(api.map((a) => a.label));
+          const engine = [
+            ...MOHO_WORDS.map((label) => ({ label, type: "function" })),
+            ...SIM_FUNCTIONS.map((label) => ({ label, type: "function", detail: "SC2" })),
+            ...SIM_TABLES.map((label) => ({ label, type: "namespace", detail: "SC2" })),
+          ].filter((o) => !known.has(o.label) && (known.add(o.label), true));
+          return { from: w.from, options: [...api, ...engine] };
         }] }),
         ...(forja ? [forjaHover, lua50, lintGutter()] : []),
         StreamLanguage.define(lua), syntaxHighlighting(highlight), theme,

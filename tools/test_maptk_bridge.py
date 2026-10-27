@@ -278,6 +278,7 @@ def main():
         test_resize()
         test_rebuild()
         test_sky_and_water()
+        test_atmosphere()
 
         bad = dict(spec, scenario_id="meu mapa")
         env = dict(os.environ, SC2_GAMEDATA=gd, SC2_MAP_OUT=out)
@@ -540,6 +541,41 @@ def test_sky_and_water():
         return pal[code]
     assert alpha(254, 7) > 0 and alpha(256, 7) == 0 and alpha(250, 7) > alpha(254, 7)
     print("céu e água ok: caminhos novos no info.win.bdf, margem da água texel a texel")
+
+
+def test_atmosphere():
+    """atmosfera: multiplicadores sobre as cores do mapa base, vento absoluto, textos intactos"""
+    import cp_regrid
+    import cp_world
+    pl = bytearray(508)
+    struct.pack_into("<3f", pl, 16, 1.0, 0.9, 0.8)       # cor do sol
+    struct.pack_into("<f", pl, 28, 1.2)                  # força do sol
+    struct.pack_into("<4f", pl, 100, 0.2, 0.4, 0.6, 1)   # cor da água
+    struct.pack_into("<3f", pl, 292, 0.3, 0.5, 0.9)      # neblina
+    struct.pack_into("<2f", pl, 316, 400, 1600)
+    struct.pack_into("<f", pl, 216, 40.0)
+    for k in range(5):
+        struct.pack_into("<I", pl, 240 + 4 * k, 508)
+    pl += b"/textures/environment/u01_sky.dds\0"
+    info = cp_regrid.write_bdf([0x4244464D, 7, 2, 0, 0, 0, 5, 1], [240, 244, 248, 252, 256], [0], pl)
+    new = cp_world.set_info_env(info, {"sun": [1.2, 1.0, 0.5], "sun_power": 2.0, "water": [1, 1, 0.5],
+                                       "fog_amount": 2.0, "wind_dir": 90, "wind": 0.5})
+    _, fix, _, p2 = cp_regrid.read_bdf(new)
+    f = lambda o, n=1: struct.unpack_from(f"<{n}f", p2, o)
+    assert [round(x, 3) for x in f(16, 3)] == [1.2, 0.9, 0.4]
+    assert abs(f(28)[0] - 2.0) < 1e-6, "força do sol limitada a 2"
+    assert [round(x, 3) for x in f(100, 4)] == [0.2, 0.4, 0.3, 1.0]
+    assert [round(x, 3) for x in f(292, 3)] == [0.6, 1.0, 1.0], "neblina limitada a 1"
+    assert [round(x) for x in f(316, 2)] == [200, 800], "neblina mais perto"
+    assert abs(f(496, 3)[0]) < 1e-3 and abs(f(496, 3)[1] - 1) < 1e-3 and abs(f(496, 3)[2] - 0.5) < 1e-6
+    assert abs(f(216)[0] - 40) < 1e-6 and fix == [240, 244, 248, 252, 256]
+    assert bytes(p2[508:]).startswith(b"/textures/environment/u01_sky.dds")
+    try:
+        cp_world.set_info_env(info, {"sun": [1, "x", 1]})
+        raise AssertionError("cor inválida aceita")
+    except ValueError:
+        pass
+    print("atmosfera ok: cores multiplicadas, limites respeitados, vento e textos")
 
 
 if __name__ == "__main__":

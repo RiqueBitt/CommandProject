@@ -4,6 +4,7 @@
 //
 // Camadas do relevo, na ordem: terreno do jogo → gerador de mundo (relevo base) → formas
 // (montanhas, lagos, rios…) → pincel de escultura → relevo simples (morro, vale, rampa…).
+import { ATMOSPHERES, atmosphereSpec, tintSky } from "./atmosphere";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DecorPoint, GroundTextures as GroundTexSet, Marker } from "../../components/MapView3D";
 import { registerCustomProp } from "../../components/propModels";
@@ -1110,6 +1111,8 @@ export default function MapStudio({ id }: { id: string }) {
     }
     if (blank && hasWater) s.water_level = water;
     if (skyNow) s.sky = { env: skyNow.env, sky: skyNow.sky, sight: skyNow.sight, fog: skyNow.fog };
+    const atm = atmosphereSpec(doc.atmosphere);
+    if (atm) s.atmosphere = atm;
     if (navNow) s.nav = { size: NAV_N, data: encodePaint(navNow) };
     if (usePatch) s.strip_props = doc.strip === "none" ? false : doc.strip;
     // decorações que ficaram debaixo d'água (relevo mudou depois de colocar) não vão para o jogo
@@ -1391,6 +1394,26 @@ export default function MapStudio({ id }: { id: string }) {
         { kind: "select", label: t("Céu"), value: doc.sky ?? "", onChange: (v: string) => setDoc((d) => ({ ...d, sky: v || null })),
           options: [{ value: "", label: t("O do terreno base") }, ...skies.map((x) => ({ value: x.map, label: skyLabel(x) }))],
           hint: skies.length ? t("Caixa do céu, reflexo e cores de outro mapa do jogo.") : t("Os céus aparecem depois que o catálogo do jogo carregar.") } as Prop,
+        { kind: "select", label: t("Atmosfera"), value: doc.atmosphere?.preset ?? "",
+          onChange: (v: string) => setDoc((d) => ({ ...d, atmosphere: v || d.atmosphere?.wind != null ? { preset: v, strength: d.atmosphere?.strength ?? 1, windDir: d.atmosphere?.windDir ?? 0, wind: d.atmosphere?.wind ?? null } : null })),
+          options: [{ value: "", label: t("A do terreno base") }, ...Object.entries(ATMOSPHERES).map(([k, st]) => ({ value: k, label: t(st.label) }))],
+          hint: doc.atmosphere?.preset && ATMOSPHERES[doc.atmosphere.preset] ? t(ATMOSPHERES[doc.atmosphere.preset].desc) : t("Cor do sol e das sombras, da água e da neblina, sobre a luz do mapa base.") } as Prop,
+        ...(doc.atmosphere?.preset ? [
+          { kind: "slider", label: t("Força da atmosfera"), value: Math.round((doc.atmosphere.strength ?? 1) * 100), min: 0, max: 150, step: 5, unit: "%",
+            onChange: (v: number) => setDoc((d) => (d.atmosphere ? { ...d, atmosphere: { ...d.atmosphere, strength: v / 100 } } : d)) } as Prop,
+        ] : []),
+        { kind: "select", label: t("Vento"), value: doc.atmosphere?.wind == null ? "" : String(doc.atmosphere.wind),
+          onChange: (v: string) => setDoc((d) => {
+            const wind = v === "" ? null : Number(v);
+            const next = { preset: d.atmosphere?.preset ?? "", strength: d.atmosphere?.strength ?? 1, windDir: d.atmosphere?.windDir ?? 0, wind };
+            return { ...d, atmosphere: next.preset || wind !== null ? next : null };
+          }),
+          options: [{ value: "", label: t("O do terreno base") }, { value: "0", label: t("Sem vento") }, { value: "0.4", label: t("Brisa") }, { value: "1", label: t("Vento forte") }, { value: "2", label: t("Ventania") }],
+          hint: t("Mexe com a água, as árvores e a fumaça no jogo.") } as Prop,
+        ...(doc.atmosphere?.wind != null ? [
+          { kind: "slider", label: t("Direção do vento"), value: doc.atmosphere.windDir ?? 0, min: 0, max: 345, step: 15, unit: "°",
+            onChange: (v: number) => setDoc((d) => (d.atmosphere ? { ...d, atmosphere: { ...d.atmosphere, windDir: v } } : d)) } as Prop,
+        ] : []),
         ...(doc.clean ? [
           { kind: "select", label: t("Bioma do chão"), value: doc.groundBiome, onChange: (v: string) => setDoc((d) => ({ ...d, groundBiome: v as GroundBiome, groundRoles: {}, groundTex: null })), options: (Object.keys(BIOME_LABEL) as GroundBiome[]).map((k) => ({ value: k, label: t(BIOME_LABEL[k]) })) } as Prop,
           { kind: "info", label: t("Texturas"), value: chain.filter(Boolean).length ? t("{n} (praia, chão, terra, rocha, topo)", { n: chain.filter(Boolean).length }) : t("carregando…") } as Prop,
@@ -1920,7 +1943,7 @@ export default function MapStudio({ id }: { id: string }) {
               </div>
             ) : view === "3d" && relief3d && heights ? (
               <Suspense fallback={<div className="bar indeterminate" style={{ margin: 20 }}><i /></div>}>
-                <MapView3D sky={skyNow?.color ?? null} pass={passCodes} size={relief3d.size} grid={relief3d.grid} heights={heights} waterLevel={water}
+                <MapView3D sky={tintSky(skyNow?.color ?? null, doc.atmosphere)} pass={passCodes} size={relief3d.size} grid={relief3d.grid} heights={heights} waterLevel={water}
                   texture={texture3d} palette={skin === "relief" ? (doc.world?.biome ?? "temperate") : null} exaggeration={exag} ground={skin === "relief" ? groundView : null}
                   spawns={markers} mass={hidden.has("grp:mass") ? [] : edits.mass} bridges={edits.bridges} seed={edits.seed}
                   decor={decor} cuts={edits.cuts} highlights={highlights} lines={lines} snapshotRef={snapshot}
