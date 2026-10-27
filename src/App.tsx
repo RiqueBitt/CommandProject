@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useEffect } from "react";
+import { Fragment, lazy, Suspense, useEffect, useRef } from "react";
 import { locale, setLang, t, tr, useLang } from "./lib/i18n";
 import { FP_VERSION, loadFirstPerson } from "./components/dialogs";
 import { FEATURES } from "./lib/features";
@@ -8,13 +8,17 @@ import { api, onEvent } from "./lib/api";
 import { errorText, useStore } from "./lib/store";
 import { useTabs } from "./lib/tabs";
 import type { GameCrash } from "./lib/types";
+import { useGameArt } from "./lib/gameArt";
 import Home from "./pages/Home";
-import Hub from "./pages/Hub";
-import Files from "./pages/Files";
-import Library from "./pages/Library";
-import Me from "./pages/Me";
-import Multiplayer from "./pages/Multiplayer";
-import SettingsPage from "./pages/Settings";
+
+// só a tela inicial vem junto: as outras páginas baixam quando abrem (o launcher abre mais rápido)
+const Hub = lazy(() => import("./pages/Hub"));
+const Files = lazy(() => import("./pages/Files"));
+const Library = lazy(() => import("./pages/Library"));
+const Me = lazy(() => import("./pages/Me"));
+const Multiplayer = lazy(() => import("./pages/Multiplayer"));
+const SettingsPage = lazy(() => import("./pages/Settings"));
+const NewsModal = lazy(() => import("./components/NewsModal"));
 
 // o Estúdio carrega three.js e o editor de código: só baixa quando abrir
 const Studio = lazy(() => import("./pages/studio/Studio"));
@@ -35,6 +39,10 @@ export default function App() {
   const prefs = useStore((s) => s.settings?.uiPrefs);
   const skin = (prefs?.skin as string | undefined) ?? "sc";
   const fac = (prefs?.faction as string | undefined) ?? "uef";
+  const root = useRef<HTMLDivElement>(null);
+  const hasGame = useStore((s) => !!s.dashboard?.game);
+  // arte dos menus do jogo (da instalação do usuário), se ligada e com o jogo encontrado
+  useGameArt(root, prefs?.gameArt !== false && hasGame);
 
   useEffect(() => {
     (async () => {
@@ -105,7 +113,7 @@ export default function App() {
   }, [refresh, toast]);
 
   return (
-    <div className={`app ${activeTab ? "in-project" : ""}`} data-skin={skin} data-fac={fac} data-motion={prefs?.reduceMotion ? "off" : "on"}>
+    <div ref={root} className={`app ${activeTab ? "in-project" : ""}`} data-skin={skin} data-fac={fac} data-motion={prefs?.reduceMotion ? "off" : "on"}>
       {/* trocar o idioma remonta a interface: tudo que usa t() muda na hora */}
       <Fragment key={lang}>
       <SystemBar />
@@ -116,6 +124,7 @@ export default function App() {
       )}
       <Rail />
       <main className="main">
+        <Suspense fallback={<div className="page"><div className="bar indeterminate"><i /></div></div>}>
         {page === "me" && <Me />}
         {page === "home" && <Home />}
         {page === "library" && <Library />}
@@ -159,8 +168,10 @@ export default function App() {
             <Icons />
           </Suspense>
         )}
+        </Suspense>
       </main>
       <CommandPalette />
+      <Suspense fallback={null}><NewsModal /></Suspense>
       <Toasts />
       </Fragment>
     </div>

@@ -4,7 +4,7 @@ import { api, openUrl } from "../lib/api";
 import { locale, t, tr } from "../lib/i18n";
 import { errorText, fmtBytes, useStore } from "../lib/store";
 import { CATEGORY_LABEL, type Category, type HubIndex, type HubMod } from "../lib/types";
-import { CATEGORY_ICON } from "./Library";
+import { CATEGORY_ICON } from "../lib/types";
 import CpModsHub from "../components/CpModsHub";
 
 type Item = { mod: HubMod; index: HubIndex };

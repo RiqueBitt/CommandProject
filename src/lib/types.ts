@@ -385,3 +385,9 @@ export interface ForjaCheck { mods: ForjaMod[]; problems: ForjaProblem[] }
 
 /** Mod da Forja em desenvolvimento (pasta forja/<id>/ editada no launcher). */
 export interface ForjaDevMod { id: string; name: string; path: string; files: string[] }
+
+/** Ícone de cada categoria de mod. */
+export const CATEGORY_ICON: Record<Category, string> = {
+  gameplay: "sports_esports", balance: "balance", maps: "map", textures: "texture", ui: "dashboard_customize",
+  models: "view_in_ar", audio: "music_note", fixes: "build", library: "inventory_2", other: "category",
+};

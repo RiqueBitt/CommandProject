@@ -295,7 +295,7 @@ export default function BigMatch() {
 
   return (
     <div className="page bigmatch-page">
-      <header className="page-head">
+      <header className="page-head art-hero">
         <div>
           <span className="overline"><Icon name="groups" size={15} /> {t("Partida grande")}</span>
           <h1 className="page-title">{t("Quantos jogadores o mapa tiver")}</h1>

@@ -505,5 +505,14 @@
  "É um arquivo do jogo": "It's a game file",
  "Índices de mods (JSON) além do hub do servidor da comunidade. Só https.": "Mod indexes (JSON) besides the community server's hub. https only.",
  "Última aplicação": "Last applied",
- "Útil se você também joga sem o launcher ou usa “Verificar integridade” da Steam.": "Useful if you also play without the launcher or use Steam's “Verify integrity”."
+ "Útil se você também joga sem o launcher ou usa “Verificar integridade” da Steam.": "Useful if you also play without the launcher or use Steam's “Verify integrity”.",
+ "marque pelo menos uma vaga como Amigo para convidar alguém": "mark at least one slot as Friend to invite someone",
+ "endereço do anfitrião inválido: {a}": "invalid host address: {a}",
+ "isso não é um convite do CommandProject (começa com CPM1.)": "this isn't a CommandProject invite (it starts with CPM1.)",
+ "convite incompleto: copie o código inteiro": "incomplete invite: copy the whole code",
+ "convite inválido": "invalid invite",
+ "o convite não tem o endereço do anfitrião": "the invite has no host address",
+ "modelo \"{t}\" não existe": "template \"{t}\" doesn't exist",
+ "arquivo {file} não pode ser editado aqui": "file {file} can't be edited here",
+ "{path} não é a pasta de um mod da Forja": "{path} isn't a Forja mod folder"
 }

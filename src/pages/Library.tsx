@@ -11,10 +11,8 @@ import { t, tr } from "../lib/i18n";
 import { fmtBytes, fmtDate, useStore } from "../lib/store";
 import { CATEGORY_LABEL, type Category, type ConflictReport, type ModView } from "../lib/types";
 
-export const CATEGORY_ICON: Record<Category, string> = {
-  gameplay: "sports_esports", balance: "balance", maps: "map", textures: "texture", ui: "dashboard_customize",
-  models: "view_in_ar", audio: "music_note", fixes: "build", library: "inventory_2", other: "category",
-};
+import { CATEGORY_ICON } from "../lib/types";
+export { CATEGORY_ICON };
 
 export default function Library() {
   const mods = useStore((s) => s.mods);

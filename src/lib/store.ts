@@ -23,6 +23,8 @@ interface State {
   busy: Record<string, boolean>;
   history: Page[];
   palette: boolean;
+  /** tela de Novidades aberta (pela busca ou depois de atualizar) */
+  showNews: boolean;
   appUpdate: AppUpdate | null;
   /** O jogo travou na última vez que foi aberto (relatório .mdmp novo na pasta bin, ou o log da
    *  partida grande sem o fim normal). */
@@ -61,6 +63,7 @@ export const useStore = create<State>((set, get) => ({
   busy: {},
   history: [],
   palette: false,
+  showNews: false,
   appUpdate: null,
   crash: null,
   createKind: "all",

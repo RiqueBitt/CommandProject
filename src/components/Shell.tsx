@@ -3,6 +3,7 @@ import { UNITS_ENABLED } from "../lib/features";
 import { api, openUrl, windowAction } from "../lib/api";
 import { switchProfile, useStore, type Page } from "../lib/store";
 import { KIND_META, useTabs } from "../lib/tabs";
+import type { CreationMeta, MatchMap } from "../lib/types";
 import { confirmDialog } from "../lib/api";
 import { t, tr } from "../lib/i18n";
 import { Field, hueOf, Icon, Modal, monogram, Tip } from "./ui";
@@ -93,6 +94,8 @@ export function SystemBar() {
   return (
     <header className="systembar">
       <TabStrip />
+      {/* logo do jogo (da instalação do usuário, quando a arte do jogo está ligada) */}
+      <i className="sys-logo" aria-hidden data-tauri-drag-region />
       <div className="drag" data-tauri-drag-region />
       <TaskDock />
       <button className="sys-btn" onClick={() => setPalette(true)}>
@@ -222,6 +225,25 @@ export function NewProfile({ onClose }: { onClose: () => void }) {
 
 interface Cmd { id: string; label: string; icon: string; hint?: string; run: () => void | Promise<void> }
 
+/** Seções das Configurações (mesmos ids da página), para a busca. */
+const SETTINGS_SECTIONS: [string, string, string][] = [
+  ["jogo", "Jogo: pasta, modo de abrir, memória e prioridade", "sports_esports"],
+  ["local", "Modo local e cópias de segurança", "cloud_off"],
+  ["visual", "Visual: tema, facção, idioma e animações", "palette"],
+  ["diagnostico", "Diagnóstico", "monitor_heart"],
+  ["comunidade", "Comunidade", "hub"],
+  ["hub", "Índices do Hub de mods", "store"],
+  ["mapas", "Estúdio de Mapas", "map"],
+  ["arquivos", "Arquivos do jogo", "folder_zip"],
+  ["atualizacoes", "Atualizações do launcher", "system_update"],
+  ["sobre", "Sobre o CommandProject", "info"],
+];
+
+/** Sem acento e em minúsculas: "nevasca" acha "Nevasca", "configuracoes" acha "Configurações". */
+function fold(s: string) {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
 /** Ação rápida (Ctrl+K): navegar e executar ações pelo teclado. */
 export function CommandPalette() {
   const open = useStore((s) => s.palette);
@@ -231,6 +253,16 @@ export function CommandPalette() {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
   const input = useRef<HTMLInputElement>(null);
+  // busca global: criações e mapas são lidos na primeira vez que a busca abre
+  const [creations, setCreations] = useState<CreationMeta[]>([]);
+  const [maps, setMaps] = useState<MatchMap[]>([]);
+  const loaded = useRef(false);
+  useEffect(() => {
+    if (!open || loaded.current) return;
+    loaded.current = true;
+    void api.creations().then(setCreations).catch(() => undefined);
+    void api.bigMatchMaps().then(setMaps).catch(() => undefined);
+  }, [open]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -273,6 +305,16 @@ export function CommandPalette() {
         id: "profile-" + p.id, label: t("Usar o perfil {name}", { name: p.name }), icon: "swap_horiz", hint: t("perfil"),
         run: async () => { await switchProfile(p.id, p.name); },
       })),
+      { id: "news", label: t("Novidades desta versão"), icon: "new_releases", hint: t("ação"), run: () => useStore.setState({ showNews: true }) },
+      ...SETTINGS_SECTIONS.map<Cmd>(([id, label, icon]) => ({ id: "set-" + id, label: t(label), icon, hint: t("configuração"), run: () => useStore.getState().openSettings(id) })),
+      ...creations.map<Cmd>((c) => ({
+        id: "cre-" + c.id, label: c.name, icon: KIND_META[c.kind]?.icon ?? "draft", hint: t(KIND_META[c.kind]?.label ?? "projeto"),
+        run: () => useTabs.getState().open(c),
+      })),
+      ...maps.map<Cmd>((m) => ({
+        id: "map-" + m.path, label: t("Partida grande em {map} ({n} bases)", { map: m.name, n: m.armies.length }), icon: "map", hint: t("mapa"),
+        run: () => { try { localStorage.setItem("cp-bigmatch-map", m.path); } catch { /* ok */ } go("bigmatch"); },
+      })),
       ...mods.map<Cmd>((m) => ({
         id: "mod-" + m.manifest.id, label: m.enabled ? t("Desligar {name}", { name: m.manifest.name }) : t("Ligar {name}", { name: m.manifest.name }), icon: m.enabled ? "toggle_on" : "toggle_off", hint: "mod",
         run: async () => {
@@ -281,9 +323,22 @@ export function CommandPalette() {
         },
       })),
     ];
-    const term = q.trim().toLowerCase();
-    return term ? list.filter((c) => c.label.toLowerCase().includes(term)) : list;
-  }, [q, mods, profiles, go, run, refresh, refreshMods]);
+    const term = fold(q.trim());
+    // sem busca: só as ações e páginas (criações e mapas aparecem ao digitar)
+    if (!term) return list.filter((c) => !c.id.startsWith("cre-") && !c.id.startsWith("map-") && !c.id.startsWith("set-"));
+    const words = term.split(/\s+/);
+    const scored = list
+      .map((c) => {
+        const hay = fold(c.label + " " + (c.hint ?? ""));
+        if (!words.every((w) => hay.includes(w))) return null;
+        // começa com o termo > palavra que começa com o termo > contém
+        const label = fold(c.label);
+        const score = label.startsWith(term) ? 0 : new RegExp("\\b" + words[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(label) ? 1 : 2;
+        return { c, score };
+      })
+      .filter((x): x is { c: Cmd; score: number } => !!x);
+    return scored.sort((a, b) => a.score - b.score).map((x) => x.c);
+  }, [q, mods, profiles, creations, maps, go, run, refresh, refreshMods]);
 
   if (!open) return null;
   const exec = async (c: Cmd) => {
@@ -293,7 +348,7 @@ export function CommandPalette() {
   return (
     <div className="palette-wrap" onMouseDown={(e) => e.target === e.currentTarget && setPalette(false)}>
       <div className="palette" role="dialog" aria-label={t("Ação rápida")}>
-        <input ref={input} className="input" placeholder={t("Digite uma ação, página, perfil ou mod…")} value={q}
+        <input ref={input} className="input" placeholder={t("Buscar páginas, ações, mods, projetos, mapas e configurações…")} value={q}
           onChange={(e) => { setQ(e.target.value); setSel(0); }}
           onKeyDown={(e) => {
             if (e.key === "Escape") setPalette(false);

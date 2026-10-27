@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { t } from "../lib/i18n";
-import { useStore } from "../lib/store";
+import { errorText, useStore } from "../lib/store";
 import type { BigMatch, InviteCheck, MatchMap } from "../lib/types";
 import { CopyButton, Field, Icon, Notice } from "./ui";
 
@@ -60,7 +60,7 @@ export default function MatchInvite({ spec, maps, busy, running, launch, markGue
     try {
       setCode(await api.bigMatchInvite(spec, address, who));
     } catch (e) {
-      useStore.getState().toast("error", String(e));
+      useStore.getState().toast("error", errorText(e));
     }
   };
 
@@ -72,7 +72,7 @@ export default function MatchInvite({ spec, maps, busy, running, launch, markGue
     try {
       setCheck(await api.bigMatchReadInvite(text));
     } catch (e) {
-      setProblem(String(e));
+      setProblem(errorText(e));
     }
   };
 

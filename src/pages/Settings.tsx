@@ -197,6 +197,10 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="setting-row">
+                <div className="txt"><b>{t("Arte do jogo no launcher")}</b><span>{t("Usa as imagens dos menus do próprio Supreme Commander 2 (lidas da sua instalação) nos cabeçalhos e janelas.")}</span></div>
+                <Switch checked={s.uiPrefs?.gameArt !== false} onChange={(v) => commit({ ...s, uiPrefs: { ...(s.uiPrefs ?? {}), gameArt: v } })} label={t("Arte do jogo no launcher")} />
+              </div>
+              <div className="setting-row">
                 <div className="txt"><b>{t("Menos animações")}</b><span>{t("Tira as transições e brilhos (o sistema também pode pedir isso).")}</span></div>
                 <Switch checked={!!s.uiPrefs?.reduceMotion} onChange={(v) => commit({ ...s, uiPrefs: { ...(s.uiPrefs ?? {}), reduceMotion: v } })} label={t("Menos animações")} />
               </div>

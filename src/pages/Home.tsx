@@ -7,7 +7,7 @@ import { fmtDate, plural, useStore } from "../lib/store";
 import { t, tr } from "../lib/i18n";
 import { CATEGORY_LABEL, type ConflictReport, type ModView, type ShaderStatus, type UpdateInfo } from "../lib/types";
 import { EnhancementsCard, HomeShowcase } from "./HomeExtras";
-import { CATEGORY_ICON } from "./Library";
+import { CATEGORY_ICON } from "../lib/types";
 
 export default function Home() {
   const d = useStore((s) => s.dashboard);

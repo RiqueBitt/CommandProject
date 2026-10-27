@@ -1255,3 +1255,47 @@ textarea.pinput { height: auto; padding: 4px 6px; resize: vertical; }
 .forja-code-host .cm-host { height: 100%; }
 @media (max-width: 820px) { .forja-editor-body { grid-template-columns: 1fr; } }
 .forja-badge { background: rgba(242, 179, 61, .9) !important; color: #1a1205 !important; }
+
+/* ------------------------------------------------------------ arte dos menus do jogo
+   As imagens vêm da instalação do usuário (lib/gameArt.ts) em variáveis --art-*; sem elas, nada muda. */
+.sys-logo { display: none; }
+.app[data-art~="logo"] .sys-logo { display: block; width: 92px; height: 22px; margin: 0 6px 0 10px; background: var(--art-logo) left center / contain no-repeat; opacity: .82; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .6)); }
+.app[data-art~="grad"] .main::after { content: ""; position: absolute; inset: 0 0 auto 0; height: 300px; z-index: -1; pointer-events: none;
+  background: var(--art-grad) top center / 100% 100% no-repeat; opacity: .22; -webkit-mask-image: linear-gradient(#000, transparent); mask-image: linear-gradient(#000, transparent); }
+.app[data-skin="classic"] .main::after { display: none; }
+.art-hero { position: relative; isolation: isolate; }
+.app[data-art~="overlay"] .perf-hero, .app[data-art~="overlay"] .art-hero, .app[data-art~="overlay"] .news-banner { position: relative; isolation: isolate; overflow: hidden; }
+.app[data-art~="overlay"] .perf-hero::before, .app[data-art~="overlay"] .art-hero::before, .app[data-art~="overlay"] .news-banner::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit;
+  background: var(--art-overlay) center / cover no-repeat; opacity: .32; mix-blend-mode: screen;
+}
+.app[data-art~="line"] .perf-hero::after, .app[data-art~="line"] .art-hero::after, .app[data-art~="line"] .news-banner::after {
+  content: ""; position: absolute; left: 18px; right: 18px; bottom: 0; height: 2px; pointer-events: none;
+  background: var(--art-line) center / 100% 100% no-repeat; opacity: .9;
+}
+.art-hero { padding: 18px 20px; border-radius: 16px; border: 1px solid transparent; }
+.app[data-art~="overlay"] .art-hero { border-color: var(--border); background: linear-gradient(120deg, rgba(var(--primary-rgb), .08), transparent 60%), var(--surface); }
+/* botões principais com o brilho do botão do menu do jogo */
+.app[data-art~="btn"] .btn.primary { background-image: linear-gradient(rgba(255, 255, 255, .06), rgba(0, 0, 0, .06)); }
+.app[data-art~="btn-hover"] .btn.primary:not(:disabled):hover { box-shadow: 0 0 0 1px rgba(var(--primary-rgb), .6), 0 6px 22px -8px rgba(var(--primary-rgb), .7); }
+/* cabeçalho das janelas com a placa do menu do jogo */
+.app[data-art~="plate"] .modal-head { background: linear-gradient(90deg, rgba(var(--primary-rgb), .12), transparent 70%); border-radius: 12px; padding: 6px 8px; margin: -6px -8px 12px; }
+
+/* ------------------------------------------------------------ novidades */
+.news { display: flex; flex-direction: column; gap: 16px; }
+.news-banner { display: flex; align-items: center; gap: 16px; padding: 18px 20px; border-radius: 14px; border: 1px solid var(--border);
+  background: radial-gradient(500px 200px at 0% 0%, rgba(var(--primary-rgb), .18), transparent 70%), var(--surface-2, var(--surface)); }
+.news-banner h3 { font-size: 20px; margin-top: 4px; }
+.news-logo { display: none; }
+.app[data-art~="logo"] .news-logo { display: block; width: 150px; height: 46px; flex: none; background: var(--art-logo) left center / contain no-repeat; }
+.news-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.news-item { display: grid; grid-template-columns: 24px minmax(0, 1fr) 18px; align-items: start; gap: 12px; width: 100%; text-align: left; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; transition: border-color .15s, transform .15s; }
+.news-item > .mi:first-child { color: var(--primary); margin-top: 2px; }
+.news-item > span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.news-item .go { color: var(--muted); align-self: center; }
+.news-item:disabled { cursor: default; }
+.news-item:not(:disabled):hover { border-color: rgba(var(--primary-rgb), .6); transform: translateY(-1px); }
+.news footer { display: flex; justify-content: flex-end; }
+@media (prefers-reduced-motion: reduce) { .news-item { transition: none; } .news-item:hover { transform: none; } }
+.app[data-motion="off"] .news-item:hover { transform: none; }
+.bm-invite .card-title h3, .forja-editor .card-title h3 { flex: none; }

@@ -647,6 +647,7 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     }
     case "game_texture": {
       const path = String(a.path).toLowerCase();
+      if (path.includes("/frontend/")) return r(mockMenuArt(path));
       const hue = path.includes("snow") || path.includes("ice") ? 205 : path.includes("sand") || path.includes("dune") ? 42 : path.includes("lava") ? 12 : path.includes("rock") || path.includes("cliff") || path.includes("metal") ? 30 : path.includes("ash") ? 0 : path.includes("earth") || path.includes("hill") ? 28 : 96;
       const sat = path.includes("rock") || path.includes("cliff") || path.includes("metal") || path.includes("ash") ? 8 : path.includes("snow") || path.includes("ice") ? 25 : 38;
       const light = path.includes("snow") || path.includes("ice") ? 82 : path.includes("ash") ? 22 : 40;
@@ -808,6 +809,31 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
       return r(db);
     }
     case "optimize_undo_windows": { const db = optDb(); db.windows = { supported: true, gpu: false, fullscreenFix: false }; db.noThrottle = false; return r(db); }
+    // ---------------------------------------------------------------- Forja (simulada)
+    case "forja_overview": return r(forjaOv());
+    case "forja_set_option": case "forja_reset_options": case "forja_set_key": return r(forjaOv());
+    case "forja_templates": return r([
+      { key: "completo", name: "Completo", description: "Blueprints, simulação, interface e biblioteca: um pouco de tudo, comentado." },
+      { key: "balanceamento", name: "Balanceamento", description: "Só blueprints: muda vida, custo, velocidade e alcance das unidades, com opções no launcher." },
+      { key: "painel", name: "Painel", description: "Só interface: um painel com tecla própria que mostra informações da partida." },
+      { key: "regra", name: "Regra de jogo", description: "Só simulação: uma regra nova para a partida (unidades que destroem outras se recuperam)." },
+      { key: "biblioteca", name: "Biblioteca", description: "Funções para outros mods usarem com Forja.Use (dependência)." },
+    ]);
+    case "forja_new_mod": return r(`${String(a.dir)}/forja/${String(a.id)}`);
+    case "forja_dev_mods": return r([{ id: "vida-dupla", name: "Vida dupla", path: "C:/CommandProject/forja-dev/forja/vida-dupla", files: ["mod.json", "blueprints.lua", "sim.lua", "ui.lua", "lib/util.lua"] }]);
+    case "forja_read_file": return r(forjaFiles[String(a.file)] ?? "");
+    case "forja_write_file": forjaFiles[String(a.file)] = String(a.text); return r(a.reload ? forjaOv() : null);
+    // ---------------------------------------------------------------- convites (simulados)
+    case "big_match_address": return r("192.168.0.10");
+    case "big_match_invite": return r("CPM1." + btoa(unescape(encodeURIComponent(JSON.stringify({ address: a.address, host: a.name, game: a.spec, mods: [] })))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""));
+    case "big_match_read_invite": {
+      const code = String(a.code).replace(/\s+/g, "");
+      const i = code.indexOf("CPM1.");
+      if (i < 0) throw new Error("isso não é um convite do CommandProject (começa com CPM1.)");
+      const inv = JSON.parse(decodeURIComponent(escape(atob(code.slice(i + 5).replace(/-/g, "+").replace(/_/g, "/")))));
+      return r({ invite: inv, missing: [["cp-trapacas", "Trapaças"]], extra: [] });
+    }
+    case "big_match_match_mods": return r([]);
     default:
       throw new Error(`mock: comando não simulado: ${cmd}`);
   }
@@ -905,4 +931,42 @@ function optDb(): T.OptimizeState {
     largeAddress: true, priority: "normal", noThrottle: false, fpsChoices: [0, 30, 45, 60, 75, 90, 120, 144, 165, 240],
   };
   return optState;
+}
+
+// ------------------------------------------------------------------ Forja simulada
+const forjaFiles: Record<string, string> = {
+  "mod.json": JSON.stringify({ id: "vida-dupla", name: "Vida dupla", version: "1.0.0", loader: ">=1.0.0", options: [] }, null, 2),
+  "blueprints.lua": "-- Roda enquanto o jogo carrega os blueprints\nlocal mult = mod.Option('multiplier', 2)\n\nForja.BP.EachUnit('LAND', function(bp, id)\n    Forja.BP.Scale(bp, 'Defense.MaxHealth', mult)\nend)\nlocal n = #lista\nmod.Log('vida x' .. mult)\n",
+  "sim.lua": "Forja.On('SessionStart', function()\n    mod.Log('começou')\nend)\n",
+  "ui.lua": "local panel = Forja.UI.Panel({ title = mod.Name })\n",
+  "lib/util.lua": "local M = {}\nreturn M\n",
+};
+function forjaOv(): T.ForjaOverview {
+  return {
+    loaderVersion: "1.0.0", key: "F8", keys: ["F8", "F9", "F10"], problems: [], built: null, devDir: "C:/CommandProject/forja-dev",
+    mods: [{ id: "vida-dupla", name: "Vida dupla", version: "1.0.0", libraryId: "vida-dupla", sides: ["blueprints", "sim", "ui"], description: "Dobra a vida das unidades terrestres.", authors: ["Rique"], options: [], values: {}, warnings: [] } as unknown as T.ForjaMod],
+  };
+}
+
+/** Arte do menu simulada (no launcher de verdade vem da instalação do jogo). */
+function mockMenuArt(path: string): string {
+  const cv = document.createElement("canvas");
+  const g = cv.getContext("2d")!;
+  if (path.includes("sc_logo")) {
+    cv.width = 512; cv.height = 128;
+    g.font = "700 64px Roboto, sans-serif"; g.fillStyle = "#e8eef5"; g.fillText("SC2", 10, 92);
+  } else if (path.includes("line")) {
+    cv.width = 512; cv.height = 8;
+    const l = g.createLinearGradient(0, 0, 512, 0);
+    l.addColorStop(0, "rgba(90,170,255,0)"); l.addColorStop(0.5, "rgba(140,200,255,1)"); l.addColorStop(1, "rgba(90,170,255,0)");
+    g.fillStyle = l; g.fillRect(0, 3, 512, 2);
+  } else {
+    cv.width = 512; cv.height = 256;
+    const l = g.createLinearGradient(0, 0, 512, 256);
+    l.addColorStop(0, "#1d4f8a"); l.addColorStop(1, "#06121f");
+    g.fillStyle = l; g.fillRect(0, 0, 512, 256);
+    g.strokeStyle = "rgba(120,190,255,.25)";
+    for (let x = -256; x < 512; x += 18) { g.beginPath(); g.moveTo(x, 256); g.lineTo(x + 256, 0); g.stroke(); }
+  }
+  return cv.toDataURL();
 }
