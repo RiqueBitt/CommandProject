@@ -329,10 +329,8 @@ export interface MatchOptions {
   weatherDynamic?: boolean;
   /** quantidade de chuva ou neve (0,4 a 2; 1 = normal) */
   weatherAmount: number;
-  /** som do clima tocado pelo launcher enquanto o jogo está aberto (só o launcher usa) */
+  /** som do clima dentro do jogo (sons de ambiente do próprio jogo) */
   weatherSound: boolean;
-  /** volume desse som, 0 a 1 */
-  weatherVolume: number;
 }
 export interface BigMatch { map: string; /** lado do mapa (confere o limite de jogadores) */ size?: number; slots: MatchSlot[]; options: MatchOptions; /** partida com amigos pela rede */ net?: MatchNet }
 /** Papel numa partida com amigos: o anfitrião abre a porta, quem entra conecta no endereço do convite. */

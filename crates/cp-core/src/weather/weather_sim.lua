@@ -69,6 +69,19 @@ local CPWeatherThunder = {
 
 -- everything made here stays referenced: an entity the Lua collector frees takes its emitters along
 local CPWeatherPool = { level = 0, cells = {}, spare = {}, view = false, retired = false }
+-- one pool per player (in a match with friends each one sees the weather where they look); the
+-- functions below work on CPWeatherPool, switched to the pool of whoever sent the camera
+local CPWeatherPools = {}
+local CPWeatherFirstPool = CPWeatherPool
+local function CPWeatherPoolFor(source)
+    local key = tostring(source or 0)
+    if not CPWeatherPools[key] then
+        local n = 0
+        for _ in pairs(CPWeatherPools) do n = n + 1 end
+        CPWeatherPools[key] = n == 0 and CPWeatherFirstPool or { level = 0, cells = {}, spare = {}, view = false, retired = false }
+    end
+    return CPWeatherPools[key]
+end
 -- how much of each layer is falling now (0 to 1, the same in every cell), see CPWeatherIntensity
 local CPWeatherShare = { main = 0, extra = 0 }
 
@@ -150,8 +163,13 @@ function CPWeatherReaper()
     while true do
         WaitSeconds(0.5)
         CPWeatherClock = CPWeatherClock + 0.5
-        local r = CPWeatherPool.retired
-        if r and r.t <= CPWeatherClock then CPWeatherFlushRetired() end
+        local keep = CPWeatherPool
+        for _, pool in pairs(CPWeatherPools) do
+            CPWeatherPool = pool
+            local r = CPWeatherPool.retired
+            if r and r.t <= CPWeatherClock then CPWeatherFlushRetired() end
+        end
+        CPWeatherPool = keep
     end
 end
 
@@ -223,6 +241,13 @@ local function CPWeatherFill(cell, i, j, x, z)
     CPWeatherLayers(cell)
 end
 
+-- the cells are shared between the players looking around (the cost stays about the same)
+function CPWeatherCellsPerPool()
+    local n = 0
+    for _ in pairs(CPWeatherPools) do n = n + 1 end
+    return math.max(60, math.floor(CPWeatherMaxCells / math.max(1, n)))
+end
+
 local function CPWeatherCount(x0, z0, x1, z1, s)
     return (math.floor(x1 / s) - math.floor(x0 / s) + 1) * (math.floor(z1 / s) - math.floor(z0 / s) + 1)
 end
@@ -248,7 +273,7 @@ function CPWeatherView(x0, z0, x1, z1)
     -- and never more cells than the pool has
     while level < table.getn(CPWeatherLevels) do
         local s = CPWeatherBase * CPWeatherLevels[level]
-        if CPWeatherCount(math.max(m0, x0 - s), math.max(n0, z0 - s), math.min(m1, x1 + s), math.min(n1, z1 + s), s) <= CPWeatherMaxCells then break end
+        if CPWeatherCount(math.max(m0, x0 - s), math.max(n0, z0 - s), math.min(m1, x1 + s), math.min(n1, z1 + s), s) <= CPWeatherCellsPerPool() then break end
         level = level + 1
     end
     local s = CPWeatherBase * CPWeatherLevels[level]
@@ -296,8 +321,56 @@ function CPWeatherCallback(data)
     if type(data) ~= 'table' then return end
     local x0, z0, x1, z1 = tonumber(data.x0), tonumber(data.z0), tonumber(data.x1), tonumber(data.z1)
     if not (x0 and z0 and x1 and z1) or x1 < x0 or z1 < z0 or x1 - x0 > 100000 or z1 - z0 > 100000 then return end
+    local source = 0
+    if GetCurrentCommandSource then source = GetCurrentCommandSource() or 0 end
+    CPWeatherPool = CPWeatherPoolFor(source)
     local ok, err = pcall(CPWeatherView, x0, z0, x1, z1)
     if not ok then WARN('*CommandProject weather: ' .. tostring(err)) end
+    pcall(CPWeatherAmbient, CPWeatherPool)
+end
+
+---------------------------------------------------------------- sound
+-- The weather's sound comes from the game itself: its ambient events (the wind high above the
+-- map and the sea), the ones of the match's map when it has them (CPWeatherSounds, from the
+-- launcher). Looping 3D sounds on entities that follow each player's camera, a bit above the
+-- ground: the bigger the view (camera higher up) the higher they go. They stop when the changing
+-- weather eases off.
+local function CPWeatherLayersOfSound()
+    local snd = CPWeatherSounds or {}
+    local k = CPWeatherKind
+    if k == 'rain' then return { { snd.water, 0.6 } } end
+    if k == 'storm' then return { { snd.water, 0.45 }, { snd.wind, 0.5 } } end
+    if k == 'fog' then return { { snd.wind, 1.4 } } end
+    -- blizzard and sandstorm: strong wind (two sources close by)
+    return { { snd.wind, 0.35 }, { snd.wind, 0.6 } }
+end
+
+function CPWeatherAmbient(pool)
+    if CPWeatherMuted or not pool.view then return end
+    local v = pool.view
+    local cx, cz = (v[1] + v[3]) / 2, (v[2] + v[4]) / 2
+    local size = math.max(v[3] - v[1], v[4] - v[2])
+    local on = CPWeatherFront(GetGameTimeSeconds and GetGameTimeSeconds() or 0) > 0.25
+    if not pool.sound then
+        pool.sound = {}
+        local Entity = import('/lua/sim/Entity.lua').Entity
+        for i, layer in ipairs(CPWeatherLayersOfSound()) do
+            if layer[1] and layer[1] ~= '' then
+                table.insert(pool.sound, { e = Entity(), event = layer[1], far = layer[2], playing = false })
+            end
+        end
+    end
+    for i, s in ipairs(pool.sound) do
+        local h = GetSurfaceHeight(cx, cz) + 8 + size * s.far * 0.5
+        Warp(s.e, Vector(cx + (i - 1) * size * 0.15, h, cz))
+        if on and not s.playing then
+            s.e:SetAmbientSound(s.event, nil)
+            s.playing = true
+        elseif not on and s.playing then
+            s.e:SetAmbientSound(nil, nil)
+            s.playing = false
+        end
+    end
 end
 
 -- SimCallback 'CPWeather': the game's dispatcher with this one name added in front (the file of
@@ -342,9 +415,20 @@ function CPWeatherBreathe()
         local main, extra = CPWeatherIntensity(t)
         if math.abs(main - CPWeatherShare.main) > 0.01 or math.abs(extra - CPWeatherShare.extra) > 0.01 then
             CPWeatherShare.main, CPWeatherShare.extra = main, extra
-            for _, cell in pairs(CPWeatherPool.cells) do
-                for _, entry in ipairs(cell.fx) do CPWeatherSetRate(entry) end
+            for _, pool in pairs(CPWeatherPools) do
+                for _, cell in pairs(pool.cells) do
+                    for _, entry in ipairs(cell.fx) do CPWeatherSetRate(entry) end
+                end
             end
+            if not next(CPWeatherPools) then
+                for _, cell in pairs(CPWeatherPool.cells) do
+                    for _, entry in ipairs(cell.fx) do CPWeatherSetRate(entry) end
+                end
+            end
+        end
+        -- the sound follows the changing weather
+        if CPWeatherDynamic then
+            for _, pool in pairs(CPWeatherPools) do pcall(CPWeatherAmbient, pool) end
         end
         WaitSeconds(2)
         t = t + 2
@@ -432,6 +516,7 @@ function CPWeatherStart()
     if kind ~= 'rain' and kind ~= 'storm' and kind ~= 'blizzard' and kind ~= 'fog' and kind ~= 'sandstorm' then return end
     CPWeatherKind = kind
     CPWeatherDynamic = ScenarioInfo.Options.CPWeatherDynamic == '1' or ScenarioInfo.Options.CPWeatherDynamic == true
+    CPWeatherMuted = ScenarioInfo.Options.CPWeatherSound == '0' or ScenarioInfo.Options.CPWeatherSound == false
     -- the same on every machine: from the map name
     local name = tostring(ScenarioInfo.name or ScenarioInfo.file or '')
     for i = 1, string.len(name) do CPWeatherSeed = math.mod(CPWeatherSeed * 31 + string.byte(name, i), 6283) end

@@ -22,6 +22,10 @@ math.mod = math.fmod
 function GetGameTimeSeconds() return 0 end
 ScenarioInfo = { name = 'Mapa', Options = { CPWeather = KIND, CPWeatherDynamic = DYNAMIC }, MapData = { PlayableRect = { 0, 0, 1024, 1024 } } }
 made, destroyed, warps, entities, stopped = 0, 0, 0, 0, 0
+ambient = {}
+SOURCE = 1
+function GetCurrentCommandSource() return SOURCE end
+CPWeatherSounds = { wind = 'SC2/SC2/Environments/X/snd_X_Skyhigh', water = 'SC2/SC2/Environments/X/snd_X_Generic_Ocean' }
 bps = {}
 live = {}
 function CreateEmitterAtEntity(e, army, bp)
@@ -61,7 +65,7 @@ WARN = LOG
 callbacks = { DoCallback = function(name, data) game_callback = name end }
 function import(p)
     if string.find(string.lower(p), 'simcallbacks') then return callbacks end
-    return { Entity = function() entities = entities + 1 return { Destroy = function() end } end }
+    return { Entity = function() entities = entities + 1 return { Destroy = function() end, SetAmbientSound = function(self, ev) ambient[ev or 'nil'] = (ambient[ev or 'nil'] or 0) + 1 end } end }
 end
 function CreateResources() end
 threads = {}
@@ -229,6 +233,21 @@ def main():
     check(min(fronts) < 0.2 and max(fronts) > 0.9, f"clima que muda: passa e volta ({min(fronts):.2f} a {max(fronts):.2f})")
     again = world("rain", dynamic=True)
     check([again.eval(f"CPWeatherFront({t})") for t in range(0, 3600, 20)] == fronts, "clima que muda: o mesmo roteiro em todo computador")
+    # som do próprio jogo: vento e mar seguindo a câmera
+    st = world("storm")
+    st.execute("CPWeatherCallback({ x0 = 400, z0 = 400, x1 = 500, z1 = 470 })")
+    check(st.eval("ambient['SC2/SC2/Environments/X/snd_X_Generic_Ocean']") == 1 and st.eval("ambient['SC2/SC2/Environments/X/snd_X_Skyhigh']") == 1,
+          "tempestade: sons de mar e vento do jogo")
+    st.execute("CPWeatherCallback({ x0 = 420, z0 = 400, x1 = 520, z1 = 470 })")
+    check(st.eval("ambient['SC2/SC2/Environments/X/snd_X_Generic_Ocean']") == 1, "o som não recomeça a cada passo da câmera")
+    # partida com amigos: cada jogador com o clima onde olha
+    two = world("rain")
+    two.execute("SOURCE = 1 CPWeatherCallback({ x0 = 100, z0 = 100, x1 = 200, z1 = 170 }) SOURCE = 2 CPWeatherCallback({ x0 = 700, z0 = 700, x1 = 800, z1 = 770 })")
+    check(two.eval("CPWeatherCellsPerPool()") == 90 and two.eval("ambient['SC2/SC2/Environments/X/snd_X_Generic_Ocean']") == 2, "dois jogadores: dois conjuntos, cada um com metade das células")
+    mute = LuaRuntime(unpack_returned_tuples=True)
+    mute.execute(WORLD.replace("KIND", "'rain'").replace("DYNAMIC", "nil").replace("CPWeatherDynamic = nil", "CPWeatherDynamic = nil, CPWeatherSound = '0'") + SIM.replace("local CPWeatherRates = {}\n", RATES))
+    mute.execute("CreateResources() for _, f in ipairs(threads) do pcall(f) end CPWeatherCallback({ x0 = 400, z0 = 400, x1 = 500, z1 = 470 })")
+    check(mute.eval("next(ambient)") is None, "som do clima desligado: nenhum som")
     clear = LuaRuntime(unpack_returned_tuples=True)
     clear.execute(WORLD.replace("KIND", "nil").replace("DYNAMIC", "nil") + SIM)
     clear.execute("CreateResources(); CPWeatherCallback({ x0 = 0, z0 = 0, x1 = 100, z1 = 100 })")

@@ -1405,7 +1405,29 @@ fn patch_sim_with(text: &str, code: &str) -> Result<String> {
 
 /// O código da simulação com a quantidade de partículas por segundo de cada emissor desta partida
 /// (o Lua muda todas juntas com a intensidade do momento, sem trocar emissores de célula em célula).
+/// Sons de ambiente do próprio jogo para o clima (eventos `SC2/SC2/Environments/...`): o vento das
+/// alturas e o mar, de preferência os do mapa da partida; senão os de um mapa do jogo.
+pub fn ambient_sounds(sources: &[PathBuf], scenario: &str) -> (String, String) {
+    const WIND: &str = "SC2/SC2/Environments/SC2_MP_001/snd_SC2_MP_001_Skyhigh";
+    const WATER: &str = "SC2/SC2/Environments/SC2_MP_001/snd_SC2_MP_001_Generic_Ocean";
+    let save = scenario.replace("_scenario.lua", "_save.lua").replace("_Scenario.lua", "_save.lua");
+    let text = mapassets::read_game_file(sources, &save)
+        .or_else(|_| mapassets::read_game_file(sources, &format!("/uncompiled{save}")))
+        .map(|b| latin1(&b))
+        .unwrap_or_default();
+    let events: Vec<&str> = text
+        .match_indices("SC2/SC2/Environments/")
+        .filter_map(|(i, _)| text[i..].split(['\'', '"']).next())
+        .collect();
+    let find = |keys: &[&str]| events.iter().find(|e| keys.iter().any(|k| e.to_ascii_lowercase().contains(k))).map(|e| e.to_string());
+    (find(&["skyhigh"]).unwrap_or_else(|| WIND.into()), find(&["generic_ocean", "_ocean"]).unwrap_or_else(|| WATER.into()))
+}
+
 fn sim_code(emitters: &[Emitter]) -> String {
+    sim_code_with(emitters, &("".into(), "".into()))
+}
+
+fn sim_code_with(emitters: &[Emitter], sounds: &(String, String)) -> String {
     let mut table = String::from("local CPWeatherRates = {\n");
     for e in emitters {
         if let Some((_, rate, _)) = e.curves.iter().find(|(n, _, _)| *n == "EmitRateCurve") {
@@ -1413,6 +1435,8 @@ fn sim_code(emitters: &[Emitter]) -> String {
         }
     }
     table.push_str("}\n");
+    let lua_str = |s: &str| s.replace(['\\', '\''], "");
+    table.push_str(&format!("local CPWeatherSounds = {{ wind = '{}', water = '{}' }}\n", lua_str(&sounds.0), lua_str(&sounds.1)));
     SIM_CODE.replacen("local CPWeatherRates = {}\n", &table, 1)
 }
 
@@ -1429,7 +1453,7 @@ pub fn patch_ui(text: &str) -> Result<String> {
 pub fn build(sources: &[PathBuf], scenario: &str, kind: Kind, amount: f32, dest: &Path) -> Result<PathBuf> {
     let amount = clamp_amount(amount);
     let emitters = emitters(kind, amount);
-    let code = sim_code(&emitters);
+    let code = sim_code_with(&emitters, &ambient_sounds(sources, scenario));
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
     for f in SIM_FILES {
         match game_lua(sources, f) {

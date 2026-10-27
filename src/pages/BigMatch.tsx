@@ -12,7 +12,6 @@ import { shuffleSpawns } from "../lib/matchSpawn";
 import { MAX_PLAYERS, maxPlayersFor, spreadBases } from "../lib/matchLimits";
 import { assignColors, GAME_COLORS, groupOf, type ColorMode } from "../lib/teamColors";
 import type { BigMatch as MatchSpec, MatchMap, MatchOptions, MatchSlot, SlotKind } from "../lib/types";
-import * as weatherAudio from "../lib/weatherAudio";
 
 let mapCache: MatchMap[] | null = null;
 
@@ -63,7 +62,7 @@ const AI_LEVELS = [{ key: "Easy", label: "Fácil" }, { key: "Normal", label: "No
 const DEFAULT_OPTIONS: MatchOptions = {
   victory: "demoralization", unitCap: 500, fog: "explored", speed: "normal", noRush: 0, prebuilt: false, civilians: "enemy",
   restrictions: [], cheats: false, shareUnitCap: false, spawn: "fixed",
-  weather: "", weatherAmount: 1, weatherSound: true, weatherVolume: 0.45,
+  weather: "", weatherAmount: 1, weatherSound: true,
 };
 /** Climas da partida (mod Climas, montado para o mapa escolhido). */
 const WEATHERS: { key: MatchOptions["weather"]; label: string; icon: string; hint: string }[] = [
@@ -241,14 +240,8 @@ export default function BigMatch() {
   const colorOf = (i: number) => GAME_COLORS[colors[i] ?? 0].hex;
 
   const start = async (spec: MatchSpec, label: string) => {
-    const o = spec.options;
-    // o som do clima só pode começar dentro do clique (o navegador exige um gesto)
-    if (o.weather && o.weatherSound) weatherAudio.prime();
     const r = await run("launch", () => api.launchBigMatch(spec), label);
-    if (r) {
-      if (o.weather && o.weatherSound) weatherAudio.start(o.weather, o.weatherVolume ?? 1);
-      await refresh();
-    }
+    if (r) await refresh();
   };
   // a partida como está na tela (cores resolvidas); null enquanto tiver erro
   const spec = useMemo<MatchSpec | null>(() => (map && !error ? { map: map.path, size: map.size[0], slots: slots.map((x, i) => ({ ...x, color: colors[i] })), options } : null), [map, error, slots, colors, options]);
@@ -428,24 +421,14 @@ export default function BigMatch() {
                       <output>{Math.round(options.weatherAmount * 100)}%</output>
                     </label>
                     <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
-                      <label className="row" style={{ gap: 10 }} title={t("O launcher toca o som do clima enquanto o jogo está aberto (o jogo não tem esses sons).")}>
-                        <Switch label={t("Som do clima")} checked={options.weatherSound} onChange={(v) => { setOpt({ weatherSound: v }); if (!v) weatherAudio.stop(1); }} /> {options.weather === "storm" ? t("Som de chuva e vento") : options.weather === "blizzard" || options.weather === "fog" || options.weather === "sandstorm" ? t("Som de vento") : t("Som de chuva")}
+                      <label className="row" style={{ gap: 10 }} title={t("Toca dentro do jogo os sons de ambiente do próprio jogo (vento das alturas e mar), seguindo a sua câmera.")}>
+                        <Switch label={t("Som do clima no jogo")} checked={options.weatherSound} onChange={(v) => setOpt({ weatherSound: v })} /> {t("Som do clima no jogo")}
                       </label>
                       <label className="row" style={{ gap: 10 }} title={t("O clima vai e volta durante a partida: períodos fortes, calmarias e, às vezes, céu limpo. O mesmo roteiro para todos os jogadores.")}>
                         <Switch label={t("Clima que muda")} checked={!!options.weatherDynamic} onChange={(v) => setOpt({ weatherDynamic: v })} /> {t("Clima que muda na partida")}
                       </label>
-                      {options.weatherSound && (
-                        <>
-                          <label className="range grow" style={{ minWidth: 220 }}>
-                            <span>{t("Volume")}</span>
-                            <input type="range" min={0} max={1} step={0.05} value={options.weatherVolume} onChange={(e) => { const v = Number(e.target.value); setOpt({ weatherVolume: v }); weatherAudio.setVolume(v); }} />
-                            <output>{Math.round(options.weatherVolume * 100)}%</output>
-                          </label>
-                          <button type="button" className="btn sm" onClick={() => options.weather && weatherAudio.preview(options.weather, options.weatherVolume)}><Icon name="volume_up" size={16} /> {t("Ouvir")}</button>
-                        </>
-                      )}
                     </div>
-                    <span className="muted small">{t("O clima segue a câmera: chove (ou neva) onde você está olhando, em qualquer zoom, com o mesmo peso no computador. Começa fraco e engrossa no primeiro minuto. Os trovões tocam no jogo, vindos de onde cada raio cai. A primeira partida em cada mapa leva alguns segundos a mais para preparar o chão (e, na primeira vez de cada clima, as unidades).")}</span>
+                    <span className="muted small">{t("O clima segue a câmera: chove (ou neva) onde você está olhando, em qualquer zoom, com o mesmo peso no computador. Começa fraco e engrossa no primeiro minuto. Os sons (vento, mar e trovões) tocam dentro do jogo, com os sons do próprio jogo. A primeira partida em cada mapa leva alguns segundos a mais para preparar o chão (e, na primeira vez de cada clima, as unidades).")}</span>
                   </div>
                 )}
               </section>

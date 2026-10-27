@@ -109,6 +109,8 @@ pub struct MatchOptions {
     pub weather_amount: f32,
     /// o clima vai e volta durante a partida (o mesmo roteiro para todos os jogadores)
     pub weather_dynamic: bool,
+    /// som do clima dentro do jogo (vento e mar do próprio jogo)
+    pub weather_sound: bool,
 }
 
 /// Restrições de unidades do lobby do jogo (`/lua/ui/lobby/restrictedUnitsData.lua`), na ordem da tela.
@@ -133,6 +135,7 @@ impl Default for MatchOptions {
             weather: String::new(),
             weather_amount: 1.0,
             weather_dynamic: false,
+            weather_sound: true,
         }
     }
 }
@@ -254,6 +257,9 @@ pub fn encode(m: &BigMatch) -> Result<String> {
         out.push_str(&format!(";CPWeather={}", kind.key()));
         if o.weather_dynamic {
             out.push_str(";CPWeatherDynamic=1");
+        }
+        if !o.weather_sound {
+            out.push_str(";CPWeatherSound=0");
         }
     }
     for s in &m.slots {
