@@ -23,6 +23,7 @@ const ProjectHost = lazy(() => import("./pages/create/ProjectHost"));
 const Performance = lazy(() => import("./pages/Performance"));
 const Icons = lazy(() => import("./pages/Icons"));
 const BigMatch = lazy(() => import("./pages/BigMatch"));
+const Forja = lazy(() => import("./pages/Forja"));
 
 export default function App() {
   const page = useStore((s) => s.page);
@@ -134,6 +135,13 @@ export default function App() {
           <div className="scroll">
             <Suspense fallback={<div className="page muted">{t("Carregando…")}</div>}>
               <Performance />
+            </Suspense>
+          </div>
+        )}
+        {page === "forja" && (
+          <div className="scroll">
+            <Suspense fallback={<div className="page muted">{t("Carregando…")}</div>}>
+              <Forja />
             </Suspense>
           </div>
         )}

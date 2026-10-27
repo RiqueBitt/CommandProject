@@ -143,6 +143,17 @@ disponível em Sistema → Visual.
     nevados, e o que muda aos poucos é a quantidade de chuva e de neve caindo.
   - O mod é montado para cada mapa e clima com os arquivos do seu jogo e dos mods ligados e fica
     ligado só nessa partida; a primeira vez leva alguns segundos (os modelos, cerca de um minuto).
+- **Forja** (carregador de mods, como o Forge do Minecraft): mods com código Lua que **não editam
+  arquivos do jogo**. Cada mod tem `forja/<id>/` com `mod.json` (versão, dependências, ordem de carga,
+  conflitos e opções) e `sim.lua`, `ui.lua` e `blueprints.lua`. A cada aplicar, o launcher confere
+  dependências e conflitos, ordena os mods e monta o mod `cp-forja` com os arquivos do jogo como
+  ficam com os outros mods ligados, acrescentando o motor da Forja: eventos (início da partida,
+  unidade criada, construída, danificada, morta, capturada), comandos da interface para a simulação e
+  mensagens de volta (sincronizado no multiplayer), painéis e teclas, ajudas para blueprints
+  (`EachUnit`, `Scale`, `Merge`, `Clone`), APIs entre mods (`Export`/`Use`) e opções ajustadas na tela
+  **Forja** do launcher. Cada mod roda isolado: um erro não derruba os outros nem o jogo, e o painel
+  **F8** na partida mostra os mods e os erros. `cp forja new|check|pack|status|option` na linha de
+  comando; guia completo em <https://redesun.gitbook.io/forja/> e exemplo em `examples/forja-exemplo`.
 - **Ação rápida** (`Ctrl+K`): jogar, aplicar, trocar de perfil ou abrir qualquer tela pelo teclado.
 
 **Hub de mods**

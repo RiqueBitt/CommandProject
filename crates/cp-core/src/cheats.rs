@@ -115,6 +115,7 @@ Callbacks.CPAIForget = function(data)
     local ok, m = pcall(import, '/lua/ai/skirmish/system/skirmishaisystem.lua')
     if ok and m and m.CPAIForgetModel then m.CPAIForgetModel() end
 end
+Callbacks.Forja = function(data, units) if _G.Forja and _G.Forja._Command then _G.Forja._Command(data, units) end end
 Callbacks.CPFirstPerson = function(data, units)
     local ok, m = pcall(import, '/lua/simsync.lua')
     if ok and m and m.CPFirstPersonSim then m.CPFirstPersonSim(data, units) end

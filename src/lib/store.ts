@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { api, onProgress } from "./api";
 import type * as T from "./types";
 
-export type Page = "me" | "home" | "library" | "hub" | "multiplayer" | "studio" | "create" | "performance" | "settings" | "files" | "icons" | "bigmatch";
+export type Page = "me" | "home" | "library" | "hub" | "multiplayer" | "studio" | "create" | "performance" | "settings" | "files" | "icons" | "bigmatch" | "forja";
 
 export type AppUpdate = T.AppUpdate;
 

@@ -1,0 +1,25 @@
+{
+  "id": "vida-dupla",
+  "name": "Vida dupla",
+  "version": "1.0.0",
+  "authors": [],
+  "description": "O que o mod faz.",
+  "loader": ">=1.0.0",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "loadAfter": [],
+  "loadBefore": [],
+  "conflicts": [],
+  "options": [
+    {
+      "key": "multiplier",
+      "label": "Multiplicador de vida",
+      "description": "Quanto a vida das unidades terrestres é multiplicada.",
+      "type": "number",
+      "default": 1.5,
+      "min": 1.0,
+      "max": 5.0,
+      "step": 0.5
+    }
+  ]
+}

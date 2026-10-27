@@ -4,6 +4,7 @@
 mod commands;
 mod creator_cmds;
 mod files_cmds;
+mod forja_cmds;
 mod perf_cmds;
 
 use cp_core::hub::HubIndex;
@@ -166,6 +167,12 @@ pub fn run() {
             commands::ui_skin_preview,
             commands::build_ui_skin,
             commands::build_cheats,
+            forja_cmds::forja_overview,
+            forja_cmds::forja_set_option,
+            forja_cmds::forja_reset_options,
+            forja_cmds::forja_set_key,
+            forja_cmds::forja_new_mod,
+            forja_cmds::forja_check,
             commands::build_optimize,
             commands::build_first_person,
             commands::optimize_status,

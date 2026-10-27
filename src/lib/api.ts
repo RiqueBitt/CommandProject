@@ -182,6 +182,13 @@ export const api = {
   aiMemory: () => call<T.AiMemoryReport>("ai_memory"),
   buildAi: (opts: T.AiOptions, enable = true) => call<T.AiInstall>("build_ai", { opts, enable }),
   buildCheats: (opts: T.CheatOptions, enable = true) => call<T.Manifest>("build_cheats", { opts, enable }),
+
+  forjaOverview: () => call<T.ForjaOverview>("forja_overview"),
+  forjaSetOption: (modId: string, key: string, value: unknown) => call<T.ForjaOverview>("forja_set_option", { modId, key, value: value ?? null }),
+  forjaResetOptions: (modId: string) => call<T.ForjaOverview>("forja_reset_options", { modId }),
+  forjaSetKey: (key: string) => call<T.ForjaOverview>("forja_set_key", { key }),
+  forjaNewMod: (dir: string, id: string, name: string) => call<string>("forja_new_mod", { dir, id, name }),
+  forjaCheck: (path: string) => call<T.ForjaCheck>("forja_check", { path }),
   buildFirstPerson: (opts: T.FirstPersonOptions, enable = true) => call<T.Manifest>("build_first_person", { opts, enable }),
   optimizeStatus: () => call<T.OptimizeState>("optimize_status"),
   buildOptimize: (opts: T.OptimizeOptions, enable = true) => call<T.OptimizeState>("build_optimize", { opts, enable }),

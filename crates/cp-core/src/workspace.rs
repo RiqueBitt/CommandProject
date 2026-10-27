@@ -208,6 +208,18 @@ impl Workspace {
 
     pub fn apply_active(&mut self, progress: &mut dyn FnMut(Progress)) -> Result<Plan> {
         self.guard_not_running()?;
+        // a Forja é montada antes: ela entra (ou sai) do perfil conforme os mods dela ligados
+        let mut early = Vec::new();
+        match self.prepare_forja() {
+            Ok(Some(st)) => early.extend(
+                st.problems
+                    .iter()
+                    .filter(|p| p.fatal)
+                    .map(|p| format!("Forja: \"{}\" não carregou: {}", p.mod_id, p.message)),
+            ),
+            Ok(None) => {}
+            Err(e) => early.push(format!("Forja não montada: {e}")),
+        }
         let active = self.profiles.active().clone();
         let lib = &self.library;
         let game = self.game.as_ref().ok_or(Error::GameNotFound)?;
@@ -219,8 +231,82 @@ impl Workspace {
         let mut w = vec![];
         let t = dep.targets(lib, &active, &mut w)?;
         let mut p = dep.apply(&t, Some(&active.id), progress)?;
+        p.warnings.extend(early);
         p.warnings.extend(w);
         Ok(p)
+    }
+
+    /// Os mods ligados no perfil ativo (menos a própria Forja): (id, arquivo), na ordem em que o
+    /// jogo monta os arquivos.
+    fn enabled_archives(&self) -> Result<Vec<(String, PathBuf)>> {
+        let active = self.profiles.active().clone();
+        let mut files: Vec<(String, PathBuf)> = Vec::new();
+        for m in self.mods()? {
+            if m.manifest.id == crate::forja::LOADER_ID || !active.mods.iter().any(|x| x.id == m.manifest.id && x.enabled) {
+                continue;
+            }
+            for f in &m.manifest.files {
+                files.push((m.manifest.id.clone(), m.file_path(&f.name)));
+            }
+        }
+        files.sort_by_key(|(_, p)| p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default());
+        Ok(files)
+    }
+
+    /// Os mods da Forja que estão ligados, sem montar nada (para a tela do launcher).
+    pub fn forja_plan(&self) -> Result<crate::forja::Plan> {
+        let archives: Vec<(String, PathBuf)> = self.enabled_archives()?.into_iter().filter(|(_, p)| has_forja(p)).collect();
+        Ok(crate::forja::plan_for(&archives))
+    }
+
+    /// Forja: monta o mod `cp-forja` (o carregador com o código dos mods da Forja ligados) ou o
+    /// desliga quando não há nenhum. Só remonta quando algo mudou (mods, opções, arquivos do jogo).
+    pub fn prepare_forja(&mut self) -> Result<Option<crate::forja::Status>> {
+        use crate::forja;
+        let archives = self.enabled_archives()?;
+        let with_forja: Vec<(String, PathBuf)> = archives.iter().filter(|(_, p)| has_forja(p)).cloned().collect();
+        let status_path = self.data_dir.join(forja::STATUS_FILE);
+        let active = self.profiles.active().id.clone();
+        if with_forja.is_empty() {
+            if self.profiles.active().mods.iter().any(|m| m.id == forja::LOADER_ID && m.enabled) {
+                self.profiles.set_enabled(&active, forja::LOADER_ID, false)?;
+            }
+            let _ = std::fs::remove_file(&status_path);
+            return Ok(None);
+        }
+        let settings = forja::Settings::load(&self.data_dir);
+        let plan = forja::plan_for(&with_forja);
+        let stock = self.stock_sources()?;
+        let mod_paths: Vec<PathBuf> = archives.iter().map(|(_, p)| p.clone()).collect();
+        let version = forja::build_version(&stock, &mod_paths, &plan, &settings);
+        let installed = self.mods()?.iter().any(|m| m.manifest.id == forja::LOADER_ID && m.manifest.version == version);
+        let saved: Option<forja::Status> = std::fs::read(&status_path).ok().and_then(|b| serde_json::from_slice(&b).ok());
+        if let (true, Some(st)) = (installed, saved) {
+            self.profiles.set_enabled(&active, forja::LOADER_ID, true)?;
+            return Ok(Some(st));
+        }
+        let dir = self.data_dir.join("cache").join("forja");
+        std::fs::create_dir_all(&dir).at(&dir)?;
+        let (archive, status) = forja::build(&stock, &mod_paths, &plan, &settings, &dir.join(forja::ARCHIVE))?;
+        let names: Vec<String> = status.loaded.iter().map(|m| m.name.clone()).collect();
+        let import = ImportOptions {
+            id: Some(forja::LOADER_ID.into()),
+            name: Some("Forja (carregador de mods)".into()),
+            version: Some(version),
+            category: Some(Category::Library),
+            description: Some(format!(
+                "Montado pelo launcher com os mods da Forja ligados ({}). Liga e desliga sozinho.",
+                if names.is_empty() { "nenhum carregou".to_string() } else { names.join(", ") }
+            )),
+            replace: true,
+            move_source: true,
+            ..Default::default()
+        };
+        self.import_mod(&archive, &import, true)?;
+        let _ = std::fs::remove_file(&archive);
+        let json = serde_json::to_vec_pretty(&status).map_err(|e| Error::Other(e.to_string()))?;
+        crate::fsutil::write_atomic(&status_path, &json)?;
+        Ok(Some(status))
     }
 
     pub fn purge(&mut self, progress: &mut dyn FnMut(Progress)) -> Result<Plan> {
@@ -728,6 +814,14 @@ pub fn default_data_dir() -> PathBuf {
     }
 }
 
+/// O `.scd` traz mods da Forja (`forja/<id>/…`)?
+fn has_forja(path: &Path) -> bool {
+    Scd::open(path)
+        .and_then(|mut s| s.entries())
+        .map(|e| e.iter().any(|e| e.key.starts_with("/forja/")))
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -780,3 +874,4 @@ mod tests {
         assert_eq!(m["ucl0103"].team, None);
     }
 }
+

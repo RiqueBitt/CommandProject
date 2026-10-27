@@ -166,6 +166,7 @@ export function Rail() {
         <AreaItem label={t("Modelos")} icon="view_in_ar" active={area("model") || page === "studio"} onClick={() => goCreate("model")} />
         <AreaItem label={t("Ícones")} icon="photo_camera" active={page === "icons"} onClick={() => go("icons")} />
         <AreaItem label={t("Mods")} icon="extension" active={page === "library" || page === "hub"} onClick={() => go("library")} />
+        <AreaItem label={t("Forja")} icon="construction" active={page === "forja"} onClick={() => go("forja")} />
         <AreaItem label={t("Rede")} icon="hub" active={page === "multiplayer"} onClick={() => go("multiplayer")} off={offline} />
         <AreaItem label={t("Sistema")} icon="settings" active={page === "settings" || page === "performance"} onClick={() => go("settings")} badge={appUpdate ? 1 : 0} />
       </div>
@@ -258,6 +259,7 @@ export function CommandPalette() {
       nav("home", t("Perfil ativo"), "sports_esports"),
       nav("library", t("Mods do perfil"), "extension"),
       nav("hub", t("Hub de mods"), "store"),
+      nav("forja", t("Forja: carregador de mods e criar mods"), "construction"),
       nav("bigmatch", t("Partida grande: mais de 8 jogadores, times à vontade"), "groups"),
       nav("multiplayer", t("Multiplayer: salas e chat"), "hub"),
       nav("create", t("Criar: mapas, tropas e modelos 3D"), "add_box"),

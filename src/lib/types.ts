@@ -335,3 +335,40 @@ export interface GameLogReport { finished: boolean; started: boolean; players: n
 /** O jogo fechou com erro: relatório do Windows (.mdmp), mods ligados e o log (partida grande). */
 export interface GameCrash { dump: string | null; mods: [string, string][]; log?: GameLogReport | null; logPath?: string | null }
 export interface MatchMap { path: string; id: string; name: string; armies: string[]; starts: [number, number][]; size: [number, number]; source: string; lobbyRisk: boolean }
+
+// ------------------------------------------------------------------ Forja (carregador de mods)
+export interface ForjaOption {
+  key: string;
+  label: string;
+  description: string;
+  type: "bool" | "number" | "choice" | "text";
+  default: unknown;
+  min?: number;
+  max?: number;
+  step?: number;
+  choices?: { value: string; label: string }[];
+}
+export interface ForjaMod {
+  id: string;
+  name: string;
+  version: string;
+  libraryId: string;
+  sides: string[];
+  description: string;
+  authors: string[];
+  options: ForjaOption[];
+  values: Record<string, unknown>;
+  warnings: string[];
+}
+export interface ForjaProblem { modId: string; message: string; fatal: boolean }
+export interface ForjaStatus { loaderVersion: string; builtAt: string; loaded: ForjaMod[]; problems: ForjaProblem[]; patched: string[] }
+export interface ForjaOverview {
+  loaderVersion: string;
+  key: string;
+  keys: string[];
+  mods: ForjaMod[];
+  problems: ForjaProblem[];
+  built: ForjaStatus | null;
+  devDir: string;
+}
+export interface ForjaCheck { mods: ForjaMod[]; problems: ForjaProblem[] }

@@ -13,6 +13,7 @@ pub mod dds;
 pub mod deploy;
 pub mod enhance;
 pub mod firstperson;
+pub mod forja;
 pub mod error;
 pub mod fsutil;
 pub mod game;

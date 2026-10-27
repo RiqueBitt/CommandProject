@@ -52,6 +52,7 @@ jobs:
           python tools/test_ai_commander.py
           python tools/test_bigmatch.py
           python tools/test_weather.py
+          python tools/test_forja.py
           python tools/test_optimize.py
           python tools/test_firstperson.py
           python tools/test_gamelang.py

@@ -40,6 +40,13 @@ USO: cp <comando> [args]
   4gb [on|off]                modo 4 GB: deixa o jogo (32 bits) usar até 4 GB de memória
   hd [grupos|gerar] [--rapido] lista os grupos de texturas ou gera o mod \"Texturas HD\"
 
+FORJA (carregador de mods):
+  forja new <ID> [NOME] [PASTA]  cria um mod de exemplo em PASTA/forja/<ID>/
+  forja check <PASTA|.scd>       confere um mod (manifesto, arquivos, avisos do código)
+  forja pack <PASTA> [SAÍDA.scd] empacota a pasta do mod num .scd (importe com \"cp import\")
+  forja status                   mods da Forja ligados, ordem de carga e problemas
+  forja option <MOD> <CHAVE> <VALOR>  muda uma opção (valor em JSON: true, 2, \"texto\")
+
 Pasta de dados: $CP_DATA ou o padrão do sistema.";
 
 fn progress(p: Progress) {
@@ -72,6 +79,9 @@ async fn run(args: &[String]) -> cp_core::Result<()> {
     if matches!(cmd, "help" | "-h" | "--help") {
         println!("{HELP}");
         return Ok(());
+    }
+    if cmd == "forja" && matches!(args.get(1).map(String::as_str), Some("new" | "check" | "pack")) {
+        return forja_offline(args);
     }
     let resources = std::env::var_os("CP_RESOURCES").map(PathBuf::from);
     let mut ws = Workspace::open(&default_data_dir(), resources)?;
@@ -265,6 +275,30 @@ async fn run(args: &[String]) -> cp_core::Result<()> {
             };
             print_json(&st);
         }
+        "forja" => match args.get(1).map(String::as_str) {
+            Some("option") => {
+                let (id, key, raw) = (arg(2)?, arg(3)?, arg(4)?);
+                let value: serde_json::Value = serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.into()));
+                let mut s = cp_core::forja::Settings::load(&ws.data_dir);
+                s.mods.entry(id.into()).or_default().insert(key.into(), value);
+                s.save(&ws.data_dir)?;
+                println!("{id}.{key} = {raw} (vale no próximo \"cp apply\")");
+            }
+            _ => {
+                let plan = ws.forja_plan()?;
+                let settings = cp_core::forja::Settings::load(&ws.data_dir);
+                println!("Forja {} — painel na partida: {}", cp_core::forja::LOADER_VERSION, settings.panel_key());
+                for (i, m) in cp_core::forja::describe(&plan, &settings).iter().enumerate() {
+                    println!("  {}. {} {} ({}) [{}]", i + 1, m.id, m.version, m.name, m.sides.join(", "));
+                    for (k, v) in &m.values {
+                        println!("       {k} = {v}");
+                    }
+                }
+                for p in &plan.problems {
+                    println!("  {} {}: {}", if p.fatal { "✗" } else { "!" }, p.mod_id, p.message);
+                }
+            }
+        },
         "hd" => {
             let sources = ws.stock_sources()?;
             if args.get(1).map(String::as_str) != Some("gerar") {
@@ -349,6 +383,62 @@ async fn run(args: &[String]) -> cp_core::Result<()> {
             return Err(cp_core::Error::Other(format!(
                 "comando desconhecido: {other} (veja \"cp help\")"
             )))
+        }
+    }
+    Ok(())
+}
+
+/// `cp forja new|check|pack`: não precisam do jogo nem da biblioteca.
+fn forja_offline(args: &[String]) -> cp_core::Result<()> {
+    use cp_core::forja;
+    let need = |i: usize| {
+        args.get(i)
+            .map(String::as_str)
+            .ok_or_else(|| cp_core::Error::Other(format!("faltou argumento para \"forja {}\"", args[1])))
+    };
+    match args[1].as_str() {
+        "new" => {
+            let id = need(2)?;
+            let name = args.get(3).cloned().unwrap_or_else(|| id.to_string());
+            let dir = args.get(4).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+            let root = forja::scaffold(&dir, id, &name)?;
+            println!("criado: {}", root.display());
+            println!("edite os .lua, depois: cp forja pack {} && cp import {}.scd", dir.display(), id);
+        }
+        "check" => {
+            let p = PathBuf::from(need(2)?);
+            let (mods, errors) = if p.is_dir() { (forja::read_folder(&p)?, Vec::new()) } else { forja::read_archive(&p, "")? };
+            for m in &mods {
+                let ok_loader = cp_core::manifest::version_matches(m.manifest.loader.as_deref(), forja::LOADER_VERSION);
+                println!("{} {} {} [{}]", if ok_loader { "✓" } else { "✗" }, m.manifest.id, m.manifest.version, m.sides().join(", "));
+                if !ok_loader {
+                    println!("    precisa da Forja {} (esta é a {})", m.manifest.loader.as_deref().unwrap_or(""), forja::LOADER_VERSION);
+                }
+                for w in m.lint() {
+                    println!("    aviso: {w}");
+                }
+            }
+            for e in &errors {
+                println!("✗ {e}");
+            }
+            if !errors.is_empty() {
+                return Err(cp_core::Error::Other(format!("{} problema(s)", errors.len())));
+            }
+        }
+        _ => {
+            let dir = PathBuf::from(need(2)?);
+            let mods = forja::read_folder(&dir)?;
+            let out = args
+                .get(3)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(format!("{}.scd", mods[0].manifest.id)));
+            let (path, packed) = forja::pack(&dir, &out)?;
+            println!(
+                "{} ({} mod: {})",
+                path.display(),
+                packed.len(),
+                packed.iter().map(|m| m.manifest.id.as_str()).collect::<Vec<_>>().join(", ")
+            );
         }
     }
     Ok(())
