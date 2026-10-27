@@ -401,7 +401,16 @@ impl Workspace {
         std::fs::create_dir_all(&dir).at(&dir)?;
         let dest = dir.join(ss::ARCHIVE);
         let archive = if settings.enabled {
-            let (archive, w) = ss::build(&scene, &edit, &settings, &stock, &self.data_dir, &dest)?;
+            // os outros menus no mesmo visual (o Menu moderno pintaria por cima em outra cor)
+            if self.profiles.active().mods.iter().any(|m| m.id == "menu-moderno" && m.enabled) {
+                self.profiles.set_enabled(&active, "menu-moderno", false)?;
+                warnings.push("o Menu moderno foi desligado: a Tela inicial nova já pinta todos os menus na cor dela".into());
+            }
+            let others: Vec<(String, Vec<u8>)> = crate::mainmenu::FRONTEND_SCENES
+                .iter()
+                .filter_map(|p| crate::forja::effective_bytes(&stock, &mod_paths, p).map(|d| (p.to_string(), d)))
+                .collect();
+            let (archive, w) = ss::build_all(&scene, &others, &edit, &settings, &stock, &self.data_dir, &dest)?;
             warnings.extend(w);
             archive
         } else {

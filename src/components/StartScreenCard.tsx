@@ -97,7 +97,7 @@ export default function StartScreenCard() {
         <span className="grow" />
         <Switch label={draft.enabled ? t("Desligar") : t("Ligar")} checked={draft.enabled} onChange={(on) => set({ enabled: on })} />
       </div>
-      <p className="muted small">{t("Logo em cima, botões grandes com ícone e borda neon, submenus ao lado, caixa do jogador e notícias. Os botões dos mods da Forja entram no mesmo visual. Só muda a aparência: o jogo e o multijogador continuam iguais.")}</p>
+      <p className="muted small">{t("Logo em cima, botões grandes com ícone e borda neon, submenus ao lado, caixa do jogador e notícias. Os outros menus (criar partida, opções, multijogador, campanha) ganham o mesmo visual e a mesma cor, e os botões dos mods da Forja entram junto. Só muda a aparência: o jogo e o multijogador continuam iguais.")}</p>
       <div className="ss-grid">
         <Preview s={draft} logo={v.logo} />
         <div className="col" style={{ gap: 14 }}>

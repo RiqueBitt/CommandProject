@@ -381,6 +381,26 @@ pub fn build(
     Ok(res)
 }
 
+/// As texturas dos menus com o tema (sem as fontes), para quem monta junto com outras coisas (a
+/// tela inicial nova): (nome dentro do jogo, DDS).
+pub fn themed_textures(sources: &[PathBuf], opts: &ThemeOptions) -> Result<Vec<(String, Vec<u8>)>> {
+    let todo: Vec<Entry> = entries(sources, false)?.into_iter().filter(|e| e.key.ends_with(".dds")).collect();
+    let mut out = Vec::new();
+    let mut open: Option<(PathBuf, Scd)> = None;
+    for batch in todo.chunks(48) {
+        let mut raw = Vec::with_capacity(batch.len());
+        for e in batch {
+            if open.as_ref().map(|(p, _)| p != &e.src).unwrap_or(true) {
+                open = Some((e.src.clone(), Scd::open(&e.src)?));
+            }
+            raw.push((e, open.as_mut().expect("aberto").1.read_at(e.index)?));
+        }
+        let done: Vec<_> = raw.par_iter().filter_map(|(e, data)| theme_dds(&e.key, data, opts).ok().flatten().map(|b| (e.name.clone(), b))).collect();
+        out.extend(done);
+    }
+    Ok(out)
+}
+
 /// Texturas usadas na prévia do menu principal na interface.
 pub const PREVIEW_KEYS: &[&str] = &[
     "blue_overlay.dds",

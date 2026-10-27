@@ -37,8 +37,10 @@ const SIZES: [Option<usize>; 16] = [
     Some(136),
     Some(144),
     Some(164),
+    // 9: vídeo (só um por cena; o tamanho não importa para ler)
     None,
-    None,
+    // 10: caixa de texto editável
+    Some(156),
     None,
     Some(128),
     Some(152),
@@ -239,7 +241,12 @@ impl Scene {
             if n == 0 || p == NONE {
                 continue;
             }
-            let size = size.ok_or_else(|| bad(format!("tipo de elemento {k} desconhecido")))?;
+            // tipo de tamanho desconhecido: com um registro só, dá para ler mesmo assim
+            let size = match size {
+                Some(sz) => *sz,
+                None if n == 1 => 32,
+                None => return Err(bad(format!("tipo de elemento {k} desconhecido"))),
+            };
             if n > 100_000 || p as usize + n * size > self.pl.len() {
                 return Err(bad("tabela fora do conteúdo"));
             }

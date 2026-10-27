@@ -169,7 +169,7 @@ macro_rules! art {
 /// Os desenhos do launcher (nome → PNG).
 const ART: &[(&str, &[u8])] = art![
     "btn_u", "btn_o", "btn_at", "btn_w", "sub_u", "sub_o", "sub_at", "sub_w", "icon_campaign", "icon_skirmish", "icon_multiplayer",
-    "icon_options", "icon_extras", "icon_quit", "icon_mod", "shade", "tint", "panel", "gamertag", "avatar_frame",
+    "icon_options", "icon_extras", "icon_quit", "icon_mod", "shade", "tint", "panel", "gamertag", "avatar_frame", "topbar",
 ];
 
 fn to_dds(img: &Rgba) -> Result<Vec<u8>> {
@@ -267,6 +267,37 @@ pub fn prepare_logo(data: &[u8]) -> Result<Rgba> {
 /// Monta o `.scd` da tela inicial em `dest`. `scene` é a cena de origem (a do jogo ou a de outro
 /// mod), `edit` o que os mods da Forja pedem. Devolve os avisos da montagem.
 pub fn build(scene: &[u8], edit: &MenuEdit, settings: &Settings, stock: &[PathBuf], data_dir: &Path, dest: &Path) -> Result<(PathBuf, Vec<String>)> {
+    build_all(scene, &[], edit, settings, stock, data_dir, dest)
+}
+
+/// Opções do tema dos outros menus (as texturas do jogo pintadas na cor da tela inicial).
+pub fn theme_options(accent: &str) -> crate::menu_theme::ThemeOptions {
+    crate::menu_theme::ThemeOptions {
+        name: "Tela inicial nova".into(),
+        recolor: true,
+        fonts: false,
+        accent: accent.into(),
+        hover: String::new(),
+        bg_darkness: 0.8,
+        bg_tint: 0.12,
+        panel_opacity: 0.92,
+        glow: 0.5,
+        sharpness: 0.5,
+        deblock: 0.5,
+    }
+}
+
+/// Como [`build`], com os outros menus do jogo (caminho, cena de origem) no mesmo visual e as
+/// texturas deles pintadas na cor escolhida.
+pub fn build_all(
+    scene: &[u8],
+    others: &[(String, Vec<u8>)],
+    edit: &MenuEdit,
+    settings: &Settings,
+    stock: &[PathBuf],
+    data_dir: &Path,
+    dest: &Path,
+) -> Result<(PathBuf, Vec<String>)> {
     let accent = crate::menu_theme::parse_hex(&settings.accent).unwrap_or([43, 140, 255]);
     let look = Look::Commander(Commander { news_title: settings.news_title.clone(), news_text: settings.news_text.clone() });
     let logo = if settings.custom_logo {
@@ -291,6 +322,21 @@ pub fn build(scene: &[u8], edit: &MenuEdit, settings: &Settings, stock: &[PathBu
     }
     for (path, data) in &files {
         b.add_bytes(path, data)?;
+    }
+    // os outros menus: cenas no visual novo e as texturas do jogo na cor escolhida
+    for (path, data) in others {
+        match mainmenu::restyle_frontend(data) {
+            Ok(new) => b.add_bytes(path.trim_start_matches('/'), &new)?,
+            Err(e) => built.warnings.push(format!("{}: {e}", path.rsplit('/').next().unwrap_or(path))),
+        }
+    }
+    if !others.is_empty() {
+        let own: std::collections::HashSet<String> = files.iter().map(|(p, _)| p.to_ascii_lowercase()).collect();
+        for (name, data) in crate::menu_theme::themed_textures(stock, &theme_options(&settings.accent))? {
+            if !own.contains(&name.to_ascii_lowercase().replace('\\', "/")) {
+                b.add_bytes(&name, &data)?;
+            }
+        }
     }
     if settings.custom_video {
         let v = Settings::video_path(data_dir);
@@ -375,7 +421,18 @@ fn real_build_when_available() {
         std::fs::copy(logo, Settings::logo_path(&out.join("data"))).unwrap();
         settings.custom_logo = true;
     }
-    let (scd, warnings) = build(&std::fs::read(scene).unwrap(), &MenuEdit::default(), &settings, &stock, &out.join("data"), &out.join(ARCHIVE)).unwrap();
+    // CP_SS_SCENES: pasta com ui/scenes/... extraídos do jogo (os outros menus)
+    let mut others = vec![];
+    if let Ok(dir) = std::env::var("CP_SS_SCENES") {
+        for p in mainmenu::FRONTEND_SCENES {
+            if let Ok(d) = std::fs::read(PathBuf::from(&dir).join(p.trim_start_matches('/'))) {
+                others.push((p.to_string(), d));
+            }
+        }
+    }
+    let mut edit = MenuEdit::default();
+    edit.buttons.push(mainmenu::NewButton { key: "cp:atalho0".into(), label: "MEGA: 4 CONTRA 4".into(), place: mainmenu::Place::Skirmish, native: None, lua: false, code: Some("LOG('atalho')".into()) });
+    let (scd, warnings) = build_all(&std::fs::read(scene).unwrap(), &others, &edit, &settings, &stock, &out.join("data"), &out.join(ARCHIVE)).unwrap();
     assert!(warnings.is_empty(), "{warnings:?}");
     eprintln!("{}", scd.display());
 }

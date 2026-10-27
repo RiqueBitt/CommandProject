@@ -139,7 +139,7 @@ def star(d, s):
     d.polygon(pts, fill=ICON)
     d.polygon([pts[0], (cx, cy), pts[2], pts[1]], fill=ICON_D)
     d.polygon([pts[4], (cx, cy), pts[6], pts[5]], fill=ICON_D)
-    d.ellipse([cx - s * 0.07, cy - s * 0.07, cx + s * 0.07, cy + s * 0.07], fill=RED + (255,))
+    d.ellipse([cx - s * 0.07, cy - s * 0.07, cx + s * 0.07, cy + s * 0.07], fill=(255, 255, 255, 255))
 
 
 def swords(d, s):
@@ -198,7 +198,7 @@ def puzzle(d, s):
     d.rectangle([m, m * 1.4, s - m, s - m], fill=ICON)
     d.ellipse([s * 0.4, m * 0.5, s * 0.6, m * 0.5 + s * 0.2], fill=ICON)
     d.ellipse([s - m - s * 0.1, s * 0.45, s - m + s * 0.1, s * 0.65], fill=ICON)
-    d.rectangle([m, m * 1.4, s - m, m * 1.4 + s * 0.06], fill=RED + (255,))
+    d.rectangle([m, m * 1.4, s - m, m * 1.4 + s * 0.06], fill=ICON_D)
 
 
 def font(size):
@@ -310,6 +310,17 @@ def gamertag():
     done(img, w * 2, h * 2, "gamertag")
 
 
+def topbar():
+    """faixa de cima dos outros menus: escura, some para baixo, com um filete de destaque"""
+    w, h = 64, 128
+    img = Image.new("RGBA", (w, h))
+    d = ImageDraw.Draw(img)
+    for y in range(h):
+        t = y / (h - 1)
+        d.line([(0, y), (w, y)], fill=(6, 7, 10, int(235 * (1 - t) ** 0.8)))
+    img.save(os.path.join(OUT, "topbar.png"), optimize=True)
+
+
 def avatar_frame():
     """moldura reta da foto (a do jogo é inclinada e fica torta na caixa nova)"""
     w = h = 48
@@ -374,4 +385,5 @@ if __name__ == "__main__":
     panel()
     gamertag()
     avatar_frame()
+    topbar()
     print("ok:", sorted(os.listdir(OUT)))

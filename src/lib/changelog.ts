@@ -6,6 +6,14 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.40.0",
+    title: "Todos os menus no estilo novo",
+    items: [
+      { icon: "palette", title: "Menus remasterizados", text: "Criar partida, opções, multijogador, campanha e resumos ganham o visual da Tela inicial nova: tom escuro por cima do vídeo, faixa de cima escura e botões, painéis e listas na cor que você escolher.", page: "features" },
+      { icon: "category", title: "Ícones brancos", text: "Os ícones dos botões da tela inicial ficam todos brancos.", page: "features" },
+    ],
+  },
+  {
     version: "0.39.1",
     title: "Tela inicial nova e botões de mods no menu do jogo",
     items: [

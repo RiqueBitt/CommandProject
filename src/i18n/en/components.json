@@ -599,5 +599,11 @@
  "Monte uma partida na tela Partida grande e use \"Pôr na tela inicial do jogo\".": "Set up a match on the Big match screen and use \"Put on the game's start screen\".",
  "Tirar": "Remove",
  "Partida grande na tela inicial": "Big match on the start screen",
- "Na tela Partida grande, \"Pôr na tela inicial do jogo\" vira um botão no submenu Escaramuça que começa aquela partida direto do jogo.": "On the Big match screen, \"Put on the game's start screen\" becomes a button in the Skirmish submenu that starts that match straight from the game."
+ "Na tela Partida grande, \"Pôr na tela inicial do jogo\" vira um botão no submenu Escaramuça que começa aquela partida direto do jogo.": "On the Big match screen, \"Put on the game's start screen\" becomes a button in the Skirmish submenu that starts that match straight from the game.",
+ "Todos os menus no estilo novo": "Every menu in the new style",
+ "Menus remasterizados": "Remastered menus",
+ "Criar partida, opções, multijogador, campanha e resumos ganham o visual da Tela inicial nova: tom escuro por cima do vídeo, faixa de cima escura e botões, painéis e listas na cor que você escolher.": "Create game, options, multiplayer, campaign and summaries get the New start screen look: a dark tint over the video, a dark top bar and buttons, panels and lists in the color you choose.",
+ "Ícones brancos": "White icons",
+ "Os ícones dos botões da tela inicial ficam todos brancos.": "The start screen button icons are all white.",
+ "Logo em cima, botões grandes com ícone e borda neon, submenus ao lado, caixa do jogador e notícias. Os outros menus (criar partida, opções, multijogador, campanha) ganham o mesmo visual e a mesma cor, e os botões dos mods da Forja entram junto. Só muda a aparência: o jogo e o multijogador continuam iguais.": "Logo on top, large buttons with icons and a neon border, submenus at the side, player box and news. The other menus (create game, options, multiplayer, campaign) get the same look and color, and Forja mod buttons come along. Only the looks change: the game and multiplayer stay the same."
 }

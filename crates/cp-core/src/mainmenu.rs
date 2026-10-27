@@ -645,6 +645,60 @@ fn commander(s: &mut Scene, c: &Commander, column: &[(u32, Option<&str>)]) -> Re
     Ok(())
 }
 
+/// Os outros menus do jogo (cenas) que ganham o visual da tela "Comandante".
+pub const FRONTEND_SCENES: &[&str] = &[
+    "/ui/scenes/frontend_skirmish/pc_frontend_skirmish.win.bdf",
+    "/ui/scenes/frontend_options/pc_frontend_options.win.bdf",
+    "/ui/scenes/frontend_options/pc_frontend_options_videoadv.win.bdf",
+    "/ui/scenes/frontend_options/pc_frontend_options_conlayout.win.bdf",
+    "/ui/scenes/frontend_mp_browser/pc_frontend_mp_browser.win.bdf",
+    "/ui/scenes/frontend_mp_host/pc_frontend_mp_host.win.bdf",
+    "/ui/scenes/frontend_mp_quickmatch/pc_frontend_mp_quickmatch.win.bdf",
+    "/ui/scenes/frontend_ranked/pc_frontend_ranked.win.bdf",
+    "/ui/scenes/frontend_campaign/pc_frontend_campaign.win.bdf",
+    "/ui/scenes/frontend_summary_sp/pc_frontend_summary_sp.win.bdf",
+    "/ui/scenes/frontend_summary_mp/pc_frontend_summary_mp.win.bdf",
+    "/ui/scenes/frontend_manager/pc_frontend_manager.win.bdf",
+];
+
+/// Um menu do jogo no visual "Comandante": a faixa azul vira o tom escuro por cima do vídeo (preso
+/// às bordas da tela, qualquer que seja o tamanho da cena), as linhas soltas somem e a faixa de
+/// cima fica escura. O resto (botões, painéis, listas) muda pelas texturas do tema.
+pub fn restyle_frontend(scene: &[u8]) -> Result<Vec<u8>> {
+    let mut s = Scene::parse(scene)?;
+    let tex = |n: &str| format!("{TEX}{n}.dds");
+    let full = Anchors { left: Some(0), right: Some(0), top: Some(0), bottom: Some(0), ..Default::default() };
+    let has = |s: &Scene, n: &str| s.by_name(n).ok().map(|e| e.id);
+    let black = has(&s, "black_overlay");
+    let blue = has(&s, "blue_overlay");
+    // um elemento da raiz cobrindo a tela (os de dentro de grupos ficam como estão)
+    let root_ids: BTreeSet<u32> = {
+        let all = s.elements()?;
+        let mut kids = BTreeSet::new();
+        for e in &all {
+            kids.extend(s.children(e.id)?);
+        }
+        all.iter().map(|e| e.id).filter(|i| !kids.contains(i)).collect()
+    };
+    let tint_target = black.or(blue);
+    if let Some(id) = tint_target {
+        s.set_str_field(id, 112, &tex("tint"))?;
+        if root_ids.contains(&id) {
+            s.set_anchors(id, full)?;
+        }
+    }
+    if let (Some(_), Some(b)) = (black, blue) {
+        s.set_str_field(b, 112, BLANK)?;
+    }
+    if let Some(id) = has(&s, "temp_lines") {
+        s.set_str_field(id, 112, BLANK)?;
+    }
+    if let Some(id) = has(&s, "top_blue_grad") {
+        s.set_str_field(id, 112, &tex("topbar"))?;
+    }
+    Ok(s.to_bytes())
+}
+
 /// Troca o logo da tela "Comandante" por outra textura (`w`×`h` em pixels), na mesma largura e
 /// com a altura da proporção dela (centrado na faixa do logo).
 pub fn set_logo(scene: &[u8], texture: &str, w: u32, h: u32) -> Result<Vec<u8>> {
