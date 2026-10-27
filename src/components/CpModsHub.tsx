@@ -41,7 +41,7 @@ const ALL_MODS: Entry[] = [
     desc: "Escaramuça com quantos jogadores o mapa tiver (12 contra 12 e mais), 32 cores, todas as opções da escaramuça normal." },
   { ids: ["cp-clima"], name: "Climas", icon: "thunderstorm", page: "bigmatch", isNew: true, auto: "Escolha o clima na tela da Partida grande: o mod é montado para o mapa e liga só nessa partida.", tags: ["Chuva", "Tempestade", "Nevasca"],
     desc: "Chuva, tempestade com raios e trovões ou nevasca na partida grande: gotas e flocos caem no mapa (não na tela), o chão fica molhado ou coberto de neve em qualquer mapa, sem perder FPS." },
-  { ids: ["texturas-hd"], name: "Texturas HD", icon: "hd", page: "studio", tags: ["Visual"],
+  { ids: ["texturas-hd"], name: "Remaster HD", icon: "hd", page: "studio", tags: ["Visual"],
     desc: "Texturas maiores e mais nítidas geradas a partir das do jogo, no tamanho que a memória aguenta." },
   { ids: ["menu-moderno"], name: "Menu moderno", icon: "dashboard_customize", page: "library", tags: ["Visual", "Interface"],
     desc: "Tema novo para os menus do jogo, montado com as imagens do próprio jogo." },

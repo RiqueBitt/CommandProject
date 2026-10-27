@@ -38,7 +38,7 @@ USO: cp <comando> [args]
                               desliga, restaura os presets ou remove tudo
   reshade                     baixa e instala o ReShade oficial no jogo (Windows)
   4gb [on|off]                modo 4 GB: deixa o jogo (32 bits) usar até 4 GB de memória
-  hd [grupos|gerar] [--rapido] lista os grupos de texturas ou gera o mod \"Texturas HD\"
+  hd [grupos|gerar] [--rapido] lista os grupos de texturas ou gera o mod \"Remaster HD\"
 
 FORJA (carregador de mods):
   forja new <ID> [NOME] [PASTA]  cria um mod de exemplo em PASTA/forja/<ID>/

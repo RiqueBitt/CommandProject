@@ -2050,7 +2050,8 @@ pub async fn build_enhance(
             version: Some(cp_core::enhance::GENERATOR_VERSION.into()),
             category: Some(Category::Textures),
             description: Some(format!(
-                "{} texturas ampliadas ({}x, até {} px) e {} com nitidez melhorada, geradas no Estúdio a partir das originais. {:.0} MB → {:.0} MB.{}",
+                "Remaster {:.0}% (cores, contraste e relevo): {} texturas ampliadas ({}x, até {} px) e {} refeitas no mesmo tamanho, geradas no Estúdio a partir das originais. {:.0} MB → {:.0} MB.{}",
+                opts.remaster.clamp(0.0, 1.5) * 100.0,
                 res.upscaled,
                 opts.scale,
                 opts.max_size,

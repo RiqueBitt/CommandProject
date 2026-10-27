@@ -65,7 +65,7 @@ export default function Performance() {
             <div className="card-title"><Icon name="auto_awesome" /><h3>{t("Mais melhorias")}</h3></div>
             <div className="perf-links">
               <button className="perf-link" onClick={() => setOpt(true)}><Icon name="speed" size={26} /><b>{t("Mod de otimização")}</b><span>{t("Limite de FPS (até 240), placa de vídeo dedicada e ajustes do Windows para o jogo. Não remove nada.")}</span></button>
-              <button className="perf-link" onClick={() => go("studio")}><Icon name="hd" size={26} /><b>{t("Texturas HD")}</b><span>{t("Gera um mod com texturas maiores e mais nítidas. Usa mais memória de vídeo.")}</span></button>
+              <button className="perf-link" onClick={() => go("studio")}><Icon name="hd" size={26} /><b>{t("Remaster HD")}</b><span>{t("Gera um mod com texturas maiores, mais nítidas e mais ricas. Usa mais memória de vídeo.")}</span></button>
               <button className="perf-link" onClick={() => go("studio")}><Icon name="auto_fix_high" size={26} /><b>{t("Shaders (ReShade)")}</b><span>{t("Cor e nitidez melhores. Custa um pouco de desempenho; dá para desligar.")}</span></button>
               <button className="perf-link" onClick={() => go("library")}><Icon name="extension" size={26} /><b>{t("Mods ligados ({n})", { n: rep.modsEnabled })}</b><span>{t("Menos mods = carregamento mais rápido e menos chance de conflito.")}</span></button>
             </div>

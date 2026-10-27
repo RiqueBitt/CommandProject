@@ -155,7 +155,7 @@ function Explore() {
   const { go, setStudioTab } = useStore.getState();
   const items: { icon: string; title: string; text: string; tint: string; action: () => void }[] = [
     { icon: "auto_awesome", title: "Shaders", text: t("Nitidez, brilho e cores vivas sem dessincronizar o multiplayer."), tint: "163 230 53", action: () => go("library") },
-    { icon: "hd", title: t("Texturas HD"), text: t("Amplie as texturas do seu jogo com um clique no Estúdio."), tint: "56 189 248", action: () => { setStudioTab("hd"); go("studio"); } },
+    { icon: "hd", title: t("Remaster HD"), text: t("Remaster das texturas do jogo: mais resolução, nitidez, cores e relevo, com um clique no Estúdio."), tint: "56 189 248", action: () => { setStudioTab("hd"); go("studio"); } },
     { icon: "map", title: t("Criar mapas"), text: t("Posicione bases e gere mapas jogáveis com o SC2 Map Toolkit."), tint: "245 184 75", action: () => { setStudioTab("maps"); go("studio"); } },
     { icon: "hub", title: t("Jogar online"), text: t("Salas, chat e perfis de mods iguais para todo mundo."), tint: "167 139 250", action: () => go("multiplayer") },
   ];

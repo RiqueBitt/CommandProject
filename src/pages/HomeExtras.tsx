@@ -153,7 +153,7 @@ export function EnhancementsCard() {
       action: () => go("library"),
     },
     {
-      icon: "hd", title: t("Texturas HD"), on: !!hd?.enabled,
+      icon: "hd", title: t("Remaster HD"), on: !!hd?.enabled,
       value: hd ? (hdOutdated(hd.manifest.version) ? t("Gerar de novo") : hd.enabled ? t("Ativas") : t("Desligadas")) : t("Gerar no Estúdio"),
       action: () => { if (hd && !hdOutdated(hd.manifest.version)) go("library"); else { setStudioTab("hd"); go("studio"); } },
     },

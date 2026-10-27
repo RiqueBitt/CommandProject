@@ -29,7 +29,7 @@ disponível em Sistema → Visual.
   girando sobre uma plataforma luminosa (arraste para girar; troque a unidade ou esconda o modelo). O modelo é lido da sua instalação na
   hora de mostrar: o launcher não copia nem distribui arquivos do jogo. Sem o jogo, aparece um robô
   original do CommandProject.
-- Card de **Aprimoramentos** (Shaders, Texturas HD, memória) com atalhos para cada um.
+- Card de **Aprimoramentos** (Shaders, Remaster HD, memória) com atalhos para cada um.
 
 **Jogar**
 - Encontra o jogo sozinho (bibliotecas da Steam, GOG ou pasta escolhida).
@@ -232,7 +232,7 @@ disponível em Sistema → Visual.
   visual e não dessincroniza o multiplayer. A faixa "Pressione Home para iniciar o tutorial" do ReShade some
   sozinha (o launcher marca o tutorial como visto). Detalhes em [resources/shaders](resources/shaders/README.md).
 
-**Texturas HD (mais resolução e nitidez)**
+**Remaster HD (texturas com mais resolução, nitidez, cor e relevo)**
 - No Estúdio, gera um mod a partir das texturas **originais do seu jogo**: tira os blocos da compressão
   DXT, amplia 2x ou 4x (Lanczos com anti-halo + retroprojeção, que recupera bordas sem inventar
   detalhes) e aplica nitidez adaptativa. Recomprime no mesmo formato, com mipmaps.
@@ -240,6 +240,12 @@ disponível em Sistema → Visual.
   nitidez, tabelas de cor/fontes/cubemaps não mudam, e a interface fica em "só nitidez" (o jogo
   desenha muitas imagens dela no tamanho da própria textura).
 - Calcula antes quanto de memória de vídeo as texturas vão ocupar e ajusta sozinho para caber.
+- **Remaster** (gerador 3.0, ligado por padrão, de 0 a 150%): fiel ao visual do jogo, só mais rico.
+  Contraste local sem halos (o detalhe pintado e o relevo aparecem mais), vivacidade que só reforça
+  cores apagadas (cinzas, metal e cor do time ficam como estão), curva em S leve e mapas de normal com
+  mais profundidade. Cada tipo de superfície tem a sua dose: chão e água, vegetação e objetos do mapa,
+  tropas e prédios, efeitos e interface. Climas e outros mods de textura partem das texturas
+  remasterizadas.
 
 **Criar em abas: mapas, tropas e modelos 3D** ([guia](docs/criacao.md))
 - Cada projeto abre numa **aba própria** (várias ao mesmo tempo), com salvamento automático,

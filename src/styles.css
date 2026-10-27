@@ -1220,3 +1220,10 @@ textarea.pinput { height: auto; padding: 4px 6px; resize: vertical; }
 .forja-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; padding-top: 6px; border-top: 1px solid var(--border); align-items: end; }
 .forja-problems { margin: 6px 0 0; padding-left: 18px; }
 .warn-text { color: var(--warn); }
+
+/* Remaster HD: força por superfície e galeria */
+.hd-mix summary { cursor: pointer; font-weight: 600; font-size: 13px; padding: 6px 0; }
+.hd-mix[open] { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; }
+.hd-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.hd-gallery figure { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.hd-gallery figcaption { font-size: 12px; display: flex; gap: 6px; align-items: baseline; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

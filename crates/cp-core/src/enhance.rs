@@ -27,7 +27,8 @@ use crate::scd::{Scd, ScdBuilder};
 
 /// Versão do gerador gravada no mod. 2.x: não mexe em tabelas de cor/iluminação (volumes 3D)
 /// nem amplia ícones desenhados na tela. Mods 1.x deixavam mapas verdes e ícones gigantes.
-pub const GENERATOR_VERSION: &str = "2.0.0";
+/// 3.x: Remaster (cores mais ricas, contraste local e relevo por tipo de textura) em cima do HD.
+pub const GENERATOR_VERSION: &str = "3.0.0";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -70,18 +71,27 @@ pub struct EnhanceOptions {
     pub sharpness: f32,
     /// Força do desbloqueio DXT (0..1).
     pub deblock: f32,
+    /// Força do Remaster (0 = só HD; 1 = padrão; até 1.5): cores, contraste local e relevo.
+    pub remaster: f32,
+    /// Estilo do Remaster.
+    pub style: Style,
+    /// Força por tipo de superfície (multiplica `remaster`).
+    pub mix: Mix,
     pub quality: Quality,
 }
 
 impl Default for EnhanceOptions {
     fn default() -> Self {
         EnhanceOptions {
-            name: "Texturas HD".into(),
+            name: "Remaster".into(),
             groups: vec![],
             scale: 2,
             max_size: 2048,
             sharpness: 0.6,
             deblock: 0.5,
+            remaster: 1.0,
+            style: Style::Faithful,
+            mix: Mix::default(),
             quality: Quality::Normal,
         }
     }
@@ -342,10 +352,14 @@ pub fn enhance_dds(key: &str, data: &[u8], mode: Mode, opts: &EnhanceOptions) ->
     let mode = effective_mode(key, &info, mode);
     let (tw, th) = target_size(info.width, info.height, mode, opts);
     let upscaled = (tw, th) != (info.width, info.height);
-    if !upscaled && (class != TextureClass::Color || opts.sharpness <= 0.0 && opts.deblock <= 0.0) {
+    let look = look_of(key, class, opts);
+    if !upscaled && look.is_none() && (class != TextureClass::Color || opts.sharpness <= 0.0 && opts.deblock <= 0.0) {
         return Ok(None); // nada a ganhar
     }
-    let out = enhance_image(&img, class, tw, th, info.format, opts);
+    let mut out = enhance_image(&img, class, tw, th, info.format, opts);
+    if let Some(look) = look {
+        apply_look(&mut out, look);
+    }
     let mips = if info.mip_count <= 1 { 1 } else { 0 };
     dds::encode(&out, info.format, mips, opts.quality).map(Some)
 }
@@ -647,6 +661,248 @@ pub fn renormalize(img: &mut Rgba) {
     }
 }
 
+// ------------------------------------------------------------------ Remaster
+
+/// Estilo do Remaster.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Style {
+    /// Fiel ao jogo: as mesmas cores, mais ricas e definidas.
+    #[default]
+    Faithful,
+    /// Mais vivo: cores mais fortes e mais luz.
+    Vivid,
+    /// Cinematográfico: mais contraste, sombras frias e luzes quentes.
+    Cinematic,
+}
+
+/// Força do Remaster por tipo de superfície (1 = padrão, 0 = não mexe, até 2).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Mix {
+    pub ground: f32,
+    pub nature: f32,
+    pub units: f32,
+    pub effects: f32,
+    pub ui: f32,
+}
+
+impl Default for Mix {
+    fn default() -> Self {
+        Mix { ground: 1.0, nature: 1.0, units: 1.0, effects: 1.0, ui: 1.0 }
+    }
+}
+
+/// Tipo de superfície de uma textura pelo caminho (para o Remaster).
+pub fn surface_of(key: &str) -> &'static str {
+    let p = key.to_ascii_lowercase();
+    let has = |t: &[&str]| t.iter().any(|x| p.contains(x));
+    if has(&["/textures/terrain/", "/maps/", "/env/terrain", "/textures/water"]) {
+        "ground"
+    } else if has(&["/env/", "/props/", "tree", "foliage", "grass", "bush", "rock"]) {
+        "nature"
+    } else if has(&["/units/", "/projectiles/", "/meshes/"]) {
+        "units"
+    } else if has(&["/effects/", "/particles/", "/textures/particles/"]) {
+        "effects"
+    } else if has(&["/textures/ui/", "/icons/", "/textures/splats/", "/textures/decals/"]) {
+        "ui"
+    } else {
+        "other"
+    }
+}
+
+/// O "acabamento" do Remaster para uma textura: fiel ao jogo, só mais rico. Cada tipo de superfície
+/// recebe uma dose diferente (o chão ganha mais contraste local, a vegetação mais cor, as unidades
+/// painéis mais definidos, a interface quase nada).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Look {
+    /// Contraste local (realça relevo e detalhe pintado, sem mudar o brilho médio).
+    pub clarity: f32,
+    /// Raio do contraste local, em fração do lado da textura.
+    pub radius: f32,
+    /// Saturação que cresce mais nas cores apagadas (nunca estoura as fortes).
+    pub vibrance: f32,
+    /// Curva em S leve (mais profundidade nos escuros e claros).
+    pub curve: f32,
+    /// Profundidade extra dos mapas de normal (1 = igual).
+    pub depth: f32,
+    /// Tom dividido (estilo cinematográfico): sombras para o frio, luzes para o quente.
+    pub split: f32,
+    /// Luz geral extra (estilo vivo), em fração.
+    pub lift: f32,
+}
+
+/// O acabamento de uma textura pelo caminho e pelo tipo (`None` = só a parte HD).
+pub fn look_of(key: &str, class: TextureClass, opts: &EnhanceOptions) -> Option<Look> {
+    let k = opts.remaster.clamp(0.0, 1.5);
+    if k <= 0.0 || matches!(class, TextureClass::Skip | TextureClass::Data) {
+        return None;
+    }
+    let surface = surface_of(key);
+    let m = &opts.mix;
+    let k = k * match surface {
+        "ground" => m.ground,
+        "nature" => m.nature,
+        "units" => m.units,
+        "effects" => m.effects,
+        "ui" => m.ui,
+        _ => (m.ground + m.units) / 2.0,
+    }
+    .clamp(0.0, 2.0);
+    if k <= 0.0 {
+        return None;
+    }
+    // (clareza, raio, vivacidade, curva, relevo)
+    let (clarity, radius, vibrance, curve, depth) = match surface {
+        "ground" => (0.7, 1.0 / 40.0, 0.24, 0.14, 1.45),
+        "nature" => (0.7, 1.0 / 36.0, 0.3, 0.14, 1.4),
+        "units" => (0.6, 1.0 / 56.0, 0.16, 0.14, 1.35),
+        "effects" => (0.0, 0.0, 0.14, 0.06, 1.0),
+        "ui" => (0.15, 1.0 / 32.0, 0.08, 0.05, 1.0),
+        _ => (0.45, 1.0 / 44.0, 0.14, 0.1, 1.25),
+    };
+    // o estilo muda as doses (o relevo é o mesmo)
+    let (cl, vi, cu, split, lift) = match opts.style {
+        Style::Faithful => (1.0, 1.0, 1.0, 0.0, 0.0),
+        Style::Vivid => (1.0, 1.7, 0.9, 0.0, 0.04),
+        Style::Cinematic => (1.15, 0.75, 1.7, 0.06, 0.0),
+    };
+    let no_tone = matches!(surface, "ui" | "effects");
+    match class {
+        // mapa de normal: só o relevo
+        TextureClass::Normal if depth > 1.001 => {
+            Some(Look { clarity: 0.0, radius, vibrance: 0.0, curve: 0.0, depth: 1.0 + (depth - 1.0) * k, split: 0.0, lift: 0.0 })
+        }
+        // cor: contraste, cores e curva (o relevo é do mapa de normal)
+        TextureClass::Color => Some(Look {
+            clarity: clarity * k * cl,
+            radius,
+            vibrance: vibrance * k * vi,
+            curve: curve * k * cu,
+            depth: 1.0,
+            split: if no_tone { 0.0 } else { split * k },
+            lift: if no_tone { 0.0 } else { lift * k },
+        }),
+        _ => None,
+    }
+}
+
+/// Média de cada pixel numa janela quadrada de raio `r`, emendando nas bordas (texturas do jogo se
+/// repetem lado a lado): duas passadas de soma corrida, O(n) para qualquer raio.
+fn box_blur_wrap(src: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
+    let r = r.min(w / 2).min(h / 2).max(1);
+    let win = (2 * r + 1) as f32;
+    let mut tmp = vec![0f32; w * h];
+    tmp.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        let line = &src[y * w..(y + 1) * w];
+        let mut acc: f32 = (0..=2 * r).map(|i| line[(i + w - r) % w]).sum();
+        for (x, out) in row.iter_mut().enumerate() {
+            *out = acc / win;
+            acc += line[(x + r + 1) % w] - line[(x + w - r) % w];
+        }
+    });
+    let mut out = vec![0f32; w * h];
+    // colunas: em blocos de linhas para usar todos os núcleos
+    let cols: Vec<Vec<f32>> = (0..w)
+        .into_par_iter()
+        .map(|x| {
+            let col: Vec<f32> = (0..h).map(|y| tmp[y * w + x]).collect();
+            let mut acc: f32 = (0..=2 * r).map(|i| col[(i + h - r) % h]).sum();
+            let mut res = vec![0f32; h];
+            for (y, v) in res.iter_mut().enumerate() {
+                *v = acc / win;
+                acc += col[(y + r + 1) % h] - col[(y + h - r) % h];
+            }
+            res
+        })
+        .collect();
+    for (x, col) in cols.into_iter().enumerate() {
+        for (y, v) in col.into_iter().enumerate() {
+            out[y * w + x] = v;
+        }
+    }
+    out
+}
+
+/// Aplica o acabamento do Remaster numa textura já ampliada.
+pub fn apply_look(img: &mut Rgba, look: Look) {
+    let (w, h) = (img.width as usize, img.height as usize);
+    if w < 8 || h < 8 {
+        return;
+    }
+    if look.depth > 1.001 {
+        // mapa de normal: inclinação maior, vetor de volta ao comprimento 1 (DXT5nm fica como está)
+        let n = (w * h) as f32;
+        let mean_r = img.pixels.chunks_exact(4).map(|p| p[0] as f32).sum::<f32>() / n;
+        let var_r = img.pixels.chunks_exact(4).map(|p| (p[0] as f32 - mean_r).powi(2)).sum::<f32>() / n;
+        if var_r < 4.0 {
+            return;
+        }
+        img.pixels.par_chunks_exact_mut(4).for_each(|p| {
+            let x = (p[0] as f32 / 127.5 - 1.0) * look.depth;
+            let y = (p[1] as f32 / 127.5 - 1.0) * look.depth;
+            let z = (p[2] as f32 / 127.5 - 1.0).max(0.05);
+            let len = (x * x + y * y + z * z).sqrt();
+            p[0] = ((x / len + 1.0) * 127.5).round().clamp(0.0, 255.0) as u8;
+            p[1] = ((y / len + 1.0) * 127.5).round().clamp(0.0, 255.0) as u8;
+            p[2] = ((z / len + 1.0) * 127.5).round().clamp(0.0, 255.0) as u8;
+        });
+        return;
+    }
+    let luma: Vec<f32> = img
+        .pixels
+        .chunks_exact(4)
+        .map(|p| (p[0] as f32 * 0.2126 + p[1] as f32 * 0.7152 + p[2] as f32 * 0.0722) / 255.0)
+        .collect();
+    // contraste local em duas escalas: a larga dá volume às formas, a fina define o detalhe
+    let blur = if look.clarity > 0.0 {
+        let r = ((w.min(h) as f32) * look.radius).round().max(2.0) as usize;
+        let fine = (r / 5).max(1);
+        Some((box_blur_wrap(&luma, w, h, r), box_blur_wrap(&luma, w, h, fine)))
+    } else {
+        None
+    };
+    img.pixels.par_chunks_exact_mut(4).enumerate().for_each(|(i, p)| {
+        let l = luma[i];
+        let mut target = l;
+        if let Some((coarse, fine)) = &blur {
+            // contraste local limitado (sem halos) e mais fraco nos extremos (sem estourar)
+            let d = ((l - coarse[i]) * look.clarity).clamp(-0.16, 0.16) + ((l - fine[i]) * look.clarity * 0.8).clamp(-0.08, 0.08);
+            target += d * (1.0 - (2.0 * l - 1.0).powi(2));
+        }
+        if look.curve > 0.0 {
+            let t = target.clamp(0.0, 1.0);
+            let s = t * t * (3.0 - 2.0 * t);
+            target = t + (s - t) * look.curve;
+        }
+        if look.lift > 0.0 {
+            // mais luz nos tons médios (os extremos ficam)
+            target += look.lift * 4.0 * target * (1.0 - target);
+        }
+        let ratio = if l > 1e-3 { target / l } else { 1.0 };
+        let rgb = [p[0] as f32 / 255.0 * ratio, p[1] as f32 / 255.0 * ratio, p[2] as f32 / 255.0 * ratio];
+        let lum = rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+        let (mx, mn) = (rgb[0].max(rgb[1]).max(rgb[2]), rgb[0].min(rgb[1]).min(rgb[2]));
+        let sat = if mx > 1e-3 { (mx - mn) / mx } else { 0.0 };
+        // vivacidade: mais nas cores apagadas, nada nos cinzas puros (metal e cor do time ficam)
+        let vib = look.vibrance * (1.0 - sat) * (sat * 6.0).min(1.0);
+        // tom dividido: sombras puxam para o azul-petróleo, luzes para o âmbar (só onde já há cor)
+        let tint = if look.split > 0.0 {
+            let w = look.split * (sat * 4.0).min(1.0);
+            let shadow = (1.0 - lum * 2.0).max(0.0) * w;
+            let light = (lum * 2.0 - 1.0).max(0.0) * w;
+            [light * 0.5 - shadow * 0.5, light * 0.15 + shadow * 0.1, shadow * 0.6 - light * 0.4]
+        } else {
+            [0.0; 3]
+        };
+        for c in 0..3 {
+            let v = lum + (rgb[c] - lum) * (1.0 + vib) + tint[c] * 0.25;
+            p[c] = (v * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+    });
+}
+
 // ------------------------------------------------------------------ geração do mod
 
 #[derive(Debug, Clone, Serialize)]
@@ -747,7 +1003,11 @@ pub fn preview(key: &str, data: &[u8], mode: Mode, opts: &EnhanceOptions) -> Res
     let after = if class == TextureClass::Skip || mode == Mode::Skip {
         img.clone()
     } else {
-        enhance_image(&img, class, tw, th, info.format, opts)
+        let mut out = enhance_image(&img, class, tw, th, info.format, opts);
+        if let Some(look) = look_of(key, class, opts) {
+            apply_look(&mut out, look);
+        }
+        out
     };
     // original ampliado só com "vizinho mais próximo", para comparar no mesmo tamanho
     let before = if (tw, th) != (img.width, img.height) {
@@ -1009,5 +1269,47 @@ mod tests {
             scd.read("textures/environment/ramp.dds").is_err(),
             "rampas não entram no mod"
         );
+    }
+
+    #[test]
+    fn remaster_styles_and_mix() {
+        let mut o = EnhanceOptions::default();
+        let k = "/textures/terrain/a/grass_d.dds";
+        let base = look_of(k, TextureClass::Color, &o).unwrap();
+        assert!(base.clarity > 0.0 && base.split == 0.0);
+        o.style = Style::Vivid;
+        let vivid = look_of(k, TextureClass::Color, &o).unwrap();
+        assert!(vivid.vibrance > base.vibrance && vivid.lift > 0.0);
+        o.style = Style::Cinematic;
+        let cine = look_of(k, TextureClass::Color, &o).unwrap();
+        assert!(cine.curve > base.curve && cine.split > 0.0);
+        // a interface nunca ganha tom
+        assert_eq!(look_of("/textures/ui/common/x.dds", TextureClass::Color, &o).unwrap().split, 0.0);
+        o.mix.ground = 0.0;
+        assert!(look_of(k, TextureClass::Color, &o).is_none());
+        assert!(look_of("/units/uef/a/a_diffuse.dds", TextureClass::Color, &o).is_some());
+        assert_eq!(surface_of("/env/tropical/props/palm01_albedo.dds"), "nature");
+        // o tom não muda pixels cinzas (metal e cor do time)
+        let mut gray = Rgba { width: 16, height: 16, pixels: [100u8, 100, 100, 255].repeat(256) };
+        apply_look(&mut gray, Look { split: 0.1, ..cine });
+        assert!(gray.pixels.chunks_exact(4).all(|p| p[0] == p[1] && p[1] == p[2]));
+    }
+
+    /// Prévia do Remaster (`CP_REMASTER_SOURCES` = pasta com .scd; `CP_REMASTER_KEYS` = caminhos
+    /// separados por vírgula; `CP_REMASTER_OUT` = pasta das PNG lado a lado).
+    #[test]
+    fn remaster_preview() {
+        let (Some(dir), Some(keys), Some(out)) = (std::env::var_os("CP_REMASTER_SOURCES"), std::env::var("CP_REMASTER_KEYS").ok(), std::env::var_os("CP_REMASTER_OUT")) else { return };
+        let mut sources: Vec<PathBuf> = std::fs::read_dir(dir).unwrap().filter_map(|e| e.ok().map(|e| e.path())).collect();
+        sources.sort();
+        let out = PathBuf::from(out);
+        let opts = EnhanceOptions::default();
+        for key in keys.split(',') {
+            let data = crate::mapassets::read_game_file(&sources, key).unwrap();
+            let (before, after, _, _) = preview(key, &data, Mode::Upscale, &opts).unwrap();
+            let name = key.rsplit('/').next().unwrap().replace(".dds", "");
+            std::fs::write(out.join(format!("{name}_antes.png")), before).unwrap();
+            std::fs::write(out.join(format!("{name}_depois.png")), after).unwrap();
+        }
     }
 }

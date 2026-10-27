@@ -9,7 +9,7 @@ import { Field, hueOf, Icon, Modal, monogram, Tip } from "./ui";
 
 /** Tarefas demoradas: aparecem na barra do topo em qualquer tela, com o progresso. */
 const LONG_TASKS: Record<string, { label: string; page: Page; tab?: string }> = {
-  hd: { label: "Texturas HD", page: "studio", tab: "hd" },
+  hd: { label: "Remaster HD", page: "studio", tab: "hd" },
   theme: { label: "Menu moderno", page: "library" },
   map: { label: "Gerando mapa", page: "studio", tab: "maps" },
   reshade: { label: "Instalando ReShade", page: "library" },

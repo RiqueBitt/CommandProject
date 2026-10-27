@@ -14,7 +14,7 @@ type Tab = "projects" | "explorer" | "hd" | "skin" | "maps";
 const TABS: { id: Tab; label: string; icon: string; hint: string }[] = [
   { id: "projects", label: "Meus projetos", icon: "folder_special", hint: "Lua, texturas e modelos do seu mod" },
   { id: "explorer", label: "Arquivos do jogo", icon: "folder_zip", hint: "Navegue e copie o que quer mudar" },
-  { id: "hd", label: "Texturas HD", icon: "hd", hint: "Mais resolução e nitidez em lote" },
+  { id: "hd", label: "Remaster HD", icon: "hd", hint: "Remaster das texturas: resolução, nitidez, cores e relevo" },
   { id: "skin", label: "Skin de interface", icon: "palette", hint: "Recolore a HUD inteira" },
   { id: "maps", label: "Mapas", icon: "map", hint: "SC2 Map Toolkit" },
 ];

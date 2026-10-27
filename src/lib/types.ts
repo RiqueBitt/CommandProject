@@ -216,7 +216,9 @@ export interface ShaderStatus {
 export type EnhanceMode = "upscale" | "sharpen" | "skip";
 export interface SizeBucket { width: number; height: number; format: string; mipmaps: boolean; skip: boolean; keepSize: boolean; count: number }
 export interface EnhanceGroup { group: string; textures: number; bytes: number; suggested: EnhanceMode; sample: string[]; buckets: SizeBucket[] }
-export interface EnhanceOptions { name: string; groups: { group: string; mode: EnhanceMode }[]; scale: number; maxSize: number; sharpness: number; deblock: number; quality: "fast" | "normal" | "best" }
+export interface EnhanceOptions { name: string; groups: { group: string; mode: EnhanceMode }[]; scale: number; maxSize: number; sharpness: number; deblock: number; remaster: number; style: RemasterStyle; mix: RemasterMix; quality: "fast" | "normal" | "best" }
+export type RemasterStyle = "faithful" | "vivid" | "cinematic";
+export interface RemasterMix { ground: number; nature: number; units: number; effects: number; ui: number }
 export interface EnhancePreview { before: string; after: string; info: DdsInfo; width: number; height: number; class: "color" | "normal" | "data" | "skip" }
 
 export interface LaaStatus { exe: string; is64bit: boolean; enabled: boolean; patchedByUs: boolean; revertedByUpdate: boolean; steamStub: boolean }

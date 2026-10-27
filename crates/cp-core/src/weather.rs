@@ -1552,6 +1552,29 @@ mod tests {
         }
     }
 
+    /// Prévia das texturas do chão molhado (`CP_GAMEDATA`, `CP_WEATHER_OUT`): para cada textura do
+    /// mapa de teste e cada material pedido, a original e a molhada, em PNG e DDS.
+    #[test]
+    fn wet_ground_preview() {
+        let (Some(dir), Some(out)) = (std::env::var_os("CP_GAMEDATA"), std::env::var_os("CP_WEATHER_OUT")) else { return };
+        let out = PathBuf::from(out);
+        let mut sources: Vec<PathBuf> = std::fs::read_dir(dir).unwrap().filter_map(|e| e.ok().map(|e| e.path())).collect();
+        sources.sort();
+        for (path, name, g) in [
+            ("/textures/Terrain/MP_002/sc2_mp_002_grass01_d.dds", "grama_cor", Ground::Grass),
+            ("/textures/Terrain/MP_002/sc2_mp_002_grass01_s.dds", "grama_brilho", Ground::Grass),
+            ("/textures/Terrain/MP_002/sc2_mp_002_earth01_d.dds", "areia_cor", Ground::Sand),
+            ("/textures/Terrain/MP_002/sc2_mp_002_earth01_s.dds", "areia_brilho", Ground::Sand),
+        ] {
+            let (_, orig) = dds::decode(&mapassets::read_game_file(&sources, path).unwrap()).unwrap();
+            std::fs::write(out.join(format!("{name}_original.png")), dds::to_png(&orig).unwrap()).unwrap();
+            let (_, data) = if name.ends_with("cor") { transform(&sources, path, |i| wet_color(i, g)) } else { transform(&sources, path, |i| wet_shine(i, g)) }.unwrap();
+            let (_, wet) = dds::decode(&data).unwrap();
+            std::fs::write(out.join(format!("{name}_molhada.png")), dds::to_png(&wet).unwrap()).unwrap();
+            std::fs::write(out.join(format!("{name}_molhada.dds")), &data).unwrap();
+        }
+    }
+
     /// Mod dos modelos com os arquivos reais (`CP_MODELS_SOURCES` = pasta com os `.scd`, na ordem do
     /// nome; `CP_WEATHER_KIND`; `CP_WEATHER_OUT` = pasta do `.scd`).
     #[test]

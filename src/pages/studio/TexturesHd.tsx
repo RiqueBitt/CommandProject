@@ -4,7 +4,31 @@ import { api } from "../../lib/api";
 import { fmtBytes, load, useStore } from "../../lib/store";
 import { hdOutdated } from "../../lib/hd";
 import { locale, t } from "../../lib/i18n";
-import type { EnhanceGroup, EnhanceMode, EnhanceOptions, EnhancePreview } from "../../lib/types";
+import type { EnhanceGroup, EnhanceMode, EnhanceOptions, EnhancePreview, RemasterMix, RemasterStyle } from "../../lib/types";
+
+const STYLES: { id: RemasterStyle; label: string; text: string }[] = [
+  { id: "faithful", label: "Fiel", text: "As cores do jogo, mais ricas e definidas" },
+  { id: "vivid", label: "Vivo", text: "Cores mais fortes e mais luz" },
+  { id: "cinematic", label: "Cinematográfico", text: "Mais contraste, sombras frias e luzes quentes" },
+];
+const MIX: { id: keyof RemasterMix; label: string; icon: string }[] = [
+  { id: "ground", label: "Chão e água", icon: "landscape" },
+  { id: "nature", label: "Vegetação e objetos", icon: "park" },
+  { id: "units", label: "Tropas e prédios", icon: "smart_toy" },
+  { id: "effects", label: "Efeitos", icon: "local_fire_department" },
+  { id: "ui", label: "Interface", icon: "web" },
+];
+/** Mesma regra de `enhance::surface_of` (para escolher as texturas da galeria). */
+export function surfaceOf(path: string): keyof RemasterMix | "other" {
+  const p = path.toLowerCase().replace(/\\/g, "/");
+  const has = (l: string[]) => l.some((x) => p.includes(x));
+  if (has(["textures/terrain/", "maps/", "env/terrain", "textures/water"])) return "ground";
+  if (has(["env/", "props/", "tree", "foliage", "grass", "bush", "rock"])) return "nature";
+  if (has(["units/", "projectiles/", "meshes/"])) return "units";
+  if (has(["effects/", "particles/"])) return "effects";
+  if (has(["textures/ui/", "/icons/", "textures/splats/", "textures/decals/"])) return "ui";
+  return "other";
+}
 
 const MODE_LABEL: Record<EnhanceMode, string> = { upscale: "Ampliar + nitidez", sharpen: "Só nitidez", skip: "Não mexer" };
 const CLASS_LABEL: Record<EnhancePreview["class"], string> = {
@@ -63,7 +87,8 @@ export default function TexturesHd() {
   const hdMod = useStore((s) => s.mods.find((m) => m.manifest.id === "texturas-hd"));
   const [groups, setGroups] = useState<EnhanceGroup[] | null>(null);
   const [modes, setModes] = useState<Record<string, EnhanceMode>>({});
-  const [opts, setOpts] = useState<Omit<EnhanceOptions, "groups">>(() => ({ name: t("Texturas HD"), scale: 2, maxSize: 2048, sharpness: 0.6, deblock: 0.5, quality: "normal" }));
+  const [opts, setOpts] = useState<Omit<EnhanceOptions, "groups">>(() => ({ name: t("Remaster HD"), scale: 2, maxSize: 2048, sharpness: 0.6, deblock: 0.5, remaster: 1, style: "faithful", mix: { ground: 1, nature: 1, units: 1, effects: 1, ui: 1 }, quality: "normal" }));
+  const [gallery, setGallery] = useState<{ key: string; surface: string; p: EnhancePreview }[] | null>(null);
   const [sample, setSample] = useState<string | null>(null);
   const [preview, setPreview] = useState<EnhancePreview | null>(null);
   const [limitMb, setLimitMb] = useState(4096);
@@ -121,13 +146,14 @@ export default function TexturesHd() {
     <div className="col" style={{ gap: 16 }}>
       {hdOutdated(hdMod?.manifest.version) && (
         <Notice kind="warn">
-          {t("Suas Texturas HD foram geradas por uma versão antiga, que deixava alguns mapas verdes e os ícones de massa gigantes.")}
-          {" "}{t("Clique em")} <b>{t("Gerar Texturas HD")}</b> {t("de novo para substituir.")}
+          {t("Suas Texturas HD foram geradas por uma versão antiga, sem o Remaster (cores mais ricas, contraste e relevo).")}
+          {" "}{t("Clique em")} <b>{t("Gerar Remaster HD")}</b> {t("de novo para substituir.")}
         </Notice>
       )}
       <Notice kind="info">
         {t("Lê as texturas")} <b>{t("originais")}</b> {t("do seu jogo, aumenta a resolução e recupera nitidez, sem inventar detalhes falsos, e gera um mod que você liga e desliga na biblioteca.")}
         {" "}{t("É só visual:")} <b>{t("não dessincroniza o multiplayer")}</b>. {t("Ícones, marcadores e a interface nunca são ampliados (o jogo desenha no tamanho da própria textura), e tabelas de cor e iluminação dos mapas ficam intactas.")}
+        {" "}{t("O Remaster também deixa as cores mais ricas, o detalhe mais definido e o relevo mais marcado, sem mudar o estilo do jogo, com uma dose diferente para chão, vegetação, tropas, prédios, efeitos e interface.")}
       </Notice>
 
       <div className="grid-2" style={{ gridTemplateColumns: "minmax(340px, 440px) 1fr", alignItems: "start" }}>
@@ -147,6 +173,22 @@ export default function TexturesHd() {
           </div>
           <label className="range" style={{ gridTemplateColumns: "110px 1fr 44px" }}><span>{t("Nitidez")}</span><input type="range" min={0} max={1.5} step={0.05} value={opts.sharpness} onChange={(e) => set("sharpness", Number(e.target.value))} /><output>{Math.round(opts.sharpness * 100)}%</output></label>
           <label className="range" style={{ gridTemplateColumns: "110px 1fr 44px" }}><span>{t("Tirar blocos DXT")}</span><input type="range" min={0} max={1} step={0.05} value={opts.deblock} onChange={(e) => set("deblock", Number(e.target.value))} /><output>{Math.round(opts.deblock * 100)}%</output></label>
+          <label className="range" style={{ gridTemplateColumns: "110px 1fr 44px" }} title={t("Cores mais ricas, contraste local e relevo, diferente para chão, vegetação, tropas, prédios, efeitos e interface. 0% = só ampliação e nitidez.")}><span>{t("Remaster")}</span><input type="range" min={0} max={1.5} step={0.05} value={opts.remaster} onChange={(e) => set("remaster", Number(e.target.value))} /><output>{Math.round(opts.remaster * 100)}%</output></label>
+          <Field label={t("Estilo do Remaster")}>
+            <div className="seg" role="group" aria-label={t("Estilo do Remaster")}>
+              {STYLES.map((s) => <button key={s.id} className="btn" title={t(s.text)} aria-pressed={opts.style === s.id} onClick={() => set("style", s.id)}>{t(s.label)}</button>)}
+            </div>
+          </Field>
+          <details className="hd-mix">
+            <summary>{t("Força por tipo de superfície")}</summary>
+            {MIX.map((m) => (
+              <label key={m.id} className="range" style={{ gridTemplateColumns: "150px 1fr 44px" }}>
+                <span><Icon name={m.icon} size={15} /> {t(m.label)}</span>
+                <input type="range" min={0} max={2} step={0.05} value={opts.mix[m.id]} onChange={(e) => set("mix", { ...opts.mix, [m.id]: Number(e.target.value) })} />
+                <output>{Math.round(opts.mix[m.id] * 100)}%</output>
+              </label>
+            ))}
+          </details>
           <Field label={t("Qualidade da compressão")} hint={t("Normal: melhor resultado. Rápida: cerca de 10x mais rápida, com um pouco mais de artefatos.")}>
             <div className="seg" role="group" aria-label={t("Qualidade")}>
               {(["fast", "normal", "best"] as const).map((q) => <button key={q} className="btn" aria-pressed={opts.quality === q} onClick={() => set("quality", q)}>{q === "fast" ? t("Rápida") : q === "normal" ? t("Normal") : t("Máxima")}</button>)}
@@ -192,7 +234,7 @@ export default function TexturesHd() {
             <button className="btn primary" disabled={!totals.count || !opts.name.trim()} onClick={async () => {
               const m = await run("hd", () => api.buildEnhance(full, true), (mm) => t('"{name}" gerado e ativado na biblioteca.', { name: mm.name }));
               if (m) await refreshMods();
-            }}><Icon name="hd" /> {t("Gerar Texturas HD")}</button>
+            }}><Icon name="hd" /> {t("Gerar Remaster HD")}</button>
           )}
           <p className="faint small">{t("Pode levar de alguns minutos a meia hora, conforme o PC e as pastas escolhidas. Os arquivos originais do jogo não são alterados.")}</p>
         </section>
@@ -206,7 +248,7 @@ export default function TexturesHd() {
           </div>
           {preview ? (
             <>
-              <Compare before={preview.before} after={preview.after} beforeLabel={t("Original")} afterLabel={t("Texturas HD")} pixelated ratio={`${preview.width} / ${preview.height}`} />
+              <Compare before={preview.before} after={preview.after} beforeLabel={t("Original")} afterLabel={t("Remaster HD")} pixelated ratio={`${preview.width} / ${preview.height}`} />
               <div className="chips">
                 <span className="chip">{preview.info.width}×{preview.info.height} {preview.info.format.toUpperCase()}</span>
                 <Icon name="arrow_forward" size={16} />
@@ -216,6 +258,35 @@ export default function TexturesHd() {
               <p className="faint small">{t("Arraste a divisória. O lado original foi ampliado sem filtro, para comparar no mesmo tamanho.")}</p>
             </>
           ) : <div className="bar indeterminate"><i /></div>}
+          <div className="section-title" style={{ marginTop: 12 }}>
+            <h2>{t("Galeria")}</h2>
+            <button className="btn sm" onClick={async () => {
+              // uma textura de cada tipo de superfície, com as opções de agora
+              const picks: { key: string; surface: string }[] = [];
+              for (const s of MIX.map((m) => m.id as string)) {
+                const key = groups.flatMap((g) => g.sample).find((k) => surfaceOf(k) === s);
+                if (key) picks.push({ key, surface: s });
+              }
+              setGallery([]);
+              const out: { key: string; surface: string; p: EnhancePreview }[] = [];
+              for (const pk of picks) {
+                const g = groups.find((x) => x.sample.includes(pk.key));
+                try { out.push({ ...pk, p: await api.enhancePreview(pk.key, g ? modes[g.group] ?? g.suggested : "upscale", full) }); } catch { /* sem prévia desta */ }
+                setGallery([...out]);
+              }
+            }}><Icon name="collections" /> {gallery ? t("Atualizar galeria") : t("Ver galeria")}</button>
+          </div>
+          {gallery && (
+            <div className="hd-gallery">
+              {gallery.map((g) => (
+                <figure key={g.key}>
+                  <Compare before={g.p.before} after={g.p.after} beforeLabel={t("Original")} afterLabel={t("Remaster HD")} ratio="1 / 1" />
+                  <figcaption><b>{t(MIX.find((m) => m.id === g.surface)?.label ?? g.surface)}</b> <span className="faint mono">{g.key.split(/[\\/]/).pop()}</span></figcaption>
+                </figure>
+              ))}
+              {gallery.length === 0 && <div className="bar indeterminate"><i /></div>}
+            </div>
+          )}
         </section>
       </div>
     </div>
