@@ -29,6 +29,7 @@ export default function Hub() {
   const [cats, setCats] = useState<Category[]>([]);
   const [sort, setSort] = useState<Sort>("downloads");
   const [onlyNew, setOnlyNew] = useState(false);
+  const [onlyForja, setOnlyForja] = useState(false);
   const [open, setOpen] = useState<Item | null>(null);
   const [slide, setSlide] = useState(0);
 
@@ -56,6 +57,7 @@ export default function Hub() {
       .filter((i) => source === "all" || i.index.sourceUrl === source)
       .filter((i) => !cats.length || cats.includes(i.mod.category))
       .filter((i) => !onlyNew || !installed.has(i.mod.id))
+      .filter((i) => !onlyForja || isForja(i.mod))
       .filter((i) => !q || [i.mod.name, i.mod.summary, ...i.mod.tags, ...i.mod.authors].some((s) => s.toLowerCase().includes(q)));
     const by: Record<Sort, (a: Item, b: Item) => number> = {
       downloads: (a, b) => b.mod.downloads - a.mod.downloads,
@@ -65,12 +67,33 @@ export default function Hub() {
     };
     return list.sort(by[sort]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [indexes, query, source, cats, sort, onlyNew, mods]);
+  }, [indexes, query, source, cats, sort, onlyNew, onlyForja, mods]);
   const trending = [...all].sort((a, b) => b.mod.downloads - a.mod.downloads).slice(0, 5);
   const catList = Array.from(new Set(all.map((i) => i.mod.category)));
 
   const install = async (i: Item, version?: string) => {
+    // dependências que faltam (de qualquer índice): instaladas antes, na ordem certa
+    const order: Item[] = [];
+    const missing: string[] = [];
+    const seen = new Set<string>();
+    const walk = (it: Item, ver?: string) => {
+      if (seen.has(it.mod.id)) return;
+      seen.add(it.mod.id);
+      const v = it.mod.versions.find((x) => x.version === ver) ?? latestOf(it.mod);
+      for (const d of v.dependencies) {
+        if (installed.has(d.id) || seen.has(d.id)) continue;
+        const dep = all.find((x) => x.mod.id === d.id);
+        if (dep) walk(dep); else missing.push(d.id);
+      }
+      if (it !== i) order.push(it);
+    };
+    walk(i, version);
+    for (const dep of order) {
+      const ok = await run("hub:" + i.mod.id, () => api.hubInstall(dep.index.sourceUrl, dep.mod.id), (m) => t("Dependência {name} {version} instalada.", { name: m.name, version: m.version }));
+      if (!ok) return;
+    }
     await run("hub:" + i.mod.id, () => api.hubInstall(i.index.sourceUrl, i.mod.id, version), (m) => t("{name} {version} instalado e ativado.", { name: m.name, version: m.version }));
+    if (missing.length) useStore.getState().toast("error", t("Não achei no hub: {list}. Instale à mão para o mod funcionar.", { list: missing.join(", ") }));
     await refreshMods();
   };
 
@@ -128,6 +151,7 @@ export default function Hub() {
         </div>
         <div className="card pad">
           <label className="row small" style={{ justifyContent: "space-between" }}>{t("Só o que eu não tenho")} <input type="checkbox" checked={onlyNew} onChange={(e) => setOnlyNew(e.target.checked)} /></label>
+          <label className="row small" style={{ justifyContent: "space-between", marginTop: 8 }} title={t("Mods feitos com a Forja: funcionam juntos, com opções no launcher.")}>{t("Só mods da Forja")} <input type="checkbox" checked={onlyForja} onChange={(e) => setOnlyForja(e.target.checked)} /></label>
         </div>
         <button className="btn text" onClick={load} disabled={loading}><Icon name="refresh" /> {loading ? t("Atualizando…") : t("Atualizar lista")}</button>
       </aside>
@@ -181,6 +205,7 @@ export default function Hub() {
                         <div className="chips">
                           <span className="chip dark"><Icon name="dns" /> {i.index.name}</span>
                           <span className="chip dark"><Icon name="sell" /> {latest.version}</span>
+                          {isForja(i.mod) && <span className="chip dark forja-badge" title={t("Mod da Forja")}><Icon name="construction" /> Forja</span>}
                         </div>
                       </div>
                       <div className="body">
@@ -211,6 +236,11 @@ export default function Hub() {
       {open && <HubDrawer item={open} installedVersion={installed.get(open.mod.id)?.manifest.version} onInstall={(v) => install(open, v)} onClose={() => setOpen(null)} />}
     </>
   );
+}
+
+/** Mod feito com a Forja (o índice marca com a tag "forja"). */
+function isForja(mod: { tags: string[] }) {
+  return mod.tags.some((x) => x.toLowerCase() === "forja");
 }
 
 function banner(name: string) {
@@ -254,7 +284,7 @@ function HubDrawer({ item, installedVersion, onInstall, onClose }: { item: Item;
         <span>{t("Download: {size}", { size: fmtBytes(v.package.size) })}</span>
         <span>{v.multiplayer === "sync" ? t("No multiplayer, todos precisam ter este mod.") : t("Só visual: não interfere na partida dos outros.")}</span>
         {v.requiresDlc && <span>{t("Requer o DLC Infinite War Battle Pack.")}</span>}
-        {v.dependencies.length > 0 && <span>{t("Precisa de: {list}", { list: v.dependencies.map((d) => d.id).join(", ") })}</span>}
+        {v.dependencies.length > 0 && <span>{t("Precisa de: {list} (instalados junto)", { list: v.dependencies.map((d) => d.id).join(", ") })}</span>}
         {v.conflicts.length > 0 && <span>{t("Não combina com: {list}", { list: v.conflicts.join(", ") })}</span>}
         <span className="mono faint selectable">sha256 {v.package.sha256}</span>
       </div>

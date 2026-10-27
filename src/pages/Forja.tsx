@@ -1,12 +1,14 @@
 // Forja: o carregador de mods do CommandProject (como o Forge do Minecraft). Mostra os mods da Forja
 // ligados no perfil, a ordem de carga, quem não vai carregar e por quê, as opções de cada mod e as
 // ferramentas para quem cria mods (criar um mod de exemplo, conferir, importar e o guia).
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Empty, Icon, Modal, Notice, Switch } from "../components/ui";
 import { api, openUrl, pickFile } from "../lib/api";
 import { errorText, useStore } from "../lib/store";
 import { t } from "../lib/i18n";
 import type { ForjaCheck, ForjaMod, ForjaOption, ForjaOverview } from "../lib/types";
+
+const ForjaEditor = lazy(() => import("./forja/ForjaEditor"));
 
 export const FORJA_WIKI = "https://commandproject.gitbook.io/forja/";
 
@@ -20,6 +22,7 @@ export default function Forja() {
   const { toast, run, refresh, go } = useStore.getState();
   const [ov, setOv] = useState<ForjaOverview | null | undefined>(undefined);
   const [creating, setCreating] = useState(false);
+  const [editorKey, setEditorKey] = useState(0);
   const [check, setCheck] = useState<{ path: string; report: ForjaCheck } | null>(null);
 
   const reload = async () => {
@@ -121,10 +124,18 @@ export default function Forja() {
         </>
       )}
 
-      {creating && <CreateModal devDir={ov?.devDir ?? ""} onClose={() => setCreating(false)} onDone={async (path) => {
+      {ov && (
+        <Suspense fallback={null}>
+          <ForjaEditor key={editorKey} devDir={ov.devDir} refreshKey={editorKey} onReloaded={(o) => { setOv(o); void refresh(); }} />
+        </Suspense>
+      )}
+
+      {creating && <CreateModal devDir={ov?.devDir ?? ""} onClose={() => setCreating(false)} onDone={async (path, dir, id) => {
         setCreating(false);
-        toast("ok", t("Mod criado em {path}. Edite os arquivos .lua e importe a pasta.", { path }));
-        await api.openPath(path).catch(() => {});
+        // o editor abre no mod novo
+        try { localStorage.setItem("cp-forja-editor-dir", dir); localStorage.setItem("cp-forja-editor-mod", id); } catch { /* ok */ }
+        setEditorKey((k) => k + 1);
+        toast("ok", t("Mod criado em {path}. Edite no Editor de mods abaixo: ao salvar, ele já entra no jogo.", { path }));
       }} />}
       {check && (
         <Modal title={t("Conferência do mod")} icon="fact_check" onClose={() => setCheck(null)}>
@@ -202,20 +213,34 @@ function OptionField({ opt, value, onChange }: { opt: ForjaOption; value: unknow
   );
 }
 
-function CreateModal({ devDir, onClose, onDone }: { devDir: string; onClose: () => void; onDone: (path: string) => void }) {
+function CreateModal({ devDir, onClose, onDone }: { devDir: string; onClose: () => void; onDone: (path: string, dir: string, id: string) => void }) {
   const toast = useStore((s) => s.toast);
   const [name, setName] = useState("");
+  const [templates, setTemplates] = useState<{ key: string; name: string; description: string }[]>([]);
+  const [template, setTemplate] = useState("completo");
+  useEffect(() => { void api.forjaTemplates().then(setTemplates).catch(() => undefined); }, []);
   const [dir, setDir] = useState(devDir);
   const id = name.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
   return (
     <Modal title={t("Criar um mod da Forja")} icon="add" onClose={onClose}>
       <form className="col" onSubmit={async (e) => {
         e.preventDefault();
-        try { onDone(await api.forjaNewMod(dir, id, name.trim())); } catch (err) { toast("error", errorText(err)); }
+        try { onDone(await api.forjaNewMod(dir, id, name.trim(), template), dir, id); } catch (err) { toast("error", errorText(err)); }
       }}>
         <p className="muted small">{t("Cria a pasta forja/<id>/ com mod.json, sim.lua, ui.lua, blueprints.lua e um arquivo de biblioteca, todos comentados. Edite, importe a pasta e jogue.")}</p>
         <label className="field"><span className="label">{t("Nome do mod")}</span><input className="input" autoFocus value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder={t("Vida dupla")} /></label>
         <p className="faint small">{t("Id: {id}", { id: id || "—" })}</p>
+        {templates.length > 0 && (
+          <div className="field"><span className="label">{t("Modelo")}</span>
+            <div className="forja-templates" role="radiogroup" aria-label={t("Modelo")}>
+              {templates.map((tp) => (
+                <button key={tp.key} type="button" role="radio" aria-checked={template === tp.key} className={`forja-template ${template === tp.key ? "on" : ""}`} onClick={() => setTemplate(tp.key)}>
+                  <b>{t(tp.name)}</b><span className="small muted">{t(tp.description)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <label className="field"><span className="label">{t("Pasta")}</span>
           <div className="row gap"><input className="input grow" value={dir} onChange={(e) => setDir(e.target.value)} />
             <button type="button" className="btn sm" onClick={async () => { const p = await pickFile([], true); if (p) setDir(p); }}>{t("Escolher")}</button></div>

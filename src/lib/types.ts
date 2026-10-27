@@ -380,3 +380,6 @@ export interface ForjaOverview {
   devDir: string;
 }
 export interface ForjaCheck { mods: ForjaMod[]; problems: ForjaProblem[] }
+
+/** Mod da Forja em desenvolvimento (pasta forja/<id>/ editada no launcher). */
+export interface ForjaDevMod { id: string; name: string; path: string; files: string[] }

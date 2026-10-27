@@ -1236,3 +1236,20 @@ textarea.pinput { height: auto; padding: 4px 6px; resize: vertical; }
 .hd-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .hd-gallery figure { margin: 0; display: flex; flex-direction: column; gap: 6px; }
 .hd-gallery figcaption { font-size: 12px; display: flex; gap: 6px; align-items: baseline; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* Forja: modelos de mod e editor */
+.forja-templates { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.forja-template { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2, transparent); color: inherit; cursor: pointer; }
+.forja-template.on { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary) inset; background: rgba(var(--primary-rgb), .08); }
+.forja-editor-body { display: grid; grid-template-columns: 220px 1fr; gap: 12px; min-height: 420px; }
+.forja-files { display: flex; flex-direction: column; gap: 2px; }
+.forja-files .select { margin-bottom: 6px; }
+.forja-file { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; border: 0; background: none; color: var(--muted); font: 12.5px/1.2 ui-monospace, Consolas, monospace; cursor: pointer; text-align: left; }
+.forja-file:hover { background: rgba(255, 255, 255, .04); color: var(--text); }
+.forja-file.on { background: rgba(var(--primary-rgb), .12); color: var(--text); }
+.forja-code { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.forja-code-bar { gap: 8px; align-items: center; }
+.forja-code-host { height: 460px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+.forja-code-host .cm-host { height: 100%; }
+@media (max-width: 820px) { .forja-editor-body { grid-template-columns: 1fr; } }
+.forja-badge { background: rgba(242, 179, 61, .9) !important; color: #1a1205 !important; }

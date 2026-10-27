@@ -4,9 +4,11 @@ import { bracketMatching, foldGutter, HighlightStyle, indentOnInput, StreamLangu
 import { lua } from "@codemirror/legacy-modes/mode/lua";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { EditorState } from "@codemirror/state";
-import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
+import { linter, lintGutter } from "@codemirror/lint";
+import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutter, hoverTooltip, keymap, lineNumbers } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
 import { useEffect, useRef } from "react";
+import { apiAt, FORJA_API, lintLua50 } from "../lib/forjaApi";
 
 const theme = EditorView.theme(
   {
@@ -21,6 +23,12 @@ const theme = EditorView.theme(
     ".cm-panels": { backgroundColor: "#13283a", color: "#e4ecf3" },
     ".cm-searchMatch": { backgroundColor: "#f2b33d33" },
     ".cm-tooltip": { backgroundColor: "#13283a", border: "1px solid #26425b" },
+    ".cm-forja-tip": { padding: "8px 10px", maxWidth: "420px", fontSize: "12.5px" },
+    ".cm-forja-tip code": { color: "#7cc4ff" },
+    ".cm-forja-tip p": { margin: "4px 0 0", color: "#c6d4df", whiteSpace: "pre-line" },
+    ".cm-diagnostic": { padding: "4px 8px" },
+    ".cm-lintRange-error": { backgroundImage: "none", textDecoration: "underline wavy #e5534b" },
+    ".cm-lintRange-warning": { backgroundImage: "none", textDecoration: "underline wavy #f2b33d" },
   },
   { dark: true },
 );
@@ -44,7 +52,41 @@ const MOHO_WORDS = [
   "Prefs", "GameMain", "GetGameTimeSeconds", "IsDestroyed", "EntityCategoryContains", "categories",
 ];
 
-export default function LuaEditor({ value, onChange, onSave, readOnly = false }: { value: string; onChange?: (v: string) => void; onSave?: () => void; readOnly?: boolean }) {
+/** Ajuda da API da Forja ao passar o mouse (palavra com pontos sob o cursor). */
+const forjaHover = hoverTooltip((view, pos) => {
+  const line = view.state.doc.lineAt(pos);
+  const text = line.text;
+  let a = pos - line.from;
+  let b = a;
+  while (a > 0 && /[\w.]/.test(text[a - 1])) a--;
+  while (b < text.length && /[\w.]/.test(text[b])) b++;
+  // do começo até a palavra sob o cursor (Forja.UI.Notify com o mouse em "UI" mostra Forja.UI…)
+  const word = text.slice(a, b);
+  const parts = word.split(".");
+  let entry;
+  for (let n = parts.length; n > 0 && !entry; n--) entry = apiAt(parts.slice(0, n).join("."));
+  if (!entry) return null;
+  const e = entry;
+  return {
+    pos: line.from + a,
+    end: line.from + b,
+    above: true,
+    create: () => {
+      const dom = document.createElement("div");
+      dom.className = "cm-forja-tip";
+      const sig = document.createElement("code");
+      sig.textContent = e.sig;
+      const info = document.createElement("p");
+      info.textContent = e.info;
+      dom.append(sig, info);
+      return { dom };
+    },
+  };
+});
+
+const lua50 = linter((view) => lintLua50(view.state.doc.toString()).map((i) => ({ from: i.from, to: i.to, severity: i.severity, message: i.message })), { delay: 400 });
+
+export default function LuaEditor({ value, onChange, onSave, readOnly = false, forja = false }: { value: string; onChange?: (v: string) => void; onSave?: () => void; readOnly?: boolean; /** API da Forja no autocompletar, ajuda e avisos do Lua 5.0 */ forja?: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const cb = useRef({ onChange, onSave });
@@ -59,8 +101,10 @@ export default function LuaEditor({ value, onChange, onSave, readOnly = false }:
         autocompletion({ override: [(ctx) => {
           const w = ctx.matchBefore(/[\w.]+/);
           if (!w || (w.from === w.to && !ctx.explicit)) return null;
-          return { from: w.from, options: MOHO_WORDS.map((label) => ({ label, type: "function" })) };
+          const api = forja ? FORJA_API.map((e) => ({ label: e.label, type: e.kind, detail: e.sig.startsWith(e.label) ? e.sig.slice(e.label.length) : e.sig, info: e.info, boost: 1 })) : [];
+          return { from: w.from, options: [...api, ...MOHO_WORDS.filter((m) => !api.some((a) => a.label === m)).map((label) => ({ label, type: "function" }))] };
         }] }),
+        ...(forja ? [forjaHover, lua50, lintGutter()] : []),
         StreamLanguage.define(lua), syntaxHighlighting(highlight), theme,
         EditorState.readOnly.of(readOnly),
         keymap.of([
@@ -74,7 +118,7 @@ export default function LuaEditor({ value, onChange, onSave, readOnly = false }:
     return () => view.current?.destroy();
     // o editor é recriado quando o arquivo muda (key no componente pai)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readOnly]);
+  }, [readOnly, forja]);
 
   return <div className="cm-host" ref={host} />;
 }

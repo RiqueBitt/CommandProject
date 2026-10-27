@@ -92,8 +92,9 @@ pub async fn forja_set_key(state: State<'_, AppState>, key: String) -> R<ForjaOv
 
 /// Cria um mod novo de exemplo (forja/<id>/ com mod.json, sim.lua, ui.lua, blueprints.lua) em `dir`.
 #[tauri::command]
-pub async fn forja_new_mod(dir: String, id: String, name: String) -> R<String> {
-    tauri::async_runtime::spawn_blocking(move || forja::scaffold(&PathBuf::from(dir), &id, &name).map(|p| p.to_string_lossy().into_owned()))
+pub async fn forja_new_mod(dir: String, id: String, name: String, template: Option<String>) -> R<String> {
+    let template = template.unwrap_or_else(|| "completo".into());
+    tauri::async_runtime::spawn_blocking(move || forja::scaffold_with(&PathBuf::from(dir), &id, &name, &template).map(|p| p.to_string_lossy().into_owned()))
         .await
         .map_err(err)?
         .map_err(err)
@@ -135,4 +136,115 @@ pub async fn forja_check(path: String) -> R<CheckReport> {
     })
     .await
     .map_err(err)?
+}
+
+// ---------------------------------------------------------------- editor e recarga
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevMod {
+    pub id: String,
+    pub name: String,
+    /// pasta do mod (forja/<id>/)
+    pub path: String,
+    /// arquivos editáveis (relativos à pasta do mod): mod.json e os .lua
+    pub files: Vec<String>,
+}
+
+/// Mods em desenvolvimento numa pasta (a pasta "forja-dev" ou outra com forja/<id>/).
+#[tauri::command]
+pub async fn forja_dev_mods(dir: String) -> R<Vec<DevMod>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = PathBuf::from(dir);
+        if !dir.join("forja").is_dir() && !dir.join("mod.json").is_file() {
+            return Ok(Vec::new());
+        }
+        let single = dir.join("mod.json").is_file() && !dir.join("forja").is_dir();
+        let mods = forja::read_folder(&dir)?;
+        Ok(mods
+            .into_iter()
+            .map(|m| {
+                let root = if single { dir.clone() } else { dir.join("forja").join(&m.manifest.id) };
+                let mut files = vec!["mod.json".to_string()];
+                files.extend(m.files.keys().cloned());
+                DevMod { id: m.manifest.id.clone(), name: m.manifest.name.clone(), path: root.to_string_lossy().into_owned(), files }
+            })
+            .collect())
+    })
+    .await
+    .map_err(err)?
+    .map_err(|e: cp_core::Error| err(e))
+}
+
+/// Só arquivos de mod da Forja (.lua e mod.json dentro da pasta de um mod).
+fn editable(root: &str, file: &str) -> Result<PathBuf, String> {
+    let rel = file.replace('\\', "/");
+    if rel.split('/').any(|p| p == ".." || p.is_empty()) || !(rel.ends_with(".lua") || rel == "mod.json") {
+        return Err(format!("arquivo {file} não pode ser editado aqui"));
+    }
+    let root = PathBuf::from(root);
+    if !root.join("mod.json").is_file() {
+        return Err(format!("{} não é a pasta de um mod da Forja", root.display()));
+    }
+    Ok(root.join(rel))
+}
+
+#[tauri::command]
+pub async fn forja_read_file(root: String, file: String) -> R<String> {
+    let p = editable(&root, &file)?;
+    match std::fs::read(&p) {
+        Ok(b) => Ok(String::from_utf8_lossy(&b).into_owned()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(err(e)),
+    }
+}
+
+/// Grava um arquivo do mod; com `reload`, monta o mod de novo e substitui o instalado (ligado).
+#[tauri::command]
+pub async fn forja_write_file(state: State<'_, AppState>, root: String, file: String, text: String, reload: bool) -> R<Option<ForjaOverview>> {
+    let p = editable(&root, &file)?;
+    if file == "mod.json" {
+        // um mod.json quebrado não é salvo: o mod sumiria da lista
+        let m: forja::ForjaManifest = serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| format!("mod.json: {e}"))?;
+        m.validate().map_err(err)?;
+    }
+    if let Some(dir) = p.parent() {
+        std::fs::create_dir_all(dir).map_err(err)?;
+    }
+    std::fs::write(&p, text).map_err(err)?;
+    if !reload {
+        return Ok(None);
+    }
+    with_ws(&state.ws, move |ws| {
+        let root = PathBuf::from(&root);
+        let cache = ws.data_dir.join("cache").join("forja-dev");
+        std::fs::create_dir_all(&cache).map_err(|e| cp_core::Error::io(&cache, e))?;
+        let id = forja::read_folder(&root)?.remove(0).manifest;
+        let (archive, _) = forja::pack(&root, &cache.join(format!("{}.scd", id.id)))?;
+        let import = cp_core::library::ImportOptions {
+            id: Some(id.id.clone()),
+            name: Some(id.name.clone()),
+            version: Some(id.version.clone()),
+            description: Some(id.description.clone()),
+            replace: true,
+            move_source: true,
+            ..Default::default()
+        };
+        ws.import_mod(&archive, &import, true)?;
+        let _ = std::fs::remove_file(&archive);
+        overview(ws).map(Some)
+    })
+    .await
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Template {
+    key: &'static str,
+    name: &'static str,
+    description: &'static str,
+}
+
+#[tauri::command]
+pub fn forja_templates() -> Vec<Template> {
+    forja::TEMPLATES.iter().map(|t| Template { key: t.0, name: t.1, description: t.2 }).collect()
 }

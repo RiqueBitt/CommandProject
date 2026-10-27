@@ -947,6 +947,23 @@ fn collect_all(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Res
 /// Esqueleto de um mod novo (para `cp forja new` e para o launcher): `forja/<id>/` com mod.json e
 /// os três arquivos comentados.
 pub fn scaffold(dir: &Path, id: &str, name: &str) -> Result<PathBuf> {
+    scaffold_with(dir, id, name, "completo")
+}
+
+/// Modelos de mod novo: (chave, nome, o que faz).
+pub const TEMPLATES: &[(&str, &str, &str)] = &[
+    ("completo", "Completo", "Blueprints, simulação, interface e biblioteca: um pouco de tudo, comentado."),
+    ("balanceamento", "Balanceamento", "Só blueprints: muda vida, custo, velocidade e alcance das unidades, com opções no launcher."),
+    ("painel", "Painel", "Só interface: um painel com tecla própria que mostra informações da partida."),
+    ("regra", "Regra de jogo", "Só simulação: uma regra nova para a partida (unidades que destroem outras se recuperam)."),
+    ("biblioteca", "Biblioteca", "Funções para outros mods usarem com Forja.Use (dependência)."),
+];
+
+/// Cria um mod novo a partir de um dos [`TEMPLATES`].
+pub fn scaffold_with(dir: &Path, id: &str, name: &str, template: &str) -> Result<PathBuf> {
+    if !TEMPLATES.iter().any(|t| t.0 == template) {
+        return Err(Error::Other(format!("modelo \"{template}\" não existe")));
+    }
     if !valid_id(id) {
         return Err(Error::Other(format!("id \"{id}\" inválido (letras minúsculas, números, '-' e '_')")));
     }
@@ -967,29 +984,147 @@ pub fn scaffold(dir: &Path, id: &str, name: &str) -> Result<PathBuf> {
         load_after: vec![],
         load_before: vec![],
         conflicts: vec![],
-        options: vec![ForjaOption {
-            key: "multiplier".into(),
-            label: "Multiplicador de vida".into(),
-            description: "Quanto a vida das unidades terrestres é multiplicada.".into(),
-            kind: OptionKind::Number,
-            default: Value::from(1.5),
-            min: Some(1.0),
-            max: Some(5.0),
-            step: Some(0.5),
-            choices: vec![],
-        }],
+        options: vec![],
     };
+    let number = |key: &str, label: &str, description: &str, default: f64, min: f64, max: f64, step: f64| ForjaOption {
+        key: key.into(),
+        label: label.into(),
+        description: description.into(),
+        kind: OptionKind::Number,
+        default: Value::from(default),
+        min: Some(min),
+        max: Some(max),
+        step: Some(step),
+        choices: vec![],
+    };
+    let mut manifest = manifest;
+    manifest.options = match template {
+        "balanceamento" => vec![
+            number("health", "Vida", "Multiplica a vida das unidades.", 1.0, 0.25, 5.0, 0.25),
+            number("cost", "Custo", "Multiplica o custo de massa e energia.", 1.0, 0.25, 5.0, 0.25),
+            number("speed", "Velocidade", "Multiplica a velocidade das unidades terrestres e navais.", 1.0, 0.5, 3.0, 0.1),
+            number("range", "Alcance", "Multiplica o alcance das armas.", 1.0, 0.5, 2.0, 0.1),
+        ],
+        "regra" => vec![number("heal", "Recuperação", "Fração da vida que a unidade recupera ao destruir outra.", 0.1, 0.0, 1.0, 0.05)],
+        "painel" | "biblioteca" => vec![],
+        _ => vec![number("multiplier", "Multiplicador de vida", "Quanto a vida das unidades terrestres é multiplicada.", 1.5, 1.0, 5.0, 0.5)],
+    };
+    if template == "biblioteca" {
+        manifest.description = "Funções para outros mods: Forja.Use('@ID@').".replace("@ID@", id);
+    }
     let write = |name: &str, text: String| -> Result<()> {
         let p = root.join(name);
         std::fs::write(&p, text).map_err(|e| Error::io(&p, e))
     };
     write("mod.json", serde_json::to_string_pretty(&manifest).map_err(|e| Error::Other(e.to_string()))? + "\n")?;
-    write("blueprints.lua", TEMPLATE_BP.replace("@ID@", id))?;
-    write("sim.lua", TEMPLATE_SIM.replace("@ID@", id))?;
-    write("ui.lua", TEMPLATE_UI.replace("@ID@", id))?;
-    write("lib/util.lua", TEMPLATE_LIB.to_string())?;
+    let files: &[(&str, &str)] = match template {
+        "balanceamento" => &[("blueprints.lua", TEMPLATE_BALANCE)],
+        "painel" => &[("ui.lua", TEMPLATE_PANEL)],
+        "regra" => &[("sim.lua", TEMPLATE_RULE)],
+        "biblioteca" => &[("sim.lua", TEMPLATE_LIBRARY), ("ui.lua", TEMPLATE_LIBRARY)],
+        _ => &[("blueprints.lua", TEMPLATE_BP), ("sim.lua", TEMPLATE_SIM), ("ui.lua", TEMPLATE_UI), ("lib/util.lua", TEMPLATE_LIB)],
+    };
+    for (file, text) in files {
+        write(file, text.replace("@ID@", id))?;
+    }
+    if !files.iter().any(|f| f.0.starts_with("lib/")) {
+        let _ = std::fs::remove_dir(root.join("lib"));
+    }
     Ok(root)
 }
+
+const TEMPLATE_BALANCE: &str = "-- Balanceamento: roda enquanto o jogo carrega os blueprints (antes de qualquer partida).
+-- Cada opção aparece no launcher (Forja > este mod) e vale na próxima partida.
+local health = mod.Option('health', 1)
+local cost = mod.Option('cost', 1)
+local speed = mod.Option('speed', 1)
+local range = mod.Option('range', 1)
+
+-- filtro: uma categoria ('LAND', 'AIR', 'NAVAL', 'STRUCTURE', 'EXPERIMENTAL'...) ou nil para todas
+Forja.BP.EachUnit(nil, function(bp, id)
+    if health ~= 1 then Forja.BP.Scale(bp, 'Defense.MaxHealth', health) end
+    if cost ~= 1 then
+        Forja.BP.Scale(bp, 'Economy.MassValue', cost)
+        Forja.BP.Scale(bp, 'Economy.EnergyValue', cost)
+    end
+    if speed ~= 1 and not Forja.BP.HasCategory(bp, 'AIR') then
+        Forja.BP.Scale(bp, 'Physics.MaxSpeed', speed)
+    end
+    if range ~= 1 and bp.Weapons then
+        for _, w in bp.Weapons do
+            if w.MaxRadius then w.MaxRadius = w.MaxRadius * range end
+        end
+    end
+end)
+
+-- uma unidade só: Forja.BP.Patch('uul0101', { Defense = { MaxHealth = 500 } })
+mod.Log('balanceamento: vida x' .. health .. ', custo x' .. cost .. ', velocidade x' .. speed .. ', alcance x' .. range)
+";
+
+const TEMPLATE_PANEL: &str = "-- Painel: roda na interface do jogador (só no computador dele).
+local panel = Forja.UI.Panel({ title = mod.Name, subtitle = 'F7 abre e fecha' })
+
+-- botões com valor: a função devolve o texto (e a cor) mostrado à direita
+panel:Button('Tempo de jogo', nil, function()
+    local s = math.floor(GetGameTimeSeconds())
+    return string.format('%d:%02d', math.floor(s / 60), math.mod(s, 60))
+end)
+panel:Button('Exército', nil, function() return tostring(GetFocusArmy()) end)
+panel:Button('Avisar na tela', function()
+    Forja.UI.Notify('Olá do ' .. mod.Name .. '!', 4)
+end)
+
+-- atualiza o painel a cada segundo enquanto ele está aberto
+Forja.Every(1, function()
+    if panel:IsShown() then panel:Refresh() end
+end)
+
+Forja.UI.AddKey('F7', mod.Name, function() panel:Toggle() end)
+Forja.UI.AddMenuItem(mod.Name, function() panel:Toggle() end)
+";
+
+const TEMPLATE_RULE: &str = "-- Regra de jogo: roda na simulação (a mesma em todos os jogadores, então vale no multijogador).
+local heal = mod.Option('heal', 0.1)
+
+-- quem destrói uma unidade recupera parte da vida
+Forja.On('UnitKilled', function(unit, instigator)
+    if heal <= 0 or not instigator or not instigator.GetMaxHealth or instigator:IsDead() then return end
+    local max = instigator:GetMaxHealth()
+    instigator:SetHealth(instigator, math.min(max, instigator:GetHealth() + max * heal))
+end)
+
+Forja.On('SessionStart', function()
+    mod.Log('regra ligada: recuperação de ' .. math.floor(heal * 100) .. '% por abate')
+end)
+";
+
+const TEMPLATE_LIBRARY: &str = "-- Biblioteca: funções que outros mods usam com  local lib = Forja.Use('@ID@')
+-- (ponha \"@ID@\" em \"dependencies\" no mod.json deles para carregar antes).
+local M = {}
+
+-- texto de uma tabela (para mod.Log)
+function M.Describe(t)
+    if type(t) ~= 'table' then return tostring(t) end
+    local parts = {}
+    for k, v in pairs(t) do table.insert(parts, tostring(k) .. '=' .. tostring(v)) end
+    return '{' .. table.concat(parts, ', ') .. '}'
+end
+
+-- arredonda com casas decimais
+function M.Round(x, places)
+    local m = 10 ^ (places or 0)
+    return math.floor(x * m + 0.5) / m
+end
+
+-- quantos itens tem uma tabela (o Lua do jogo não tem o operador #)
+function M.Count(t)
+    local n = 0
+    for _ in pairs(t) do n = n + 1 end
+    return n
+end
+
+mod.Export(M)
+";
 
 const TEMPLATE_BP: &str = "-- Roda enquanto o jogo carrega os blueprints (antes de qualquer partida).
 -- `mod` é este mod (mod.Id, mod.Option, mod.Log...) e `Forja` é a API do carregador.
@@ -1230,6 +1365,15 @@ mod tests {
         std::fs::create_dir_all(&t).unwrap();
         let root = scaffold(&t, "meu-mod", "Meu mod").unwrap();
         assert!(scaffold(&t, "meu-mod", "x").is_err());
+        // todos os modelos saem limpos (sem armadilhas do Lua 5.0) e carregam
+        for (key, _, _) in TEMPLATES.iter().filter(|t| t.0 != "completo") {
+            let d = t.join("modelos").join(key);
+            let r = scaffold_with(&d, &format!("m-{key}"), key, key).unwrap();
+            let m = &read_folder(&r).unwrap()[0];
+            assert!(m.lint().is_empty(), "{key}: {:?}", m.lint());
+            assert!(!m.sides().is_empty(), "{key}");
+        }
+        assert!(scaffold_with(&t.join("x"), "x", "x", "nada").is_err());
         let found = read_folder(&t).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].sides(), ["sim", "ui", "blueprints"]);
