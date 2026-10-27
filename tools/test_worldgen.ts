@@ -130,5 +130,24 @@ for (const [sym, players, G] of [["rot2", 4, 4096], ["mirror-x", 8, 3072]] as co
   check(maxd < 0.01, `gigante ${G}: relevo simétrico (dif ${maxd.toFixed(3)})`);
   console.log("gigante", G, sym, "formas", count(a), "ms", Date.now() - t0);
 }
+// mar e ilhas: bases em terra, mar de verdade, ilhas separadas (ou ligadas, se pedido)
+for (const [mode, links, sym, players] of [["bases", "none", "rot2", 2], ["bases", "shallows", "rot4", 4], ["teams", "none", "mirror-x", 4], ["continent", "bridges", "rot2", 2], ["scattered", "none", "rot4", 8]] as const) {
+  const W = 30;
+  const wg = newWorld({ seed: 77, symmetry: sym, players, style: "ocean", islandMode: mode, links, islandSize: 1, extraIslands: 4, coast: 0.6, seaDepth: 28 });
+  const a = generateWorld(g, donor, W, true, wg, cat);
+  const wet = a.heights.filter((y) => y < W).length / a.heights.length;
+  check(wet > 0.35, `mar e ilhas (${mode}): mar ocupa ${(wet * 100).toFixed(0)}%`);
+  const hAt = (p: [number, number]) => a.heights[Math.round(p[1] / 8) * 129 + Math.round(p[0] / 8)];
+  check(a.spawns.every((s2) => hAt(s2) > W + 1), `mar e ilhas (${mode}): todas as bases em terra`);
+  const m = walkMask(g, a.heights, W, true);
+  const d0 = walkDistances(g, m, a.spawns[0]);
+  const reach = a.spawns.filter((s2) => distAt(g, d0, s2) >= 0).length;
+  if (mode === "bases" && links === "none") check(reach === 1, `ilha de cada base separada pelo mar (alcança ${reach})`);
+  if (links === "shallows" || links === "bridges") check(reach === players, `ilhas ligadas (${links}): ${reach} de ${players}`);
+  if (mode === "teams") check(reach === players / 2, `ilha por time: ${reach} bases juntas`);
+  const b = generateWorld(g, donor, W, true, wg, cat);
+  check(a.heights.every((v, i) => v === b.heights[i]), `mar e ilhas determinístico (${mode})`);
+  console.log("mar e ilhas", mode, links, "mar", (wet * 100).toFixed(0) + "%", "bases juntas", reach);
+}
 console.log(fails ? `${fails} falha(s)` : "worldgen: tudo certo");
 process.exit(fails ? 1 : 0);

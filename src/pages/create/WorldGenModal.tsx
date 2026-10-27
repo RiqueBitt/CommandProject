@@ -94,6 +94,7 @@ export default function WorldGenModal(props: Props) {
   const [small, smallDonor] = useMemo(() => downsample(grid, donor, 128), [grid, donor]);
   const set = <K extends keyof WorldGen>(k: K, v: WorldGen[K]) => setWg((w) => ({ ...w, [k]: v }));
   const plat = wg.style === "platforms";
+  const ocean = wg.style === "ocean";
 
   // prévia: gera numa grade menor alguns instantes depois da última mudança
   useEffect(() => {
@@ -205,6 +206,7 @@ export default function WorldGenModal(props: Props) {
               <select className="select" value={wg.style ?? "natural"} onChange={(e) => set("style", e.target.value as WorldGen["style"])}>
                 <option value="natural">{t("Natural (morros, montanhas, água)")}</option>
                 <option value="platforms">{t("Plataformas sobre um abismo, com pontes")}</option>
+                <option value="ocean">{t("Mar e ilhas (mar gigante em volta)")}</option>
               </select>
             </label>
           </div>
@@ -232,6 +234,42 @@ export default function WorldGenModal(props: Props) {
                 </select>
               </label>
               <p className="faint small">{t("As bases, o centro e as expansões ficam em plataformas altas ligadas por pontes; o resto é abismo. Depois de gerar, mova as plataformas e desenhe pontes novas em Formas → Plataformas e abismo.")}</p>
+            </section>
+          )}
+          {ocean && (
+            <section className="wg-group">
+              <h4><Icon name="sailing" size={17} /> {t("Mar e ilhas")}</h4>
+              {!hasWater && <Notice kind="warn">{t("Este terreno não tem água: o mar vira uma bacia seca. Use um mapa em branco de 1024 ou maior, ou um terreno do jogo com água.")}</Notice>}
+              <label className="field"><span className="label">{t("Onde ficam as bases")}</span>
+                <div className="seg wrap" role="radiogroup">
+                  {([["bases", "Cada base na sua ilha"], ["teams", "Uma ilha por time"], ["continent", "Continente no meio"], ["scattered", "Arquipélago (muitas ilhas)"]] as const).map(([k, l]) => (
+                    <button key={k} type="button" className="btn sm" aria-pressed={(wg.islandMode ?? "bases") === k} onClick={() => set("islandMode", k)}>{t(l)}</button>
+                  ))}
+                </div>
+              </label>
+              {([
+                { key: "islandSize", label: "Tamanho das ilhas", min: 0.5, max: 1.6, step: 0.05, def: 1, pct: true },
+                { key: "extraIslands", label: "Ilhas neutras no mar", min: 0, max: 24, step: 1, def: 4 },
+                { key: "coast", label: "Recorte da costa (baías e cabos)", min: 0, max: 1, step: 0.05, def: 0.55, pct: true },
+                { key: "seaDepth", label: "Profundidade do mar", min: 10, max: 60, step: 2, def: 28 },
+              ] as { key: keyof WorldGen; label: string; min: number; max: number; step: number; def: number; pct?: boolean }[]).map((it) => {
+                const v = (wg[it.key] as number | undefined) ?? it.def;
+                return (
+                  <label key={it.key} className="range">
+                    <span>{t(it.label)}</span>
+                    <input type="range" min={it.min} max={it.max} step={it.step} value={v} onChange={(e) => set(it.key, Number(e.target.value) as never)} />
+                    <output>{it.pct ? `${Math.round(v * 100)}%` : v}</output>
+                  </label>
+                );
+              })}
+              <label className="field"><span className="label">{t("Ligação entre as ilhas")}</span>
+                <select className="select" value={wg.links ?? "none"} onChange={(e) => set("links", e.target.value as WorldGen["links"])}>
+                  <option value="none">{t("Só pelo mar (navios, aviões e anfíbios)")}</option>
+                  <option value="shallows">{t("Bancos de areia rasos (tropas passam a pé)")}</option>
+                  <option value="bridges">{t("Pontes")}</option>
+                </select>
+              </label>
+              <p className="faint small">{t("As ilhas seguem a simetria do mapa. Depois de gerar, dá para mudar a costa com o pincel e as formas.")}</p>
             </section>
           )}
           {SLIDERS.filter((g) => !plat || !["Montanhas", "Água", "Cavidades"].includes(g.group)).map((g) => (

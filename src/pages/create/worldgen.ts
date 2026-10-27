@@ -541,8 +541,21 @@ export interface WorldGen {
   farms?: number;
   /** detalhe fino do relevo (0 a 1) */
   detail?: number;
-  /** "platforms": plataformas altas ligadas por pontes sobre um abismo (estilo Shiva Prime) */
-  style?: "natural" | "platforms";
+  /** "platforms": plataformas altas ligadas por pontes sobre um abismo (estilo Shiva Prime);
+   *  "ocean": mar aberto com ilhas (cada base na sua ilha, ilhas por time, continente ou arquipélago) */
+  style?: "natural" | "platforms" | "ocean";
+  /** mar e ilhas: onde ficam as bases */
+  islandMode?: "bases" | "teams" | "continent" | "scattered";
+  /** mar e ilhas: tamanho das ilhas (0,5 a 2; 1 = normal) */
+  islandSize?: number;
+  /** mar e ilhas: ilhas neutras a mais pelo mar (de todos os jogadores juntos) */
+  extraIslands?: number;
+  /** mar e ilhas: recorte da costa (0 = redonda, 1 = muito recortada) */
+  coast?: number;
+  /** mar e ilhas: profundidade do mar */
+  seaDepth?: number;
+  /** mar e ilhas: como as ilhas se ligam — só pelo mar (naval e aéreo), bancos de areia rasos ou pontes */
+  links?: "none" | "shallows" | "bridges";
   /** altura das plataformas acima do fundo do abismo */
   platformHeight?: number;
   /** fundo do abismo: seco (rocha) ou mar (precisa de água no terreno) */
@@ -579,6 +592,8 @@ export const WORLD_PRESETS: { id: string; label: string; icon: string; desc: str
   { id: "desert", label: "Deserto", icon: "wb_sunny", desc: "Dunas, cânions e ruínas.", over: { blend: 1, style: "natural", hilliness: 5, scale: 300, mountains: 1, mountainHeight: 45, ridges: 1, hills: 2, plateaus: 3, craters: 1, canyons: 2, lakes: 0, rivers: 0, dunes: 4, islands: 0, edge: "rugged", forests: 0.05, rocks: 0.55, structures: 4, wrecks: 0.6, biome: "desert", settlements: 2, farms: 0, roads: true, detail: 0.7 } },
   { id: "wasteland", label: "Terra arrasada", icon: "local_fire_department", desc: "Crateras, destroços e bases em ruínas.", over: { blend: 1, style: "natural", hilliness: 8, scale: 180, mountains: 1, mountainHeight: 40, ridges: 1, hills: 3, plateaus: 1, craters: 6, canyons: 1, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "rugged", forests: 0.1, rocks: 0.6, structures: 5, wrecks: 1, biome: "volcanic", settlements: 2, farms: 0, roads: true, detail: 0.8 } },
   { id: "frozen", label: "Gelo", icon: "ac_unit", desc: "Planaltos gelados e lagos.", over: { blend: 1, style: "natural", hilliness: 10, scale: 240, mountains: 3, mountainHeight: 70, ridges: 2, hills: 3, plateaus: 2, craters: 1, canyons: 1, lakes: 3, rivers: 0, dunes: 0, islands: 0, edge: "mountains", forests: 0.3, rocks: 0.6, structures: 2, wrecks: 0.3, biome: "snow", settlements: 1, farms: 0, roads: true, detail: 0.6 } },
+  { id: "ocean", label: "Ilhas no mar aberto", icon: "sailing", desc: "Mar gigante: cada base na sua ilha, ilhas neutras pelo mar. Guerra naval e aérea.", over: { blend: 1, style: "ocean", islandMode: "bases", islandSize: 1, extraIslands: 6, coast: 0.6, seaDepth: 30, links: "none", hilliness: 6, scale: 220, mountains: 1, mountainHeight: 40, ridges: 0, hills: 2, plateaus: 0, craters: 0, canyons: 0, lakes: 0, rivers: 1, dunes: 0, islands: 0, edge: "water", forests: 0.55, rocks: 0.35, structures: 1, wrecks: 0.25, biome: "temperate", settlements: 1, farms: 0.2, roads: false, detail: 0.5 } },
+  { id: "continent", label: "Continente e ilhas", icon: "public", desc: "Uma grande terra no meio do mar, com ilhas em volta ligadas por pontes.", over: { blend: 1, style: "ocean", islandMode: "continent", islandSize: 1, extraIslands: 5, coast: 0.7, seaDepth: 26, links: "bridges", hilliness: 8, scale: 240, mountains: 2, mountainHeight: 50, ridges: 1, hills: 4, plateaus: 1, craters: 0, canyons: 0, lakes: 1, rivers: 2, dunes: 0, islands: 0, edge: "water", forests: 0.6, rocks: 0.3, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 2, farms: 0.4, roads: true, detail: 0.55 } },
   { id: "abyss", label: "Plataformas no abismo", icon: "layers", desc: "Plataformas altas e pontes sobre um abismo (como Shiva Prime).", over: { blend: 1, style: "platforms", platformHeight: 170, abyss: "deep", hilliness: 4, scale: 220, mountains: 6, mountainHeight: 60, ridges: 0, hills: 0, plateaus: 6, craters: 0, canyons: 0, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.25, rocks: 0.5, structures: 4, wrecks: 0.5, biome: "volcanic", settlements: 0, farms: 0, roads: false, detail: 0.5 } },
   { id: "skyforts", label: "Fortalezas suspensas", icon: "fort", desc: "Plataformas verdes com vilas, ligadas por pontes (como Sinorok Rift).", over: { blend: 1, style: "platforms", platformHeight: 140, abyss: "deep", hilliness: 4, scale: 220, mountains: 8, mountainHeight: 60, ridges: 0, hills: 0, plateaus: 8, craters: 0, canyons: 0, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.45, rocks: 0.35, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 2, farms: 0.3, roads: true, detail: 0.5 } },
   { id: "open", label: "Campo aberto", icon: "grass", desc: "Plano e rápido, poucos obstáculos.", over: { blend: 1, style: "natural", hilliness: 4, scale: 320, mountains: 0, mountainHeight: 40, ridges: 0, hills: 4, plateaus: 1, craters: 0, canyons: 0, lakes: 1, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.35, rocks: 0.2, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 4, farms: 0.85, roads: true, detail: 0.45 } },
@@ -615,8 +630,38 @@ export function baseHeights(g: Grid, donor: Float32Array, water: number, hasWate
   const out = new Float32Array(w * w);
   const amp = Math.sqrt(ops.length);
   const plat = wg.style === "platforms", floorY = plat ? abyssFloor(wg, water, hasWater, medianOf(donor)) : 0;
+  const ocean = wg.style === "ocean";
+  const isles = ocean ? oceanIsles(wg, G) : [];
+  const coast = wg.coast ?? 0.55, depth = wg.seaDepth ?? 28;
+  // sem água no terreno o "mar" vira uma bacia seca bem funda
+  const sea = hasWater ? water : ref;
   for (let j = 0; j <= s; j++) for (let i = 0; i <= s; i++) {
     const x = i * step, z = j * step;
+    if (ocean) {
+      // a forma das ilhas e o relevo de dentro seguem a simetria (o ruído é a média das cópias)
+      const f = isleField(isles, x, z, n3, coast, ops);
+      let v = 0, dv = 0, sd = 0;
+      for (const o of ops) {
+        const [px, pz] = o.pt([x, z]);
+        v += fbm(n, px / wg.scale, pz / wg.scale, 5);
+        dv += det > 0 ? fbm(n3, px / 46, pz / 46, 2) : 0;
+        sd += fbm(n2, px / 260, pz / 260, 3);
+      }
+      v /= ops.length; dv /= ops.length; sd /= ops.length;
+      let y: number;
+      if (f > 0) {
+        // praia baixa, depois o miolo da ilha com morros
+        const inland = smooth(0, 0.35, f);
+        y = sea + 1.2 + inland * (wg.elevation * 0.8 + wg.hilliness * Math.max(-0.4, v) * 1.1) + detAmp * dv * inland;
+      } else {
+        // plataforma rasa perto da costa, depois o mar fundo (com o fundo ondulado)
+        const out = -f;
+        y = sea - 1.2 - smooth(0, 0.6, out) * depth * (0.8 + 0.4 * sd) - smooth(0, 0.08, out) * 2;
+      }
+      const idx = j * w + i;
+      out[idx] = Math.max(0, lerp(donor[idx], y, wg.blend));
+      continue;
+    }
     if (plat) {
       // plataformas: o chão base é o fundo do abismo (pedras e sulcos); as plataformas sobem dele
       let v = 0, dv = 0;
@@ -900,9 +945,109 @@ export function axisDist(sym: Symmetry, G: number, [x, z]: Pt) {
 
 /** Montanhas entre os times e entre as bases: ligadas por padrão nas partidas grandes. */
 export const teamWallsOn = (wg: Pick<WorldGen, "teamWalls" | "players" | "symmetry" | "style">) =>
-  wg.style !== "platforms" && wg.symmetry !== "none" && (wg.teamWalls ?? wg.players > 8);
+  wg.style !== "platforms" && wg.style !== "ocean" && wg.symmetry !== "none" && (wg.teamWalls ?? wg.players > 8);
 export const baseWallsOn = (wg: Pick<WorldGen, "baseWalls" | "players" | "style">) =>
-  wg.style !== "platforms" && (wg.baseWalls ?? wg.players > 8);
+  wg.style !== "platforms" && wg.style !== "ocean" && (wg.baseWalls ?? wg.players > 8);
+
+// ------------------------------------------------------------------ mar e ilhas
+
+/** Uma ilha: centro, raio e a semente do recorte da costa. */
+export interface Isle { p: Pt; r: number; seed: number; kind: "base" | "team" | "continent" | "neutral";
+  /** volta da cópia para a ilha original (a costa é a mesma em todas as cópias); ausente = ilha no
+   *  centro da simetria (a costa é a média das cópias) */
+  m?: [number, number, number, number] }
+
+/** As bases do mundo (as mesmas que o gerador vai usar): o primeiro sorteio da semente. */
+export function worldSpawns(wg: WorldGen, G: number): Pt[] {
+  const r = rng(wg.seed * 7919 + 13);
+  const walls = teamWallsOn(wg);
+  const big = Math.max(0.6, Math.min(1.4, G / 1024));
+  return placeSpawns(wg.players, wg.symmetry, G, r, wg.players > 8 || walls, walls ? Math.round(58 * big) + 85 : 0);
+}
+
+/** As ilhas do estilo "mar e ilhas", simétricas como as bases. */
+export function oceanIsles(wg: WorldGen, G: number): Isle[] {
+  const ops = symmetryOps(wg.symmetry, G);
+  const spawns = worldSpawns(wg, G);
+  const k = Math.max(1, Math.round(wg.players / ops.length));
+  const canon = spawns.slice(0, k);
+  const size = Math.max(0.4, Math.min(2.2, wg.islandSize ?? 1));
+  const r = rng(wg.seed * 104729 + 7);
+  const gap = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  let minGap = Infinity;
+  for (let a = 0; a < spawns.length; a++) for (let b = a + 1; b < spawns.length; b++) minGap = Math.min(minGap, gap(spawns[a], spawns[b]));
+  const isles: Isle[] = [];
+  const mode = wg.islandMode ?? "bases";
+  // centro disputado: uma ilha no meio (a área plana do centro fica nela)
+  const centerR = wg.center !== false && wg.symmetry !== "none" ? Math.round(85 * size) : 0;
+  if (centerR && mode !== "continent") isles.push({ p: [G / 2, G / 2], r: centerR, seed: Math.floor(r() * 1e6), kind: "neutral" });
+  // ilha de cada base: grande o bastante para a base e a economia, sem encostar na vizinha (com mar no meio)
+  const baseR = Math.max(95, Math.min(G * 0.2, (Number.isFinite(minGap) ? minGap * 0.42 : G * 0.16))) * size;
+  const each = (p: Pt, rad: number, kind: Isle["kind"]) => {
+    const seed = Math.floor(r() * 1e6);
+    for (const o of ops) isles.push({ p: o.pt(p), r: rad, seed, kind, m: invert(o.m) });
+  };
+  if (mode === "teams" && ops.length > 1) {
+    // o time (as bases de uma cópia da simetria) numa ilha só
+    const c: Pt = [canon.reduce((a, q) => a + q[0], 0) / canon.length, canon.reduce((a, q) => a + q[1], 0) / canon.length];
+    const reach = Math.max(...canon.map((q) => gap(q, c)));
+    // sem encostar na ilha do outro time (sempre fica mar entre elas)
+    const other = Math.min(...ops.slice(1).map((o) => gap(o.pt(c), c)));
+    const room = other / 2 - (centerR ? centerR + 50 : 45);
+    each(c, Math.max(60, Math.min(reach + baseR * 0.85, room)), "team");
+    for (const q of canon) {
+      // a ilha da base não passa para o lado do outro time
+      const mirror = Math.min(...ops.slice(1).map((o) => gap(o.pt(q), q)));
+      each(q, Math.max(60, Math.min(baseR * 0.8, mirror / 2 - 45, room - gap(q, c) + baseR * 0.8)), "base");
+    }
+  } else if (mode === "continent") {
+    isles.push({ p: [G / 2, G / 2], r: G * 0.3 * size, seed: Math.floor(r() * 1e6), kind: "continent" });
+    for (const q of canon) each(q, baseR * 0.75, "base");
+  } else {
+    for (const q of canon) each(q, mode === "scattered" ? baseR * 0.75 : baseR, "base");
+  }
+  // ilhas neutras: pelo mar, longe das outras (expansões disputadas)
+  const extra = Math.max(0, Math.round((wg.extraIslands ?? (mode === "scattered" ? 10 : 4)) / ops.length));
+  for (let i = 0, tries = 0; i < extra && tries < 400; tries++) {
+    const rad = lerp(0.045, 0.085, r()) * G * size;
+    const p: Pt = [lerp(rad + 30, G - rad - 30, r()), lerp(rad + 30, G - rad - 30, r())];
+    const copies = ops.map((o) => o.pt(p));
+    if (copies.some((q) => isles.some((s) => gap(q, s.p) < s.r + rad + 40))) continue;
+    if (copies.some((q, a) => copies.some((q2, b) => b > a && gap(q, q2) < rad * 2 + 40))) continue;
+    const seed = Math.floor(r() * 1e6);
+    copies.forEach((q, k) => isles.push({ p: q, r: rad, seed, kind: "neutral", m: invert(ops[k].m) }));
+    i++;
+  }
+  return isles;
+}
+
+/** Quanto um ponto é terra (> 0) ou mar (< 0), já com o recorte da costa. */
+function isleField(isles: Isle[], x: number, z: number, n: (x: number, y: number) => number, coast: number, ops: ReturnType<typeof symmetryOps>) {
+  let best = -Infinity;
+  for (const s of isles) {
+    const dx = x - s.p[0], dz = z - s.p[1];
+    const d = Math.hypot(dx, dz);
+    if (d > s.r * (1 + coast * 1.4)) continue;
+    // costa recortada (baías, cabos e penínsulas), medida na ilha original: as cópias da simetria
+    // ficam com a mesma costa
+    const shape = (u: number, v: number) => {
+      const o = (s.seed % 997) * 0.37;
+      const big = fbm(n, u / (s.r * 0.7) + o, v / (s.r * 0.7) - o, 4);
+      const small = fbm(n, u / 38 + o * 2, v / 38 - o, 3);
+      return 0.95 * big + 0.35 * small;
+    };
+    let wob: number;
+    if (s.m) wob = shape(s.m[0] * dx + s.m[1] * dz, s.m[2] * dx + s.m[3] * dz);
+    else {
+      wob = 0;
+      for (const o of ops) { const [px, pz] = o.pt([x, z]); wob += shape(px - s.p[0], pz - s.p[1]); }
+      wob /= ops.length;
+    }
+    const edge = s.r * (1 + coast * wob);
+    best = Math.max(best, 1 - d / Math.max(1, edge));
+  }
+  return best === -Infinity ? -1 : best;
+}
 
 /**
  * Onde ficam as bases: k pontos na região fundamental, repetidos pela simetria. `spread` (muitas
@@ -988,6 +1133,8 @@ function placeSpawns(players: number, sym: Symmetry, grid: number, r: () => numb
 /** Gera o mundo inteiro a partir dos parâmetros. */
 export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWater: boolean, wg: WorldGen, cat: PropCatalog): WorldResult {
   const G = g.grid;
+  // mar e ilhas sem ligação por terra: nada de trilhas e estradas atravessando o mar
+  if (wg.style === "ocean" && (wg.links ?? "none") !== "shallows") wg = { ...wg, paths: false, roads: false };
   const r = rng(wg.seed * 7919 + 13);
   const ops = symmetryOps(wg.symmetry, G);
   const notes: string[] = [];
@@ -996,6 +1143,7 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
   // largura da cordilheira entre os times (meia largura) e a faixa sem bases em volta dela
   const wallR = Math.round(58 * big);
   const spawns = placeSpawns(wg.players, wg.symmetry, G, r, wg.players > 8 || walls, walls ? wallR + 85 : 0);
+  const ocean = wg.style === "ocean";
   const canonSpawns = spawns.slice(0, Math.max(1, Math.round(wg.players / ops.length)));
   let gapMin = Infinity;
   for (let a = 0; a < spawns.length; a++) for (let b = a + 1; b < spawns.length; b++) gapMin = Math.min(gapMin, Math.hypot(spawns[a][0] - spawns[b][0], spawns[a][1] - spawns[b][1]));
@@ -1258,7 +1406,8 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
   // água
   if (!plat) for (let i = 0; i < per(wg.lakes); i++) put("lake", [45, 95], [6, 12], 0.75, 140, 30);
   if (!plat) for (let i = 0; i < per(wg.rivers); i++) putLine("river", [16, 28], [5, 9], 0.6, [380, 700], true);
-  if (hasWater && !plat) for (let i = 0; i < per(wg.islands); i++) put("island", [70, 120], [14, 26], 0.7, 130, 40);
+  if (hasWater && !plat && !ocean) for (let i = 0; i < per(wg.islands); i++) put("island", [70, 120], [14, 26], 0.7, 130, 40);
+  if (ocean && !hasWater) notes.push("Este terreno não tem água: o mar virou uma bacia seca. Para mar de verdade use um mapa em branco de 1024 ou maior, ou um terreno do jogo com água.");
   // obstáculos: paredões curtos e íngremes entre as bases (criam gargalos; o passe de conexão garante caminho)
   if (!plat) for (let i = 0; i < per(wg.obstacles ?? 0); i++) putLine("ridge", [16, 24], [26, 40], 0.9, [110, 200], false);
   if (centerOn) features.push({ id: fid(), kind: "pad", pts: [[G / 2, G / 2]], r: 46, h: 0, rough: 0, seed: 2, gen: true, name: "Centro" });
@@ -1270,7 +1419,11 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
   // relevo, depois garante que todas as bases se alcançam (passagens automáticas)
   const base = baseHeights(g, donor, water, hasWater, wg);
   let H = composeWorld(g, donor, water, hasWater, wg, features, base);
-  for (let round = 0; round < 6; round++) {
+  // mar e ilhas: as ilhas ficam separadas pelo mar (naval e aéreo), a menos que a ligação seja
+  // por bancos de areia ou pontes
+  const linkRounds = ocean && (wg.links ?? "none") === "none" ? 0 : 6;
+  const bridges = plat || (ocean && wg.links === "bridges");
+  for (let round = 0; round < linkRounds; round++) {
     const mask = walkMask(g, H, water, hasWater, 6, 2, null);
     const d0 = walkDistances(g, mask, spawns[0]);
     const lost = spawns.findIndex((s) => distAt(g, d0, s) < 0);
@@ -1283,10 +1436,10 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
       const same = (p: Pt, q: Pt) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 5;
       // a mesma passagem (em qualquer sentido) só uma vez
       if (features.some((f) => (f.kind === "pass" || f.kind === "span") && ((same(f.pts[0], a) && same(f.pts[1], b)) || (same(f.pts[0], b) && same(f.pts[1], a))))) continue;
-      features.push(plat ? { id: fid(), kind: "span", pts: [a, b], r: 15, h: 0, rough: 0, seed: 9, gen: true } : { id: fid(), kind: "pass", pts: [a, b], r: 34, h: 0, rough: 0.2, seed: 7, gen: true });
+      features.push(bridges ? { id: fid(), kind: "span", pts: [a, b], r: 15, h: 0, rough: 0, seed: 9, gen: true } : { id: fid(), kind: "pass", pts: [a, b], r: ocean ? 17 : 34, h: 0, rough: 0.2, seed: 7, gen: true, ...(ocean ? { name: "Banco de areia" } : {}) });
     }
     H = composeWorld(g, donor, water, hasWater, wg, features, base);
-    if (round === 0) notes.push(plat ? "Algumas bases ficaram isoladas: o gerador pôs pontes entre elas." : "Algumas bases ficaram isoladas: o gerador abriu passagens entre elas.");
+    if (round === 0) notes.push(bridges ? (ocean ? "As ilhas das bases foram ligadas por pontes." : "Algumas bases ficaram isoladas: o gerador pôs pontes entre elas.") : ocean ? "As ilhas das bases foram ligadas por bancos de areia rasos." : "Algumas bases ficaram isoladas: o gerador abriu passagens entre elas.");
   }
 
   const strategic: Strategic[] = [];
