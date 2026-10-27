@@ -226,6 +226,7 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     case "creation_recovery": return r(proj(String(a.id)).autosave ?? null);
     case "creation_discard_recovery": { proj(String(a.id)).autosave = undefined; saveProjects(creationsDb); return r(undefined); }
     case "creation_versions": return r(proj(String(a.id)).versions.map((v) => ({ file: v.file, savedAt: v.savedAt, size: JSON.stringify(v.doc).length })));
+    case "creation_version": { const v = proj(String(a.id)).versions.find((x) => x.file === a.file); if (!v) throw new Error("versão não encontrada"); return r(v.doc); }
     case "creation_restore": {
       const p = proj(String(a.id));
       const v = p.versions.find((x) => x.file === a.file);

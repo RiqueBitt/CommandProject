@@ -2019,7 +2019,7 @@ export function encodeDelta(final: Float32Array, donor: Float32Array) {
 
 // ------------------------------------------------------------------ pincel de escultura
 
-export type BrushMode = "raise" | "lower" | "smooth" | "flatten" | "noise";
+export type BrushMode = "raise" | "lower" | "smooth" | "flatten" | "noise" | "erode";
 
 /** Uma pincelada na camada do pincel (delta em unidades do mundo). */
 export function brushDab(g: Grid, layer: Float32Array, cur: Float32Array, mode: BrushMode, cx: number, cz: number, rad: number, strength: number, target?: number) {
@@ -2027,6 +2027,7 @@ export function brushDab(g: Grid, layer: Float32Array, cur: Float32Array, mode: 
   const i0 = Math.max(0, Math.ceil((cx - rad) / step)), i1 = Math.min(s, Math.floor((cx + rad) / step));
   const j0 = Math.max(0, Math.ceil((cz - rad) / step)), j1 = Math.min(s, Math.floor((cz + rad) / step));
   const n = simplex(4242);
+  if (mode === "erode") { erodeDab(g, layer, cur.slice(), cx, cz, rad, strength); return; }
   for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
     const d = Math.hypot(i * step - cx, j * step - cz) / rad;
     if (d >= 1) continue;
@@ -2046,6 +2047,56 @@ export function brushDab(g: Grid, layer: Float32Array, cur: Float32Array, mode: 
       delta = (sum / c - cur[k]) * 0.5 * fall;
     } else if (mode === "noise") delta = n(i * step / 18, j * step / 18) * strength * 0.12 * fall;
     layer[k] += delta;
+  }
+}
+
+/** Pincel de erosão: gotas de chuva caem dentro do círculo e descem a encosta levando terra
+ *  (cavam ravinas) e deixando onde o terreno fica plano; depois um pouco de erosão térmica tira as
+ *  quinas. Mexe só na camada do pincel e acompanha `cur` (as alturas de agora). */
+export function erodeDab(g: Grid, layer: Float32Array, cur: Float32Array, cx: number, cz: number, rad: number, strength: number, seed = (cx * 73856093) ^ (cz * 19349663)) {
+  const s = g.size, w = s + 1, step = g.grid / s;
+  const r = rng(Math.abs(Math.round(seed)) + 1);
+  const drops = Math.round(20 + strength * 1.2);
+  const reach = rad * 1.6;
+  const inside = (i: number, j: number) => i >= 1 && j >= 1 && i < s && j < s && Math.hypot(i * step - cx, j * step - cz) < reach;
+  const change = (k: number, dv: number) => { layer[k] += dv; cur[k] += dv; };
+  for (let d = 0; d < drops; d++) {
+    const a = r() * Math.PI * 2, rr = Math.sqrt(r()) * rad;
+    let i = Math.round((cx + Math.cos(a) * rr) / step), j = Math.round((cz + Math.sin(a) * rr) / step);
+    let sed = 0;
+    for (let t = 0; t < 40 && inside(i, j); t++) {
+      const k = j * w + i;
+      // vizinho mais baixo
+      let bi = i, bj = j, bh = cur[k];
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const h = cur[(j + dj) * w + i + di];
+        if (h < bh) { bh = h; bi = i + di; bj = j + dj; }
+      }
+      const drop = cur[k] - bh;
+      if (bi === i && bj === j || drop < 0.02) {
+        // parou num buraco ou no plano: deixa a terra aqui
+        change(k, sed * 0.9);
+        sed = 0;
+        break;
+      }
+      // leva mais terra onde desce mais; deixa um pouco quando a encosta suaviza
+      const take = Math.min(drop * 0.45, 0.06 * strength * Math.min(1, drop / step * 2));
+      const cap = drop * 0.8 + 0.2;
+      if (sed > cap) { const put = (sed - cap) * 0.3; change(k, put); sed -= put; }
+      else { change(k, -take); sed += take; }
+      i = bi; j = bj;
+    }
+  }
+  // erosão térmica leve só no círculo: encostas acima do limite escorregam
+  const i0 = Math.max(1, Math.floor((cx - rad) / step)), i1 = Math.min(s - 1, Math.ceil((cx + rad) / step));
+  const j0 = Math.max(1, Math.floor((cz - rad) / step)), j1 = Math.min(s - 1, Math.ceil((cz + rad) / step));
+  const talus = step * 0.9;
+  for (let it = 0; it < 2; it++) for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const k = j * w + i;
+    for (const q of [k - 1, k + 1, k - w, k + w]) {
+      const diff = cur[k] - cur[q];
+      if (diff > talus) { const m = (diff - talus) * 0.25; change(k, -m); change(q, m); }
+    }
   }
 }
 

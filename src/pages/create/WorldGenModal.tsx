@@ -2,6 +2,7 @@
 // veja a prévia ao vivo e gere. Tudo o que sai daqui continua editável no editor.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon, Modal, Notice } from "../../components/ui";
+import { describeWorld } from "./mapTools";
 import { BLANK_SIZES, blankLabel } from "../studio/mapEdit";
 import { largestSizeFor, maxPlayersFor } from "../../lib/matchLimits";
 import type { Terrain } from "../../lib/types";
@@ -83,6 +84,34 @@ const SLIDERS: { group: string; icon: string; items: { key: keyof WorldGen; labe
   ] },
 ];
 
+/** "Descreva o mapa": uma frase vira os ajustes do gerador (sem internet, por palavras-chave). */
+function DescribeBox({ onApply }: { onApply: (over: Partial<WorldGen>) => void }) {
+  const [text, setText] = useState("");
+  const [got, setGot] = useState<string[] | null>(null);
+  const run = () => {
+    const d = describeWorld(text);
+    setGot(d.understood);
+    if (d.understood.length) onApply(d.over);
+  };
+  return (
+    <div className="wg-describe">
+      <label className="field"><span className="label"><Icon name="chat" size={15} /> {t("Descreva o mapa")}</span>
+        <div className="row" style={{ gap: 6 }}>
+          <input className="input grow" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") run(); }}
+            placeholder={t("ex.: arquipélago com 6 jogadores, muitos rios e florestas, ligado por pontes")} />
+          <button type="button" className="btn primary" disabled={!text.trim()} onClick={run}><Icon name="auto_awesome" size={16} /> {t("Aplicar")}</button>
+        </div>
+      </label>
+      {got && (got.length ? (
+        <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
+          <span className="faint small">{t("Entendi:")}</span>
+          {got.map((g) => <span key={g} className="chip ok">{t(g)}</span>)}
+        </div>
+      ) : <span className="faint small">{t("Não entendi nada: tente palavras como ilhas, montanhas, deserto, neve, rios, florestas, vilas, 4 jogadores, 2v2, rico.")}</span>)}
+    </div>
+  );
+}
+
 export default function WorldGenModal(props: Props) {
   const { grid, donor, water, hasWater, catalog } = props;
   // mundos de versões antigas não têm as opções novas (vilas, estradas, detalhe): entram os padrões
@@ -151,6 +180,7 @@ export default function WorldGenModal(props: Props) {
     <Modal title={t("Gerar mundo")} icon="auto_awesome" onClose={props.onClose} wide>
       <div className="wg">
         <div className="wg-left">
+          <DescribeBox onApply={(over) => setWg((w) => ({ ...w, ...over, preset: "custom" }))} />
           <div className="wg-presets">
             {WORLD_PRESETS.map((p) => (
               <button key={p.id} className={`wg-preset ${wg.preset === p.id ? "on" : ""}`} onClick={() => setWg((w) => ({ ...w, ...p.over, preset: p.id }))} title={t(p.desc)}>

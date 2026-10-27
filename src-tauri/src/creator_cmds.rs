@@ -81,6 +81,12 @@ pub async fn creation_versions(state: State<'_, AppState>, id: String) -> R<Vec<
 }
 
 #[tauri::command]
+pub async fn creation_version(state: State<'_, AppState>, id: String, file: String) -> R<Value> {
+    let c = store(&state).await?;
+    off_lock(move || c.version(&id, &file)).await
+}
+
+#[tauri::command]
 pub async fn creation_restore(state: State<'_, AppState>, id: String, file: String) -> R<Value> {
     let c = store(&state).await?;
     off_lock(move || c.restore(&id, &file)).await

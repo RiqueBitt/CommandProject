@@ -331,6 +331,15 @@ impl Creations {
         Ok(out)
     }
 
+    /// Lê uma versão anterior sem mexer no projeto (linha do tempo).
+    pub fn version(&self, id: &str, file: &str) -> Result<Value> {
+        let d = self.dir(id)?;
+        if file.contains(['/', '\\']) || !file.ends_with(".json") {
+            return Err(Error::Other("versão inválida".into()));
+        }
+        read_json(&d.join("versions").join(file))
+    }
+
     /// Volta para uma versão anterior (a atual vira uma versão também, para poder desfazer).
     pub fn restore(&self, id: &str, file: &str) -> Result<Value> {
         let d = self.dir(id)?;

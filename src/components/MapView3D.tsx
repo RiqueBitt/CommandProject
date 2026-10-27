@@ -46,6 +46,10 @@ interface Props {
   /** passagem das tropas por vértice: 0 livre, 1 íngreme/água, 2 bloqueado à mão, 3 liberado à mão */
   pass?: Uint8Array | null;
   onPointer: (type: "down" | "move" | "up", p: Pt | null) => void;
+  /** pedido de câmera (o número muda a cada pedido): jogo, passeio, de cima ou livre */
+  cameraRequest?: { mode: "game" | "tour" | "top" | "free"; n: number } | null;
+  /** a câmera voltou a ser livre (o passeio parou) */
+  onCamera?: (mode: "free") => void;
 }
 
 const SKY = 0x0b1118;
@@ -83,6 +87,7 @@ export default function MapView3D(props: Props) {
     redrawBrush: () => void;
     setGround: () => void;
     setSky: () => void;
+    camera: (mode: "game" | "tour" | "top" | "free") => void;
   } | null>(null);
 
   // contexto WebGL perdido (driver, falta de memória de vídeo, muitos contextos abertos): a cena é
@@ -754,9 +759,40 @@ if (uGround > 0.5) {
     // Um quadro a cada 400 ms pega texturas que terminaram de carregar em segundo plano.
     let raf = 0;
     let lastDraw = 0;
+    // passeio: a câmera dá a volta no mapa, alta e olhando para o centro (para no primeiro clique)
+    let tour: { a: number; last: number } | null = null;
+    const stopTour = () => { if (tour) { tour = null; live.current.onCamera?.("free"); } };
+    renderer.domElement.addEventListener("pointerdown", stopTour);
+    renderer.domElement.addEventListener("wheel", stopTour, { passive: true });
+    const setCamera = (mode: "game" | "tour" | "top" | "free") => {
+      tour = null;
+      const t = controls.target;
+      if (mode === "game") {
+        // como a câmera do jogo no zoom padrão: bem inclinada, olhando de cima para o chão
+        const dist = grid * 0.24, pitch = (62 * Math.PI) / 180;
+        camera.position.set(t.x, t.y + dist * Math.sin(pitch), t.z + dist * Math.cos(pitch));
+      } else if (mode === "top") {
+        controls.target.set(grid / 2, 0, grid / 2);
+        camera.position.set(grid / 2, grid * 1.25, grid / 2 + 0.01);
+      } else if (mode === "tour") {
+        controls.target.set(grid / 2, 0, grid / 2);
+        tour = { a: Math.atan2(camera.position.z - grid / 2, camera.position.x - grid / 2), last: performance.now() };
+      }
+      controls.update();
+      invalidate();
+    };
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
       if (document.hidden) return;
+      if (tour) {
+        const dt = Math.min(0.05, (now - tour.last) / 1000);
+        tour.last = now;
+        tour.a += dt * 0.18;
+        const R = grid * 0.62, bob = Math.sin(tour.a * 2) * grid * 0.05;
+        camera.position.set(grid / 2 + Math.cos(tour.a) * R, grid * 0.38 + bob, grid / 2 + Math.sin(tour.a) * R);
+        controls.target.set(grid / 2, 0, grid / 2);
+        dirty = true;
+      }
       const moved = controls.update();
       if (moved || dirty || now - lastDraw > 400) {
         renderer.render(scene, camera);
@@ -801,6 +837,7 @@ if (uGround > 0.5) {
       (scene.fog as THREE.Fog).color.copy(bg);
     };
     api.current = {
+      camera: setCamera,
       setSky: dirtying(setSky),
       setHeights: scheduleHeights, setTexture: dirtying(setTexture), setMarkers: dirtying(setMarkers), setDecor: dirtying(setDecor), setHighlights: dirtying(setHighlights),
       setOrbit: dirtying(setOrbit), setExaggeration: scheduleHeights, redrawBrush: dirtying(redrawBrush), setGround: dirtying(setGround),
@@ -822,6 +859,8 @@ if (uGround > 0.5) {
       cv.removeEventListener("pointermove", onMove);
       cv.removeEventListener("pointerup", onUp);
       cv.removeEventListener("pointerleave", onLeave);
+      cv.removeEventListener("pointerdown", stopTour);
+      cv.removeEventListener("wheel", stopTour);
       clearGroup();
       clearDecor();
       for (const o of [...hiGroup.children]) { const m = o as THREE.Line; m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
@@ -851,6 +890,7 @@ if (uGround > 0.5) {
   useEffect(() => { api.current?.setHighlights(); }, [props.highlights]);
   useEffect(() => { api.current?.setOrbit(props.orbit); }, [props.orbit]);
   useEffect(() => { api.current?.redrawBrush(); }, [props.brush, props.drag]);
+  useEffect(() => { if (props.cameraRequest) api.current?.camera(props.cameraRequest.mode); }, [props.cameraRequest]);
 
   return <div ref={host} className="map-3d" />;
 }

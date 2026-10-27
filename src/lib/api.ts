@@ -250,6 +250,7 @@ export const api = {
   creationRecovery: <D>(id: string) => call<D>("creation_recovery", { id }),
   creationDiscardRecovery: (id: string) => call<void>("creation_discard_recovery", { id }),
   creationVersions: (id: string) => call<T.CreationVersion[]>("creation_versions", { id }),
+  creationVersion: <D>(id: string, file: string) => call<D>("creation_version", { id, file }),
   creationRestore: <D>(id: string, file: string) => call<D>("creation_restore", { id, file }),
   creationUpdate: (id: string, patch: { name?: string; description?: string; favorite?: boolean; tags?: string[] }) => call<T.CreationMeta>("creation_update", { id, ...patch }),
   creationSetThumb: (id: string, png: string) => call<void>("creation_set_thumb", { id, png }),

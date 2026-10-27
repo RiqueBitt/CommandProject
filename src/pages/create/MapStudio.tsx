@@ -27,6 +27,8 @@ import {
 } from "../studio/mapEdit";
 import { MAX_SPAWNS, migrateMap, newMapDoc, TEAM_OPTIONS, teamLists, teamOfSpawn, worldTeams, type MapDoc } from "./docs";
 import { analyzeMap, type Analysis } from "./mapAnalysis";
+import { applyStamp, balanceMap, captureStamp, fmtDist, fmtTime, imageHeights, loadStamps, measure, saveStamps, sketchHeights, type Balance, type Measure, type Stamp } from "./mapTools";
+import { BalanceModal, ImportHeightModal, SketchModal, TimelineModal } from "./MapAssist";
 import { autoFixMap, checkMap, type MapIssue } from "./mapCheck";
 import {
   baseHeights, BIOME_LABEL, brushDab, massPads, NAV_N, navAt, resampleGrid, setWalkNav, composeWorld, decodeLayer, encodeDelta, encodeLayer, FEATURE_COLOR, FEATURE_ICON, FEATURE_LABEL, fullCuts, invert,
@@ -40,7 +42,7 @@ const WorldGenModal = lazy(() => import("./WorldGenModal"));
 type BrushTool = `b-${BrushMode}`;
 type FeatTool = `f-${FeatureKind}`;
 type NavTool = "nav-block" | "nav-allow" | "nav-erase";
-type Tool = "select" | "orbit" | "spawn" | "mass" | ReliefKind | "bridge" | "decor" | "uncut" | "seed" | "erase" | "paint" | NavTool | BrushTool | FeatTool;
+type Tool = "select" | "orbit" | "spawn" | "mass" | ReliefKind | "bridge" | "decor" | "uncut" | "seed" | "erase" | "paint" | NavTool | BrushTool | FeatTool | "ruler" | "stamp-copy" | "stamp-paste";
 const isNav = (t: Tool): t is NavTool => t.startsWith("nav-");
 type M = [number, number, number, number];
 const TEAM_COLORS = ["#5aa9e6", "#e5534b", "#7bd88f", "#c78bff", "#f2b33d", "#ff8fab", "#9be7ff", "#eeeeee"];
@@ -52,6 +54,7 @@ const BRUSH: Record<BrushMode, { label: string; icon: string; color: string; hin
   smooth: { label: "Suavizar", icon: "blur_on", color: "#9be7ff", hint: "Pinte para suavizar degraus e pontas." },
   flatten: { label: "Nivelar", icon: "horizontal_rule", color: "#c9d1d9", hint: "Nivela na altura do ponto onde você começou a pintar." },
   noise: { label: "Irregular", icon: "grain", color: "#c78bff", hint: "Deixa o chão irregular e natural." },
+  erode: { label: "Erosão", icon: "water_drop", color: "#5fd3c0", hint: "Pinte para a chuva cavar ravinas e levar terra encosta abaixo, como a natureza faz." },
 };
 const POINT_FEATS: FeatureKind[] = ["mountain", "hill", "plateau", "crater", "lake", "dunes", "island", "pad", "platform", "chasm"];
 const isRelief = (t: Tool): t is ReliefKind => t in RELIEF_LABEL;
@@ -81,6 +84,9 @@ const HINT: Record<string, string> = {
   decor: "Escolha uma decoração na caixa de recursos e clique; arraste para espalhar.",
   uncut: "Clique ou arraste para tirar decorações do terreno original.",
   seed: "Ponto de onde a navegação é recalculada.",
+  ruler: "Arraste de um ponto a outro: distância em linha reta e a pé, e quanto tempo cada tropa leva.",
+  "stamp-copy": "Clique no centro do relevo que quer guardar (o raio do pincel é o tamanho do carimbo).",
+  "stamp-paste": "Clique para colar o carimbo escolhido (raio, giro e espelho na caixa de recursos).",
   erase: "Clique sobre qualquer item para apagá-lo.",
 };
 const hintOf = (tl: Tool) => isBrush(tl) ? t(BRUSH[tl.slice(2) as BrushMode].hint)
@@ -154,7 +160,16 @@ export default function MapStudio({ id }: { id: string }) {
   const [assets, setAssets] = useState<MapAssets | null>(null);
   const [models, setModels] = useState<CreationMeta[] | null>(null);
   const [ribbon, setRibbon] = useState("home");
-  const [left, setLeft] = useState<"decor" | "mine" | "ground">("decor");
+  const [left, setLeft] = useState<"decor" | "mine" | "ground" | "stamps">("decor");
+  const [stamps, setStamps] = useState<Stamp[]>(() => loadStamps());
+  const [stampId, setStampId] = useState<string | null>(null);
+  const [stampRot, setStampRot] = useState(0);
+  const [stampMirror, setStampMirror] = useState(false);
+  const [ruler, setRuler] = useState<{ a: Pt; b: Pt; m: Measure | null } | null>(null);
+  const [assist, setAssist] = useState<"sketch" | "image" | "balance" | "timeline" | null>(null);
+  const [balance, setBalance] = useState<Balance | null>(null);
+  const [camReq, setCamReq] = useState<{ mode: "game" | "tour" | "top" | "free"; n: number } | null>(null);
+  const [touring, setTouring] = useState(false);
   const [view, setView] = useState<"3d" | "2d">("3d");
   const [skin, setSkin] = useState<"game" | "nav" | "relief" | "analysis">(() => (p.doc.world || p.doc.base === "blank" ? "relief" : "game"));
   const [exag, setExag] = useState(1.5);
@@ -273,6 +288,22 @@ export default function MapStudio({ id }: { id: string }) {
   }, [featured, layer, hidden, edits.mass, relief3d, water, hasWater]);
   const heights = useMemo(() => (relief3d && composed ? applyRelief(relief3d, composed, edits.relief, doc.rugged, water) : null), [relief3d, composed, edits.relief, doc.rugged, water]);
 
+  const renderVersion = useCallback((d: MapDoc) => {
+    if (!relief3d) return { image: null, stats: "" };
+    const feats = d.features ?? [];
+    const base = d.world ? baseHeights(relief3d, relief3d.heights, water, hasWater, d.world) : null;
+    const H = composeWorld(relief3d, relief3d.heights, water, hasWater, d.world, feats, base);
+    if (d.sculpt && d.sculptSize) {
+      const lay = resampleGrid(decodeLayer(d.sculpt, (d.sculptSize + 1) ** 2), d.sculptSize, relief3d.size);
+      for (let k = 0; k < H.length; k++) H[k] = Math.max(0, Math.min(511, H[k] + lay[k]));
+    }
+    const e = d.edits ?? { spawns: [], mass: [], props: [] };
+    return {
+      image: reliefImage(relief3d, H, water, hasWater, d.world?.biome ?? "temperate", 260),
+      stats: t("{b} bases · {m} massa · {f} formas · {p} decorações", { b: e.spawns.length, m: e.mass.length, f: feats.length, p: e.props.length }),
+    };
+  }, [relief3d, water, hasWater]);
+
   // ------------------------------------------------------------ edição
   const setDoc = useCallback((fn: (d: MapDoc) => MapDoc) => p.commit(fn), [p]);
   const setEdits = useCallback((fn: (e: Edits) => Edits, amend = false) => (amend ? p.amend : p.commit)((d) => {
@@ -292,8 +323,8 @@ export default function MapStudio({ id }: { id: string }) {
     return out;
   }, [symOps]);
 
-  const ctxRef = useRef({ tool, radius, strength, heights, composed, relief3d, edits, drag, propBp, density, sizeVar, sel, layer, avoidWater, avoidSteep, doc });
-  ctxRef.current = { tool, radius, strength, heights, composed, relief3d, edits, drag, propBp, density, sizeVar, sel, layer, avoidWater, avoidSteep, doc };
+  const ctxRef = useRef({ tool, radius, strength, heights, composed, relief3d, edits, drag, propBp, density, sizeVar, sel, layer, avoidWater, avoidSteep, doc, stamp: null as Stamp | null, stampRot, stampMirror });
+  ctxRef.current = { tool, radius, strength, heights, composed, relief3d, edits, drag, propBp, density, sizeVar, sel, layer, avoidWater, avoidSteep, doc, stamp: stamps.find((x) => x.id === stampId) ?? null, stampRot, stampMirror };
   const stroke = useRef<Pt | null>(null);
   const moving = useRef<{ from: Pt; ids: Sel[]; started: boolean; center?: Pt; a0?: number; d0?: number } | null>(null);
   /** modo de transformar a seleção ao arrastar */
@@ -726,6 +757,44 @@ export default function MapStudio({ id }: { id: string }) {
       if (ch) setPaintRev((v) => v + 1);
       return;
     }
+    // régua: arrastar de A até B
+    if (tl === "ruler") {
+      const r = ctxRef.current.relief3d, H = ctxRef.current.heights;
+      if (type === "down" && q) setRuler({ a: q, b: q, m: null });
+      else if (type === "move" && q) setRuler((x) => (x ? { ...x, b: q } : x));
+      else if (type === "up") setRuler((x) => {
+        if (!x || !r || !H) return x;
+        const b = q ?? x.b;
+        return { a: x.a, b, m: measure(r, H, water, hasWater, x.a, b) };
+      });
+      return;
+    }
+    // carimbos: guardar o relevo de um círculo / colar o carimbo escolhido
+    if (tl === "stamp-copy" && type === "down" && q) {
+      const r = ctxRef.current.relief3d, H = ctxRef.current.heights;
+      if (!r || !H) return;
+      const name = prompt(t("Nome do carimbo:"), t("Carimbo {n}", { n: loadStamps().length + 1 }));
+      if (!name) return;
+      const st = captureStamp(r, H, q[0], q[1], rad, name.trim().slice(0, 40));
+      const list = [st, ...loadStamps()];
+      saveStamps(list);
+      setStamps(list);
+      setStampId(st.id);
+      setLeft("stamps");
+      setTool("stamp-paste");
+      toast("ok", t("Carimbo guardado. Clique no mapa para colar (raio, giro e espelho na caixa de recursos)."));
+      return;
+    }
+    if (tl === "stamp-paste" && type === "down" && q) {
+      const { relief3d: r, composed: cur, stamp: st } = ctxRef.current;
+      if (!r || !cur) return;
+      if (!st) { toast("info", t("Escolha um carimbo na caixa de recursos (ou guarde um com Copiar).")); setLeft("stamps"); return; }
+      const lay = ctxRef.current.layer ? ctxRef.current.layer.slice() : new Float32Array((r.size + 1) ** 2);
+      const work = cur.slice();
+      for (const mq of mirrors(q)) applyStamp(r, lay, work, st, mq.p[0], mq.p[1], rad, ctxRef.current.stampRot, ctxRef.current.stampMirror);
+      commitSculpt(lay);
+      return;
+    }
     // pincel de escultura
     if (isBrush(tl)) {
       const mode = tl.slice(2) as BrushMode;
@@ -812,7 +881,7 @@ export default function MapStudio({ id }: { id: string }) {
       else if (stroke.current && Math.hypot(q[0] - stroke.current[0], q[1] - stroke.current[1]) > rad * 0.45) { stroke.current = q; setEdits(add, true); }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p, setEdits, grid, mirrors, symOps]);
+  }, [p, setEdits, grid, mirrors, symOps, water, hasWater]);
 
   // ------------------------------------------------------------ derivados
   const groundLayers: GroundLayer[] = useMemo(() => (doc.terrain && assets ? assets.layers.filter((l) => l.map.toLowerCase() === doc.terrain!.toLowerCase()) : []), [doc.terrain, assets]);
@@ -993,8 +1062,10 @@ export default function MapStudio({ id }: { id: string }) {
   }, [sel, edits, doc.features]);
   const lines = useMemo(() => {
     const selF = new Set([...sel].filter((s) => s.startsWith("feat:")).map((s) => s.slice(5)));
-    return activeFeatures.filter((f) => LINE_FEATURES.includes(f.kind) && f.pts.length > 1 && (selF.has(f.id) || f.kind === "pass")).map((f) => ({ pts: f.pts, color: selF.has(f.id) ? "#ffd166" : FEATURE_COLOR[f.kind] }));
-  }, [activeFeatures, sel]);
+    const out = activeFeatures.filter((f) => LINE_FEATURES.includes(f.kind) && f.pts.length > 1 && (selF.has(f.id) || f.kind === "pass")).map((f) => ({ pts: f.pts, color: selF.has(f.id) ? "#ffd166" : FEATURE_COLOR[f.kind] }));
+    if (ruler && tool === "ruler") out.push({ pts: [ruler.a, ruler.b], color: "#ffd166" });
+    return out;
+  }, [activeFeatures, sel, ruler, tool]);
 
   const usesWorld = !!doc.world || activeFeatures.length > 0 || !!doc.sculpt || edits.mass.length > 0;
   const editsTerrain = edits.relief.length > 0 || doc.rugged || edits.bridges.length > 0 || usesWorld;
@@ -1531,13 +1602,58 @@ export default function MapStudio({ id }: { id: string }) {
       <span className="faint small">{doc.symmetry === "none" ? t("Coloca só onde clicar") : t("Repete nos outros lados")}</span>
     </div>
   );
+  // ------------------------------------------------------------ assistente
+  /** troca o relevo inteiro por `H` (vai na camada do pincel: dá para desfazer e continuar editando) */
+  const replaceRelief = (H: Float32Array) => {
+    if (!featured || !relief3d) return;
+    const lay = new Float32Array(H.length);
+    for (let k = 0; k < H.length; k++) lay[k] = H[k] - featured[k];
+    commitSculpt(lay);
+  };
+  const baseLevel = () => {
+    if (hasWater) return water + 8;
+    const h = relief3d ? Float32Array.from(relief3d.heights).sort() : null;
+    return h ? h[h.length >> 1] : 60;
+  };
+  const applySketch = (sk: Uint8Array, N: number, bases: Pt[]) => {
+    if (!relief3d) return;
+    replaceRelief(sketchHeights(relief3d, sk, N, water, hasWater, Math.floor(Math.random() * 1e6), baseLevel()));
+    if (bases.length >= 2) setEdits((e) => ({ ...e, spawns: bases.map((b) => [round1((b[0] / 1024) * grid), round1((b[1] / 1024) * grid)] as Pt) }));
+    setAssist(null);
+    setSkin("relief");
+    toast("ok", t("Esboço transformado em relevo. Ctrl+Z desfaz; continue editando com os pincéis e as formas."));
+  };
+  const applyImage = (gray: Float32Array, w: number, h: number, low: number, high: number) => {
+    if (!relief3d) return;
+    replaceRelief(imageHeights(relief3d, gray, w, h, low, high));
+    setAssist(null);
+    setSkin("relief");
+    toast("ok", t("Relevo importado da imagem. Ctrl+Z desfaz."));
+  };
+  const openBalance = () => {
+    if (!relief3d || !heights) return;
+    if (edits.spawns.length < 2) { toast("info", t("Ponha pelo menos 2 bases para avaliar o equilíbrio.")); return; }
+    setBalance(balanceMap(relief3d, heights, water, hasWater, edits.spawns, edits.mass, teamOf));
+    setAssist("balance");
+  };
+  const travelTable = () => {
+    if (!relief3d || !heights || !balance) return [];
+    const out: { a: number; b: number; walk: string; time: string }[] = [];
+    for (let a = 0; a < edits.spawns.length && out.length < 12; a++) for (let b = a + 1; b < edits.spawns.length && out.length < 12; b++) {
+      if (teamOf(a) === teamOf(b)) continue;
+      const m = measure(relief3d, heights, water, hasWater, edits.spawns[a], edits.spawns[b]);
+      out.push({ a: a + 1, b: b + 1, walk: m.walk === null ? t("sem caminho") : fmtDist(m.walk), time: fmtTime(m.times[1].seconds) });
+    }
+    return out;
+  };
+
   const genBtn = <RibbonButton icon="auto_awesome" label={t("Gerar mundo")} onClick={() => setGenOpen(true)} disabled={!relief3d} color="#a3e635" hint={t("Relevo, montanhas, lagos, rios, florestas e estruturas a partir de uma semente (G)")} />;
 
   return (
     <div className="studio-root">
       <div className="studio-top">
         <Ribbon active={ribbon} onTab={setRibbon}
-          tabs={[{ id: "home", label: t("Início") }, { id: "terrain", label: t("Terreno") }, { id: "shapes", label: t("Formas") }, { id: "objects", label: t("Objetos") }, { id: "view", label: t("Exibir") }, { id: "game", label: t("Jogo") }]}>
+          tabs={[{ id: "home", label: t("Início") }, { id: "terrain", label: t("Terreno") }, { id: "shapes", label: t("Formas") }, { id: "objects", label: t("Objetos") }, { id: "assist", label: t("Assistente") }, { id: "view", label: t("Exibir") }, { id: "game", label: t("Jogo") }]}>
           {ribbon === "home" && <>
             <RibbonGroup label={t("Ferramentas")}>
               {toolBtn("select", "near_me", t("Selecionar"))}
@@ -1641,6 +1757,34 @@ export default function MapStudio({ id }: { id: string }) {
               <RibbonButton icon="restore" label={t("Devolver as do terreno")} onClick={() => setEdits((e) => ({ ...e, cuts: [] }))} disabled={!edits.cuts.length} />
             </RibbonGroup>
           </>}
+          {ribbon === "assist" && <>
+            <RibbonGroup label={t("Criar")}>
+              <RibbonButton icon="draw" label={t("Esboço → mapa")} onClick={() => setAssist("sketch")} disabled={!relief3d} color="#a3e635" hint={t("Desenhe com cores (água, montanha, deserto…) e vira relevo de verdade")} />
+              <RibbonButton icon="chat" label={t("Descrever o mapa")} onClick={() => setGenOpen(true)} disabled={!relief3d} color="#a3e635" hint={t("Escreva como quer o mapa (\"arquipélago com 6 jogadores e muitos rios\") no gerador de mundo")} />
+              <RibbonButton icon="image" label={t("Relevo de imagem")} onClick={() => setAssist("image")} disabled={!relief3d} hint={t("PNG em tons de cinza vira relevo")} />
+            </RibbonGroup>
+            <RibbonGroup label={t("Natureza")}>
+              {toolBtn("b-erode", BRUSH.erode.icon, t(BRUSH.erode.label), BRUSH.erode.color)}
+            </RibbonGroup>
+            <RibbonGroup label={t("Carimbos")}>
+              {toolBtn("stamp-copy", "approval", t("Copiar relevo"), "#ffd166")}
+              {toolBtn("stamp-paste", "content_paste", t("Colar carimbo"), "#ffd166")}
+              <RibbonButton icon="collections_bookmark" label={t("Biblioteca {n}", { n: stamps.length })} onClick={() => setLeft("stamps")} />
+            </RibbonGroup>
+            <RibbonGroup label={t("Tamanho")}>{sizeSliders}</RibbonGroup>
+            <RibbonGroup label={t("Medir e equilibrar")}>
+              {toolBtn("ruler", "straighten", t("Régua"), "#ffd166")}
+              <RibbonButton icon="balance" label={t("Equilíbrio")} onClick={openBalance} disabled={!heights} color="#ffd166" hint={t("Nota de 0 a 100: massa, distância ao inimigo e proteção de cada base")} />
+            </RibbonGroup>
+            <RibbonGroup label={t("Câmera")}>
+              <RibbonButton icon="videogame_asset" label={t("Câmera do jogo")} disabled={view !== "3d"} onClick={() => setCamReq({ mode: "game", n: Date.now() })} hint={t("A inclinação e o zoom da câmera do jogo")} />
+              <RibbonButton icon="flight" label={touring ? t("Passeando…") : t("Passeio")} active={touring} disabled={view !== "3d"} onClick={() => { setCamReq({ mode: touring ? "free" : "tour", n: Date.now() }); setTouring((v) => !v); }} hint={t("A câmera dá a volta no mapa (clique para parar)")} />
+              <RibbonButton icon="crop_free" label={t("De cima")} disabled={view !== "3d"} onClick={() => setCamReq({ mode: "top", n: Date.now() })} />
+            </RibbonGroup>
+            <RibbonGroup label={t("Histórico")}>
+              <RibbonButton icon="history" label={t("Linha do tempo")} onClick={() => setAssist("timeline")} disabled={!p.meta || !relief3d} hint={t("Volte no tempo pelas versões salvas, comparando com o mapa de agora")} />
+            </RibbonGroup>
+          </>}
           {ribbon === "view" && <>
             <RibbonGroup label={t("Vista")}>
               <RibbonButton icon="view_in_ar" label="3D" active={view === "3d"} disabled={!relief3d} onClick={() => setView("3d")} />
@@ -1685,6 +1829,7 @@ export default function MapStudio({ id }: { id: string }) {
               <button className="chip" aria-pressed={left === "decor"} onClick={() => setLeft("decor")}><Icon name="park" size={15} /> {t("Do jogo")}</button>
               <button className="chip" aria-pressed={left === "mine"} onClick={() => setLeft("mine")}><Icon name="inventory_2" size={15} /> {t("Meus modelos")}</button>
               <button className="chip" aria-pressed={left === "ground"} onClick={() => setLeft("ground")}><Icon name="format_paint" size={15} /> {t("Chão")}</button>
+              <button className="chip" aria-pressed={left === "stamps"} onClick={() => setLeft("stamps")}><Icon name="approval" size={15} /> {t("Carimbos")}</button>
             </div>
             <div className="spanel-pad">
               {left === "decor" && (
@@ -1711,6 +1856,23 @@ export default function MapStudio({ id }: { id: string }) {
                     })}
                   </div>
                 )
+              )}
+              {left === "stamps" && (
+                <div className="col" style={{ gap: 8 }}>
+                  <p className="faint small">{t("Guarde montanhas, vales e ilhas que ficaram bons e cole em outros lugares (ou em outros mapas). Copiar relevo: clique no centro; o raio do pincel é o tamanho.")}</p>
+                  <div className="row" style={{ gap: 6 }}>
+                    <button className={`btn sm ${tool === "stamp-copy" ? "primary" : ""}`} onClick={() => setTool("stamp-copy")}><Icon name="approval" size={15} /> {t("Copiar relevo")}</button>
+                    <button className={`btn sm ${tool === "stamp-paste" ? "primary" : ""}`} disabled={!stampId} onClick={() => setTool("stamp-paste")}><Icon name="content_paste" size={15} /> {t("Colar")}</button>
+                  </div>
+                  <label className="range"><span>{t("Giro")}</span><input type="range" min={0} max={345} step={15} value={stampRot} onChange={(e) => setStampRot(Number(e.target.value))} /><output>{stampRot}°</output></label>
+                  <label className="check small"><input type="checkbox" checked={stampMirror} onChange={(e) => setStampMirror(e.target.checked)} /> {t("Espelhado")}</label>
+                  {stamps.length === 0 ? <p className="faint small">{t("Nenhum carimbo ainda.")}</p> : stamps.map((st) => (
+                    <div key={st.id} className={`stamp-row ${st.id === stampId ? "on" : ""}`}>
+                      <button className="grow" onClick={() => { setStampId(st.id); setTool("stamp-paste"); }}><Icon name="terrain" size={16} /> {st.name} <small className="faint">r {st.r}</small></button>
+                      <button className="btn icon-btn sm" aria-label={t("Apagar")} onClick={() => { const l = stamps.filter((x) => x.id !== st.id); saveStamps(l); setStamps(l); if (stampId === st.id) setStampId(null); }}><Icon name="delete" size={15} /></button>
+                    </div>
+                  ))}
+                </div>
               )}
               {left === "ground" && (assets === null ? <div className="bar indeterminate"><i /></div> : doc.clean ? (
                 <GroundPaint all={allLayers} chain={chain} deck={spans.length ? deck : undefined} onDeck={(dPath: string | null) => setDoc((d) => ({ ...d, deckTex: dPath }))} biome={doc.groundBiome} role={paintRole} painting={tool === "paint"}
@@ -1762,7 +1924,8 @@ export default function MapStudio({ id }: { id: string }) {
                   texture={texture3d} palette={skin === "relief" ? (doc.world?.biome ?? "temperate") : null} exaggeration={exag} ground={skin === "relief" ? groundView : null}
                   spawns={markers} mass={hidden.has("grp:mass") ? [] : edits.mass} bridges={edits.bridges} seed={edits.seed}
                   decor={decor} cuts={edits.cuts} highlights={highlights} lines={lines} snapshotRef={snapshot}
-                  brush={brush} drag={drag} orbit={tool === "orbit"} onPointer={onPointer} />
+                  brush={brush} drag={drag} orbit={tool === "orbit"} onPointer={onPointer}
+                  cameraRequest={camReq} onCamera={() => setTouring(false)} />
               </Suspense>
             ) : view === "3d" ? <div className="bar indeterminate" style={{ margin: 20 }}><i /></div> : (
               <div className="map-stage studio-2d" ref={stage}
@@ -1784,6 +1947,7 @@ export default function MapStudio({ id }: { id: string }) {
                   {!hidden.has("grp:spawn") && edits.spawns.map((q, i) => <g key={`s${i}`}><circle cx={q[0]} cy={q[1]} r={26} fill={TEAM_COLORS[teamOf(i) % 8]} stroke="#0d1b26" strokeWidth={5} /><text x={q[0]} y={q[1] + 10} textAnchor="middle" fontSize={30} fontWeight={700} fill="#0d1b26">{i + 1}</text></g>)}
                   {highlights.map(([x, z, r], i) => <circle key={`h${i}`} cx={x} cy={z} r={r} fill="none" stroke="#ffd166" strokeWidth={3} />)}
                   {cursor && brush && <circle cx={cursor[0]} cy={cursor[1]} r={brush.shape === "circle" ? brush.radius : 10} fill="none" stroke={brush.color} strokeWidth={3} />}
+                  {ruler && tool === "ruler" && <line x1={ruler.a[0]} y1={ruler.a[1]} x2={ruler.b[0]} y2={ruler.b[1]} stroke="#ffd166" strokeWidth={4} strokeDasharray="14 8" />}
                 </svg>
               </div>
             )}
@@ -1791,8 +1955,17 @@ export default function MapStudio({ id }: { id: string }) {
               <span className="vp-chip"><Icon name={tool === "select" ? "near_me" : "edit"} size={15} /> {hintOf(tool).split(".")[0]}.</span>
               {selIds.length > 0 && <span className="vp-chip"><Icon name="select_all" size={15} /> {selIds.length > 1 ? t("{n} selecionados", { n: selIds.length }) : t("1 selecionado")}</span>}
               {doc.symmetry !== "none" && <span className="vp-chip"><Icon name="flip" size={15} /> {t(SYMMETRY_LABEL[doc.symmetry])}</span>}
+              {touring && <button className="vp-chip" onClick={() => { setCamReq({ mode: "free", n: Date.now() }); setTouring(false); }}><Icon name="stop" size={15} /> {t("Parar o passeio")}</button>}
               {skin === "relief" && <span className="vp-chip faint" title={t("No jogo o chão usa as texturas do terreno base (troque em Chão)")}><Icon name="info" size={15} /> {t("Cores da prévia")}</span>}
             </div>
+            {ruler?.m && tool === "ruler" && (
+              <div className="ruler-card">
+                <b><Icon name="straighten" size={15} /> {t("Régua")}</b>
+                <span>{t("Em linha reta: {d}", { d: fmtDist(ruler.m.straight) })}</span>
+                <span>{ruler.m.walk === null ? t("A pé: sem caminho (água, encosta ou bloqueio)") : t("A pé: {d}", { d: fmtDist(ruler.m.walk) })}</span>
+                {ruler.m.times.map((x) => <span key={x.id} className="row" style={{ justifyContent: "space-between", gap: 10 }}><span className="muted">{t(x.label)}</span><b>{fmtTime(x.seconds)}</b></span>)}
+              </div>
+            )}
             {skin === "analysis" && (
               <div className="analysis-panel">
                 {!analysis ? <div className="bar indeterminate"><i /></div> : <>
@@ -1850,6 +2023,10 @@ export default function MapStudio({ id }: { id: string }) {
         { icon: locked.has(ctx.id) ? "lock_open" : "lock", label: locked.has(ctx.id) ? t("Destravar") : t("Travar"), onClick: () => toggleLayer("locked", ctx.id) },
         { icon: "delete", label: t("Excluir"), shortcut: "Del", danger: true, onClick: doDelete },
       ] as CtxItem[]} />}
+      {assist === "sketch" && <SketchModal players={edits.spawns.length} onClose={() => setAssist(null)} onApply={applySketch} />}
+      {assist === "image" && <ImportHeightModal water={hasWater ? water : 0} onClose={() => setAssist(null)} onApply={applyImage} />}
+      {assist === "balance" && balance && <BalanceModal result={balance} travel={travelTable()} onClose={() => setAssist(null)} onAddMass={(pts) => { setEdits((e) => ({ ...e, mass: [...e.mass, ...pts] })); setAssist(null); toast("ok", t("{n} ponto(s) de massa colocados. Ctrl+Z desfaz.", { n: pts.length })); }} />}
+      {assist === "timeline" && p.meta && <TimelineModal<MapDoc> id={p.meta.id} current={doc} render={renderVersion} onClose={() => setAssist(null)} onRestore={(d) => p.replace(migrateMap(d))} />}
       {genOpen && relief3d && (
         <Suspense fallback={null}>
           <WorldGenModal grid={relief3d} donor={relief3d.heights} water={water} hasWater={hasWater} terrains={terrains} terrain={doc.terrain} blank={blank} blankSize={blankSize}

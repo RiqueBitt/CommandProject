@@ -92,6 +92,7 @@ pub fn run() {
             creator_cmds::creation_discard_recovery,
             creator_cmds::creation_versions,
             creator_cmds::creation_restore,
+            creator_cmds::creation_version,
             creator_cmds::creation_update,
             creator_cmds::creation_set_thumb,
             creator_cmds::creation_thumb,
