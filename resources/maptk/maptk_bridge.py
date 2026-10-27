@@ -16,6 +16,7 @@ O toolkit (sc2maps.py / make_map.py) é de plutonics72, licença MIT — veja LI
 Este arquivo é do CommandProject (MIT).
 """
 
+import base64
 import io
 import json
 import math
@@ -515,7 +516,8 @@ def _clean_spec(spec):
         spec["clean"] = dict(paint=paint, deck=deck, ground=ground, chain=chain if len(chain) >= 2 else None, relight=bool(clean.get("relight", True)),
                              clear_props=bool(clean.get("clear_props", True)), ring=bool(clean.get("ring", True)), peaks=bool(clean.get("peaks", True)),
                              uv_tile=max(0.003, min(0.15, float(clean["uv_tile"]))) if clean.get("uv_tile") else None,
-                             ring_rise=max(0.0, min(250.0, float(clean.get("ring_rise", 95)))))
+                             ring_rise=max(0.0, min(250.0, float(clean.get("ring_rise", 95)))),
+                             ring_sculpt=_ring_sculpt(clean.get("ring_sculpt")))
     else:
         spec.pop("clean", None)
     # água do mapa em branco: nível novo (a lâmina d'água do terreno base sobe até ele)
@@ -769,7 +771,23 @@ def _hooks(sm, spec, state):
             if state.get("mesh_step"):  # malha nova feita logo acima (sem ela, o chão é o relevo)
                 import cp_regrid
                 height = cp_regrid.mesh_height(ground, state["mesh_step"])
-            data, na, nr = cp_mapobjs.edit(terrain.raw["mapobjs.win.bdf"], spec.get("props_add") or [],
+            ring = state.get("ring")
+            adds = spec.get("props_add") or []
+            outside = [p for p in adds if not (0 <= p[1] <= grid and 0 <= p[2] <= grid)]
+            if ring:
+                import cp_world
+                inner_h, ring_h = height, cp_world.ring_mesh_height(ring["height"], ring["step"])
+                m = ring["margin"]
+                def height(x, z, _i=inner_h, _r=ring_h):  # noqa: F811 — fora do mapa, a paisagem
+                    return _i(x, z) if 0 <= x <= grid and 0 <= z <= grid else _r(x, z)
+                adds = [p for p in adds if -m <= p[1] <= grid + m and -m <= p[2] <= grid + m]
+            elif outside:
+                adds = [p for p in adds if 0 <= p[1] <= grid and 0 <= p[2] <= grid]
+            if len(adds) < len(spec.get("props_add") or []):
+                state["warnings"].append(f"{len(spec['props_add']) - len(adds)} decoração(ões) fora do mapa ficaram de fora (sem paisagem em volta)")
+            if outside and ring:
+                emit("progress", message=f"paisagem em volta: {len([p for p in adds if not (0 <= p[1] <= grid and 0 <= p[2] <= grid)])} decoração(ões)")
+            data, na, nr = cp_mapobjs.edit(terrain.raw["mapobjs.win.bdf"], adds,
                                            spec.get("props_remove") or [], height, clear=clear)
             terrain.raw["mapobjs.win.bdf"] = data
             state["props"] = (na, nr)
@@ -864,6 +882,21 @@ def _mesh_step(grid):
     return float(math.ceil(grid / 230 / 4) * 4)
 
 
+def _ring_sculpt(rs):
+    """Valida a camada da paisagem em volta vinda do editor: {n, margin, data (base64)}."""
+    if not rs:
+        return None
+    try:
+        n = int(rs["n"])
+        margin = float(rs["margin"])
+        data = base64.b64decode(rs["data"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("camada da paisagem inválida")
+    if not 8 <= n <= 512 or not 64 <= margin <= 1024 or len(data) != (n + 1) ** 2 * 2:
+        raise ValueError("camada da paisagem inválida")
+    return dict(n=n, margin=margin, data=data)
+
+
 def _clean_visual(sm, spec, state, terrain, new_id):
     """Chão com um conjunto só de texturas e luz refeita para o relevo novo (cp_lighting)."""
     import cp_lighting
@@ -890,6 +923,12 @@ def _clean_visual(sm, spec, state, terrain, new_id):
             margin = (256.0 if g <= 1024 else 384.0) if clean.get("ring") else 0.0
             inner = lambda x, z: terrain.y(min(g, max(0, x)), min(g, max(0, z)))  # noqa: E731
             height = cp_world.ring_height(inner, g, rise=clean.get("ring_rise", 95.0)) if margin else inner
+            rs = clean.get("ring_sculpt")
+            if margin and rs:
+                # paisagem esculpida à mão no editor (só fora do mapa)
+                delta = cp_world.ring_layer(rs["n"], rs["margin"], g, rs["data"])
+                height = (lambda base: (lambda x, z: base(x, z) + delta(x, z)))(height)
+                emit("progress", message="paisagem em volta: escultura do editor aplicada")
             wl = spec.get("water_level")
             water = wl if wl is not None else (sm._water_level(terrain) or None)
             chain = _existing_textures(sm, clean.get("chain") or []) if clean.get("chain") else []
@@ -930,6 +969,9 @@ def _clean_visual(sm, spec, state, terrain, new_id):
             if tb2 is None:
                 raise ValueError("malha do chão grande demais mesmo na versão mais leve")
             state["mesh_step"] = step
+            if margin:
+                # decorações na paisagem em volta assentam na malha dela
+                state["ring"] = dict(height=height, margin=margin, step=ring_step)
             if zones and info["zones"] < len(zones):
                 state["warnings"].append(f"o terreno base só tem {info['zones']} material(is) de mistura: o chão usa {info['zones'] + 1} texturas")
             stem = info["old_mask"].replace("\\", "/").rsplit("/", 1)[-1][:-4] if info["old_mask"] else ""

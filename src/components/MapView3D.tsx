@@ -5,6 +5,7 @@ import { naturalColor } from "../pages/create/worldgen";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { heightAt, type DecorKind, type Pt, type Rect } from "../pages/studio/mapEdit";
 import { propModel, propModelNow } from "./propModels";
+import { ringHeight, type RingLayer } from "../pages/create/ring";
 
 export interface Marker { p: Pt; color: string; label: string }
 /** decoração mostrada no editor: x, z, yaw (graus), escala, tipo; `added` = colocada por você */
@@ -68,7 +69,7 @@ export interface GroundTextures {
   /** posição de cada vértice na cadeia praia(0)→chão(1)→terra(2)→rocha(3)→topo(4), como no jogo */
   t?: Float32Array | null;
   /** paisagem em volta do mapa (como no jogo): largura e altura das montanhas */
-  ring?: { margin: number; rise: number; water: number | null } | null;
+  ring?: { margin: number; rise: number; water: number | null; layer?: RingLayer | null; rev?: number } | null;
 }
 
 /** Editor 3D: relevo do terreno com a textura do jogo, água, marcadores e pincel. */
@@ -209,9 +210,10 @@ if (uGround > 0.5) {
     let ringKey = "";
     let ringSig = "";
     const setRing = (e: number, lo: number, hi: number) => {
+      ringArgs = [e, lo, hi];
       const r = live.current.ground?.ring;
       const { heights } = live.current;
-      const key = r ? `${r.margin}:${r.rise}:${r.water}` : "";
+      const key = r ? `${r.margin}:${r.rise}:${r.water}:${r.rev ?? 0}` : "";
       if (!r) {
         if (ringMesh) { scene.remove(ringMesh); ringMesh.geometry.dispose(); ringMesh = null; ringKey = ""; }
         skirt.visible = true;
@@ -232,15 +234,8 @@ if (uGround > 0.5) {
         const a = heights[j0 * w + i0], b = heights[j0 * w + i0 + 1], c = heights[(j0 + 1) * w + i0], d = heights[(j0 + 1) * w + i0 + 1];
         return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
       };
-      const hAt = (x: number, z: number) => {
-        const cx = Math.max(0, Math.min(grid, x)), cz = Math.max(0, Math.min(grid, z));
-        const base = hIn(cx, cz), d = Math.hypot(x - cx, z - cz);
-        if (d <= 0) return base;
-        const t = Math.min(1, d / 220), k = t * t * (3 - 2 * t);
-        const big = 0.55 + 0.45 * fbm(x / 260, z / 260, 4242);
-        const crag = 1 - Math.abs(fbm(x / 70, z / 70, 4249));
-        return base + r.rise * k * big + 22 * k * crag * crag;
-      };
+      // mesma conta do jogo (cp_world.ring_height) + a camada do pincel da paisagem
+      const hAt = (x: number, z: number) => ringHeight(hIn, grid, r.rise, r.layer, x, z);
       const P = new Float32Array(n * n * 3), C = new Float32Array(n * n * 3).fill(1), S = new Float32Array(n * n * 4), SB = new Float32Array(n * n), U = new Float32Array(n * n * 2);
       const ee = grid / 256;
       for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
@@ -322,7 +317,13 @@ if (uGround > 0.5) {
     scene.add(dragBox);
 
     const exag = () => live.current.exaggeration;
-    const hAt = (x: number, z: number) => heightAt({ size, grid }, live.current.heights, x, z) * exag();
+    const hAt = (x: number, z: number) => {
+      const r = live.current.ground?.ring;
+      // fora da área jogável (decorações e pincel na paisagem em volta): a altura da paisagem
+      if (r && (x < 0 || z < 0 || x > grid || z > grid))
+        return ringHeight((a, b) => heightAt({ size, grid }, live.current.heights, a, b), grid, r.rise, r.layer, x, z) * exag();
+      return heightAt({ size, grid }, live.current.heights, x, z) * exag();
+    };
 
     let texture: THREE.Texture | null = null;
     const loader = new THREE.TextureLoader();
@@ -349,12 +350,32 @@ if (uGround > 0.5) {
     // texturas do chão (só nas cores do relevo, sem a textura do jogo por cima)
     const groundTex: THREE.Texture[] = [];
     let groundKey = "";
+    // tudo do chão menos a camada da paisagem (para saber quando só ela mudou)
+    const ringOnlyKey = (g: GroundTextures | null | undefined) => (g ? `${g.t?.length ?? 0}:${g.tile}:${g.deck ?? ""}:${g.ring ? `${g.ring.margin}:${g.ring.rise}:${g.ring.water}` : "-"}` : "");
+    let lastRingOnly = "";
+    let lastRingRev: number | undefined;
+    let ringArgs: [number, number, number] | null = null;
     const setGround = () => {
       const g = live.current.ground;
       groundU.uTile.value = g?.tile ? g.tile : 1 / 22;
       groundU.uExact.value = g?.tile ? 1 : 0;
       const key = g ? `${g.uniform ? "u" : ""}${g.sand.length}:${g.grass.slice(-40)}:${g.rock.slice(-40)}:${g.snow.slice(-40)}:${(g.dirt ?? "").slice(-40)}:${(g.deck ?? "").slice(-40)}` : "";
-      if (key === groundKey) { if (groundU.uGround.value > 0.5) scheduleHeights(); return; }
+      if (key === groundKey) {
+        // só a camada da paisagem mudou (pincel lá fora): refaz só a paisagem, não o chão do mapa
+        const rk = ringOnlyKey(g);
+        if (rk === lastRingOnly && ringArgs && g?.ring?.rev !== lastRingRev) {
+          lastRingRev = g?.ring?.rev;
+          setRing(...ringArgs);
+          if (decorQueued) window.clearTimeout(decorQueued);
+          decorQueued = window.setTimeout(() => { decorQueued = 0; api.current?.setDecor(); }, 160);
+          invalidate();
+          return;
+        }
+        lastRingOnly = rk;
+        lastRingRev = g?.ring?.rev;
+        if (groundU.uGround.value > 0.5) scheduleHeights();
+        return;
+      }
       groundKey = key;
       groundTex.splice(0).forEach((t) => t.dispose());
       groundU.uGround.value = 0;
@@ -678,7 +699,8 @@ if (uGround > 0.5) {
       const r = brush.shape === "circle" ? brush.radius : 10 * (grid / 1024);
       for (let i = 0; i < 96; i++) {
         const a = (i / 96) * Math.PI * 2;
-        const x = Math.max(0, Math.min(grid, cursor[0] + Math.cos(a) * r)), z = Math.max(0, Math.min(grid, cursor[1] + Math.sin(a) * r));
+        const m = ringMesh ? live.current.ground?.ring?.margin ?? 0 : 0;
+        const x = Math.max(-m, Math.min(grid + m, cursor[0] + Math.cos(a) * r)), z = Math.max(-m, Math.min(grid + m, cursor[1] + Math.sin(a) * r));
         arr.set([x, hAt(x, z) + 1.5, z], i * 3);
       }
       brushLine.geometry.attributes.position.needsUpdate = true;
@@ -712,9 +734,11 @@ if (uGround > 0.5) {
       const r = renderer.domElement.getBoundingClientRect();
       ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
       ray.setFromCamera(ndc, camera);
-      const hit = ray.intersectObject(ground, false)[0];
+      const hit = ray.intersectObjects(ringMesh ? [ground, ringMesh] : [ground], false)[0];
       if (!hit) return null;
-      return [Math.round(Math.max(0, Math.min(grid, hit.point.x))), Math.round(Math.max(0, Math.min(grid, hit.point.z)))];
+      // na paisagem em volta o ponto pode ficar fora do mapa (quem usa decide se aceita)
+      const m = ringMesh ? live.current.ground?.ring?.margin ?? 0 : 0;
+      return [Math.round(Math.max(-m, Math.min(grid + m, hit.point.x))), Math.round(Math.max(-m, Math.min(grid + m, hit.point.z)))];
     };
     let down = false;
     const onDown = (ev: PointerEvent) => {

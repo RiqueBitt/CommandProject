@@ -352,7 +352,10 @@ disponível em Sistema → Visual.
     sombras também, e as decorações originais saem — nada do mapa original aparece por cima;
   - **chão por biomas** (praia, chão, terra, rocha e topo misturados pelo relevo) e **pincel de
     textura** para pintar partes do mapa; **texturas próprias** importadas de .png/.jpg (contínuas,
-    com relevo e brilho gerados); **paisagem em volta** do mapa com montanhas;
+    com relevo e brilho gerados); **paisagem em volta** do mapa (montanhas, morros, planície ou
+    abismo) **editável à mão**: os pincéis de relevo (subir, descer, suavizar, nivelar, rugosidade)
+    e as decorações funcionam fora da borda do mapa, e **Povoar a paisagem** enche o horizonte de
+    mata, rochas, cidade (prédios) ou ruínas — tudo só cenário, a área jogável não muda;
   - **atmosfera** do mapa (pôr do sol, amanhecer, noite, nublado, neblina densa, deserto, frio
     polar, vulcânico, planeta alienígena) com força ajustável, e **vento** (força e direção): mexe
     na cor do sol e das sombras, da água e da neblina no `info.bdf`, sobre a luz do mapa base;

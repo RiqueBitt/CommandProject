@@ -74,6 +74,7 @@ jobs:
           node --experimental-strip-types tools/test_matchlimits.ts
           node --experimental-strip-types tools/test_forjalint.ts
           node --experimental-strip-types tools/test_maptools.ts
+          node --experimental-strip-types tools/test_ring.ts
 
   shaders-dx9:
     needs: test

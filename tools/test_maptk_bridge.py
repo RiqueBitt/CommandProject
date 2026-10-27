@@ -220,7 +220,8 @@ def main():
         t3 = run("terrain3d", {"terrain": TID, "size": 64}, gd, out)[0]
         assert t3["propKinds"] == ["/props/Trees/spruce01/spruce01_prop.bp"] and len(t3["props"]) == 1, t3["props"]
         spec4 = dict(spec, scenario_id="SC2_CPDECOR", name="[2] Decor",
-                     props_add=[["/props/Rocks/Rock02/Rock02_prop.bp", 500, 500, 30, 1.2], ["/props/Trees/oak01/oak01_prop.bp", 520, 510]],
+                     props_add=[["/props/Rocks/Rock02/Rock02_prop.bp", 500, 500, 30, 1.2], ["/props/Trees/oak01/oak01_prop.bp", 520, 510],
+                                ["/props/Rocks/Rock02/Rock02_prop.bp", -50, 300]],  # fora do mapa sem paisagem: fica de fora
                      props_remove=[[400, 400, 5]],
                      reskin={"/textures/Terrain/MP_901/sc2_mp_901_grass01_d.dds": "/textures/Terrain/MP_002/sc2_mp_002_snow01_d.dds"})
         res4, log4 = run("build", {"spec": spec4}, gd, out)
@@ -279,6 +280,7 @@ def main():
         test_rebuild()
         test_sky_and_water()
         test_atmosphere()
+        test_ring_layer()
 
         bad = dict(spec, scenario_id="meu mapa")
         env = dict(os.environ, SC2_GAMEDATA=gd, SC2_MAP_OUT=out)
@@ -576,6 +578,36 @@ def test_atmosphere():
     except ValueError:
         pass
     print("atmosfera ok: cores multiplicadas, limites respeitados, vento e textos")
+
+
+def test_ring_layer():
+    """paisagem esculpida: camada só fora do mapa, zero na borda, malha da paisagem sem saltos"""
+    import base64
+    import cp_world
+    import maptk_bridge as mb
+    n, grid, margin = 16, 512, 256
+    vals = [0] * ((n + 1) ** 2)
+    for j in range(n + 1):
+        for i in range(n + 1):
+            vals[j * (n + 1) + i] = 100 * 32  # +100 em todo lugar
+    data = struct.pack(f"<{len(vals)}h", *vals)
+    d = cp_world.ring_layer(n, margin, grid, data)
+    assert d(256, 256) == 0 and d(0, 300) == 0 and d(512, 512) == 0, "dentro do mapa e na borda não muda"
+    assert abs(d(-100, 256) - 100) < 1e-6 and abs(d(700, -150) - 100) < 1e-6, "longe da borda entra inteira"
+    assert 0 < d(-10, 256) < 100, "mistura perto da borda"
+    flat = cp_world.ring_mesh_height(lambda x, z: 3 * x + 2 * z, 16.0)
+    for x, z in ((-100.0, -37.5), (600.5, 13.0), (-3.0, 700.0)):
+        assert abs(flat(x, z) - (3 * x + 2 * z)) < 1e-6, "plano reproduzido pela malha"
+    ok = mb._ring_sculpt({"n": n, "margin": margin, "data": base64.b64encode(data).decode()})
+    assert ok["n"] == n and ok["data"] == data
+    for bad in ({"n": 4, "margin": 256, "data": ""}, {"n": n, "margin": 256, "data": base64.b64encode(data[:-2]).decode()}, {"margin": 1}):
+        try:
+            mb._ring_sculpt(bad)
+            raise AssertionError(f"camada inválida aceita: {bad}")
+        except ValueError:
+            pass
+    assert mb._ring_sculpt(None) is None
+    print("paisagem ok: camada só fora do mapa, emenda sem degrau, validação")
 
 
 if __name__ == "__main__":

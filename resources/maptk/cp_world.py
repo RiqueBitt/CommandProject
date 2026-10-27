@@ -212,6 +212,50 @@ def ring_height(inner, grid, rise=95.0, seed=4242):
     return h
 
 
+RING_FADE = 40.0
+
+
+def ring_layer(n, margin, grid, data):
+    """Camada do pincel da paisagem em volta (editor: src/pages/create/ring.ts). `data` = int16 LE
+    (1/32 unidade) com (n+1)² pontos sobre [-margin, grid+margin]. Devolve delta(x, z): vale só
+    fora do mapa e some suavemente na borda (sem degrau na emenda com o chão jogável)."""
+    import struct
+    n = int(n)
+    if not 8 <= n <= 512 or len(data) != (n + 1) ** 2 * 2:
+        raise ValueError("camada da paisagem inválida")
+    vals = [v / 32.0 for v in struct.unpack(f"<{(n + 1) ** 2}h", data)]
+    w = n + 1
+    ext = grid + 2.0 * margin
+
+    def delta(x, z):
+        cx, cz = min(grid, max(0.0, x)), min(grid, max(0.0, z))
+        d = math.hypot(x - cx, z - cz)
+        if d <= 0:
+            return 0.0
+        fx = max(0.0, min(n, (x + margin) / ext * n))
+        fz = max(0.0, min(n, (z + margin) / ext * n))
+        i0, j0 = min(n - 1, int(fx)), min(n - 1, int(fz))
+        u, v = fx - i0, fz - j0
+        k = j0 * w + i0
+        val = (vals[k] * (1 - u) + vals[k + 1] * u) * (1 - v) + (vals[k + w] * (1 - u) + vals[k + w + 1] * u) * v
+        return val * _smooth(min(1.0, d / RING_FADE))
+    return delta
+
+
+def ring_mesh_height(height, step):
+    """Altura na superfície da malha da paisagem em volta (células de `step`, diagonal a–d)."""
+    def h(x, z):
+        i, j = math.floor(x / step), math.floor(z / step)
+        x0, z0 = i * step, j * step
+        u, w = (x - x0) / step, (z - z0) / step
+        ya, yb = height(x0, z0), height(x0 + step, z0)
+        yc, yd = height(x0, z0 + step), height(x0 + step, z0 + step)
+        if w > u:
+            return ya + (yd - yc) * u + (yc - ya) * w
+        return ya + (yb - ya) * u + (yd - yb) * w
+    return h
+
+
 def dds_header(w, h, mips):
     """cabeçalho DDS de uma textura DXT5 (com níveis de mip)"""
     import struct

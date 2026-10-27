@@ -100,6 +100,9 @@ export interface MapDoc {
   deckTex: string | null;
   /** altura das montanhas da paisagem em volta (0 = o abismo continua lá embaixo) */
   ringRise: number;
+  /** pincel da paisagem em volta: camada (int16 base64, 1/32 unidade) sobre o mapa + margem; null = nada */
+  ringSculpt: string | null;
+  ringSculptN: number;
   /** passagem das tropas pintada à mão (papel 1 = bloqueado, 2 = liberado; NAV_N pontos por lado) */
   nav: string | null;
   /** passagem feita pelo gerador (por baixo da pintada à mão) */
@@ -114,7 +117,7 @@ export const newMapDoc = (over: Partial<MapDoc> = {}): MapDoc => ({
   patch: false, maxSlope: 6, waterMargin: 4, smooth: false, rugged: false, minimap: "donor", strip: "moving",
   edits: EMPTY_EDITS, models: [], notes: "", world: null, features: [], sculpt: null, sculptSize: 0, symmetry: "none",
   layers: { hidden: [], locked: [] }, base: "game", clean: false, groundBiome: "temperate", groundTex: null,
-  groundRoles: {}, paint: null, paintSize: 512, worldPaint: null, ring: true, customTex: [], sky: null, atmosphere: null, peaks: true, deckTex: null, ringRise: 95, nav: null, worldNav: null, ...over,
+  groundRoles: {}, paint: null, paintSize: 512, worldPaint: null, ring: true, customTex: [], sky: null, atmosphere: null, peaks: true, deckTex: null, ringRise: 95, ringSculpt: null, ringSculptN: 0, nav: null, worldNav: null, ...over,
 });
 
 export function migrateMap(raw: unknown): MapDoc {
@@ -125,7 +128,7 @@ export function migrateMap(raw: unknown): MapDoc {
     features: d.features ?? [], layers: { hidden: d.layers?.hidden ?? [], locked: d.layers?.locked ?? [] }, schema: 1,
     // projetos antigos: mundo gerado sobre um mapa do jogo já ganha o visual limpo
     base: d.base ?? "game", clean: d.clean ?? !!d.world, groundBiome: d.groundBiome ?? d.world?.biome ?? "temperate", groundTex: d.groundTex ?? null,
-    groundRoles: d.groundRoles ?? (d.groundTex ? { low: d.groundTex } : {}), paint: d.paint ?? null, paintSize: d.paintSize ?? 256, worldPaint: d.worldPaint ?? null, ring: d.ring ?? true, customTex: d.customTex ?? [], sky: d.sky ?? null, atmosphere: d.atmosphere ?? null, peaks: d.peaks ?? true, deckTex: d.deckTex ?? null, ringRise: d.ringRise ?? 95, nav: d.nav ?? null, worldNav: d.worldNav ?? null,
+    groundRoles: d.groundRoles ?? (d.groundTex ? { low: d.groundTex } : {}), paint: d.paint ?? null, paintSize: d.paintSize ?? 256, worldPaint: d.worldPaint ?? null, ring: d.ring ?? true, customTex: d.customTex ?? [], sky: d.sky ?? null, atmosphere: d.atmosphere ?? null, peaks: d.peaks ?? true, deckTex: d.deckTex ?? null, ringRise: d.ringRise ?? 95, ringSculpt: d.ringSculpt ?? null, ringSculptN: d.ringSculptN ?? 0, nav: d.nav ?? null, worldNav: d.worldNav ?? null,
   };
 }
 

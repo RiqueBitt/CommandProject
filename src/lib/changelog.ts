@@ -6,6 +6,13 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.38.0",
+    title: "A paisagem em volta do mapa do seu jeito",
+    items: [
+      { icon: "landscape", title: "Paisagem em volta editável", text: "Esculpa as montanhas fora da borda do mapa com os pincéis de relevo, coloque prédios e árvores lá fora ou povoe o horizonte com mata, cidade, rochas ou ruínas.", page: "create" },
+    ],
+  },
+  {
     version: "0.37.0",
     title: "Jogar por IP, atmosfera dos mapas e a Forja conhecendo o jogo",
     items: [

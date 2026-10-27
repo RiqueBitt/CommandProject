@@ -21,7 +21,7 @@ function sampler(g: Grid, H: Float32Array) {
   return { hAt, slope, step };
 }
 
-export function checkMap(g: Grid, H: Float32Array, water: number, hasWater: boolean, spawns: Pt[], mass: Pt[], props: PlacedProp[], teamOf: (i: number) => number): MapIssue[] {
+export function checkMap(g: Grid, H: Float32Array, water: number, hasWater: boolean, spawns: Pt[], mass: Pt[], props: PlacedProp[], teamOf: (i: number) => number, ring = 0): MapIssue[] {
   const out: MapIssue[] = [];
   const G = g.grid;
   const { hAt, slope } = sampler(g, H);
@@ -87,7 +87,9 @@ export function checkMap(g: Grid, H: Float32Array, water: number, hasWater: bool
   const near = new Map<string, number>();
   let overlap = 0, onBase = 0, onMass = 0, outside = 0, underwater = 0;
   for (const p of props) {
-    if (p.x < 0 || p.z < 0 || p.x > G || p.z > G) { outside++; continue; }
+    // na paisagem em volta (largura `ring`) a decoração é cenário: vale; além dela, fora do mapa
+    if (p.x < -ring || p.z < -ring || p.x > G + ring || p.z > G + ring) { outside++; continue; }
+    if (p.x < 0 || p.z < 0 || p.x > G || p.z > G) continue;
     const k = `${Math.round(p.x / 1.5)},${Math.round(p.z / 1.5)}`;
     if (near.has(k)) overlap++; else near.set(k, 1);
     if (spawns.some((s) => Math.hypot(s[0] - p.x, s[1] - p.z) < 40)) onBase++;
@@ -105,7 +107,7 @@ export function checkMap(g: Grid, H: Float32Array, water: number, hasWater: bool
 }
 
 /** Corrige massa e decorações (não mexe nas bases nem no relevo). */
-export function autoFixMap(g: Grid, H: Float32Array, water: number, hasWater: boolean, spawns: Pt[], mass: Pt[], props: PlacedProp[]): MapFix {
+export function autoFixMap(g: Grid, H: Float32Array, water: number, hasWater: boolean, spawns: Pt[], mass: Pt[], props: PlacedProp[], ring = 0): MapFix {
   const G = g.grid;
   const { hAt, slope } = sampler(g, H);
   const mask = walkMask(g, H, water, hasWater);
@@ -132,6 +134,7 @@ export function autoFixMap(g: Grid, H: Float32Array, water: number, hasWater: bo
   const seen = new Set<string>();
   let removed = 0;
   for (const p of props) {
+    if ((p.x < 0 || p.z < 0 || p.x > G || p.z > G) && p.x >= -ring && p.z >= -ring && p.x <= G + ring && p.z <= G + ring) { keep.push(p); continue; }
     const k = `${Math.round(p.x / 1.5)},${Math.round(p.z / 1.5)}`;
     const bad = p.x < 0 || p.z < 0 || p.x > G || p.z > G || seen.has(k) || spawns.some((s) => Math.hypot(s[0] - p.x, s[1] - p.z) < 40) ||
       fixed.some((m) => Math.hypot(m[0] - p.x, m[1] - p.z) < 8) || (hasWater && hAt(p.x, p.z) < water - 2);

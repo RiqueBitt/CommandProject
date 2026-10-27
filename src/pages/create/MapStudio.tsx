@@ -5,6 +5,7 @@
 // Camadas do relevo, na ordem: terreno do jogo → gerador de mundo (relevo base) → formas
 // (montanhas, lagos, rios…) → pincel de escultura → relevo simples (morro, vale, rampa…).
 import { ATMOSPHERES, atmosphereSpec, tintSky } from "./atmosphere";
+import { decodeRing, emptyRing, encodeRing, isRingProp, ringDab, ringHeight, ringMargin, ringScatter, type RingFill, type RingLayer, type RingMode } from "./ring";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DecorPoint, GroundTextures as GroundTexSet, Marker } from "../../components/MapView3D";
 import { registerCustomProp } from "../../components/propModels";
@@ -343,6 +344,10 @@ export default function MapStudio({ id }: { id: string }) {
   /** decorações do mapa original que ainda estão no mapa (para adotar com um clique) */
   const keptRef = useRef<DecorPoint[]>([]);
   const brushState = useRef<{ layer: Float32Array; target: number } | null>(null);
+  // pincel na paisagem em volta (fora do mapa): camada própria, editada durante o traço
+  const ringStroke = useRef<{ layer: RingLayer; target: number } | null>(null);
+  const [ringRev, setRingRev] = useState(0);
+  const ringFillRef = useRef<(kind: RingFill, density: number) => void>(() => undefined);
 
   const hAt = (q: Pt) => {
     const { heights: h, relief3d: r } = ctxRef.current;
@@ -421,6 +426,11 @@ export default function MapStudio({ id }: { id: string }) {
   };
 
   /** move os objetos selecionados por (dx, dz) */
+  /** decorações podem ir para a paisagem em volta (com o visual limpo e a paisagem ligada) */
+  const clampRing = (v: number) => {
+    const m = ctxRef.current.doc.clean && ctxRef.current.doc.ring !== false ? ringMargin(grid) - 2 : 0;
+    return Math.max(-m, Math.min(grid + m, Math.round(v * 10) / 10));
+  };
   const moveSel = (e: Edits, ids: Sel[], dx: number, dz: number): Edits => {
     const clamp = (v: number) => Math.max(0, Math.min(grid, Math.round(v * 10) / 10));
     const mv = (q: Pt): Pt => [clamp(q[0] + dx), clamp(q[1] + dz)];
@@ -430,7 +440,7 @@ export default function MapStudio({ id }: { id: string }) {
       const i = Number(iS);
       if (k === "spawn") n.spawns[i] = mv(n.spawns[i]);
       else if (k === "mass") n.mass[i] = mv(n.mass[i]);
-      else if (k === "prop") { const q = n.props[i]; const [x, z] = mv([q.x, q.z]); n.props[i] = { ...q, x, z }; }
+      else if (k === "prop") { const q = n.props[i]; n.props[i] = { ...q, x: clampRing(q.x + dx), z: clampRing(q.z + dz) }; }
       else if (k === "seed" && n.seed) n.seed = mv(n.seed);
       else if (k === "cut") { const [x, z, r] = n.cuts[i]; n.cuts[i] = [clamp(x + dx), clamp(z + dz), r]; }
       else if (k === "bridge") { const [x0, x1, z0, z1] = n.bridges[i]; n.bridges[i] = [clamp(x0 + dx), clamp(x1 + dx), clamp(z0 + dz), clamp(z1 + dz)]; }
@@ -578,10 +588,11 @@ export default function MapStudio({ id }: { id: string }) {
     const out: PlacedProp[] = [];
     for (let i = 0, tries = 0; i < n && tries < n * 6; tries++) {
       const a = Math.random() * Math.PI * 2, d = n === 1 ? 0 : Math.sqrt(Math.random()) * rad;
-      const x = Math.round(Math.max(2, Math.min(grid - 2, q[0] + Math.cos(a) * d)) * 10) / 10;
-      const z = Math.round(Math.max(2, Math.min(grid - 2, q[1] + Math.sin(a) * d)) * 10) / 10;
-      if (n > 1 && aw && hasWater && hAt([x, z]) < water + 2) continue;
-      if (n > 1 && as && slopeAt([x, z]) > 1.1) continue;
+      const outside = isRingProp(grid, { x: q[0], z: q[1] });
+      const x = outside ? clampRing(q[0] + Math.cos(a) * d) : Math.round(Math.max(2, Math.min(grid - 2, q[0] + Math.cos(a) * d)) * 10) / 10;
+      const z = outside ? clampRing(q[1] + Math.sin(a) * d) : Math.round(Math.max(2, Math.min(grid - 2, q[1] + Math.sin(a) * d)) * 10) / 10;
+      if (!outside && n > 1 && aw && hasWater && hAt([x, z]) < water + 2) continue;
+      if (!outside && n > 1 && as && slopeAt([x, z]) > 1.1) continue;
       i++;
       out.push({ bp, x, z, yaw: Math.round(Math.random() * 360), scale: round1(Math.max(0.3, 1 + (Math.random() * 2 - 1) * (v / 100)) * 100) / 100 });
     }
@@ -631,10 +642,47 @@ export default function MapStudio({ id }: { id: string }) {
     p.commit((d) => ({ ...d, sculpt: enc, sculptSize: r?.size ?? 0 }));
   };
 
-  const onPointer = useCallback((type: "down" | "move" | "up", q: Pt | null) => {
+  const onPointer = useCallback((type: "down" | "move" | "up", q0: Pt | null) => {
     const { tool: tl, radius: rad, drag: d, doc: dc } = ctxRef.current;
     if (tl === "orbit") return;
+    let q = q0;
+    // fora do mapa (na paisagem em volta) só valem a seleção, as decorações e os pincéis de relevo
+    const outside = !!q && (q[0] < 0 || q[1] < 0 || q[0] > grid || q[1] > grid);
+    if (q && outside && !(tl === "select" || tl === "decor" || tl === "uncut" || tl === "erase" || isBrush(tl)))
+      q = [Math.max(0, Math.min(grid, q[0])), Math.max(0, Math.min(grid, q[1]))];
     if (q) setCursor(q);
+    // pincel de relevo começado fora do mapa: esculpe a paisagem em volta
+    if (isBrush(tl) && (ringStroke.current || (type === "down" && outside && dc.clean && dc.ring !== false))) {
+      const r = ctxRef.current.relief3d, H = ctxRef.current.heights;
+      if (!r || !H) return;
+      const inner = (x: number, z: number) => heightAt(r, H, x, z);
+      if (type === "up" || !q) {
+        const st = ringStroke.current;
+        ringStroke.current = null;
+        stroke.current = null;
+        if (st) {
+          const enc = encodeRing(st.layer);
+          p.commit((d0) => ({ ...d0, ringSculpt: enc, ringSculptN: st.layer.n }));
+        }
+        return;
+      }
+      if (type === "down") {
+        const L = decodeRing(dc.ringSculpt, dc.ringSculptN, grid) ?? emptyRing(grid);
+        ringStroke.current = { layer: L, target: ringHeight(inner, grid, dc.ringRise ?? 95, L, q[0], q[1]) };
+        stroke.current = null;
+      }
+      const st = ringStroke.current;
+      if (!st) return;
+      if (stroke.current && Math.hypot(q[0] - stroke.current[0], q[1] - stroke.current[1]) < rad * 0.22) return;
+      stroke.current = q;
+      const mode0 = tl.slice(2);
+      const mode: RingMode = mode0 === "erode" ? "smooth" : (mode0 as RingMode);
+      const total = (x: number, z: number) => ringHeight(inner, grid, dc.ringRise ?? 95, st.layer, x, z);
+      let ch = false;
+      for (const mq of mirrors(q)) ch = ringDab(st.layer, grid, mode, mq.p[0], mq.p[1], rad, ctxRef.current.strength, total, st.target) || ch;
+      if (ch) setRingRev((v) => v + 1);
+      return;
+    }
     if (tl === "select") {
       if (type === "down" && q) {
         const s = ctxRef.current.sel;
@@ -1015,14 +1063,18 @@ export default function MapStudio({ id }: { id: string }) {
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseT, relief3d, worldPaint, paintNow, paintRev, deckUrl, deckSegs]);
+  const ringLayer = useMemo(() => decodeRing(doc.ringSculpt, doc.ringSculptN, grid), [doc.ringSculpt, doc.ringSculptN, grid]);
+  // muda a cada camada nova (pincelada confirmada, desfazer, refazer): a prévia refaz a paisagem
+  const ringSeq = useRef(0);
+  const ringDocRev = useMemo(() => ++ringSeq.current, [ringLayer]); // eslint-disable-line react-hooks/exhaustive-deps
   const groundView: GroundTexSet | null = useMemo(() => {
     if (doc.clean) {
       if (!chainTex) return null;
       return { sand: chainTex[0], grass: chainTex[1], dirt: chainTex[2], rock: chainTex[3], snow: chainTex[4], t: tField, deck: deckUrl, tile: uvTile,
-        ring: doc.ring !== false ? { margin: grid <= 1024 ? 256 : 384, rise: doc.ringRise ?? 95, water: hasWater ? water : null } : null };
+        ring: doc.ring !== false ? { margin: ringMargin(grid), rise: doc.ringRise ?? 95, water: hasWater ? water : null, layer: ringStroke.current?.layer ?? ringLayer, rev: ringRev * 100000 + ringDocRev } : null };
     }
     return groundTex;
-  }, [doc.clean, chainTex, tField, doc.ring, doc.ringRise, grid, hasWater, water, groundTex, deckUrl, uvTile]);
+  }, [doc.clean, chainTex, tField, doc.ring, doc.ringRise, grid, hasWater, water, groundTex, deckUrl, uvTile, ringLayer, ringRev, ringDocRev]);
   const allCuts = useMemo(() => (doc.clean || doc.world?.clearDonor ? [...edits.cuts, ...fullCuts(grid)] : edits.cuts), [edits.cuts, doc.clean, doc.world?.clearDonor, grid]);
   const [kept, removedCount] = useMemo(() => {
     const bps = donor?.kinds ?? [];
@@ -1105,6 +1157,7 @@ export default function MapStudio({ id }: { id: string }) {
       s.clean = {
         ground: full ? [full[1], ...groundSpec(cleanCands)] : groundSpec(cleanCands), relight: true, clear_props: true,
         ...(full ? { chain: full } : {}), uv_tile: uvTile, ring: doc.ring !== false, ring_rise: doc.ringRise ?? 95, peaks: doc.peaks !== false,
+        ...(doc.ring !== false && doc.ringSculpt && doc.ringSculptN ? { ring_sculpt: { n: doc.ringSculptN, margin: ringMargin(grid), data: doc.ringSculpt } } : {}),
         ...(deck && deckSegs.length ? { deck: { d: deck.d, ...(deck.n ? { n: deck.n } : {}), ...(deck.s ? { s: deck.s } : {}), segs: deckSegs.map((v) => v.map((x) => Math.round(x * 10) / 10)) } } : {}),
         ...(enc ? { paint: { size: doc.paintSize || 256, data: enc } } : {}),
       };
@@ -1117,8 +1170,14 @@ export default function MapStudio({ id }: { id: string }) {
     if (usePatch) s.strip_props = doc.strip === "none" ? false : doc.strip;
     // decorações que ficaram debaixo d'água (relevo mudou depois de colocar) não vão para o jogo
     const WATER_PROP = /kelp|barge|buoy|water|coral/i;
-    const dry = hasWater && heights && relief3d ? props.filter((q) => WATER_PROP.test(q.bp) || heightAt(relief3d, heights, q.x, q.z) >= water + 0.3) : props;
-    if (dry.length < props.length) s._notes = [`${props.length - dry.length} decoração(ões) debaixo d'água ficaram de fora do mapa (o chão delas está abaixo do nível da água).`];
+    const ringOn = doc.clean && doc.ring !== false;
+    // decorações fora do mapa só existem com a paisagem em volta
+    const placed = ringOn ? props : props.filter((q) => !isRingProp(grid, q));
+    const groundOf = (q: PlacedProp) => (relief3d && heights ? (isRingProp(grid, q)
+      ? ringHeight((x, z) => heightAt(relief3d, heights, x, z), grid, doc.ringRise ?? 95, ringLayer, q.x, q.z)
+      : heightAt(relief3d, heights, q.x, q.z)) : 0);
+    const dry = hasWater && heights && relief3d ? placed.filter((q) => WATER_PROP.test(q.bp) || groundOf(q) >= water + 0.3) : placed;
+    if (dry.length < placed.length) s._notes = [`${placed.length - dry.length} decoração(ões) debaixo d'água ficaram de fora do mapa (o chão delas está abaixo do nível da água).`];
     if (dry.length) s.props_add = dry.map((q) => [q.bp, q.x, q.z, q.yaw, q.scale]);
     if (allCuts.length && !doc.clean) s.props_remove = allCuts;
     if (waterNew) s.water_rewrite = true;
@@ -1137,7 +1196,7 @@ export default function MapStudio({ id }: { id: string }) {
     }
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, edits, usePatch, grid, blankSize, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands, chain, hasWater, water, id, heights, relief3d, skyNow, deck, deckSegs, worldPaint, navNow, uvTile]);
+  }, [doc, edits, ringLayer, usePatch, grid, blankSize, groundLayers, lobbyName, allCuts, scenarioId, waterNew, blank, cleanCands, chain, hasWater, water, id, heights, relief3d, skyNow, deck, deckSegs, worldPaint, navNow, uvTile]);
   const canBuild = !!doc.terrain;
 
   // ------------------------------------------------------------ ações
@@ -1148,10 +1207,10 @@ export default function MapStudio({ id }: { id: string }) {
     return ok;
   }, [p, doc.lobbyName, id, renameTab]);
 
-  const runCheck = () => (relief3d && heights ? checkMap(relief3d, heights, water, hasWater, edits.spawns, edits.mass, edits.props, teamOf) : null);
+  const runCheck = () => (relief3d && heights ? checkMap(relief3d, heights, water, hasWater, edits.spawns, edits.mass, edits.props, teamOf, doc.clean && doc.ring !== false ? ringMargin(grid) : 0) : null);
   const autoFix = () => {
     if (!relief3d || !heights) return;
-    const f = autoFixMap(relief3d, heights, water, hasWater, edits.spawns, edits.mass, edits.props);
+    const f = autoFixMap(relief3d, heights, water, hasWater, edits.spawns, edits.mass, edits.props, doc.clean && doc.ring !== false ? ringMargin(grid) : 0);
     if (!f.changes.length) { toast("info", t("Nada para corrigir automaticamente.")); return; }
     p.commit((d) => ({ ...d, edits: { ...d.edits, mass: f.mass, props: f.props } }));
     toast("ok", t("Corrigido: {list}{more}. Dá para desfazer com Ctrl+Z.", { list: f.changes.slice(0, 4).map((c) => tr(c)).join("; "), more: f.changes.length > 4 ? t(" e mais {n}", { n: f.changes.length - 4 }) : "" }));
@@ -1419,8 +1478,13 @@ export default function MapStudio({ id }: { id: string }) {
           { kind: "info", label: t("Texturas"), value: chain.filter(Boolean).length ? t("{n} (praia, chão, terra, rocha, topo)", { n: chain.filter(Boolean).length }) : t("carregando…") } as Prop,
           { kind: "toggle", label: t("Neve no alto"), value: doc.peaks !== false, onChange: (v: boolean) => setDoc((d) => ({ ...d, peaks: v })), hint: t("Pontos mais altos com a textura de topo do bioma (neve na grama). Desligue em mapas de plataformas.") } as Prop,
           { kind: "select", label: t("Paisagem em volta"), value: doc.ring === false ? "off" : String(doc.ringRise ?? 95), onChange: (v: string) => setDoc((d) => (v === "off" ? { ...d, ring: false } : { ...d, ring: true, ringRise: Number(v) })),
-            options: [{ value: "95", label: t("Montanhas") }, { value: "40", label: t("Morros baixos") }, { value: "0", label: t("Abismo (o chão continua lá embaixo)") }, { value: "off", label: t("Nenhuma") }],
+            options: [{ value: "95", label: t("Montanhas") }, { value: "40", label: t("Morros baixos") }, { value: "12", label: t("Planície") }, { value: "0", label: t("Abismo (o chão continua lá embaixo)") }, { value: "off", label: t("Nenhuma") }],
             hint: t("O que aparece além da borda do mapa, com as texturas do bioma.") } as Prop,
+          ...(doc.ring !== false ? [{ kind: "custom", label: "", node: <RingTools
+            sculpted={!!doc.ringSculpt} props={edits.props.filter((q) => isRingProp(grid, q)).length}
+            onFill={(k, dens) => ringFillRef.current(k, dens)}
+            onClearProps={() => setEdits((e) => ({ ...e, props: e.props.filter((q) => !isRingProp(grid, q)) }))}
+            onClearSculpt={() => p.commit((d) => ({ ...d, ringSculpt: null, ringSculptN: 0 }))} /> } as Prop] : []),
           { kind: "custom", label: "", node: <button className="btn sm" onClick={() => { setTool("paint"); setLeft("ground"); }}><Icon name="brush" size={16} /> Pincel de textura</button> } as Prop,
         ] : []),
       ] });
@@ -1585,6 +1649,26 @@ export default function MapStudio({ id }: { id: string }) {
   };
 
   const catalog = useMemo(() => propCatalog(assets?.props ?? [], donor?.kinds ?? []), [assets, donor]);
+  // povoar a paisagem em volta (prédios, mata, rochas, ruínas) com decorações do bioma
+  ringFillRef.current = (kind: RingFill, density: number) => {
+    const H = heights, r = relief3d;
+    if (!H || !r) return;
+    const biome = doc.groundBiome;
+    const ofBiome = (list: string[]) => {
+      const here = list.filter((bp) => catalog.meta?.[bp.toLowerCase()]?.biomes.includes(biome));
+      return here.length >= 3 ? here : list;
+    };
+    const pools = { trees: ofBiome(catalog.trees), rocks: ofBiome(catalog.rocks), buildings: catalog.buildings, wrecks: catalog.wrecks };
+    const inner = (x: number, z: number) => heightAt(r, H, x, z);
+    const total = (x: number, z: number) => ringHeight(inner, grid, doc.ringRise ?? 95, ringLayer, x, z);
+    const list = ringScatter(grid, kind, pools, density, total, hasWater ? water : null, Math.floor(Math.random() * 1e9));
+    if (!list.length) { toast("info", t("Não achei decorações desse tipo no jogo (ou a paisagem não tem lugar plano para elas).")); return; }
+    setEdits((e) => {
+      const room = Math.max(0, MAX_PROPS - e.props.length);
+      if (room < list.length) toast("info", t("Limite de decorações: {n} entraram.", { n: room }));
+      return { ...e, props: [...e.props, ...list.slice(0, room)] };
+    });
+  };
   const reliefTexture = useMemo(() => (view === "2d" && skin === "relief" && relief3d && heights ? reliefImage(relief3d, heights, water, hasWater, doc.world?.biome ?? "temperate", 512) : null),
     [view, skin, relief3d, heights, water, hasWater, doc.world?.biome]);
   const lobbyImage = useMemo(() => {
@@ -2113,4 +2197,36 @@ async function textureStats(url: string) {
   const light = r * 0.3 + gg * 0.59 + b * 0.11;
   const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b);
   return { light, contrast: Math.sqrt(Math.max(0, l2 / n - light * light)) * 4, green: gg - (r + b) / 2, yellow: (r + gg) / 2 - b, sat: mx - mn };
+}
+
+/** Ferramentas da paisagem em volta: povoar com decorações e limpar. */
+function RingTools({ sculpted, props, onFill, onClearProps, onClearSculpt }: {
+  sculpted: boolean; props: number; onFill: (k: RingFill, density: number) => void; onClearProps: () => void; onClearSculpt: () => void;
+}) {
+  const [kind, setKind] = useState<RingFill>("forest");
+  const [dens, setDens] = useState(1);
+  return (
+    <div className="col" style={{ gap: 6, width: "100%" }}>
+      <b className="small">{t("Editar a paisagem")}</b>
+      <span className="faint small">{t("Os pincéis de relevo e as decorações também funcionam fora da borda do mapa: esculpa montanhas, abra vales e coloque prédios na paisagem.")}</span>
+      <div className="row" style={{ gap: 6 }}>
+        <select className="select dense" style={{ flex: 1 }} value={kind} onChange={(e) => setKind(e.target.value as RingFill)} aria-label={t("Povoar com")}>
+          <option value="forest">{t("Mata")}</option>
+          <option value="rocks">{t("Rochas")}</option>
+          <option value="city">{t("Cidade (prédios)")}</option>
+          <option value="ruins">{t("Ruínas e destroços")}</option>
+        </select>
+        <select className="select dense" value={String(dens)} onChange={(e) => setDens(Number(e.target.value))} aria-label={t("Densidade")}>
+          <option value="0.5">{t("Pouco")}</option>
+          <option value="1">{t("Normal")}</option>
+          <option value="2">{t("Muito")}</option>
+        </select>
+      </div>
+      <button className="btn sm" onClick={() => onFill(kind, dens)}><Icon name="forest" size={16} /> {t("Povoar a paisagem")}</button>
+      <div className="row wrap" style={{ gap: 6 }}>
+        <button className="btn sm text" disabled={!props} onClick={onClearProps}><Icon name="delete_sweep" size={16} /> {t("Tirar as decorações ({n})", { n: props })}</button>
+        <button className="btn sm text" disabled={!sculpted} onClick={onClearSculpt}><Icon name="layers_clear" size={16} /> {t("Desfazer a escultura")}</button>
+      </div>
+    </div>
+  );
 }
