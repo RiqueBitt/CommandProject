@@ -107,9 +107,26 @@ impl Rect {
     pub fn moved(self, dy: i32) -> Rect {
         Rect { y0: self.y0 + dy, y1: self.y1 + dy, ..self }
     }
+    pub fn shifted(self, dx: i32, dy: i32) -> Rect {
+        Rect { x0: self.x0 + dx, x1: self.x1 + dx, y0: self.y0 + dy, y1: self.y1 + dy }
+    }
+    pub fn new(x0: i32, x1: i32, y0: i32, y1: i32) -> Rect {
+        Rect { x0, x1, y0, y1 }
+    }
     pub fn height(self) -> i32 {
         self.y1 - self.y0
     }
+}
+
+/// Âncoras de um elemento (veja [`Scene::set_anchors`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Anchors {
+    pub left: Option<i32>,
+    pub right: Option<i32>,
+    pub top: Option<i32>,
+    pub bottom: Option<i32>,
+    pub x: Option<i32>,
+    pub y: Option<i32>,
 }
 
 pub struct Scene {
@@ -385,6 +402,52 @@ impl Scene {
         }
         let p = self.add_str(text);
         self.set_ptr(e.rec + 112, p);
+        Ok(())
+    }
+
+    /// Texto apontado por um campo do registro (ex.: textura de uma imagem em +112).
+    pub fn str_field(&self, id: u32, off: usize) -> Result<String> {
+        let rec = self.by_id(id)?.rec;
+        self.cstr(self.u32_at(rec + off)?)
+    }
+
+    /// Troca o texto apontado por um campo (textura, fonte...).
+    pub fn set_str_field(&mut self, id: u32, off: usize, text: &str) -> Result<()> {
+        let rec = self.by_id(id)?.rec;
+        let p = self.add_str(text);
+        self.set_ptr(rec + off, p);
+        Ok(())
+    }
+
+    /// Um campo numérico do registro.
+    pub fn set_u32(&mut self, id: u32, off: usize, v: u32) -> Result<()> {
+        let rec = self.by_id(id)?.rec;
+        self.put(rec + off, v);
+        Ok(())
+    }
+
+    /// Âncoras de um elemento da raiz da cena (os de dentro de grupos seguem o grupo). O jogo
+    /// mostra uma área de 1920×1080 unidades com o centro no centro da tela 1024×768 (x de −448 a
+    /// 1472 e y de −156 a 924 em 16:9): `left`/`right`/`top`/`bottom` prendem a borda à borda da
+    /// tela (distância), `x`/`y` põem a esquerda/o topo numa posição em relação ao centro.
+    pub fn set_anchors(&mut self, id: u32, a: Anchors) -> Result<()> {
+        let rec = self.by_id(id)?.rec;
+        for k in 1..13 {
+            self.put(rec + 32 + 4 * k, 0);
+        }
+        let mut put = |k: usize, v: Option<i32>, center: i32, edge: bool| {
+            if let Some(v) = v {
+                let val = if edge { v } else { center - v };
+                self.put(rec + 32 + 4 * k, val as u32);
+                self.put(rec + 32 + 4 * (k + 1), 1);
+            }
+        };
+        put(1, a.left, 0, true);
+        put(3, a.right, 0, true);
+        put(5, a.top, 0, true);
+        put(7, a.bottom, 0, true);
+        put(9, a.x, 512, false);
+        put(11, a.y, 384, false);
         Ok(())
     }
 

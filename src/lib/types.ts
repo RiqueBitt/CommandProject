@@ -374,6 +374,13 @@ export interface ForjaMod {
 }
 export interface ForjaMenuButton { id: string; label: string; where?: "main" | "extras"; message?: string; url?: string; native?: string }
 export interface ForjaMenu { buttons?: ForjaMenuButton[]; rename?: Record<string, string>; hide?: string[] }
+/** "Tela inicial nova" (cp-core startscreen::Settings) */
+export interface StartScreenSettings {
+  enabled: boolean; accent: string; newsTitle: string; newsText: string; customLogo: boolean; customVideo: boolean; videoName: string;
+}
+export interface StartScreenView {
+  settings: StartScreenSettings; logo: string | null; video: { name: string; size: number } | null; ffmpeg: string | null; active: boolean;
+}
 export interface ForjaProblem { modId: string; message: string; fatal: boolean }
 export interface ForjaStatus { loaderVersion: string; builtAt: string; loaded: ForjaMod[]; problems: ForjaProblem[]; patched: string[]; menu?: { key: string; place: "main" | "extras" }[] }
 export interface ForjaOverview {

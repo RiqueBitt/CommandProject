@@ -812,6 +812,11 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     }
     case "optimize_undo_windows": { const db = optDb(); db.windows = { supported: true, gpu: false, fullscreenFix: false }; db.noThrottle = false; return r(db); }
     // ---------------------------------------------------------------- Forja (simulada)
+    case "start_screen_get": return r(startScreenView());
+    case "start_screen_save": startScreen = { ...(a.settings as T.StartScreenSettings) }; return r(startScreenView());
+    case "start_screen_logo": startScreen.customLogo = !!a.path; return r(startScreenView());
+    case "start_screen_video": startScreen.customVideo = !!a.path; startScreen.videoName = a.path ? String(a.path).split(/[\\/]/).pop() ?? "" : ""; return r(startScreenView());
+    case "start_screen_get_ffmpeg": return r(startScreenView());
     case "forja_overview": return r(forjaOv());
     case "forja_set_option": case "forja_reset_options": case "forja_set_key": return r(forjaOv());
     case "forja_templates": return r([
@@ -946,6 +951,10 @@ const forjaFiles: Record<string, string> = {
   "ui.lua": "local panel = Forja.UI.Panel({ title = mod.Name })\n",
   "lib/util.lua": "local M = {}\nreturn M\n",
 };
+let startScreen: T.StartScreenSettings = { enabled: true, accent: "#2b8cff", newsTitle: "Bem-vindo ao CommandProject", newsText: "Mods, partidas grandes e mais pelo launcher.", customLogo: false, customVideo: false, videoName: "" };
+function startScreenView(): T.StartScreenView {
+  return { settings: { ...startScreen }, logo: null, video: startScreen.customVideo ? { name: startScreen.videoName, size: 129_000_000 } : null, ffmpeg: "ffmpeg", active: startScreen.enabled };
+}
 function forjaOv(): T.ForjaOverview {
   return {
     loaderVersion: "1.0.0", key: "F8", keys: ["F8", "F9", "F10"], problems: [], built: null, devDir: "C:/CommandProject/forja-dev",

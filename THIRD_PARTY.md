@@ -30,3 +30,10 @@ a Partida grande do launcher já chega a 5000 unidades).
 
 Supreme Commander 2 é marca registrada de seus respectivos donos. O CommandProject não
 contém nem distribui arquivos do jogo: tudo é lido da instalação do próprio usuário.
+
+## FFmpeg (baixado só quando você pede)
+
+A "Tela inicial nova" converte o vídeo de fundo que você escolher com o **FFmpeg**
+(https://ffmpeg.org, LGPL/GPL). O launcher não traz o FFmpeg: o botão "Baixar o ffmpeg" baixa a
+compilação para Windows de BtbN/FFmpeg-Builds (GitHub) para a pasta de dados do launcher, ou usa
+um `ffmpeg` que já esteja no seu computador.

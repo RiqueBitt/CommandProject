@@ -5,6 +5,7 @@ mod commands;
 mod creator_cmds;
 mod files_cmds;
 mod forja_cmds;
+mod startscreen_cmds;
 mod party;
 mod perf_cmds;
 
@@ -192,6 +193,11 @@ pub fn run() {
             commands::build_ui_skin,
             commands::build_cheats,
             forja_cmds::forja_overview,
+            startscreen_cmds::start_screen_get,
+            startscreen_cmds::start_screen_save,
+            startscreen_cmds::start_screen_logo,
+            startscreen_cmds::start_screen_video,
+            startscreen_cmds::start_screen_get_ffmpeg,
             forja_cmds::forja_set_option,
             forja_cmds::forja_reset_options,
             forja_cmds::forja_set_key,

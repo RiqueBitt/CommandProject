@@ -220,6 +220,11 @@ impl Workspace {
             Ok(None) => {}
             Err(e) => early.push(format!("Forja não montada: {e}")),
         }
+        // a tela inicial (o visual novo e os botões dos mods da Forja) depois da Forja
+        match self.prepare_start_screen() {
+            Ok(w) => early.extend(w.into_iter().map(|w| format!("Tela inicial: {w}"))),
+            Err(e) => early.push(format!("Tela inicial não montada: {e}")),
+        }
         let active = self.profiles.active().clone();
         let lib = &self.library;
         let game = self.game.as_ref().ok_or(Error::GameNotFound)?;
@@ -242,7 +247,10 @@ impl Workspace {
         let active = self.profiles.active().clone();
         let mut files: Vec<(String, PathBuf)> = Vec::new();
         for m in self.mods()? {
-            if m.manifest.id == crate::forja::LOADER_ID || !active.mods.iter().any(|x| x.id == m.manifest.id && x.enabled) {
+            if m.manifest.id == crate::forja::LOADER_ID
+                || m.manifest.id == crate::startscreen::MOD_ID
+                || !active.mods.iter().any(|x| x.id == m.manifest.id && x.enabled)
+            {
                 continue;
             }
             for f in &m.manifest.files {
@@ -307,6 +315,72 @@ impl Workspace {
         let json = serde_json::to_vec_pretty(&status).map_err(|e| Error::Other(e.to_string()))?;
         crate::fsutil::write_atomic(&status_path, &json)?;
         Ok(Some(status))
+    }
+
+    /// Tela inicial: monta o mod `cp-tela-inicial` com o visual novo (se ligado) e os botões dos mods
+    /// da Forja, ou o desliga quando não há nada. Só remonta quando algo mudou. Devolve os avisos.
+    pub fn prepare_start_screen(&mut self) -> Result<Vec<String>> {
+        use crate::startscreen as ss;
+        let settings = ss::Settings::load(&self.data_dir);
+        let plan = self.forja_plan()?;
+        let (edit, _, problems) = crate::forja::menu_edit(&plan);
+        let mut warnings: Vec<String> = problems.into_iter().map(|p| p.message).collect();
+        let active = self.profiles.active().id.clone();
+        if !settings.enabled && edit.is_empty() {
+            if self.profiles.active().mods.iter().any(|m| m.id == ss::MOD_ID && m.enabled) {
+                self.profiles.set_enabled(&active, ss::MOD_ID, false)?;
+            }
+            return Ok(warnings);
+        }
+        let archives = self.enabled_archives()?;
+        let stock = self.stock_sources()?;
+        let mod_paths: Vec<PathBuf> = archives.iter().map(|(_, p)| p.clone()).collect();
+        let mut version = ss::build_version(&settings, &edit, &self.data_dir);
+        // a cena de origem também entra (outro mod que mexa nela)
+        let scene = crate::forja::effective_bytes(&stock, &mod_paths, crate::mainmenu::SCENE_PATH)
+            .ok_or_else(|| Error::Other("a tela inicial do jogo (pc_main_menu) não foi encontrada".into()))?;
+        {
+            use sha2::{Digest, Sha256};
+            version.push('.');
+            version.push_str(&hex::encode(Sha256::digest(&scene))[..8]);
+        }
+        if self.mods()?.iter().any(|m| m.manifest.id == ss::MOD_ID && m.manifest.version == version) {
+            self.profiles.set_enabled(&active, ss::MOD_ID, true)?;
+            return Ok(warnings);
+        }
+        let dir = self.data_dir.join("cache").join("start-screen");
+        std::fs::create_dir_all(&dir).at(&dir)?;
+        let dest = dir.join(ss::ARCHIVE);
+        let archive = if settings.enabled {
+            let (archive, w) = ss::build(&scene, &edit, &settings, &stock, &self.data_dir, &dest)?;
+            warnings.extend(w);
+            archive
+        } else {
+            // só os botões dos mods, no visual do jogo
+            let built = crate::mainmenu::build(&scene, &edit)?;
+            warnings.extend(built.warnings);
+            let mut b = crate::scd::ScdBuilder::create(&dest)?;
+            b.add_bytes(crate::mainmenu::SCENE_PATH.trim_start_matches('/'), &built.scene)?;
+            b.finish()?
+        };
+        let import = ImportOptions {
+            id: Some(ss::MOD_ID.into()),
+            name: Some("Tela inicial".into()),
+            version: Some(version),
+            category: Some(Category::Ui),
+            description: Some(if settings.enabled {
+                "Tela inicial nova do CommandProject (cores, logo, vídeo de fundo e os botões dos mods da Forja). Montada pelo launcher.".into()
+            } else {
+                "Os botões dos mods da Forja na tela inicial do jogo. Montado pelo launcher.".into()
+            }),
+            multiplayer: Some(crate::manifest::MpPolicy::Local),
+            replace: true,
+            move_source: true,
+            ..Default::default()
+        };
+        self.import_mod(&archive, &import, true)?;
+        let _ = std::fs::remove_file(&archive);
+        Ok(warnings)
     }
 
     pub fn purge(&mut self, progress: &mut dyn FnMut(Progress)) -> Result<Plan> {

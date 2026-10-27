@@ -12,7 +12,7 @@
 //! fica sempre na mesma posição dentro dele.
 
 use crate::error::{Error, Result};
-use crate::scene::{event, kind, Event, Rect, Scene};
+use crate::scene::{event, kind, Anchors, Event, Rect, Scene};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -124,11 +124,97 @@ fn find(s: &Scene, name: &str) -> Result<u32> {
     s.by_name(name).map(|e| e.id).map_err(|_| Error::Other(format!("a tela inicial do jogo é diferente do esperado (sem {name})")))
 }
 
+/// Visual da tela inicial.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Look {
+    /// a do jogo (só os botões dos mods entram)
+    #[default]
+    Original,
+    /// "Comandante": logo em cima, botões grandes com ícone e borda neon, notícias, rodapé
+    Commander(Commander),
+}
+
+/// Textos da tela "Comandante".
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Commander {
+    pub news_title: String,
+    pub news_text: String,
+}
+
+/// Pasta das texturas da tela "Comandante" (arquivos novos: o jogo acha sem mexer no índice).
+pub const TEX: &str = "/textures/ui/common/pc/frontend/cp/";
+const BLANK: &str = "/textures/ui/common/pc/frontend/blank.dds";
+
+/// Medidas da coluna em cada visual.
+struct Geo {
+    x: Option<(i32, i32)>,
+    h: i32,
+    sub_step: i32,
+    sub_h: i32,
+    highest: i32,
+    bottom: i32,
+    commander: bool,
+}
+
+impl Geo {
+    fn of(look: &Look) -> Geo {
+        match look {
+            Look::Original => Geo { x: None, h: BUTTON_H, sub_step: STEP, sub_h: BUTTON_H, highest: HIGHEST, bottom: BOTTOM, commander: false },
+            Look::Commander(_) => Geo { x: Some((C_X0, C_X1)), h: C_H, sub_step: SUB_STEP, sub_h: SUB_H, highest: C_TOP, bottom: C_BOTTOM, commander: true },
+        }
+    }
+    /// (topo, passo) da coluna com `n` botões
+    fn column(&self, n: i32) -> (i32, i32) {
+        if self.commander {
+            let step = if n <= 6 { C_STEP } else { ((C_BOTTOM - C_H - C_TOP) / (n - 1)).min(C_STEP) };
+            (C_TOP, step)
+        } else if n <= 6 {
+            (TOP, STEP)
+        } else {
+            let step = ((LAST_Y - HIGHEST) / (n - 1)).min(46);
+            (LAST_Y - step * (n - 1), step)
+        }
+    }
+}
+
+// medidas da "Comandante" (em unidades da cena; a tela 16:9 vai de x −448 a 1472, y −156 a 924)
+const C_X0: i32 = -373;
+const C_X1: i32 = 155;
+const C_TOP: i32 = 163;
+const C_STEP: i32 = 84;
+const C_H: i32 = 74;
+const C_BOTTOM: i32 = 860;
+/// botões dos submenus na "Comandante"
+const SUB_W: i32 = 420;
+const SUB_H: i32 = 58;
+const SUB_STEP: i32 = 64;
+/// os filhos de `g_main` ficam presos à borda direita: em 16:9 a borda está 448 além da do 1024
+const RIGHT: i32 = -448;
+
+/// Ícone de cada botão da coluna na "Comandante".
+fn icon_for(key: Option<&str>) -> &'static str {
+    match key {
+        Some("campaign") => "icon_campaign",
+        Some("skirmish") => "icon_skirmish",
+        Some("multiplayer") => "icon_multiplayer",
+        Some("options") => "icon_options",
+        Some("extras") => "icon_extras",
+        Some("quit") => "icon_quit",
+        _ => "icon_mod",
+    }
+}
+
 /// Monta a tela inicial com as mudanças de `edit` a partir da cena `data` (a do jogo ou a de outro
 /// mod que já mexe nela).
 pub fn build(data: &[u8], edit: &MenuEdit) -> Result<Built> {
+    build_with(data, edit, &Look::Original)
+}
+
+/// Como [`build`], com o visual escolhido.
+pub fn build_with(data: &[u8], edit: &MenuEdit, look: &Look) -> Result<Built> {
     let mut s = Scene::parse(data)?;
     let mut warnings = Vec::new();
+    let geo = Geo::of(look);
     let group = find(&s, "rg_menu_group")?;
     let main_ids: HashMap<&str, u32> = MAIN.iter().map(|(k, n)| find(&s, n).map(|id| (*k, id))).collect::<Result<_>>()?;
     let extra_ids: HashMap<&str, u32> = EXTRAS.iter().map(|(k, n)| find(&s, n).map(|id| (*k, id))).collect::<Result<_>>()?;
@@ -223,44 +309,53 @@ pub fn build(data: &[u8], edit: &MenuEdit) -> Result<Built> {
     let mut placed = Vec::new();
 
     // coluna principal: botões do jogo na ordem, os dos mods antes de Sair
-    let mut column: Vec<u32> = stock_main.iter().filter(|k| **k != "quit").map(|k| main_ids[k]).collect();
+    let mut column: Vec<(u32, Option<&str>)> = stock_main.iter().filter(|k| **k != "quit").map(|k| (main_ids[k], Some(*k))).collect();
     for b in &to_main {
-        column.push(make(&mut s, main_ids["options"], b, true)?);
+        column.push((make(&mut s, main_ids["options"], b, true)?, None));
         placed.push((b.key.clone(), Place::Main));
     }
-    column.push(main_ids["quit"]);
+    column.push((main_ids["quit"], Some("quit")));
     let n = column.len() as i32;
-    let (top, step) = if n <= 6 { (TOP, STEP) } else {
-        let step = ((LAST_Y - HIGHEST) / (n - 1)).min(46);
-        (LAST_Y - step * (n - 1), step)
-    };
+    let (top, step) = geo.column(n);
     let mut moved: Vec<u32> = Vec::new();
-    for (i, &id) in column.iter().enumerate() {
+    for (i, &(id, _)) in column.iter().enumerate() {
         let old = s.rect(id)?.ok_or_else(|| Error::Other("botão sem posição".into()))?;
         let y = top + step * i as i32;
-        let dy = y - old.y0;
-        s.set_rect(id, Rect { y0: y, y1: y + BUTTON_H, ..old })?;
+        let (x0, x1) = geo.x.unwrap_or((old.x0, old.x1));
+        let (dx, dy) = (x0 - old.x0, y - old.y0);
+        s.set_rect(id, Rect::new(x0, x1, y, y + geo.h))?;
         moved.push(id);
-        // o submenu do botão vai junto
+        // o submenu do botão vai junto (na "Comandante", ao lado, alinhado com o botão)
         let mut seen = BTreeSet::new();
         for c in s.children(id)? {
-            if kinds.get(&c) != Some(&kind::TEXT) {
-                shift_tree(&mut s, c, dy, &kinds, &mut seen, &mut moved)?;
+            if kinds.get(&c) == Some(&kind::TEXT) {
+                continue;
             }
+            let (sdx, sdy) = match (geo.commander, s.rect(c)?) {
+                (true, Some(r)) => (x1 + 18 - r.x0, y - r.y0),
+                _ => (dx, dy),
+            };
+            shift_tree(&mut s, c, sdx, sdy, &kinds, &mut seen, &mut moved)?;
         }
     }
+    let first_x = geo.x.map(|x| x.0);
     if let Some(r) = s.rect(group)? {
-        s.set_rect(group, Rect { y0: top, y1: top + step * (n - 1) + BUTTON_H, ..r })?;
+        let (x0, x1) = geo.x.unwrap_or((r.x0, r.x1));
+        s.set_rect(group, Rect::new(x0, x1, top, top + step * (n - 1) + geo.h))?;
     }
-    s.set_children(group, &column)?;
+    if geo.commander {
+        s.set_anchors(group, Anchors { x: first_x, y: Some(top), ..Default::default() })?;
+    }
+    let ids: Vec<u32> = column.iter().map(|c| c.0).collect();
+    s.set_children(group, &ids)?;
     // submenus que passaram da borda de baixo sobem
-    for &id in &column {
+    for &id in &ids {
         for c in s.children(id)? {
             if kinds.get(&c) == Some(&kind::GROUP) {
                 if let Some(r) = s.rect(c)? {
-                    if r.y1 > BOTTOM {
+                    if r.y1 > geo.bottom {
                         let mut seen = BTreeSet::new();
-                        shift_tree(&mut s, c, BOTTOM - r.y1, &kinds, &mut seen, &mut moved)?;
+                        shift_tree(&mut s, c, 0, geo.bottom - r.y1, &kinds, &mut seen, &mut moved)?;
                     }
                 }
             }
@@ -268,30 +363,34 @@ pub fn build(data: &[u8], edit: &MenuEdit) -> Result<Built> {
     }
 
     // submenu Extras: Replays, Créditos e os dos mods, em coluna terminando acima da borda
-    if extras_open && (!to_extras.is_empty() || stock_extras.len() < EXTRAS.len()) {
+    if extras_open && (!to_extras.is_empty() || stock_extras.len() < EXTRAS.len() || geo.commander) {
         let mut items: Vec<u32> = stock_extras.iter().map(|k| extra_ids[k]).collect();
         for b in &to_extras {
             items.push(make(&mut s, extra_ids["credits"], b, false)?);
             placed.push((b.key.clone(), Place::Extras));
         }
-        let ext_y = s.rect(main_ids["extras"])?.map(|r| r.y0).unwrap_or(TOP);
+        let ext = s.rect(main_ids["extras"])?.unwrap_or(Rect::new(0, 0, TOP, TOP));
         let count = items.len().max(1) as i32;
-        let base = ext_y.min(BOTTOM - STEP * (count - 1) - BUTTON_H).max(HIGHEST);
+        let base = ext.y0.min(geo.bottom - geo.sub_step * (count - 1) - geo.sub_h).max(geo.highest);
+        let sub_x = geo.x.map(|(_, x1)| (x1 + 18, x1 + 18 + SUB_W));
         for (i, &id) in items.iter().enumerate() {
             let old = s.rect(id)?.ok_or_else(|| Error::Other("botão sem posição".into()))?;
-            let y = base + STEP * i as i32;
-            s.set_rect(id, Rect { y0: y, y1: y + BUTTON_H, ..old })?;
+            let y = base + geo.sub_step * i as i32;
+            let (x0, x1) = sub_x.unwrap_or((old.x0, old.x1));
+            s.set_rect(id, Rect::new(x0, x1, y, y + geo.sub_h))?;
             moved.push(id);
         }
         if let Some(r) = s.rect(extras_group)? {
-            s.set_rect(extras_group, Rect { y0: base, y1: base + STEP * count + 2, ..r })?;
+            let (x0, x1) = sub_x.unwrap_or((r.x0, r.x1));
+            s.set_rect(extras_group, Rect::new(x0, x1, base, base + geo.sub_step * count + 2))?;
         }
         s.set_children(extras_group, &items)?;
     }
 
     // o texto de cada botão que mudou de lugar fica na mesma posição dentro dele
+    let column_ids: BTreeSet<u32> = ids.iter().copied().collect();
     let moved: BTreeSet<u32> = moved.into_iter().collect();
-    for id in moved {
+    for &id in &moved {
         let Some(k) = kinds.get(&id).copied().or_else(|| s.by_id(id).ok().map(|e| e.kind)) else { continue };
         if k != kind::RADIO_BUTTON && k != kind::BUTTON {
             continue;
@@ -302,24 +401,196 @@ pub fn build(data: &[u8], edit: &MenuEdit) -> Result<Built> {
             if e.kind != kind::TEXT {
                 continue;
             }
-            let o = offset.get(&c).copied().unwrap_or([31, -31, 6, -6]);
-            s.set_rect(c, Rect { x0: b.x0 + o[0], x1: b.x1 + o[1], y0: b.y0 + o[2], y1: b.y1 + o[3] })?;
+            if geo.commander && column_ids.contains(&id) {
+                s.set_rect(c, Rect::new(b.x0 + 92, b.x1 - 60, b.y0 + 10, b.y1 - 10))?;
+                s.set_str_field(c, 108, "pc_title_font_4")?;
+            } else {
+                let o = offset.get(&c).copied().unwrap_or([31, -31, 6, -6]);
+                s.set_rect(c, Rect::new(b.x0 + o[0], b.x1 + o[1], b.y0 + o[2], b.y1 + o[3]))?;
+            }
         }
+    }
+    if let Look::Commander(c) = look {
+        commander(&mut s, c, &column)?;
     }
     Ok(Built { scene: s.to_bytes(), placed, warnings })
 }
 
+/// O resto da "Comandante": fundo, logo, texturas dos botões, ícones, lado direito e rodapé.
+fn commander(s: &mut Scene, c: &Commander, column: &[(u32, Option<&str>)]) -> Result<()> {
+    let tex = |n: &str| format!("{TEX}{n}.dds");
+    // fundo: tom e vinheta por cima do vídeo, sombra atrás dos botões, sem as faixas azuis
+    let tint = find(s, "black_overlay")?;
+    s.set_rect(tint, Rect::new(-448, 1472, -156, 924))?;
+    s.set_str_field(tint, 112, &tex("tint"))?;
+    s.set_anchors(tint, Anchors { left: Some(0), right: Some(0), top: Some(0), bottom: Some(0), ..Default::default() })?;
+    let shade = find(s, "blue_overlay")?;
+    s.set_rect(shade, Rect::new(-448, 700, -156, 924))?;
+    s.set_str_field(shade, 112, &tex("shade"))?;
+    s.set_anchors(shade, Anchors { left: Some(0), top: Some(0), bottom: Some(0), x: Some(-448), ..Default::default() })?;
+    for n in ["temp_lines", "topline"] {
+        if let Ok(e) = s.by_name(n) {
+            s.set_str_field(e.id, 112, BLANK)?;
+        }
+    }
+    let logo = find(s, "sc2_logo")?;
+    s.set_rect(logo, Rect::new(-373, 267, -60, 87))?;
+    s.set_anchors(logo, Anchors { x: Some(-373), y: Some(-60), ..Default::default() })?;
+
+    // botões: os da coluna com a textura grande, os dos submenus com a fina, maiores e em coluna
+    // ao lado do botão de cada um
+    let column_ids: BTreeSet<u32> = column.iter().map(|c| c.0).collect();
+    for e in s.elements()? {
+        if e.kind != kind::RADIO_BUTTON {
+            continue;
+        }
+        let prefix = if column_ids.contains(&e.id) { "btn" } else { "sub" };
+        for off in [112, 116, 120, 124, 128, 132] {
+            let old = s.str_field(e.id, off)?;
+            if let Some(rest) = old.to_ascii_lowercase().split("mainmenu/btn_").nth(1) {
+                let state = rest.trim_end_matches(".dds");
+                let state = if ["u", "o", "w", "at"].contains(&state) { state } else { "u" };
+                s.set_str_field(e.id, off, &tex(&format!("{prefix}_{state}")))?;
+            }
+        }
+    }
+    for &(id, _) in column {
+        let Some(b) = s.rect(id)? else { continue };
+        for g in s.children(id)? {
+            if s.by_id(g)?.kind != kind::GROUP {
+                continue;
+            }
+            let mut items: Vec<(i32, u32)> = Vec::new();
+            for c in s.children(g)? {
+                if s.by_id(c)?.kind == kind::RADIO_BUTTON {
+                    items.push((s.rect(c)?.map(|r| r.y0).unwrap_or(0), c));
+                }
+            }
+            items.sort();
+            let n = items.len().max(1) as i32;
+            let base = b.y0.min(C_BOTTOM - SUB_STEP * (n - 1) - SUB_H);
+            let x0 = C_X1 + 18;
+            for (k, &(_, c)) in items.iter().enumerate() {
+                let y = base + SUB_STEP * k as i32;
+                s.set_rect(c, Rect::new(x0, x0 + SUB_W, y, y + SUB_H))?;
+                for l in s.children(c)? {
+                    if s.by_id(l)?.kind == kind::TEXT {
+                        s.set_rect(l, Rect::new(x0 + 26, x0 + SUB_W - 52, y + 9, y + SUB_H - 9))?;
+                        s.set_str_field(l, 108, "pc_title_font_3")?;
+                    }
+                }
+            }
+            s.set_rect(g, Rect::new(x0, x0 + SUB_W, base, base + SUB_STEP * (n - 1) + SUB_H))?;
+        }
+    }
+    // ícones dentro dos botões da coluna
+    let avatar = find(s, "avatar")?;
+    for &(id, key) in column {
+        let r = s.rect(id)?.ok_or_else(|| Error::Other("botão sem posição".into()))?;
+        let icon = s.clone_element(avatar, &format!("cp_icon_{id}"))?;
+        s.set_str_field(icon, 112, &tex(icon_for(key)))?;
+        s.set_rect(icon, Rect::new(r.x0 + 26, r.x0 + 78, r.y0 + 11, r.y0 + 63))?;
+        let mut kids = vec![icon];
+        kids.extend(s.children(id)?);
+        s.set_children(id, &kids)?;
+    }
+
+    // lado direito (filhos de g_main, presos à borda direita)
+    let main = find(s, "g_main")?;
+    let place = |s: &mut Scene, name: &str, right: i32, top: i32| -> Result<()> {
+        let Ok(e) = s.by_name(name) else { return Ok(()) };
+        let Some(r) = s.rect(e.id)? else { return Ok(()) };
+        let mut seen = BTreeSet::new();
+        let kinds: HashMap<u32, u32> = HashMap::new();
+        let mut moved = Vec::new();
+        shift_tree(s, e.id, right + RIGHT - r.x1, top - r.y0, &kinds, &mut seen, &mut moved)
+    };
+    // caixa do jogador: foto à esquerda (moldura reta), nome ao lado
+    place(s, "g_steam_username", 1448, -131)?;
+    let set = |s: &mut Scene, name: &str, r: Rect| -> Result<()> {
+        if let Ok(e) = s.by_name(name) {
+            s.set_rect(e.id, Rect::new(r.x0 + RIGHT, r.x1 + RIGHT, r.y0, r.y1))?;
+        }
+        Ok(())
+    };
+    set(s, "g_steam_username", Rect::new(1178, 1448, -131, -77))?;
+    set(s, "gamertag_bg", Rect::new(1178, 1448, -131, -77))?;
+    set(s, "avatar", Rect::new(1190, 1230, -124, -84))?;
+    set(s, "avatar_overlay", Rect::new(1186, 1234, -128, -80))?;
+    set(s, "label_gamertag", Rect::new(1244, 1436, -124, -84))?;
+    if let Ok(e) = s.by_name("gamertag_bg") {
+        s.set_str_field(e.id, 112, &tex("gamertag"))?;
+    }
+    if let Ok(e) = s.by_name("avatar_overlay") {
+        s.set_str_field(e.id, 112, &tex("avatar_frame"))?;
+    }
+    if let Ok(e) = s.by_name("label_gamertag") {
+        s.set_u32(e.id, 128, 0)?; // nome à esquerda, colado na foto
+    }
+    let has_news = !c.news_title.trim().is_empty() || !c.news_text.trim().is_empty();
+    let mut y = if has_news { 268 } else { -60 };
+    for n in ["g_steam_leaderboards", "g_steam_chat", "g_DLC"] {
+        place(s, n, 1436, y)?;
+        y += 34;
+    }
+    let mut extra = Vec::new();
+    if has_news {
+        let panel = s.clone_element(avatar, "cp_news_panel")?;
+        s.set_str_field(panel, 112, &tex("panel"))?;
+        s.set_rect(panel, Rect::new(1059 + RIGHT, 1436 + RIGHT, 14, 252))?;
+        let img = s.clone_element(avatar, "cp_news_image")?;
+        s.set_str_field(img, 112, &tex("news"))?;
+        s.set_rect(img, Rect::new(1067 + RIGHT, 1428 + RIGHT, 52, 176))?;
+        extra.extend([panel, img]);
+        let label = find(s, "label_chat")?;
+        for (i, (text, font)) in [(&c.news_title, "pc_title_font_3"), (&c.news_text, "pc_body_font_narrow_3")].into_iter().enumerate() {
+            if text.trim().is_empty() {
+                continue;
+            }
+            let t = s.clone_element(label, &format!("cp_news_text{i}"))?;
+            s.set_text(t, text.trim())?;
+            s.set_str_field(t, 108, font)?;
+            s.set_u32(t, 128, 0)?; // à esquerda
+            let y0 = 182 + 28 * i as i32;
+            s.set_rect(t, Rect::new(1069 + RIGHT, 1426 + RIGHT, y0, y0 + 28))?;
+            extra.push(t);
+        }
+    }
+    if let Ok(e) = s.by_name("label_version") {
+        s.set_rect(e.id, Rect::new(1150 + RIGHT, 1440 + RIGHT, 862, 892))?;
+    }
+    let mut kids = extra;
+    kids.extend(s.children(main)?);
+    s.set_children(main, &kids)?;
+
+    Ok(())
+}
+
+/// Troca o logo da tela "Comandante" por outra textura (`w`×`h` em pixels), na mesma largura e
+/// com a altura da proporção dela (centrado na faixa do logo).
+pub fn set_logo(scene: &[u8], texture: &str, w: u32, h: u32) -> Result<Vec<u8>> {
+    let mut s = Scene::parse(scene)?;
+    let logo = find(&s, "sc2_logo")?;
+    let width = 640;
+    let height = ((width as f32 * h as f32 / w.max(1) as f32).round() as i32).clamp(40, 220);
+    let y0 = 13 - height / 2;
+    s.set_str_field(logo, 112, texture)?;
+    s.set_rect(logo, Rect::new(C_X0, C_X0 + width, y0, y0 + height))?;
+    s.set_anchors(logo, Anchors { x: Some(C_X0), y: Some(y0), ..Default::default() })?;
+    Ok(s.to_bytes())
+}
+
 /// Desloca um elemento e tudo dentro dele (menos os textos, que são postos no fim).
-fn shift_tree(s: &mut Scene, id: u32, dy: i32, kinds: &HashMap<u32, u32>, seen: &mut BTreeSet<u32>, moved: &mut Vec<u32>) -> Result<()> {
-    if dy == 0 || !seen.insert(id) || kinds.get(&id) == Some(&kind::TEXT) {
+fn shift_tree(s: &mut Scene, id: u32, dx: i32, dy: i32, kinds: &HashMap<u32, u32>, seen: &mut BTreeSet<u32>, moved: &mut Vec<u32>) -> Result<()> {
+    if (dx == 0 && dy == 0) || !seen.insert(id) || kinds.get(&id) == Some(&kind::TEXT) {
         return Ok(());
     }
     if let Some(r) = s.rect(id)? {
-        s.set_rect(id, r.moved(dy))?;
+        s.set_rect(id, r.shifted(dx, dy))?;
         moved.push(id);
     }
     for c in s.children(id)? {
-        shift_tree(s, c, dy, kinds, seen, moved)?;
+        shift_tree(s, c, dx, dy, kinds, seen, moved)?;
     }
     Ok(())
 }
@@ -454,6 +725,15 @@ fn real_scene_when_available() {
         eprintln!("{:<28} {:<40} {:?}", m.0, m.1, m.2);
     }
     if let Ok(dest) = std::env::var("CP_TEST_SCENE_OUT") {
+        std::fs::write(dest, &out.scene).unwrap();
+    }
+    let look = Look::Commander(Commander { news_title: "Bem-vindo ao CommandProject".into(), news_text: "Tela inicial nova, feita pelo launcher.".into() });
+    let out = build_with(&data, &edit, &look).unwrap();
+    assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    let (main, extras) = describe(&out.scene).unwrap();
+    assert_eq!(main[0].2, Rect::new(C_X0, C_X1, C_TOP, C_TOP + C_H));
+    assert!(extras.iter().all(|e| e.2.x0 == C_X1 + 18 && e.2.x1 == C_X1 + 18 + SUB_W && e.2.y1 <= C_BOTTOM));
+    if let Ok(dest) = std::env::var("CP_TEST_SCENE_OUT2") {
         std::fs::write(dest, &out.scene).unwrap();
     }
 }

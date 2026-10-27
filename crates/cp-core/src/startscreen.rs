@@ -1,0 +1,351 @@
+//! "Tela inicial nova": a tela inicial do jogo no estilo "Comandante" (logo em cima, botões grandes
+//! com ícone e borda neon, submenus ao lado, caixa do jogador, notícias), na cor que o jogador
+//! escolher, com o logo e o vídeo de fundo dele se quiser. Os botões dos mods da Forja entram no
+//! mesmo visual.
+//!
+//! Montado no computador do jogador como o mod `cp-tela-inicial`:
+//! * a cena da tela inicial ([`crate::mainmenu`]);
+//! * as texturas desenhadas para o launcher (`menu_style/*.png`, por `tools/make_menu_style.py`)
+//!   pintadas na cor escolhida, e a imagem das notícias (uma tela de carregamento do próprio jogo
+//!   tingida);
+//! * o logo e o vídeo de fundo do jogador, quando escolhidos (o vídeo vira `.usm`: [`crate::usm`]).
+//!   Eles ficam só no computador dele.
+
+use crate::dds::{self, DdsFormat, Quality, Rgba};
+use crate::error::{Error, Result};
+use crate::mainmenu::{self, Commander, Look, MenuEdit};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+
+pub const MOD_ID: &str = "cp-tela-inicial";
+pub const ARCHIVE: &str = "zz_cp_tela_inicial.scd";
+/// Muda quando o visual muda (o launcher remonta).
+pub const STYLE_VERSION: &str = "1.0.0";
+pub const SETTINGS_FILE: &str = "start-screen.json";
+/// Pasta (nos dados do launcher) com o logo e o vídeo do jogador.
+pub const USER_DIR: &str = "start-screen";
+/// O vídeo da tela inicial do jogo.
+pub const MOVIE: &str = "movies/FMV_FRONTEND.win.usm";
+pub const DEFAULT_ACCENT: &str = "#2b8cff";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Settings {
+    pub enabled: bool,
+    /// Cor de destaque (#rrggbb).
+    pub accent: String,
+    pub news_title: String,
+    pub news_text: String,
+    /// Usar o logo do jogador (`start-screen/logo.png`).
+    pub custom_logo: bool,
+    /// Usar o vídeo do jogador (`start-screen/FMV_FRONTEND.win.usm`).
+    pub custom_video: bool,
+    /// Nome do vídeo escolhido (para a tela).
+    pub video_name: String,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            enabled: false,
+            accent: DEFAULT_ACCENT.into(),
+            news_title: "Bem-vindo ao CommandProject".into(),
+            news_text: "Mods, partidas grandes e mais pelo launcher.".into(),
+            custom_logo: false,
+            custom_video: false,
+            video_name: String::new(),
+        }
+    }
+}
+
+impl Settings {
+    pub fn load(data_dir: &Path) -> Settings {
+        std::fs::read(data_dir.join(SETTINGS_FILE)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+    pub fn save(&self, data_dir: &Path) -> Result<()> {
+        let json = serde_json::to_vec_pretty(self).map_err(|e| Error::Other(e.to_string()))?;
+        crate::fsutil::write_atomic(&data_dir.join(SETTINGS_FILE), &json)
+    }
+    pub fn logo_path(data_dir: &Path) -> PathBuf {
+        data_dir.join(USER_DIR).join("logo.png")
+    }
+    pub fn video_path(data_dir: &Path) -> PathBuf {
+        data_dir.join(USER_DIR).join("FMV_FRONTEND.win.usm")
+    }
+}
+
+// ------------------------------------------------------------------ cores
+
+fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let d = max - min;
+    let h = if d <= f32::EPSILON {
+        0.0
+    } else if max == r {
+        60.0 * (((g - b) / d).rem_euclid(6.0))
+    } else if max == g {
+        60.0 * ((b - r) / d + 2.0)
+    } else {
+        60.0 * ((r - g) / d + 4.0)
+    };
+    (h, if max <= 0.0 { 0.0 } else { d / max }, max)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    let c = v * s;
+    let x = c * (1.0 - ((h / 60.0).rem_euclid(2.0) - 1.0).abs());
+    let m = v - c;
+    let (r, g, b) = match (h.rem_euclid(360.0) / 60.0) as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    (r + m, g + m, b + m)
+}
+
+/// As texturas são desenhadas em vermelho; aqui o vermelho vira a cor escolhida (o resto, cinza e
+/// preto, fica igual). Brilho e saturação seguem a cor: um azul claro fica claro, um branco fica cinza.
+pub fn recolor(img: &mut Rgba, accent: [u8; 3]) {
+    let (th, ts, tv) = rgb_to_hsv(accent[0] as f32 / 255.0, accent[1] as f32 / 255.0, accent[2] as f32 / 255.0);
+    // a cor de referência dos desenhos (226, 30, 36)
+    let (_, rs, rv) = rgb_to_hsv(226.0 / 255.0, 30.0 / 255.0, 36.0 / 255.0);
+    for px in img.pixels.chunks_exact_mut(4) {
+        let (r, g, b) = (px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0);
+        let (h, s, v) = rgb_to_hsv(r, g, b);
+        let dist = h.min(360.0 - h);
+        if s < 0.12 || dist > 40.0 {
+            continue;
+        }
+        // quanto deste pixel é "vermelho do desenho"
+        let w = ((s - 0.12) / 0.25).clamp(0.0, 1.0) * (1.0 - (dist / 40.0).powi(2));
+        let ns = (s * ts / rs).clamp(0.0, 1.0);
+        let nv = (v * tv / rv).clamp(0.0, 1.0);
+        let (nr, ng, nb) = hsv_to_rgb(th, ns, nv);
+        let mix = |a: f32, b: f32| ((a + (b - a) * w) * 255.0).round().clamp(0.0, 255.0) as u8;
+        px[0] = mix(r, nr);
+        px[1] = mix(g, ng);
+        px[2] = mix(b, nb);
+    }
+}
+
+macro_rules! art {
+    ($($n:literal),* $(,)?) => { &[$(($n, include_bytes!(concat!("menu_style/", $n, ".png")) as &[u8])),*] };
+}
+
+/// Os desenhos do launcher (nome → PNG).
+const ART: &[(&str, &[u8])] = art![
+    "btn_u", "btn_o", "btn_at", "btn_w", "sub_u", "sub_o", "sub_at", "sub_w", "icon_campaign", "icon_skirmish", "icon_multiplayer",
+    "icon_options", "icon_extras", "icon_quit", "icon_mod", "shade", "tint", "panel", "gamertag", "avatar_frame",
+];
+
+fn to_dds(img: &Rgba) -> Result<Vec<u8>> {
+    dds::encode(img, DdsFormat::Bgra8, 1, Quality::Normal)
+}
+
+/// As texturas da tela na cor escolhida: (caminho dentro do jogo, DDS).
+pub fn textures(accent: [u8; 3]) -> Result<Vec<(String, Vec<u8>)>> {
+    let mut out = Vec::new();
+    for (name, png) in ART {
+        let mut img = dds::from_png(png)?;
+        recolor(&mut img, accent);
+        out.push((format!("{}{name}.dds", mainmenu::TEX.trim_start_matches('/')), to_dds(&img)?));
+    }
+    Ok(out)
+}
+
+/// Imagem das notícias: uma tela de carregamento do jogo, recortada e tingida na cor de destaque.
+pub fn news_image(stock: &[PathBuf], accent: [u8; 3]) -> Option<Vec<u8>> {
+    // arte do menu antigo do jogo (a nave), sem logo
+    let raw = ["/textures/ui/common/menus/background-colossus.dds", "/textures/ui/common/menus/background-colossus02.dds"]
+        .iter()
+        .find_map(|p| crate::mapassets::read_game_file(stock, p).ok())?;
+    let (_, img) = dds::decode(&raw).ok()?;
+    let src = image::RgbaImage::from_raw(img.width, img.height, img.pixels)?;
+    // recorte central na proporção do quadro (361 × 124)
+    // recorte na proporção do quadro (361 × 124), pegando a nave (meio para a direita, um pouco acima)
+    let cw = (src.width() as f32 * 0.8) as u32;
+    let ch = ((cw as f32 * 124.0 / 361.0) as u32).min(src.height());
+    let x0 = src.width() - cw - src.width() / 40;
+    let y0 = (src.height().saturating_sub(ch) as f32 * 0.32) as u32;
+    let crop = image::imageops::crop_imm(&src, x0, y0, cw, ch).to_image();
+    let small = image::imageops::resize(&crop, 722, 248, image::imageops::FilterType::Triangle);
+    let mut px = small.into_raw();
+    for p in px.chunks_exact_mut(4) {
+        let l = (0.3 * p[0] as f32 + 0.59 * p[1] as f32 + 0.11 * p[2] as f32) / 255.0;
+        let l = l.powf(0.9);
+        for (i, c) in accent.iter().enumerate() {
+            p[i] = ((*c as f32 * l * 1.25 + 255.0 * (l * l * 0.25)).min(255.0)) as u8;
+        }
+        p[3] = 255;
+    }
+    to_dds(&Rgba { width: 722, height: 248, pixels: px }).ok()
+}
+
+/// Logo do jogador: tira o fundo preto (o brilho vira transparência), corta as bordas vazias e
+/// limita o tamanho.
+pub fn prepare_logo(data: &[u8]) -> Result<Rgba> {
+    let img = image::load_from_memory(data).map_err(|e| Error::Format(format!("imagem do logo inválida: {e}")))?.to_rgba8();
+    let (w, h) = img.dimensions();
+    let mut px = img.into_raw();
+    let opaque_bg = px.chunks_exact(4).all(|p| p[3] == 255);
+    if opaque_bg {
+        for p in px.chunks_exact_mut(4) {
+            let a = p[0].max(p[1]).max(p[2]) as f32 / 255.0;
+            let a = ((a - 0.04) / 0.96).clamp(0.0, 1.0);
+            if a <= 0.0 {
+                p.copy_from_slice(&[0, 0, 0, 0]);
+                continue;
+            }
+            for c in p.iter_mut().take(3) {
+                *c = ((*c as f32 / 255.0 / a).min(1.0) * 255.0) as u8;
+            }
+            p[3] = (a * 255.0) as u8;
+        }
+    }
+    // bordas vazias
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            if px[((y * w + x) * 4 + 3) as usize] > 8 {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x);
+                y1 = y1.max(y);
+            }
+        }
+    }
+    if x1 < x0 || y1 < y0 {
+        return Err(Error::Format("o logo está vazio (só fundo)".into()));
+    }
+    let pad = 6;
+    let (x0, y0) = (x0.saturating_sub(pad), y0.saturating_sub(pad));
+    let (x1, y1) = ((x1 + pad).min(w - 1), (y1 + pad).min(h - 1));
+    let full = image::RgbaImage::from_raw(w, h, px).expect("tamanho");
+    let mut cut = image::imageops::crop_imm(&full, x0, y0, x1 - x0 + 1, y1 - y0 + 1).to_image();
+    if cut.width() > 1400 {
+        let nh = (cut.height() as f32 * 1400.0 / cut.width() as f32).round().max(1.0) as u32;
+        cut = image::imageops::resize(&cut, 1400, nh, image::imageops::FilterType::Lanczos3);
+    }
+    let (w, h) = cut.dimensions();
+    Ok(Rgba { width: w, height: h, pixels: cut.into_raw() })
+}
+
+/// Monta o `.scd` da tela inicial em `dest`. `scene` é a cena de origem (a do jogo ou a de outro
+/// mod), `edit` o que os mods da Forja pedem. Devolve os avisos da montagem.
+pub fn build(scene: &[u8], edit: &MenuEdit, settings: &Settings, stock: &[PathBuf], data_dir: &Path, dest: &Path) -> Result<(PathBuf, Vec<String>)> {
+    let accent = crate::menu_theme::parse_hex(&settings.accent).unwrap_or([43, 140, 255]);
+    let look = Look::Commander(Commander { news_title: settings.news_title.clone(), news_text: settings.news_text.clone() });
+    let logo = if settings.custom_logo {
+        let p = Settings::logo_path(data_dir);
+        let data = std::fs::read(&p).map_err(|e| Error::io(&p, e))?;
+        Some(prepare_logo(&data)?)
+    } else {
+        None
+    };
+    let mut built = mainmenu::build_with(scene, edit, &look)?;
+    if let Some(l) = &logo {
+        built.scene = mainmenu::set_logo(&built.scene, &format!("{}logo_custom.dds", mainmenu::TEX), l.width, l.height)?;
+    }
+    let mut b = crate::scd::ScdBuilder::create(dest)?;
+    b.add_bytes(mainmenu::SCENE_PATH.trim_start_matches('/'), &built.scene)?;
+    let mut files = textures(accent)?;
+    if let Some(news) = news_image(stock, accent) {
+        files.push((format!("{}news.dds", mainmenu::TEX.trim_start_matches('/')), news));
+    }
+    if let Some(l) = &logo {
+        files.push((format!("{}logo_custom.dds", mainmenu::TEX.trim_start_matches('/')), to_dds(l)?));
+    }
+    for (path, data) in &files {
+        b.add_bytes(path, data)?;
+    }
+    if settings.custom_video {
+        let v = Settings::video_path(data_dir);
+        if v.is_file() {
+            b.add_file(MOVIE, &v)?;
+        } else {
+            built.warnings.push("o vídeo de fundo escolhido não foi encontrado: ficou o do jogo".into());
+        }
+    }
+    Ok((b.finish()?, built.warnings))
+}
+
+/// Versão do mod montado: muda com o visual, as opções, os mods da Forja e os arquivos escolhidos.
+pub fn build_version(settings: &Settings, edit: &MenuEdit, data_dir: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(STYLE_VERSION);
+    h.update(serde_json::to_vec(settings).unwrap_or_default());
+    h.update(format!("{edit:?}"));
+    for (on, p) in [(settings.custom_logo, Settings::logo_path(data_dir)), (settings.custom_video, Settings::video_path(data_dir))] {
+        if on {
+            let meta = std::fs::metadata(&p).ok();
+            h.update(format!("{}:{:?}", meta.as_ref().map(|m| m.len()).unwrap_or(0), meta.and_then(|m| m.modified().ok())));
+        }
+    }
+    format!("{STYLE_VERSION}+{}", &hex::encode(h.finalize())[..12])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recolor_keeps_grays_and_moves_red() {
+        let mut img = Rgba { width: 3, height: 1, pixels: vec![226, 30, 36, 255, 40, 40, 44, 255, 120, 14, 16, 200] };
+        recolor(&mut img, [43, 140, 255]);
+        let p = &img.pixels;
+        // o vermelho do desenho vira a cor (azul) com o mesmo brilho dela
+        assert!(p[2] > 200 && p[0] < 80, "{:?}", &p[0..4]);
+        // cinza fica igual
+        assert_eq!(&p[4..8], &[40, 40, 44, 255]);
+        // vermelho escuro vira azul escuro, alfa igual
+        assert!(p[10] > p[8] && p[11] == 200);
+        assert!(textures([43, 140, 255]).unwrap().len() == ART.len());
+    }
+
+    #[test]
+    fn logo_loses_black_background() {
+        let mut img = image::RgbaImage::from_pixel(40, 20, image::Rgba([0, 0, 0, 255]));
+        for x in 10..30 {
+            for y in 5..15 {
+                img.put_pixel(x, y, image::Rgba([200, 200, 210, 255]));
+            }
+        }
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        let l = prepare_logo(&png).unwrap();
+        assert_eq!((l.width, l.height), (32, 20));
+        assert_eq!(l.pixels[3], 0, "canto transparente");
+        let mid = ((11 * l.width + 16) * 4) as usize;
+        assert!(l.pixels[mid + 3] > 190 && l.pixels[mid] > 230);
+    }
+}
+
+/// Com `CP_SS_SCENE` (a cena do jogo), `CP_SS_LOAD` (cybran_load.dds), `CP_SS_LOGO` (um PNG) e
+/// `CP_SS_OUT` (pasta): monta o `.scd` de verdade para testar no jogo.
+#[cfg(test)]
+#[test]
+fn real_build_when_available() {
+    let (Ok(scene), Ok(out)) = (std::env::var("CP_SS_SCENE"), std::env::var("CP_SS_OUT")) else { return };
+    let out = PathBuf::from(out);
+    std::fs::create_dir_all(out.join("data").join(USER_DIR)).unwrap();
+    let mut stock = vec![];
+    if let Ok(load) = std::env::var("CP_SS_LOAD") {
+        let p = out.join("stock.scd");
+        let mut b = crate::scd::ScdBuilder::create(&p).unwrap();
+        b.add_bytes("textures/ui/common/menus/background-colossus.dds", &std::fs::read(load).unwrap()).unwrap();
+        stock.push(b.finish().unwrap());
+    }
+    let mut settings = Settings { enabled: true, ..Default::default() };
+    if let Ok(logo) = std::env::var("CP_SS_LOGO") {
+        std::fs::copy(logo, Settings::logo_path(&out.join("data"))).unwrap();
+        settings.custom_logo = true;
+    }
+    let (scd, warnings) = build(&std::fs::read(scene).unwrap(), &MenuEdit::default(), &settings, &stock, &out.join("data"), &out.join(ARCHIVE)).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    eprintln!("{}", scd.display());
+}

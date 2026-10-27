@@ -3,6 +3,7 @@
 // launcher — abrindo pela Steam o jogo fica original.
 import CpModsHub from "../components/CpModsHub";
 import MenuThemeCard from "../components/MenuThemeCard";
+import StartScreenCard from "../components/StartScreenCard";
 import ShadersCard from "../components/ShadersCard";
 import { Icon, Notice } from "../components/ui";
 import { t } from "../lib/i18n";
@@ -19,6 +20,7 @@ export default function Features() {
         <Notice kind="info">{t("Com \"Mods só pelo launcher\" desligado, os recursos ligados continuam no jogo mesmo abrindo pela Steam.")} <a href="#" onClick={(e) => { e.preventDefault(); useStore.getState().openSettings("jogo"); }}>{t("Abrir configurações")}</a></Notice>
       )}
       <CpModsHub />
+      <div id="start-screen"><StartScreenCard /></div>
       <div id="menu-theme"><MenuThemeCard /></div>
       <ShadersCard />
       <p className="faint small"><Icon name="extension" size={15} /> {t("Procurando seus mods ou as Trapaças?")} <a href="#" onClick={(e) => { e.preventDefault(); go("library"); }}>{t("Abrir Mods")}</a></p>

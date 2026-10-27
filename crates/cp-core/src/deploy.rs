@@ -669,6 +669,7 @@ impl<'a> Deployer<'a> {
     }
 
     /// Deixa na pasta do jogo exatamente os arquivos soltos de `loose` (tira os da vez anterior).
+    /// Um arquivo solto do próprio jogo no mesmo caminho é guardado e volta quando o mod sai.
     fn sync_loose(
         &mut self,
         st: &mut TocState,
@@ -676,12 +677,24 @@ impl<'a> Deployer<'a> {
         loose: &[crate::toc::LooseFile],
     ) -> Result<()> {
         let root = self.game.root.clone();
+        // arquivos soltos do próprio jogo que um mod substitui (ex.: o vídeo da tela inicial) ficam
+        // guardados aqui e voltam quando o mod sai
+        let originals = self.data_dir.join("deploy").join("loose-originals");
         let wanted: std::collections::HashSet<&str> = loose.iter().map(|l| l.path.as_str()).collect();
         for old in std::mem::take(&mut st.loose) {
             if wanted.contains(old.as_str()) {
                 continue;
             }
             let p = root.join(&old);
+            let saved = originals.join(&old);
+            if saved.is_file() {
+                if p.is_file() {
+                    fs::remove_file(&p).at(&p)?;
+                }
+                move_file(&saved, &p)?;
+                prune_empty_dirs(&originals, saved.parent());
+                continue;
+            }
             if p.is_file() {
                 fs::remove_file(&p).at(&p)?;
             }
@@ -701,12 +714,18 @@ impl<'a> Deployer<'a> {
                 }
                 let data = scd.read_at(l.entry as usize)?;
                 let dest = root.join(&l.path);
-                // arquivo que não é do launcher no caminho: guardado, nunca sobrescrito em silêncio
+                // arquivo que não é do launcher no caminho: o original vai para o lado (volta quando o
+                // mod sai); se já há um guardado, este vai para a quarentena — nunca some em silêncio
                 if dest.is_file() && !st.loose.contains(&l.path) && fs::read(&dest).ok().as_deref() != Some(&data[..]) {
-                    fs::create_dir_all(&q).at(&q)?;
-                    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
-                    let name = l.path.replace('/', "_");
-                    fs::copy(&dest, q.join(format!("{stamp}-{name}"))).at(&dest)?;
+                    let saved = originals.join(&l.path);
+                    if !saved.exists() {
+                        move_file(&dest, &saved)?;
+                    } else {
+                        fs::create_dir_all(&q).at(&q)?;
+                        let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+                        let name = l.path.replace('/', "_");
+                        fs::copy(&dest, q.join(format!("{stamp}-{name}"))).at(&dest)?;
+                    }
                 }
                 if let Some(parent) = dest.parent() {
                     fs::create_dir_all(parent).at(parent)?;
@@ -841,6 +860,14 @@ impl<'a> Deployer<'a> {
 /// Cria `dst` como hard link de `src` (troca atômica). `false` se o sistema não deixar
 /// (discos diferentes, FAT32, permissão) — aí quem chamou copia.
 /// Remove pastas vazias de `dir` para cima, sem passar da raiz do jogo.
+/// Move um arquivo (cria a pasta; entre discos, copia e apaga).
+fn move_file(from: &Path, to: &Path) -> Result<()> {
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).at(parent)?;
+    }
+    fs::rename(from, to).or_else(|_| fs::copy(from, to).map(|_| ()).and_then(|_| fs::remove_file(from))).at(from)
+}
+
 fn prune_empty_dirs(root: &Path, mut dir: Option<&Path>) {
     while let Some(d) = dir {
         if d == root || !d.starts_with(root) || fs::remove_dir(d).is_err() {
@@ -1029,6 +1056,34 @@ mod tests {
         assert_eq!(fs::read(&toc_path).unwrap(), original);
         assert!(!loose.exists());
         assert!(!e.game.root.join("textures").exists(), "pastas vazias saem");
+    }
+
+    #[test]
+    fn game_loose_file_comes_back() {
+        // um arquivo solto do próprio jogo (como o vídeo da tela inicial) trocado por um mod volta
+        // igual quando o mod sai
+        let mut e = env();
+        let toc_path = e.game.root.join("toc.win.bdf");
+        let original = crate::toc::tests::sample();
+        fs::write(&toc_path, &original).unwrap();
+        fs::write(e.game.root.join("readme.txt"), b"original do jogo").unwrap();
+        let src = e.data.join("in");
+        fs::create_dir_all(&src).unwrap();
+        make_scd(&src.join("zz_cp_a.scd"), &[("textures/ui/bg.win.dds", b"hd")]);
+        make_scd(&src.join("zz_cp_b.scd"), &[("readme.txt", b"do mod")]);
+        let a = e.lib.import(&src.join("zz_cp_a.scd"), &ImportOptions::default()).unwrap();
+        let b = e.lib.import(&src.join("zz_cp_b.scd"), &ImportOptions::default()).unwrap();
+        let mut w = vec![];
+        let mut d = Deployer { game: &e.game, data_dir: &e.data, hashes: &mut e.cache };
+        d.apply(&[], None, &mut |_| {}).unwrap();
+        let targets = d.targets(&e.lib, &profile(&[a.id.as_str(), b.id.as_str()]), &mut w).unwrap();
+        d.apply(&targets, Some("p"), &mut |_| {}).unwrap();
+        assert_eq!(fs::read(e.game.root.join("readme.txt")).unwrap(), b"do mod");
+        // reaplicar não guarda o do mod como se fosse o original
+        d.apply(&targets, Some("p"), &mut |_| {}).unwrap();
+        d.purge(&mut |_| {}).unwrap();
+        assert_eq!(fs::read(e.game.root.join("readme.txt")).unwrap(), b"original do jogo");
+        assert_eq!(fs::read(&toc_path).unwrap(), original);
     }
 
     #[test]

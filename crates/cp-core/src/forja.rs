@@ -1052,28 +1052,17 @@ pub fn build(stock: &[PathBuf], mods: &[PathBuf], plan: &Plan, settings: &Settin
         }
     }
     // tela inicial: só quando algum mod mexe nela
-    let mut problems = plan.problems.clone();
+    let problems = plan.problems.clone();
     let mut menu_buttons = Vec::new();
     if plan.mods.iter().any(|m| m.has_menu()) {
         let text = effective_text(stock, mods, crate::mainmenu::DISPATCH)
             .ok_or_else(|| Error::Other("o jogo não tem o uimain.lua em texto (uncompiled_lua.scd): não dá para mexer na tela inicial".into()))?;
         let patched = patch(crate::mainmenu::DISPATCH, &text, plan, settings)?;
         files.push((crate::mainmenu::DISPATCH.trim_start_matches('/').to_string(), to_bytes(&patched)));
-        let (edit, owners, warnings) = menu_edit(plan);
-        problems.extend(warnings);
-        if !edit.is_empty() {
-            let scene = effective_bytes(stock, mods, crate::mainmenu::SCENE_PATH)
-                .ok_or_else(|| Error::Other("a tela inicial do jogo (pc_main_menu) não foi encontrada".into()))?;
-            let built = crate::mainmenu::build(&scene, &edit)?;
-            for w in built.warnings {
-                // o aviso é do mod do botão, quando dá para saber
-                let who = owners.iter().find(|(label, _)| w.contains(&format!("\"{label}\""))).map(|(_, id)| id.clone()).unwrap_or_default();
-                problems.push(Problem { mod_id: who, message: format!("tela inicial: {w}"), fatal: false });
-            }
-            for (key, place) in built.placed {
-                menu_buttons.push(MenuPlaced { key, place });
-            }
-            files.push((crate::mainmenu::SCENE_PATH.trim_start_matches('/').to_string(), built.scene));
+        // a cena (os botões) é montada pela tela inicial (crate::startscreen), junto com o visual
+        let (edit, _, _) = menu_edit(plan);
+        for b in &edit.buttons {
+            menu_buttons.push(MenuPlaced { key: b.key.clone(), place: b.place });
         }
     }
     let mut b = crate::scd::ScdBuilder::create(dest)?;
