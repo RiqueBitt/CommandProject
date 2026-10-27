@@ -20,7 +20,7 @@ const ENTRY: &str = "function StartCommandLineSession(mapName, isPerfTest)\n";
 const HOOK: &str = "\tif CPBigMatchStart and CPBigMatchStart(mapName) then return end -- CommandProject big match\n";
 
 /// Versão do código do mod: quando muda, o launcher monta o mod de novo.
-pub const MOD_VERSION: &str = "1.8.0";
+pub const MOD_VERSION: &str = "1.9.0";
 /// Cores de exército na partida grande: as 10 do jogo e mais 14 (o mod acrescenta só com `/cpmatch`).
 pub const COLORS: i32 = 32;
 /// Mapas com mais de 8 bases são gravados com este tipo: o lobby do jogo (8 posições, que trava com
@@ -56,6 +56,8 @@ pub enum SlotKind {
     #[default]
     Ai,
     Empty,
+    /// base de um amigo convidado (partida com convite): vira IA se ninguém entrar
+    Guest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -142,7 +144,27 @@ pub struct BigMatch {
     pub options: MatchOptions,
     /// lado do mapa (0 = não informado): confere o limite de jogadores pela memória do jogo
     pub size: u32,
+    /// partida com amigos pela rede (convite): `None` = partida sozinho, como sempre
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub net: Option<Net>,
 }
+
+/// Papel nesta partida com amigos: quem convida abre a porta, quem entra conecta direto nela.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Net {
+    /// true = anfitrião (abre a porta); false = entra no endereço do convite
+    pub host: bool,
+    /// porta UDP do anfitrião
+    pub port: u16,
+    /// endereço do anfitrião (`ip:porta`), só para quem entra
+    pub address: String,
+    /// nome mostrado aos outros
+    pub name: String,
+}
+
+/// Porta padrão das partidas com amigos (a mesma do jogo para partidas pela rede).
+pub const DEFAULT_PORT: u16 = 15000;
 
 fn pick<'a>(value: &'a str, allowed: &[&'a str], what: &str) -> Result<&'a str> {
     allowed
@@ -235,6 +257,7 @@ pub fn encode(m: &BigMatch) -> Result<String> {
         match s.kind {
             SlotKind::Empty => out.push_str("|X"),
             SlotKind::You => out.push_str(&format!("|H,{team},{faction},,{}", color(s.color))),
+            SlotKind::Guest => out.push_str(&format!("|G,{team},{faction},,{}", color(s.color))),
             SlotKind::Ai => out.push_str(&format!("|A,{team},{faction},{},{}", pick(&s.ai, AI_LEVELS, "dificuldade da IA")?, color(s.color))),
         }
     }
@@ -252,7 +275,7 @@ pub fn clean_user_args(args: &[String]) -> Vec<String> {
             continue;
         }
         let l = a.to_ascii_lowercase();
-        if l == "/map" || l == "/cpmatch" {
+        if l == "/map" || l == "/cpmatch" || l == "/cphost" || l == "/cpjoin" || l == "/cpname" {
             skip = true;
             continue;
         }
@@ -270,7 +293,87 @@ pub fn launch_args(m: &BigMatch) -> Result<Vec<String>> {
     if !map.starts_with("/maps/") || !map.to_ascii_lowercase().ends_with("_scenario.lua") || map.contains(char::is_whitespace) {
         return Err(Error::Other(format!("cenário inválido: {map}")));
     }
-    Ok(vec!["/map".into(), map.to_string(), "/cpmatch".into(), encode(m)?])
+    let mut args = vec!["/map".into(), map.to_string(), "/cpmatch".into(), encode(m)?];
+    if let Some(n) = &m.net {
+        if n.host {
+            if !m.slots.iter().any(|s| s.kind == SlotKind::Guest) {
+                return Err(Error::Other("marque pelo menos uma vaga como Amigo para convidar alguém".into()));
+            }
+            args.extend(["/cphost".into(), n.port.max(1).to_string()]);
+        } else {
+            let a = n.address.trim();
+            if a.is_empty() || a.contains(char::is_whitespace) || !a.contains(':') {
+                return Err(Error::Other(format!("endereço do anfitrião inválido: {a}")));
+            }
+            args.extend(["/cpjoin".into(), a.to_string()]);
+        }
+        // o nome vai como um argumento só: sem espaços
+        let name: String = n.name.trim().chars().map(|c| if c.is_whitespace() { '_' } else { c }).take(24).collect();
+        if !name.is_empty() {
+            args.extend(["/cpname".into(), name]);
+        }
+    }
+    Ok(args)
+}
+
+// ---------------------------------------------------------------- convites
+
+/// Começo de todo código de convite (com a versão do formato).
+pub const INVITE_PREFIX: &str = "CPM1.";
+
+/// Convite para uma partida com amigos: tudo o que o amigo precisa para entrar, num texto que se
+/// copia e cola (sem servidor nem banco de dados: o jogo de quem entra conecta direto no anfitrião).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Invite {
+    /// `ip:porta` do anfitrião
+    pub address: String,
+    /// nome do anfitrião
+    pub host: String,
+    /// a partida (mapa, vagas, opções e clima), sem a parte de rede
+    pub game: BigMatch,
+    /// mods ligados no anfitrião (id, nome): os do amigo precisam bater
+    pub mods: Vec<(String, String)>,
+}
+
+/// Escreve o código do convite.
+pub fn encode_invite(inv: &Invite) -> Result<String> {
+    use base64::Engine;
+    let mut inv = inv.clone();
+    inv.game.net = None;
+    launch_args(&inv.game)?;
+    let json = serde_json::to_vec(&inv).map_err(|e| Error::Other(e.to_string()))?;
+    Ok(format!("{INVITE_PREFIX}{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json)))
+}
+
+/// Lê um código de convite (aceita espaços e quebras de linha de quem colou).
+pub fn decode_invite(code: &str) -> Result<Invite> {
+    use base64::Engine;
+    let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    let body = code
+        .find(INVITE_PREFIX)
+        .map(|i| &code[i + INVITE_PREFIX.len()..])
+        .ok_or_else(|| Error::Other("isso não é um convite do CommandProject (começa com CPM1.)".into()))?;
+    let body = body.trim_end_matches('=');
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(body)
+        .map_err(|_| Error::Other("convite incompleto: copie o código inteiro".into()))?;
+    let mut inv: Invite = serde_json::from_slice(&bytes).map_err(|_| Error::Other("convite inválido".into()))?;
+    inv.game.net = None;
+    launch_args(&inv.game)?;
+    if inv.address.trim().is_empty() {
+        return Err(Error::Other("o convite não tem o endereço do anfitrião".into()));
+    }
+    Ok(inv)
+}
+
+/// Endereço deste PC na rede (o que os amigos usam na mesma rede ou VPN): descoberto sem mandar
+/// nada (um socket UDP "conectado" só escolhe a placa de rede).
+pub fn local_address() -> Option<String> {
+    let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    s.connect("8.8.8.8:80").ok()?;
+    let ip = s.local_addr().ok()?.ip();
+    (!ip.is_unspecified() && !ip.is_loopback()).then(|| ip.to_string())
 }
 
 // ---------------------------------------------------------------- log do jogo
@@ -599,12 +702,45 @@ mod tests {
     }
 
     #[test]
+    fn invites_round_trip() {
+        let game = BigMatch {
+            map: "/maps/X/X_scenario.lua".into(),
+            slots: vec![slot(SlotKind::You, 1), slot(SlotKind::Guest, 1), slot(SlotKind::Guest, 2), slot(SlotKind::Ai, 2)],
+            ..Default::default()
+        };
+        assert!(encode(&game).unwrap().contains("|H,2,0,,|G,2,0,,|G,3,0,,|A,3,0,Normal,"));
+        let inv = Invite { address: "10.0.0.5:15000".into(), host: "Ana".into(), game: game.clone(), mods: vec![("a".into(), "A".into())] };
+        let code = encode_invite(&inv).unwrap();
+        assert!(code.starts_with(INVITE_PREFIX));
+        // colado com quebras de linha e texto em volta
+        let pasted = format!("entra aí: {}\n{}", &code[..20], &code[20..]);
+        assert_eq!(decode_invite(&pasted).unwrap(), inv);
+        assert!(decode_invite("CPM1.abc").is_err() && decode_invite("oi").is_err());
+        // anfitrião e quem entra
+        let mut host = game.clone();
+        host.net = Some(Net { host: true, port: 15000, address: String::new(), name: "Ana Paula".into() });
+        let a = launch_args(&host).unwrap();
+        assert!(a.ends_with(&["/cphost".into(), "15000".into(), "/cpname".into(), "Ana_Paula".into()]), "{a:?}");
+        let mut join = game.clone();
+        join.net = Some(Net { host: false, port: 0, address: "10.0.0.5:15000".into(), name: "Bia".into() });
+        assert!(launch_args(&join).unwrap().contains(&"/cpjoin".to_string()));
+        join.net.as_mut().unwrap().address = "semporta".into();
+        assert!(launch_args(&join).is_err());
+        // sem vaga de amigo não há quem convidar
+        let mut solo = host.clone();
+        solo.slots[1].kind = SlotKind::Ai;
+        solo.slots[2].kind = SlotKind::Ai;
+        assert!(launch_args(&solo).is_err());
+    }
+
+    #[test]
     fn encodes_teams() {
         let m = BigMatch {
             map: "/maps/X/X_scenario.lua".into(),
             slots: vec![slot(SlotKind::You, 1), slot(SlotKind::Ai, 1), slot(SlotKind::Ai, 2), slot(SlotKind::Empty, 0), slot(SlotKind::Ai, 2)],
             options: MatchOptions { no_rush: 5, ..Default::default() },
             size: 0,
+            net: None,
         };
         let s = encode(&m).unwrap();
         assert!(s.starts_with("Victory=demoralization;UnitCap=500;FogOfWar=explored;GameSpeed=normal;NoRushOption=5;"));

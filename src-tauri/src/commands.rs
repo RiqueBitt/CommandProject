@@ -2460,3 +2460,77 @@ pub async fn mod_export_files(state: State<'_, AppState>, id: String, dir: Strin
     })
     .await
 }
+
+// ---------------------------------------------------------------- convites da partida grande
+
+/// Mods que o launcher liga sozinho para a partida (não contam na conferência do convite).
+const MATCH_MODS: [&str; 3] = ["cp-partida-grande", cp_core::weather::MOD_ID, cp_core::weather::MODELS_ID];
+
+fn enabled_mods(ws: &Workspace) -> cp_core::Result<Vec<(String, String)>> {
+    let active = ws.profiles.active().clone();
+    Ok(ws
+        .mods()?
+        .into_iter()
+        .filter(|m| !MATCH_MODS.contains(&m.manifest.id.as_str()))
+        .filter(|m| active.mods.iter().any(|x| x.id == m.manifest.id && x.enabled))
+        .map(|m| (m.manifest.id, m.manifest.name))
+        .collect())
+}
+
+/// Endereço deste PC na rede (para o convite).
+#[tauri::command]
+pub fn big_match_address() -> Option<String> {
+    cp_core::bigmatch::local_address()
+}
+
+/// Código do convite para a partida (com os mods ligados agora).
+#[tauri::command]
+pub async fn big_match_invite(state: State<'_, AppState>, spec: cp_core::bigmatch::BigMatch, address: String, name: String) -> R<String> {
+    with_ws(&state.ws, move |ws| {
+        let invite = cp_core::bigmatch::Invite { address: address.trim().to_string(), host: name, game: spec, mods: enabled_mods(ws)? };
+        cp_core::bigmatch::encode_invite(&invite)
+    })
+    .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteCheck {
+    invite: cp_core::bigmatch::Invite,
+    /// mods ligados no anfitrião que aqui estão desligados ou não instalados
+    missing: Vec<(String, String)>,
+    /// mods ligados aqui que o anfitrião não tem
+    extra: Vec<(String, String)>,
+}
+
+/// Lê um convite colado e confere os mods com os daqui.
+#[tauri::command]
+pub async fn big_match_read_invite(state: State<'_, AppState>, code: String) -> R<InviteCheck> {
+    with_ws(&state.ws, move |ws| {
+        let invite = cp_core::bigmatch::decode_invite(&code)?;
+        let mine = enabled_mods(ws)?;
+        let missing = invite.mods.iter().filter(|m| !mine.iter().any(|x| x.0 == m.0)).cloned().collect();
+        let extra = mine.iter().filter(|m| !invite.mods.iter().any(|x| x.0 == m.0)).cloned().collect();
+        Ok(InviteCheck { invite, missing, extra })
+    })
+    .await
+}
+
+/// Liga os mods do convite que estão instalados aqui (os que faltam continuam na lista).
+#[tauri::command]
+pub async fn big_match_match_mods(state: State<'_, AppState>, ids: Vec<String>) -> R<Vec<String>> {
+    with_ws(&state.ws, move |ws| {
+        let installed: Vec<String> = ws.mods()?.into_iter().map(|m| m.manifest.id).collect();
+        let active = ws.profiles.active().id.clone();
+        let mut missing = Vec::new();
+        for id in ids {
+            if installed.contains(&id) {
+                ws.profiles.set_enabled(&active, &id, true)?;
+            } else {
+                missing.push(id);
+            }
+        }
+        Ok(missing)
+    })
+    .await
+}

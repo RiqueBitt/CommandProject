@@ -310,7 +310,8 @@ export interface ProcessStats { pid: number; memoryMb: number; virtualMb: number
 export interface PrefsWriteReport { backup: string | null; changed: number; skipped: string[] }
 
 // ---------------------------------------------------------------- partida grande
-export type SlotKind = "you" | "ai" | "empty";
+/** guest = base de um amigo convidado (partida com convite) */
+export type SlotKind = "you" | "ai" | "empty" | "guest";
 export interface MatchSlot { kind: SlotKind; team: number; faction: number; ai: string; color: number }
 export interface MatchOptions {
   victory: string; unitCap: number; fog: string; speed: string; noRush: number; prebuilt: boolean; civilians: string;
@@ -331,7 +332,12 @@ export interface MatchOptions {
   /** volume desse som, 0 a 1 */
   weatherVolume: number;
 }
-export interface BigMatch { map: string; /** lado do mapa (confere o limite de jogadores) */ size?: number; slots: MatchSlot[]; options: MatchOptions }
+export interface BigMatch { map: string; /** lado do mapa (confere o limite de jogadores) */ size?: number; slots: MatchSlot[]; options: MatchOptions; /** partida com amigos pela rede */ net?: MatchNet }
+/** Papel numa partida com amigos: o anfitrião abre a porta, quem entra conecta no endereço do convite. */
+export interface MatchNet { host: boolean; port: number; address: string; name: string }
+/** Convite de partida (código CPM1.…): sem servidor, o jogo de quem entra conecta direto no anfitrião. */
+export interface MatchInvite { address: string; host: string; game: BigMatch; mods: [string, string][] }
+export interface InviteCheck { invite: MatchInvite; missing: [string, string][]; extra: [string, string][] }
 /** O que o log do jogo diz sobre uma partida grande que fechou no meio. */
 export interface GameLogReport { finished: boolean; started: boolean; players: number | null; size: number | null; problems: string[]; tail: string[]; hints: string[] }
 /** O jogo fechou com erro: relatório do Windows (.mdmp), mods ligados e o log (partida grande). */

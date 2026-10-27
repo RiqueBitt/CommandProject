@@ -22,7 +22,7 @@ export const DISTINCT_ORDER = [0, 2, 1, 8, 3, 9, 7, 15, 10, 23, 13, 11, 4, 18, 1
 
 export type ColorMode = "team" | "player";
 
-export interface ColorSlot { kind: "you" | "ai" | "empty"; team: number; color: number }
+export interface ColorSlot { kind: "you" | "ai" | "empty" | "guest"; team: number; color: number }
 
 /** Grupo de cor de uma vaga: o time, ou a própria vaga para quem joga sozinho. */
 export const groupOf = (s: ColorSlot, i: number) => (s.team > 0 ? `t${s.team}` : `s${i}`);

@@ -3,6 +3,7 @@
 // launcher abre o jogo direto na partida.
 import { useEffect, useMemo, useRef, useState } from "react";
 import CrashNotice from "../components/CrashNotice";
+import MatchInvite from "../components/MatchInvite";
 import { Empty, Field, Icon, Notice, Switch, TaskProgress } from "../components/ui";
 import { api } from "../lib/api";
 import { t, tr } from "../lib/i18n";
@@ -10,7 +11,7 @@ import { load, useStore } from "../lib/store";
 import { shuffleSpawns } from "../lib/matchSpawn";
 import { MAX_PLAYERS, maxPlayersFor, spreadBases } from "../lib/matchLimits";
 import { assignColors, GAME_COLORS, groupOf, type ColorMode } from "../lib/teamColors";
-import type { MatchMap, MatchOptions, MatchSlot, SlotKind } from "../lib/types";
+import type { BigMatch as MatchSpec, MatchMap, MatchOptions, MatchSlot, SlotKind } from "../lib/types";
 import * as weatherAudio from "../lib/weatherAudio";
 
 let mapCache: MatchMap[] | null = null;
@@ -237,17 +238,23 @@ export default function BigMatch() {
   const setOpt = (patch: Partial<MatchOptions>) => setOptions((o) => ({ ...o, ...patch }));
   const colorOf = (i: number) => GAME_COLORS[colors[i] ?? 0].hex;
 
-  const play = async () => {
-    if (!map || error) return;
+  const start = async (spec: MatchSpec, label: string) => {
+    const o = spec.options;
     // o som do clima só pode começar dentro do clique (o navegador exige um gesto)
-    if (options.weather && options.weatherSound) weatherAudio.prime();
-    // posições sorteadas: cada vaga leva junto a cor dela
-    const placed = shuffleSpawns(slots.map((x, i) => ({ ...x, color: colors[i] })), options.spawn);
-    const r = await run("launch", () => api.launchBigMatch({ map: map.path, size: map.size[0], slots: placed, options }), (options.spawn !== "fixed" ? t("Abrindo o jogo: {what} em {map} (posições sorteadas).", { what: sum.text, map: map.name }) : t("Abrindo o jogo: {what} em {map}.", { what: sum.text, map: map.name })));
+    if (o.weather && o.weatherSound) weatherAudio.prime();
+    const r = await run("launch", () => api.launchBigMatch(spec), label);
     if (r) {
-      if (options.weather && options.weatherSound) weatherAudio.start(options.weather, options.weatherVolume);
+      if (o.weather && o.weatherSound) weatherAudio.start(o.weather, o.weatherVolume ?? 1);
       await refresh();
     }
+  };
+  // a partida como está na tela (cores resolvidas); null enquanto tiver erro
+  const spec = useMemo<MatchSpec | null>(() => (map && !error ? { map: map.path, size: map.size[0], slots: slots.map((x, i) => ({ ...x, color: colors[i] })), options } : null), [map, error, slots, colors, options]);
+  const play = async () => {
+    if (!map || !spec) return;
+    // posições sorteadas: cada vaga leva junto a cor dela
+    const placed = shuffleSpawns(spec.slots, options.spawn);
+    await start({ ...spec, slots: placed }, options.spawn !== "fixed" ? t("Abrindo o jogo: {what} em {map} (posições sorteadas).", { what: sum.text, map: map.name }) : t("Abrindo o jogo: {what} em {map}.", { what: sum.text, map: map.name }));
   };
 
   // prévia das bases: o terreno do mapa (minimapa do jogo), posição de cada base, cor e você marcado
@@ -273,10 +280,10 @@ export default function BigMatch() {
           const R = (r * w) / 300;
           return (
             <g key={i} className={`bm-base ${s.kind}`} onClick={() => setSlot(i, { kind: "you" })} style={{ cursor: "pointer" }}>
-              <title>{t("Base {n}: {who}{team} (clique para jogar aqui)", { n: i + 1, who: s.kind === "you" ? t("você") : s.kind === "ai" ? t("IA") : t("vazia"), team: s.team ? t(", time {n}", { n: s.team }) : "" })}</title>
+              <title>{t("Base {n}: {who}{team} (clique para jogar aqui)", { n: i + 1, who: s.kind === "you" ? t("você") : s.kind === "ai" ? t("IA") : s.kind === "guest" ? t("amigo") : t("vazia"), team: s.team ? t(", time {n}", { n: s.team }) : "" })}</title>
               <circle cx={p[0]} cy={p[1]} r={R * 1.12} className="bm-halo" />
               <circle cx={p[0]} cy={p[1]} r={R} fill={s.kind === "empty" ? "rgba(11,15,20,.55)" : colorOf(i)} stroke={s.kind === "you" ? "#fff" : s.kind === "empty" ? "#6b707c" : colorOf(i)} strokeWidth={s.kind === "you" ? R * 0.35 : R * 0.15} />
-              <text x={p[0]} y={p[1] + R * 0.38} textAnchor="middle" fontSize={R * 1.05} className="bm-label">{s.kind === "you" ? "★" : i + 1}</text>
+              <text x={p[0]} y={p[1] + R * 0.38} textAnchor="middle" fontSize={R * 1.05} className="bm-label">{s.kind === "you" ? "★" : s.kind === "guest" ? "♦" : i + 1}</text>
             </g>
           );
         })}
@@ -372,7 +379,7 @@ export default function BigMatch() {
                     <div key={i} className={`bm-slot ${s.kind}`} role="row">
                       <span className="row" style={{ gap: 8 }}><i className="bm-dot" style={{ background: s.kind === "empty" ? "transparent" : colorOf(i), borderColor: colorOf(i) }} />{i + 1}</span>
                       <select className="select dense" value={s.kind} onChange={(e) => setSlot(i, { kind: e.target.value as SlotKind })} aria-label={t("Quem joga na base {n}", { n: i + 1 })}>
-                        <option value="you">{t("Você")}</option><option value="ai">{t("IA")}</option><option value="empty">{t("Vazia")}</option>
+                        <option value="you">{t("Você")}</option><option value="ai">{t("IA")}</option><option value="guest">{t("Amigo")}</option><option value="empty">{t("Vazia")}</option>
                       </select>
                       <select className="select dense" value={s.team} disabled={s.kind === "empty"} onChange={(e) => setSlot(i, { team: Number(e.target.value) })} aria-label={t("Time da base {n}", { n: i + 1 })}>
                         <option value={0}>{t("Sozinho")}</option>
@@ -516,6 +523,11 @@ export default function BigMatch() {
                   {t("Este mapa tem {bases} bases, mas num mapa de {size} o jogo aguenta até {max} jogadores: ele é um programa de 32 bits e cada exército guarda dados do mapa inteiro. Escolha quais bases jogam; as outras ficam vazias.", { bases: map.armies.length, size: map.size[0], max: limit })}
                 </Notice>
               ) : sum.players > 8 && <Notice kind="info">{t("O jogo foi feito para até 8 jogadores. Com mais, a partida fica mais pesada (cada IA pensa sozinha): se o jogo fechar ao carregar, o launcher mostra aqui o que o log do jogo disse.")}</Notice>}
+              <MatchInvite spec={spec} maps={maps ?? []} busy={busy} running={!!running} launch={start}
+                markGuests={() => setSlots((l) => {
+                  const mine = l.find((s) => s.kind === "you");
+                  return l.map((s) => (s.kind === "ai" && mine && mine.team > 0 && s.team === mine.team ? { ...s, kind: "guest" } : s));
+                })} />
               {busy && <TaskProgress task="apply" label={t("Preparando a partida…")} />}
               <div className="row bm-launch">
                 <span className="grow">{error ? <span className="chip warn"><Icon name="error_outline" size={14} /> {tr(error)}</span> : <span className="muted">{sum.text} · {map.name}</span>}</span>

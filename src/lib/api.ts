@@ -134,6 +134,10 @@ export const api = {
   bigMatchMaps: () => call<T.MatchMap[]>("big_match_maps"),
   /** Minimapa do cenário em data URL (null quando o mapa não tem). */
   bigMatchPreview: (path: string, size = 512) => call<string | null>("big_match_preview", { path, size }),
+  bigMatchAddress: () => call<string | null>("big_match_address"),
+  bigMatchInvite: (spec: T.BigMatch, address: string, name: string) => call<string>("big_match_invite", { spec, address, name }),
+  bigMatchReadInvite: (code: string) => call<T.InviteCheck>("big_match_read_invite", { code }),
+  bigMatchMatchMods: (ids: string[]) => call<string[]>("big_match_match_mods", { ids }),
   launchBigMatch: (spec: T.BigMatch) => call<{ plan: unknown; applied?: T.Plan | null; watching: boolean }>("launch_big_match", { spec }),
 
   fingerprint: () => call<T.Fingerprint>("fingerprint"),

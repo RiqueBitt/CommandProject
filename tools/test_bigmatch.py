@@ -207,8 +207,71 @@ def colors(source: str, label: str):
         check(gc.CivilianArmyColor == "BurlyWood", f"{label}: cor dos civis continua")
 
 
+NET = r"""
+Comm = { sent = {}, broadcast = false, launched = false, ejected = {} }
+local lc = import('/lua/ui/lobby/lobbyComm.lua')
+lc.CreateLobbyComm = function(proto, port, name)
+    Comm.port, Comm.name = port, name
+    local c = {}
+    function c:GetLocalPlayerID() return Comm.host and 1 or 7 end
+    function c:HostGame() Comm.host = true self:Hosting() end
+    function c:JoinGame(addr) Comm.joined = addr self:ConnectionToHostEstablished(7, 1) end
+    function c:SendData(id, d) table.insert(Comm.sent, d) end
+    function c:BroadcastData(d) Comm.broadcast = d end
+    function c:LaunchGame(info) Comm.launched = info end
+    function c:EjectPeer(id, why) table.insert(Comm.ejected, id) end
+    Comm.comm = c
+    return c
+end
+"""
+
+
+def network(source: str, label: str):
+    spec = "Victory=demoralization|H,2,1,,|G,2,0,,|G,3,0,,|A,3,0,Hard,"
+
+    def world(args):
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.execute(HARNESS)
+        lua.execute(moho_to_lua(source))
+        lua.execute(NET)
+        g = lua.globals()
+        g.World.args = lua.table_from({k: lua.table_from(v) for k, v in args.items()})
+        g.StartCommandLineSession("/maps/big/big_scenario.lua", False)
+        return lua, g
+
+    lua, g = world({"/cpmatch": [spec], "/cphost": ["15000"], "/cpname": ["Ana"]})
+    check(g.Comm.host and g.Comm.port == 15000 and g.Comm.name == "Ana" and not g.World.launched, f"{label}: anfitrião abre a porta e espera")
+    lua.execute("Comm.comm:DataReceived({ Type = 'CPHello', Name = 'Bia', SenderID = 7 })")
+    check(not g.Comm.launched, f"{label}: com vaga livre ainda espera")
+    lua.execute("Comm.comm:DataReceived({ Type = 'CPHello', Name = 'Caio', SenderID = 9 })")
+    info = g.Comm.launched
+    check(bool(info) and g.Comm.broadcast and g.Comm.broadcast.Type == "CPLaunch", f"{label}: todos dentro, a partida começa para todo mundo")
+    if info:
+        ps = [info.PlayerOptions[i] for i in range(1, lua.eval("table.getn")(info.PlayerOptions) + 1)]
+        owners = [(p.PlayerName, p.OwnerID, bool(p.Human)) for p in ps]
+        check(owners[0] == ("Ana", 1, True) and owners[1] == ("Bia", 7, True) and owners[2] == ("Caio", 9, True),
+              f"{label}: cada amigo na sua base ({owners})")
+        check(owners[3][1] == 1 and not owners[3][2], f"{label}: a IA fica com o anfitrião")
+        check(info.GameOptions.ScenarioFile == "/maps/big/big_scenario.lua", f"{label}: cenário nas opções")
+    lua.execute("Comm.comm:DataReceived({ Type = 'CPHello', Name = 'X', SenderID = 11 })")
+    check(True, f"{label}: depois de começar, novas conexões são ignoradas")
+
+    # anfitrião começa antes de todos chegarem: vaga livre vira IA
+    lua, g = world({"/cpmatch": [spec], "/cphost": ["15000"]})
+    lua.execute("Comm.comm:DataReceived({ Type = 'CPHello', Name = 'Bia', SenderID = 7 }) CPNetLaunch()")
+    ps = g.Comm.launched.PlayerOptions
+    check(not ps[3].Human and ps[3].AIPersonality == "Normal", f"{label}: amigo que não veio vira IA")
+
+    # quem entra
+    lua, g = world({"/cpmatch": [spec], "/cpjoin": ["10.0.0.5:15000"], "/cpname": ["Bia"]})
+    check(g.Comm.joined == "10.0.0.5:15000" and g.Comm.sent[1].Type == "CPHello" and g.Comm.sent[1].Name == "Bia", f"{label}: amigo conecta e se apresenta")
+    lua.execute("Comm.comm:DataReceived({ Type = 'CPLaunch', GameInfo = { PlayerOptions = {} } })")
+    check(bool(g.Comm.launched) and not g.World.launched, f"{label}: amigo entra na partida do anfitrião")
+
+
 def main() -> int:
     run(patch(FAKE_GAME_FILE), "modelo", real=False)
+    network(patch(FAKE_GAME_FILE), "rede (modelo)")
     colors(FAKE_COLORS + COLORS_CODE, "cores (modelo)")
     out = os.environ.get("CP_BIG_OUT")
     if out:
