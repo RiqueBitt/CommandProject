@@ -118,17 +118,31 @@ disponível em Sistema → Visual.
   chão, e o terreno, os prédios e as unidades escondem cada um onde ele chega; a chuva faz anéis e
   respingos no chão e na água. A interface do jogo informa à simulação o pedaço do mapa que a câmera
   mostra (`SimCallback 'CPWeather'`), e um conjunto fixo de emissores (até 180) segue a câmera numa
-  grade que engrossa quando ela sobe, então continua chovendo vendo o mapa inteiro, com o **mesmo
-  custo em qualquer zoom e em qualquer tamanho de mapa**. Na chuva o chão do mapa fica **molhado**:
-  a mesma textura, mais escura e com reflexo, e poças na terra. Na nevasca o chão de qualquer mapa
-  (do jogo ou de mods, inclusive com as Texturas HD) fica **coberto de neve**, mantendo o relevo; as
-  rochas ficam com neve só nas partes altas. A tempestade tem vento, **raios** ramificados (a maioria
-  onde você está olhando) e luz só em volta de onde caem. O jogo não tem som de chuva nem de trovão:
-  o launcher toca o **som do clima** (chuva, trovões ao fundo, vento da nevasca) enquanto o jogo está
-  aberto, com volume e botão de ouvir. O mod é montado para cada mapa e clima com os arquivos do seu
-  jogo (`ScenarioUtilities.lua` com a cópia da expansão, `timer.lua`, os emissores de clima das
-  campanhas e as texturas do chão do mapa) e fica ligado só nessa partida; a primeira vez em cada
-  mapa leva alguns segundos para preparar o chão.
+  grade que engrossa quando ela sobe, com o **mesmo custo em qualquer zoom e em qualquer tamanho de
+  mapa**. Todas as células caem **na mesma quantidade** (sem quadrados com e sem chuva), o clima
+  **começa fraco e engrossa** no primeiro minuto e depois varia devagar; ao mudar o zoom, a chuva
+  antiga termina de cair enquanto a nova chega. Os anéis no chão ficam na altura de cada pedaço do
+  terreno (sem manchas sem pingo nos desníveis).
+  - **Chão**: na chuva, a mesma textura do mapa **molhada** conforme o material (terra e areia
+    escurecem muito, rocha e grama menos, piso de metal e concreto quase não escurece mas vira
+    espelho, com água nas juntas); na nevasca, **coberto de neve** mantendo o relevo, com neve só nas
+    partes altas das rochas e as juntas dos pisos aparecendo. Nada de manchas novas, que se repetiriam
+    a cada ladrilho.
+  - **Unidades, prédios e objetos do mapa** (mod "Climas: unidades e prédios", montado uma vez por
+    clima): pela malha de cada modelo, a **neve acumula só nas superfícies viradas para cima**
+    (telhados, topos), fosca, com um leve tom de geada no resto; na chuva as partes expostas ficam
+    **molhadas** (mais brilho; tinta e borracha escurecem, metal liso só brilha). A cor do time e as
+    luzes nunca mudam.
+  - **Água**: na chuva e, mais ainda, na tempestade, ondas mais fundas e ondinhas da chuva.
+  - **Raios e trovões**: raros e em lugares sorteados (metade perto de onde você olha, às vezes dois
+    seguidos), com intervalos sem ritmo. O **trovão é um som do próprio jogo tocado no lugar do raio**
+    (som 3D, com a direção e a distância) e chega depois do clarão, mais tarde quanto mais longe.
+  - **Som**: o jogo não tem som de chuva nem de vento forte; o launcher toca um som baixo de chuva e
+    vento (ou o vento da nevasca) que **varia o tempo todo**, com volume e botão de ouvir.
+  - A textura não muda durante a partida (limite do motor): o chão e os modelos já começam molhados ou
+    nevados, e o que muda aos poucos é a quantidade de chuva e de neve caindo.
+  - O mod é montado para cada mapa e clima com os arquivos do seu jogo e dos mods ligados e fica
+    ligado só nessa partida; a primeira vez leva alguns segundos (os modelos, cerca de um minuto).
 - **Ação rápida** (`Ctrl+K`): jogar, aplicar, trocar de perfil ou abrir qualquer tela pelo teclado.
 
 **Hub de mods**

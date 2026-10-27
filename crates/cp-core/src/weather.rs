@@ -28,7 +28,7 @@ use crate::mapassets::{self, LayerSet};
 
 pub const MOD_ID: &str = "cp-clima";
 /// Muda quando o código ou as texturas mudam (o launcher monta de novo).
-pub const MOD_VERSION: &str = "1.0.0";
+pub const MOD_VERSION: &str = "1.1.0";
 /// Depois de todos os outros mods (inclusive as Texturas HD e o `zz_cp_zz_…`): as texturas do chão
 /// daqui valem.
 pub const ARCHIVE: &str = "zz_cp_zzz_clima.scd";
@@ -620,6 +620,9 @@ enum Ground {
     Rock,
     Grass,
     Soil,
+    Sand,
+    /// chão construído: placas de metal, concreto, asfalto, pisos de base
+    Plate,
 }
 
 fn ground_of(name: &str) -> Ground {
@@ -627,6 +630,12 @@ fn ground_of(name: &str) -> Ground {
     let has = |ks: &[&str]| ks.iter().any(|k| n.contains(k));
     if has(&["snow", "ice", "frost"]) {
         Ground::Snow
+    } else if has(&["metal", "tech", "panel", "concrete", "asphalt", "road", "pavement", "urban", "industrial", "grate", "steel"])
+        || (n.contains("plate") && !n.contains("plateau"))
+    {
+        Ground::Plate
+    } else if has(&["sand", "beach", "dune", "desert"]) {
+        Ground::Sand
     } else if has(&["cliff", "rock", "stone", "hill", "mountain", "boulder", "crag"]) {
         Ground::Rock
     } else if has(&["grass", "moss", "leaf", "forest", "plant", "jungle", "field"]) {
@@ -689,6 +698,9 @@ fn wet_color(img: &mut Rgba, g: Ground) {
         Ground::Rock => (0.66, 0.12),
         Ground::Grass => (0.70, 0.08),
         Ground::Soil => (0.60, 0.18),
+        // areia molhada escurece muito; piso construído escurece pouco e junta água nas juntas
+        Ground::Sand => (0.62, 0.10),
+        Ground::Plate => (0.84, 0.14),
     };
     let (lums, mean, std) = lum_stats(img);
     img.pixels.par_chunks_exact_mut(4).zip(lums.par_iter()).for_each(|(p, l)| {
@@ -709,6 +721,9 @@ fn wet_shine(img: &mut Rgba, g: Ground) {
         Ground::Rock => (2.4, 55.0),
         Ground::Grass => (1.9, 38.0),
         Ground::Soil => (2.7, 65.0),
+        Ground::Sand => (2.0, 40.0),
+        // metal e concreto molhados viram quase espelho
+        Ground::Plate => (2.9, 75.0),
     };
     img.pixels.par_chunks_exact_mut(4).for_each(|p| {
         for c in p.iter_mut().take(3) {
@@ -728,7 +743,12 @@ fn snow_color(img: &mut Rgba, g: Ground) {
     const SNOW: [f32; 3] = [236.0, 241.0, 250.0];
     img.pixels.par_chunks_exact_mut(4).zip(lums.par_iter()).for_each(|(p, l)| {
         let detail = (l - mean) / std;
-        let cover = if g == Ground::Rock { smooth(-0.9, 0.4, detail) * 0.85 } else { 0.94 };
+        let cover = match g {
+            Ground::Rock => smooth(-0.9, 0.4, detail) * 0.85,
+            // no piso a neve cobre as placas e as juntas continuam aparecendo
+            Ground::Plate => smooth(-1.4, 0.0, detail) * 0.9,
+            _ => 0.94,
+        };
         for (k, c) in p.iter_mut().take(3).enumerate() {
             let snow = SNOW[k] * (1.0 + 0.12 * detail);
             *c = (*c as f32 * 0.85 * (1.0 - cover) + snow * cover).clamp(0.0, 255.0) as u8;
@@ -753,6 +773,7 @@ fn snow_relief(img: &mut Rgba, g: Ground) {
     let keep = match g {
         Ground::Snow => return,
         Ground::Rock => 0.8,
+        Ground::Plate => 0.7,
         _ => 0.55,
     };
     img.pixels.par_chunks_exact_mut(4).for_each(|p| {
@@ -909,23 +930,26 @@ pub struct ModelSet {
     pub mesh: String,
 }
 
-/// Modelos de unidades e prédios dos arquivos (`/units/…/X_Diffuse.dds` com `X_LOD0.scm` ao lado),
-/// do jogo e dos mods; o último arquivo vence, como no jogo.
+/// Modelos dos arquivos, do jogo e dos mods (o último arquivo vence, como no jogo): unidades e prédios
+/// (`/units/…/X_Diffuse.dds` com `X_LOD0.scm` ao lado) e os outros objetos do mapa que seguem o mesmo
+/// padrão (árvores, rochas, ruínas: `X_Diffuse.dds` ou `X_Albedo.dds` com a malha ao lado).
 pub fn model_sets(sources: &[PathBuf]) -> Vec<ModelSet> {
     let mut keys = std::collections::BTreeSet::new();
     for src in sources {
         let Ok(mut scd) = crate::scd::Scd::open(src) else { continue };
         let Ok(entries) = scd.entries() else { continue };
         for e in entries {
-            if !e.is_dir && e.key.starts_with("/units/") {
-                keys.insert(e.key.replace(".win.", "."));
+            let k = e.key.replace(".win.", ".");
+            // só o que pode ser de um modelo (malhas e texturas), fora as do chão e da interface
+            if !e.is_dir && (k.ends_with(".scm") || k.ends_with(".dds")) && !k.starts_with("/textures/") {
+                keys.insert(k);
             }
         }
     }
     let has = |k: &str| keys.contains(k);
     keys.iter()
         .filter_map(|k| {
-            let stem = k.strip_suffix("_diffuse.dds")?;
+            let stem = k.strip_suffix("_diffuse.dds").or_else(|| k.strip_suffix("_albedo.dds"))?;
             let mesh = format!("{stem}_lod0.scm");
             if !has(&mesh) {
                 return None;
@@ -1027,49 +1051,99 @@ fn fit(img: Rgba, w: u32, h: u32) -> Rgba {
     if img.width == w && img.height == h { img } else { dds::resize(&img, w, h) }
 }
 
-/// Neve no modelo: só nas superfícies viradas para cima (telhados, topos, ombros), com a borda
-/// irregular; nunca na cor do time nem nas luzes. O relevo da textura continua aparecendo.
+// O modelo no clima sai da própria malha: para cada texel, quanto a superfície que ele pinta está
+// virada para cima (`up_map`). A cor do time (canal verde da textura do time) e as luzes (canal verde
+// da máscara) nunca mudam; o brilho do material (vermelho e azul da máscara) diz se é metal liso ou
+// superfície fosca, que reagem diferente à água e à neve.
+
+/// Valor de 0 a 1 de um canal de uma textura opcional (0 sem a textura).
+fn channel(img: Option<&Rgba>, i: usize, c: usize) -> f32 {
+    img.map(|t| t.pixels[i * 4 + c] as f32 / 255.0).unwrap_or(0.0)
+}
+
+/// Quanto de neve fica num texel (0 a 1): só nas superfícies viradas para cima (telhados, topos,
+/// ombros), com a borda irregular; nunca na cor do time nem nas luzes. `(x, y)` em texels da textura
+/// de cor, para a borda sair igual na cor e na máscara (que pode ter outro tamanho).
+fn snow_cover(up: f32, x: f32, y: f32, team: f32, glow: f32) -> f32 {
+    if up < 0.0 {
+        return 0.0;
+    }
+    let n = value_noise(x / 11.0, y / 11.0, 5) * 0.65 + value_noise(x / 3.5, y / 3.5, 9) * 0.35;
+    smooth(0.42 + 0.28 * (n - 0.5), 0.82, up) * (1.0 - team) * (1.0 - glow) * 0.86
+}
+
+/// Quanto um texel fica molhado (0 a 1): muito nas superfícies expostas à chuva (as de cima), um pouco
+/// nas de lado (a água escorre), quase nada embaixo.
+fn wet_cover(up: f32) -> f32 {
+    if up < -1.5 {
+        return 0.0;
+    }
+    0.2 + 0.8 * smooth(-0.25, 0.75, up)
+}
+
+/// Neve na cor do modelo. Fora da neve, as partes expostas ganham um leve tom frio (geada), para o
+/// modelo combinar com o mapa nevado sem virar uma camada branca por igual.
 fn snow_on_model(diffuse: &mut Rgba, up: &[f32], team: Option<&Rgba>, mask: Option<&Rgba>) {
     let w = diffuse.width;
     let (lums, mean, std) = lum_stats(diffuse);
     const SNOW: [f32; 3] = [232.0, 237.0, 246.0];
+    const FROST: [f32; 3] = [196.0, 205.0, 220.0];
     diffuse.pixels.par_chunks_exact_mut(4).enumerate().for_each(|(i, p)| {
-        let u = up[i];
-        if u < 0.0 {
-            return;
-        }
-        let (x, y) = ((i as u32 % w) as f32, (i as u32 / w) as f32);
-        let n = value_noise(x / 11.0, y / 11.0, 5) * 0.65 + value_noise(x / 3.5, y / 3.5, 9) * 0.35;
-        let mut amount = smooth(0.42 + 0.28 * (n - 0.5), 0.82, u);
-        if let Some(t) = team {
-            amount *= 1.0 - t.pixels[i * 4 + 1] as f32 / 255.0;
-        }
-        if let Some(m) = mask {
-            amount *= 1.0 - m.pixels[i * 4 + 1] as f32 / 255.0;
-        }
-        if amount <= 0.0 {
-            return;
-        }
-        // a neve segue o relevo pintado (painéis, frestas e rebites continuam aparecendo)
-        let detail = ((lums[i] - mean) / std).clamp(-2.5, 2.5);
-        let amount = amount * 0.86;
-        for (k, c) in p.iter_mut().take(3).enumerate() {
-            let snow = SNOW[k] * (0.86 + 0.07 * detail);
-            *c = (*c as f32 * (1.0 - amount) + snow * amount).clamp(0.0, 255.0) as u8;
-        }
-    });
-}
-
-/// Molhado no modelo: mais brilho (canais de brilho da máscara), muito mais nas superfícies expostas
-/// à chuva (as de cima) do que nas de lado e quase nada embaixo. Metal que já brilha muda pouco,
-/// superfícies foscas mudam mais. As luzes (canal verde) ficam como estão.
-fn wet_model_mask(mask: &mut Rgba, up: &[f32]) {
-    mask.pixels.par_chunks_exact_mut(4).enumerate().for_each(|(i, p)| {
         let u = up[i];
         if u < -1.5 {
             return;
         }
-        let wet = 0.25 + 0.75 * smooth(-0.2, 0.75, u);
+        let (team, glow) = (channel(team, i, 1), channel(mask, i, 1));
+        let keep = (1.0 - team) * (1.0 - glow);
+        let (x, y) = ((i as u32 % w) as f32, (i as u32 / w) as f32);
+        let amount = snow_cover(u, x, y, team, glow);
+        let frost = 0.07 * smooth(-0.4, 0.3, u) * keep;
+        // a neve segue o relevo pintado (painéis, frestas e rebites continuam aparecendo)
+        let detail = ((lums[i] - mean) / std).clamp(-2.5, 2.5);
+        for (k, c) in p.iter_mut().take(3).enumerate() {
+            let base = *c as f32 * (1.0 - frost) + FROST[k] * (*c as f32 / 255.0).sqrt() * frost;
+            let snow = SNOW[k] * (0.86 + 0.07 * detail);
+            *c = (base * (1.0 - amount) + snow * amount).clamp(0.0, 255.0) as u8;
+        }
+    });
+}
+
+/// Neve na máscara: onde há neve o material fica fosco (neve não reflete como metal).
+fn snow_model_mask(mask: &mut Rgba, up: &[f32], team: Option<&Rgba>, scale: f32) {
+    let w = mask.width;
+    mask.pixels.par_chunks_exact_mut(4).enumerate().for_each(|(i, p)| {
+        let glow = p[1] as f32 / 255.0;
+        let (x, y) = ((i as u32 % w) as f32 * scale, (i as u32 / w) as f32 * scale);
+        let amount = snow_cover(up[i], x, y, channel(team, i, 1), glow);
+        for k in [0usize, 2] {
+            p[k] = (p[k] as f32 * (1.0 - 0.85 * amount)) as u8;
+        }
+    });
+}
+
+/// Molhado na cor: superfícies foscas (pouco brilho na máscara) escurecem e saturam um pouco, como
+/// tinta, concreto e borracha molhados; metal liso quase não muda de cor (só de brilho, na máscara).
+fn wet_model_diffuse(diffuse: &mut Rgba, up: &[f32], team: Option<&Rgba>, mask: Option<&Rgba>) {
+    diffuse.pixels.par_chunks_exact_mut(4).enumerate().for_each(|(i, p)| {
+        let wet = wet_cover(up[i]);
+        if wet <= 0.0 {
+            return;
+        }
+        let shiny = channel(mask, i, 0).max(channel(mask, i, 2));
+        let amount = wet * (1.0 - shiny).powf(1.5) * (1.0 - channel(team, i, 1) * 0.6) * (1.0 - channel(mask, i, 1));
+        let lum = (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0;
+        for c in p.iter_mut().take(3) {
+            let sat = lum + (*c as f32 - lum) * (1.0 + 0.12 * amount);
+            *c = (sat * (1.0 - 0.18 * amount)).clamp(0.0, 255.0) as u8;
+        }
+    });
+}
+
+/// Molhado no brilho: mais brilho (vermelho e azul da máscara) nas partes expostas. Metal que já
+/// brilha muda pouco, superfícies foscas mudam mais. As luzes (verde) ficam como estão.
+fn wet_model_mask(mask: &mut Rgba, up: &[f32]) {
+    mask.pixels.par_chunks_exact_mut(4).enumerate().for_each(|(i, p)| {
+        let wet = wet_cover(up[i]);
         for k in [0usize, 2] {
             let v = p[k] as f32;
             p[k] = (v + (255.0 - v) * 0.4 * wet).min(255.0) as u8;
@@ -1089,24 +1163,36 @@ fn encode_like(img: &Rgba, info: &crate::dds::DdsInfo) -> Result<Vec<u8>> {
     dds::encode(img, format, info.mip_count.max(1), dds::Quality::Normal)
 }
 
-/// As texturas de um modelo no clima: (caminho no `.scd`, DDS).
+/// As texturas de um modelo no clima: (caminho no `.scd`, DDS). Chuva: cor (foscos mais escuros) e
+/// brilho; neve: cor (neve em cima, geada leve no resto) e brilho (fosco onde há neve).
 fn model_textures(sources: &[PathBuf], set: &ModelSet, kind: Kind) -> Result<Vec<(String, Vec<u8>)>> {
     let mesh = crate::scm::read(&mapassets::read_game_file(sources, &set.mesh)?)?;
+    let (info, mut diffuse) = read_dds(sources, &set.diffuse)?;
+    let (w, h) = (diffuse.width, diffuse.height);
+    let up = up_map(&mesh, w, h);
+    let team = set.team.as_ref().and_then(|p| read_dds(sources, p).ok()).map(|(_, t)| t);
+    let mask = set.mask.as_ref().and_then(|p| read_dds(sources, p).ok());
+    let team_d = team.clone().map(|t| fit(t, w, h));
+    let mask_d = mask.as_ref().map(|(_, m)| fit(m.clone(), w, h));
+    let mut out = Vec::new();
     if kind.wet() {
-        let Some(mask_path) = &set.mask else { return Ok(Vec::new()) };
-        let (info, mut mask) = read_dds(sources, mask_path)?;
-        let up = up_map(&mesh, mask.width, mask.height);
-        wet_model_mask(&mut mask, &up);
-        Ok(vec![(scd_path(mask_path), encode_like(&mask, &info)?)])
+        wet_model_diffuse(&mut diffuse, &up, team_d.as_ref(), mask_d.as_ref());
     } else {
-        let (info, mut diffuse) = read_dds(sources, &set.diffuse)?;
-        let (w, h) = (diffuse.width, diffuse.height);
-        let up = up_map(&mesh, w, h);
-        let team = set.team.as_ref().and_then(|p| read_dds(sources, p).ok()).map(|(_, t)| fit(t, w, h));
-        let mask = set.mask.as_ref().and_then(|p| read_dds(sources, p).ok()).map(|(_, m)| fit(m, w, h));
-        snow_on_model(&mut diffuse, &up, team.as_ref(), mask.as_ref());
-        Ok(vec![(scd_path(&set.diffuse), encode_like(&diffuse, &info)?)])
+        snow_on_model(&mut diffuse, &up, team_d.as_ref(), mask_d.as_ref());
     }
+    out.push((scd_path(&set.diffuse), encode_like(&diffuse, &info)?));
+    if let (Some(path), Some((minfo, mut m))) = (&set.mask, mask) {
+        let (mw, mh) = (m.width, m.height);
+        let mup = if (mw, mh) == (w, h) { up } else { up_map(&mesh, mw, mh) };
+        if kind.wet() {
+            wet_model_mask(&mut m, &mup);
+        } else {
+            let team_m = team.map(|t| fit(t, mw, mh));
+            snow_model_mask(&mut m, &mup, team_m.as_ref(), w as f32 / mw.max(1) as f32);
+        }
+        out.push((scd_path(path), encode_like(&m, &minfo)?));
+    }
+    Ok(out)
 }
 
 /// Versão do mod dos modelos: muda com o clima (molhado ou neve) e com os arquivos de origem.
@@ -1350,6 +1436,51 @@ mod tests {
     }
 
     #[test]
+    fn models_found_and_dressed() {
+        let dir = std::env::temp_dir().join(format!("cp-weather-models-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("m.scd");
+        let mut b = crate::scd::ScdBuilder::create(&path).unwrap();
+        for name in [
+            "units/UEF/UUL0001/UUL0001_Diffuse.win.dds",
+            "units/UEF/UUL0001/UUL0001_LOD0.win.scm",
+            "units/UEF/UUL0001/UUL0001_Team.win.dds",
+            "env/props/tree01/tree01_albedo.dds",
+            "env/props/tree01/tree01_lod0.scm",
+            "units/UEF/UUL0002/tread_diffuse.dds",
+            "textures/Terrain/a_diffuse.dds",
+            "textures/Terrain/a_lod0.scm",
+        ] {
+            b.add_bytes(name, b"x").unwrap();
+        }
+        b.finish().unwrap();
+        let sets = model_sets(&[path]);
+        let _ = std::fs::remove_dir_all(&dir);
+        let names: Vec<&str> = sets.iter().map(|s| s.diffuse.as_str()).collect();
+        assert_eq!(names, ["/env/props/tree01/tree01_albedo.dds", "/units/uef/uul0001/uul0001_diffuse.dds"], "{sets:?}");
+        assert_eq!(sets[1].team.as_deref(), Some("/units/uef/uul0001/uul0001_team.dds"));
+        assert_eq!(sets[1].mesh, "/units/uef/uul0001/uul0001_lod0.scm");
+
+        // 4 texels: virado para cima, de lado, para baixo, e para cima mas na cor do time
+        let up = [1.0, 0.0, -1.0, 1.0];
+        let gray = Rgba { width: 4, height: 1, pixels: [90u8, 90, 90, 255].repeat(4) };
+        let team = Rgba { width: 4, height: 1, pixels: [0u8, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 255, 0, 255].to_vec() };
+        let mut snow = gray.clone();
+        snow_on_model(&mut snow, &up, Some(&team), None);
+        assert!(snow.pixels[0] > 150, "neve em cima: {:?}", snow.pixels);
+        assert!(snow.pixels[4] < 110 && snow.pixels[8] == 90, "de lado só geada, embaixo nada: {:?}", snow.pixels);
+        assert_eq!(&snow.pixels[12..15], &[90, 90, 90], "a cor do time fica");
+        let mut mask = Rgba { width: 4, height: 1, pixels: [200u8, 0, 200, 255].repeat(4) };
+        snow_model_mask(&mut mask, &up, Some(&team), 1.0);
+        assert!(mask.pixels[0] < 100 && mask.pixels[8] == 200 && mask.pixels[12] == 200, "neve é fosca: {:?}", mask.pixels);
+        // molhado: o fosco escurece, o metal liso quase não muda de cor
+        let shiny = Rgba { width: 4, height: 1, pixels: [250u8, 0, 250, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255].to_vec() };
+        let mut wet = gray.clone();
+        wet_model_diffuse(&mut wet, &[1.0, 1.0, -1.0, 1.0], None, Some(&shiny));
+        assert!(wet.pixels[0] >= 89 && wet.pixels[4] < 80 && wet.pixels[8] > wet.pixels[4], "{:?}", wet.pixels);
+    }
+
+    #[test]
     fn ground_looks() {
         let grass = Rgba { width: 8, height: 8, pixels: [80u8, 83, 46, 255].repeat(64) };
         let mut wet = grass.clone();
@@ -1364,6 +1495,15 @@ mod tests {
         assert_eq!(ground_of("sc2_mp_002_cliff01"), Ground::Rock);
         assert_eq!(ground_of("snow01"), Ground::Snow);
         assert_eq!(ground_of("earth01"), Ground::Soil);
+        assert_eq!(ground_of("sc2_mp_101_metalplate02"), Ground::Plate);
+        assert_eq!(ground_of("beach_sand01"), Ground::Sand);
+        assert_eq!(ground_of("plateau_grass"), Ground::Grass);
+        assert_eq!(ground_of("forestfloor01"), Ground::Grass);
+        let mut plate = Rgba { width: 8, height: 8, pixels: [120u8, 120, 125, 255].repeat(64) };
+        wet_color(&mut plate, Ground::Plate);
+        let mut soil = Rgba { width: 8, height: 8, pixels: [120u8, 120, 125, 255].repeat(64) };
+        wet_color(&mut soil, Ground::Soil);
+        assert!(plate.pixels[0] > soil.pixels[0], "metal escurece menos que terra");
         assert_eq!(terrain_path("/maps/SC2_MP_002/SC2_MP_002_scenario.lua").unwrap(), "/maps/SC2_MP_002/SC2_MP_002.terrain.bdf");
         assert_eq!(scd_path("/textures/Terrain/a_d.dds"), "textures/Terrain/a_d.dds");
         assert_eq!(scd_path("/textures/Terrain/a_d.win.dds"), "textures/Terrain/a_d.dds");
@@ -1410,6 +1550,28 @@ mod tests {
                 eprintln!("{} {:?} {:?}", set.diffuse, kind, t.elapsed());
             }
         }
+    }
+
+    /// Mod dos modelos com os arquivos reais (`CP_MODELS_SOURCES` = pasta com os `.scd`, na ordem do
+    /// nome; `CP_WEATHER_KIND`; `CP_WEATHER_OUT` = pasta do `.scd`).
+    #[test]
+    fn real_models_build() {
+        let Some(dir) = std::env::var_os("CP_MODELS_SOURCES") else { return };
+        let mut sources: Vec<PathBuf> = std::fs::read_dir(dir).unwrap().filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().map(|x| x == "scd").unwrap_or(false)).collect();
+        sources.sort();
+        let kind = Kind::parse(&std::env::var("CP_WEATHER_KIND").unwrap_or_else(|_| "blizzard".into())).unwrap();
+        let out = std::env::var_os("CP_WEATHER_OUT").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+        let sets = model_sets(&sources);
+        for s in &sets {
+            if let Err(e) = model_textures(&sources, s, kind) {
+                eprintln!("falhou {}: {e}", s.diffuse);
+            }
+        }
+        eprintln!("{} modelos", sets.len());
+        let t = std::time::Instant::now();
+        let (scd, n) = build_models(&sources, kind, &out.join(MODELS_ARCHIVE)).unwrap();
+        eprintln!("{} ({n} modelos) em {:?}", scd.display(), t.elapsed());
     }
 
     /// Monta com os arquivos reais do jogo (`CP_GAMEDATA` = pasta `gamedata`; `CP_WEATHER_OUT` = pasta
