@@ -8,7 +8,7 @@ import { errorText, useStore } from "../lib/store";
 import { t } from "../lib/i18n";
 import type { ForjaCheck, ForjaMod, ForjaOption, ForjaOverview } from "../lib/types";
 
-export const FORJA_WIKI = "https://redesun.gitbook.io/forja/";
+export const FORJA_WIKI = "https://commandproject.gitbook.io/forja/";
 
 const SIDE: Record<string, { label: string; icon: string }> = {
   sim: { label: "Simulação", icon: "memory" },

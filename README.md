@@ -153,7 +153,7 @@ disponível em Sistema → Visual.
   (`EachUnit`, `Scale`, `Merge`, `Clone`), APIs entre mods (`Export`/`Use`) e opções ajustadas na tela
   **Forja** do launcher. Cada mod roda isolado: um erro não derruba os outros nem o jogo, e o painel
   **F8** na partida mostra os mods e os erros. `cp forja new|check|pack|status|option` na linha de
-  comando; guia completo em <https://redesun.gitbook.io/forja/> e exemplo em `examples/forja-exemplo`.
+  comando; guia completo em <https://commandproject.gitbook.io/forja/> e exemplo em `examples/forja-exemplo`.
 - **Ação rápida** (`Ctrl+K`): jogar, aplicar, trocar de perfil ou abrir qualquer tela pelo teclado.
 
 **Hub de mods**
