@@ -71,6 +71,8 @@ const WEATHERS: { key: MatchOptions["weather"]; label: string; icon: string; hin
   { key: "rain", label: "Chuva", icon: "water_drop", hint: "Gotas caindo no mapa, respingos no chão e na água e o chão molhado." },
   { key: "storm", label: "Tempestade", icon: "thunderstorm", hint: "Chuva forte com vento, raios e trovões ao fundo; chão encharcado, com poças." },
   { key: "blizzard", label: "Nevasca", icon: "ac_unit", hint: "Neve caindo com vento, rajadas de neve no chão e o mapa todo coberto de neve." },
+  { key: "fog", label: "Neblina", icon: "foggy", hint: "Bancos de névoa baixos passando devagar pelo mapa. O chão fica como é." },
+  { key: "sandstorm", label: "Tempestade de areia", icon: "air", hint: "Areia e poeira levadas por vento forte, rente ao chão. O chão fica como é." },
 ];
 /** Restrições de unidades do lobby do jogo (mesmas chaves e efeito). */
 const RESTRICTIONS: { key: string; label: string; hint: string }[] = [
@@ -421,13 +423,16 @@ export default function BigMatch() {
                 {options.weather && (
                   <div className="bm-weather-opts">
                     <label className="range">
-                      <span>{options.weather === "blizzard" ? t("Quantidade de neve") : t("Quantidade de chuva")}</span>
+                      <span>{options.weather === "blizzard" ? t("Quantidade de neve") : options.weather === "fog" ? t("Densidade da neblina") : options.weather === "sandstorm" ? t("Quantidade de areia") : t("Quantidade de chuva")}</span>
                       <input type="range" min={0.4} max={2} step={0.1} value={options.weatherAmount} onChange={(e) => setOpt({ weatherAmount: Number(e.target.value) })} />
                       <output>{Math.round(options.weatherAmount * 100)}%</output>
                     </label>
                     <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
                       <label className="row" style={{ gap: 10 }} title={t("O launcher toca o som do clima enquanto o jogo está aberto (o jogo não tem esses sons).")}>
-                        <Switch label={t("Som do clima")} checked={options.weatherSound} onChange={(v) => { setOpt({ weatherSound: v }); if (!v) weatherAudio.stop(1); }} /> {options.weather === "storm" ? t("Som de chuva e vento") : options.weather === "blizzard" ? t("Som de vento") : t("Som de chuva")}
+                        <Switch label={t("Som do clima")} checked={options.weatherSound} onChange={(v) => { setOpt({ weatherSound: v }); if (!v) weatherAudio.stop(1); }} /> {options.weather === "storm" ? t("Som de chuva e vento") : options.weather === "blizzard" || options.weather === "fog" || options.weather === "sandstorm" ? t("Som de vento") : t("Som de chuva")}
+                      </label>
+                      <label className="row" style={{ gap: 10 }} title={t("O clima vai e volta durante a partida: períodos fortes, calmarias e, às vezes, céu limpo. O mesmo roteiro para todos os jogadores.")}>
+                        <Switch label={t("Clima que muda")} checked={!!options.weatherDynamic} onChange={(v) => setOpt({ weatherDynamic: v })} /> {t("Clima que muda na partida")}
                       </label>
                       {options.weatherSound && (
                         <>

@@ -507,9 +507,14 @@ fn apply_weather(ws: &mut Workspace, b: &cp_core::bigmatch::BigMatch, app: &AppH
     mod_files.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()));
     let mut sources = ws.stock_sources()?;
     sources.extend(mod_files);
-    // unidades e prédios no clima: não dependem do mapa, montados uma vez por clima (molhado ou neve)
+    // unidades e prédios no clima: não dependem do mapa, montados uma vez por clima (molhado ou neve);
+    // neblina e areia não mudam as unidades
     let models_version = weather::models_version(&sources, kind);
-    if ws.mods()?.iter().any(|m| m.manifest.id == weather::MODELS_ID && m.manifest.version == models_version) {
+    if !kind.dresses_ground() {
+        if active.mods.iter().any(|m| m.id == weather::MODELS_ID && m.enabled) {
+            ws.profiles.set_enabled(&active.id, weather::MODELS_ID, false)?;
+        }
+    } else if ws.mods()?.iter().any(|m| m.manifest.id == weather::MODELS_ID && m.manifest.version == models_version) {
         ws.profiles.set_enabled(&active.id, weather::MODELS_ID, true)?;
     } else {
         emit_progress(app, "apply", 0, 1, "Preparando o clima nas unidades e prédios (só na primeira vez)…");

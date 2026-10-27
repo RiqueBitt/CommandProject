@@ -324,7 +324,9 @@ export interface MatchOptions {
   /** posições: fixas, sorteadas dentro de cada time ou sorteadas entre todos (só o launcher usa) */
   spawn: "fixed" | "team" | "all";
   /** clima (mod Climas): "" = limpo */
-  weather: "" | "rain" | "storm" | "blizzard";
+  weather: "" | "rain" | "storm" | "blizzard" | "fog" | "sandstorm";
+  /** o clima vai e volta durante a partida */
+  weatherDynamic?: boolean;
   /** quantidade de chuva ou neve (0,4 a 2; 1 = normal) */
   weatherAmount: number;
   /** som do clima tocado pelo launcher enquanto o jogo está aberto (só o launcher usa) */

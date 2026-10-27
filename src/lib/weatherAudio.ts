@@ -8,7 +8,7 @@
 
 import { onEvent } from "./api";
 
-export type WeatherKind = "rain" | "storm" | "blizzard";
+export type WeatherKind = "rain" | "storm" | "blizzard" | "fog" | "sandstorm";
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
@@ -139,6 +139,20 @@ function build(c: AudioContext, kind: WeatherKind) {
       drift(c, wind, 0.07, 0.8, 3, 9);
       wobble(c, band.frequency, 0.04, 90);
     }
+  } else if (kind === "fog") {
+    // neblina: só um vento baixo e abafado, quase parado
+    const band = filter(c, "lowpass", 380);
+    const air = layer(c, "brown", [band], 0.09);
+    drift(c, air, 0.09, 0.5, 6, 16);
+    wobble(c, band.frequency, 0.03, 80);
+  } else if (kind === "sandstorm") {
+    // areia: vento forte e rouco com o chiado dos grãos batendo
+    const band = filter(c, "bandpass", 300, 0.7);
+    const wind = layer(c, "pink", [band], 0.16);
+    drift(c, wind, 0.16, 0.6, 2, 7);
+    wobble(c, band.frequency, 0.06, 140);
+    const grit = layer(c, "white", [filter(c, "bandpass", 2600, 1.2)], 0.035);
+    drift(c, grit, 0.035, 0.9, 1.5, 5);
   } else {
     // nevasca: vento que sobe e desce sem ritmo, um assobio bem leve e o chiado da neve
     const band = filter(c, "bandpass", 480, 0.8);

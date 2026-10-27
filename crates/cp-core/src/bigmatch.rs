@@ -103,10 +103,12 @@ pub struct MatchOptions {
     pub cheats: bool,
     /// quando um jogador morre, o limite de unidades dele passa para os aliados
     pub share_unit_cap: bool,
-    /// clima: vazio (limpo), `rain`, `storm` ou `blizzard` (mod Climas, montado para a partida)
+    /// clima: vazio (limpo), `rain`, `storm`, `blizzard`, `fog` ou `sandstorm` (mod Climas, montado para a partida)
     pub weather: String,
     /// quantidade de chuva ou neve (1 = normal; de 0,4 a 2)
     pub weather_amount: f32,
+    /// o clima vai e volta durante a partida (o mesmo roteiro para todos os jogadores)
+    pub weather_dynamic: bool,
 }
 
 /// Restrições de unidades do lobby do jogo (`/lua/ui/lobby/restrictedUnitsData.lua`), na ordem da tela.
@@ -130,6 +132,7 @@ impl Default for MatchOptions {
             share_unit_cap: false,
             weather: String::new(),
             weather_amount: 1.0,
+            weather_dynamic: false,
         }
     }
 }
@@ -249,6 +252,9 @@ pub fn encode(m: &BigMatch) -> Result<String> {
     }
     if let Some(kind) = weather_of(o)? {
         out.push_str(&format!(";CPWeather={}", kind.key()));
+        if o.weather_dynamic {
+            out.push_str(";CPWeatherDynamic=1");
+        }
     }
     for s in &m.slots {
         // no jogo o time 1 é "sozinho" e os times de verdade começam no 2

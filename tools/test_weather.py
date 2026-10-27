@@ -18,7 +18,9 @@ SIM = open(os.path.join(ROOT, "crates", "cp-core", "src", "weather", "weather_si
 
 WORLD = r"""
 table.getn = function(t) return #t end
-ScenarioInfo = { Options = { CPWeather = KIND }, MapData = { PlayableRect = { 0, 0, 1024, 1024 } } }
+math.mod = math.fmod
+function GetGameTimeSeconds() return 0 end
+ScenarioInfo = { name = 'Mapa', Options = { CPWeather = KIND, CPWeatherDynamic = DYNAMIC }, MapData = { PlayableRect = { 0, 0, 1024, 1024 } } }
 made, destroyed, warps, entities, stopped = 0, 0, 0, 0, 0
 bps = {}
 live = {}
@@ -86,10 +88,10 @@ RATES = """local CPWeatherRates = {
 """
 
 
-def world(kind):
+def world(kind, dynamic=False):
     lua = LuaRuntime(unpack_returned_tuples=True)
     assert "local CPWeatherRates = {}\n" in SIM
-    lua.execute(WORLD.replace("KIND", repr(kind)) + SIM.replace("local CPWeatherRates = {}\n", RATES))
+    lua.execute(WORLD.replace("KIND", repr(kind)).replace("DYNAMIC", "'1'" if dynamic else "nil") + SIM.replace("local CPWeatherRates = {}\n", RATES))
     lua.execute("CreateResources()")
     # a thread do clima: liga o clima e engancha o despachante (a tempestade para no primeiro raio)
     lua.execute("for _, f in ipairs(threads) do pcall(f) end")
@@ -209,8 +211,26 @@ def main():
     snow.execute("CPWeatherCallback({ x0 = 400, z0 = 400, x1 = 500, z1 = 470 })")
     check(snow.eval("bps['/effects/emitters/ambient/weather/snow/weather_snow_falling_01_emit.bp'] or 0") > 0, "nevasca: flocos")
     check(snow.eval("bps['/effects/emitters/ambient/weather/dust/weather_sand_01_emit.bp']") is None, "nevasca: sem respingos")
+    fog = world("fog")
+    full(fog)
+    fog.execute("CPWeatherCallback({ x0 = 400, z0 = 400, x1 = 500, z1 = 470 })")
+    check(fog.eval("bps['/effects/emitters/ambient/weather/snow/weather_snow_falling_01_emit.bp'] or 0") > 0, "neblina: bancos de névoa")
+    check(fog.eval("bps['/effects/emitters/ambient/weather/snow/weather_snow_drifting_01_emit.bp']") is None
+          and fog.eval("bps['/effects/emitters/ambient/weather/dust/weather_sand_01_emit.bp']") is None, "neblina: sem neve levantada nem respingos")
+    sand = world("sandstorm")
+    full(sand)
+    sand.execute("CPWeatherCallback({ x0 = 400, z0 = 400, x1 = 500, z1 = 470 })")
+    check(sand.eval("bps['/effects/emitters/ambient/weather/snow/weather_snow_drifting_01_emit.bp'] or 0") > 0, "areia: poeira rente ao chão")
+    # clima que muda: vai e volta (igual em todos os jogadores: só depende do tempo e do mapa)
+    still = world("rain")
+    check(all(still.eval(f"CPWeatherFront({t})") == 1 for t in range(0, 3600, 60)), "clima fixo: sempre inteiro")
+    dyn = world("rain", dynamic=True)
+    fronts = [dyn.eval(f"CPWeatherFront({t})") for t in range(0, 3600, 20)]
+    check(min(fronts) < 0.2 and max(fronts) > 0.9, f"clima que muda: passa e volta ({min(fronts):.2f} a {max(fronts):.2f})")
+    again = world("rain", dynamic=True)
+    check([again.eval(f"CPWeatherFront({t})") for t in range(0, 3600, 20)] == fronts, "clima que muda: o mesmo roteiro em todo computador")
     clear = LuaRuntime(unpack_returned_tuples=True)
-    clear.execute(WORLD.replace("KIND", "nil") + SIM)
+    clear.execute(WORLD.replace("KIND", "nil").replace("DYNAMIC", "nil") + SIM)
     clear.execute("CreateResources(); CPWeatherCallback({ x0 = 0, z0 = 0, x1 = 100, z1 = 100 })")
     check(clear.eval("made") == 0 and clear.eval("#threads") == 0, "sem clima escolhido nada acontece")
 

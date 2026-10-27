@@ -118,6 +118,8 @@ end
 local CPWeatherClock = 0
 local function CPWeatherLinger()
     if CPWeatherKind == 'blizzard' then return 9 end
+    if CPWeatherKind == 'fog' then return 14 end
+    if CPWeatherKind == 'sandstorm' then return 6 end
     return 2.5
 end
 
@@ -198,9 +200,13 @@ local function CPWeatherLayers(cell)
         CPWeatherSetRate(entry)
         return entry
     end
-    if CPWeatherKind == 'blizzard' then
+    if CPWeatherKind == 'blizzard' or CPWeatherKind == 'sandstorm' then
+        -- (fog and sand use the same emitter files as snow, with their own particles)
         add(CPWeatherBP.snow[level], 'main')
         add(CPWeatherBP.drift[level], 'main')
+        add(CPWeatherBP.snow2[level], 'extra')
+    elseif CPWeatherKind == 'fog' then
+        add(CPWeatherBP.snow[level], 'main')
         add(CPWeatherBP.snow2[level], 'extra')
     else
         add(CPWeatherBP.fall[level], 'main')
@@ -309,10 +315,24 @@ end
 
 -- how much it rains or snows over time (seconds since the weather started): it starts light and
 -- thickens over the first minute, then the extra layer comes and goes slowly, never in step
+-- Changing weather (option CPWeatherDynamic): the weather comes and goes during the match. The
+-- schedule only depends on the match time and the map seed, so it is the same for every player.
+local CPWeatherDynamic = false
+local CPWeatherSeed = 0
+function CPWeatherFront(t)
+    if not CPWeatherDynamic then return 1 end
+    -- fronts of 6 to 10 minutes: a full spell, a lull and, now and then, a clear sky
+    local slow = 0.5 + 0.5 * math.sin(t / 157 + CPWeatherSeed)
+    local fast = 0.5 + 0.5 * math.sin(t / 61 + CPWeatherSeed * 1.7)
+    local front = CPWeatherSmooth(0.25, 0.75, slow * 0.75 + fast * 0.25)
+    return 0.05 + 0.95 * front
+end
+
 function CPWeatherIntensity(t)
     local onset = CPWeatherSmooth(0, 55, t)
     local wave = 0.5 + 0.3 * math.sin(t / 71 + 0.7) + 0.2 * math.sin(t / 29 + 2.1)
-    return math.min(1, onset * 1.35), onset * math.min(1, math.max(0, wave))
+    local front = CPWeatherFront(t)
+    return math.min(1, onset * 1.35) * front, onset * math.min(1, math.max(0, wave)) * front
 end
 
 -- every couple of seconds every emitter takes the rates of the moment (the same everywhere)
@@ -386,7 +406,8 @@ function CPWeatherLightning()
             x0, z0 = math.max(x0, v[1] - w * 0.4), math.max(z0, v[2] - h * 0.4)
             x1, z1 = math.min(x1, v[3] + w * 0.4), math.min(z1, v[4] + h * 0.4)
         end
-        if x1 > x0 and z1 > z0 then
+        -- with changing weather, no lightning while the storm has eased off
+        if x1 > x0 and z1 > z0 and CPWeatherFront(GetGameTimeSeconds()) > 0.5 then
             local x = x0 + Random() * (x1 - x0)
             local z = z0 + Random() * (z1 - z0)
             local power = Random()
@@ -408,8 +429,13 @@ end
 
 function CPWeatherStart()
     local kind = ScenarioInfo.Options and ScenarioInfo.Options.CPWeather
-    if kind ~= 'rain' and kind ~= 'storm' and kind ~= 'blizzard' then return end
+    if kind ~= 'rain' and kind ~= 'storm' and kind ~= 'blizzard' and kind ~= 'fog' and kind ~= 'sandstorm' then return end
     CPWeatherKind = kind
+    CPWeatherDynamic = ScenarioInfo.Options.CPWeatherDynamic == '1' or ScenarioInfo.Options.CPWeatherDynamic == true
+    -- the same on every machine: from the map name
+    local name = tostring(ScenarioInfo.name or ScenarioInfo.file or '')
+    for i = 1, string.len(name) do CPWeatherSeed = math.mod(CPWeatherSeed * 31 + string.byte(name, i), 6283) end
+    CPWeatherSeed = CPWeatherSeed / 1000
     CPWeatherHookCallbacks()
     -- the playable area is set by the map script right after the resources
     WaitTicks(2)

@@ -44,6 +44,10 @@ pub enum Kind {
     Rain,
     Storm,
     Blizzard,
+    /// neblina: bancos baixos e lentos que passam pelo mapa
+    Fog,
+    /// tempestade de areia: poeira e areia levadas por vento forte
+    Sandstorm,
 }
 
 impl Kind {
@@ -52,6 +56,8 @@ impl Kind {
             "rain" => Some(Kind::Rain),
             "storm" => Some(Kind::Storm),
             "blizzard" | "snow" => Some(Kind::Blizzard),
+            "fog" => Some(Kind::Fog),
+            "sandstorm" | "sand" => Some(Kind::Sandstorm),
             _ => None,
         }
     }
@@ -61,10 +67,17 @@ impl Kind {
             Kind::Rain => "rain",
             Kind::Storm => "storm",
             Kind::Blizzard => "blizzard",
+            Kind::Fog => "fog",
+            Kind::Sandstorm => "sandstorm",
         }
     }
+    /// chuva (gotas, respingos, chão molhado)
     fn wet(self) -> bool {
-        self != Kind::Blizzard
+        matches!(self, Kind::Rain | Kind::Storm)
+    }
+    /// muda o chão e as unidades (molhado ou com neve); neblina e areia deixam o mapa como é
+    pub fn dresses_ground(self) -> bool {
+        matches!(self, Kind::Rain | Kind::Storm | Kind::Blizzard)
     }
 }
 
@@ -200,6 +213,48 @@ fn snow_gust() -> Rgba {
         }
         // borda macia: some antes da beira do quadro
         (a * 0.45).min(1.0) * (1.0 - smooth(0.7, 1.0, (x * x + y * y * 4.0).sqrt()))
+    })
+}
+
+/// Banco de neblina: nuvem larga e baixa, bem macia, mais densa no meio.
+fn fog_bank() -> Rgba {
+    let mut rng = Rng::new(23);
+    let puffs: Vec<(f32, f32, f32, f32)> = (0..40).map(|_| (rng.range(-0.6, 0.6), rng.range(-0.35, 0.35), rng.range(0.08, 0.3), rng.range(0.3, 1.0))).collect();
+    sprite(128, [232, 236, 240], |x, y| {
+        let mut a = 0.0;
+        for (cx, cy, r, w) in &puffs {
+            a += w * (-(((x - cx) / (r * 1.4)).powi(2) + ((y - cy) / r).powi(2))).exp();
+        }
+        // saturação macia: o miolo varia (fiapos), sem um bloco chapado
+        (1.0 - (-a * 0.22).exp()) * 1.6 * (1.0 - smooth(0.35, 1.0, (x * x + y * y).sqrt()))
+    })
+}
+
+/// Fios de areia levados pelo vento: riscos finos na horizontal.
+fn sand_streaks() -> Rgba {
+    let mut rng = Rng::new(31);
+    let lines: Vec<(f32, f32, f32, f32)> = (0..26).map(|_| (rng.range(-0.8, 0.8), rng.range(-0.5, 0.5), rng.range(0.25, 0.7), rng.range(0.3, 1.0))).collect();
+    sprite(128, [214, 178, 120], |x, y| {
+        let mut a: f32 = 0.0;
+        for (cx, cy, len, w) in &lines {
+            let dx = ((x - cx) / len).abs();
+            let dy = ((y - cy) / 0.012).abs();
+            a += w * (1.0 - smooth(0.5, 1.0, dx)) * (-dy * dy).exp();
+        }
+        a.min(1.0) * (1.0 - smooth(0.75, 1.0, (x * x + y * y).sqrt()))
+    })
+}
+
+/// Nuvem de poeira rente ao chão.
+fn dust_cloud() -> Rgba {
+    let mut rng = Rng::new(37);
+    let puffs: Vec<(f32, f32, f32, f32)> = (0..34).map(|_| (rng.range(-0.6, 0.6), rng.range(-0.3, 0.3), rng.range(0.07, 0.28), rng.range(0.3, 1.0))).collect();
+    sprite(128, [196, 158, 104], |x, y| {
+        let mut a = 0.0;
+        for (cx, cy, r, w) in &puffs {
+            a += w * (-(((x - cx) / (r * 1.6)).powi(2) + ((y - cy) / r).powi(2))).exp();
+        }
+        ((1.0 - (-a * 0.25).exp()) * 1.6).min(1.0) * (1.0 - smooth(0.4, 1.0, (x * x + y * y * 2.0).sqrt()))
     })
 }
 
@@ -342,6 +397,13 @@ pub fn particle_images() -> Vec<(&'static str, Rgba)> {
         ("cp_ramp_flash", ramp([105, 115, 140], |t| 0.8 * (1.0 - smooth(0.2, 1.0, t)))),
         // fraca: são véus de neve, não neblina
         ("cp_ramp_drift", ramp([244, 247, 252], |t| 0.16 * (std::f32::consts::PI * t).sin().max(0.0).powf(1.3))),
+        ("cp_fog_bank", fog_bank()),
+        ("cp_sand_streak", sand_streaks()),
+        ("cp_dust_cloud", dust_cloud()),
+        // neblina: entra e sai devagar, sem aparecer de repente
+        ("cp_ramp_fog", ramp([228, 232, 236], |t| 0.22 * (std::f32::consts::PI * t).sin().max(0.0).powf(1.6))),
+        ("cp_ramp_sand", ramp([222, 186, 128], |t| 0.55 * smooth(0.0, 0.15, t) * (1.0 - smooth(0.7, 1.0, t)))),
+        ("cp_ramp_dust", ramp([200, 162, 108], |t| 0.3 * (std::f32::consts::PI * t).sin().max(0.0).powf(1.2))),
     ]
 }
 
@@ -444,6 +506,81 @@ fn emitters(kind: Kind, amount: f32) -> Vec<Emitter> {
                     ],
                 });
             }
+        } else if kind == Kind::Fog {
+            // bancos de neblina baixos e lentos (camada principal) e véus mais altos e finos (extra);
+            // os mesmos lugares de emissor da neve (os dois climas nunca vêm juntos)
+            let (xp, xr) = span(-6.0 * f, half);
+            let (zp, zr) = span(0.0, half);
+            for (layer, rate, height, size, life) in [("snow", 0.55, 2.6, 4.2, 26.0), ("snow2", 0.35, 6.0, 5.5, 30.0)] {
+                out.push(Emitter {
+                    path: level_path(layer, i),
+                    texture: tex("cp_fog_bank"),
+                    ramp: tex("cp_ramp_fog"),
+                    flags: vec![("LODCutoff", -1.0), ("EmitIfVisible", 0.0), ("Blendmode", 0.0)],
+                    curves: vec![
+                        ("EmitRateCurve", rate * amount, 0.0),
+                        ("LifetimeCurve", life, 5.0),
+                        ("VelocityCurve", 0.18 * f, 0.06 * f),
+                        ("XDirectionCurve", 1.0, 0.2),
+                        ("YDirectionCurve", 0.0, 0.02),
+                        ("ZDirectionCurve", 0.2, 0.3),
+                        ("XPosCurve", xp, xr),
+                        ("YPosCurve", height * f, 0.8 * f),
+                        ("ZPosCurve", zp, zr),
+                        ("StartSizeCurve", size * f, 1.2 * f),
+                        ("EndSizeCurve", size * 1.5 * f, 1.5 * f),
+                        ("InitialRotationCurve", 0.0, 360.0),
+                        ("RotationRateCurve", -1.5, 3.0),
+                    ],
+                });
+            }
+        } else if kind == Kind::Sandstorm {
+            // areia em fios rápidos (principal), mais fios de outro tamanho (extra) e nuvens de poeira
+            // rente ao chão
+            let (xp, xr) = span(-14.0 * f, half);
+            let (zp, zr) = span(0.0, half);
+            for (layer, rate, size, speed) in [("snow", 7.0, 0.9, 3.4), ("snow2", 5.0, 1.4, 4.2)] {
+                out.push(Emitter {
+                    path: level_path(layer, i),
+                    texture: tex("cp_sand_streak"),
+                    ramp: tex("cp_ramp_sand"),
+                    flags: vec![("AlignRotation", 1.0), ("LODCutoff", -1.0), ("EmitIfVisible", 0.0), ("Blendmode", 0.0)],
+                    curves: vec![
+                        ("EmitRateCurve", rate * amount, 0.0),
+                        ("LifetimeCurve", 10.0, 2.0),
+                        ("VelocityCurve", speed * f, 0.6 * f),
+                        ("XDirectionCurve", 1.0, 0.08),
+                        ("YDirectionCurve", -0.08, 0.06),
+                        ("ZDirectionCurve", 0.18, 0.1),
+                        ("XPosCurve", xp, xr),
+                        ("YPosCurve", 5.0 * f, 4.0 * f),
+                        ("ZPosCurve", zp, zr),
+                        ("StartSizeCurve", size * f, 0.3 * f),
+                        ("EndSizeCurve", size * f, 0.3 * f),
+                    ],
+                });
+            }
+            out.push(Emitter {
+                path: level_path("drift", i),
+                texture: tex("cp_dust_cloud"),
+                ramp: tex("cp_ramp_dust"),
+                flags: vec![("LODCutoff", -1.0), ("EmitIfVisible", 0.0), ("Blendmode", 0.0)],
+                curves: vec![
+                    ("EmitRateCurve", 0.6 * amount, 0.0),
+                    ("LifetimeCurve", 22.0, 6.0),
+                    ("VelocityCurve", 1.6 * f, 0.4 * f),
+                    ("XDirectionCurve", 1.0, 0.12),
+                    ("YDirectionCurve", 0.02, 0.02),
+                    ("ZDirectionCurve", 0.2, 0.15),
+                    ("XPosCurve", xp, xr),
+                    ("YPosCurve", 3.0 * f, 1.0 * f),
+                    ("ZPosCurve", zp, zr),
+                    ("StartSizeCurve", 3.0 * f, 0.8 * f),
+                    ("EndSizeCurve", 6.5 * f, 1.5 * f),
+                    ("InitialRotationCurve", 0.0, 360.0),
+                    ("RotationRateCurve", -3.0, 6.0),
+                ],
+            });
         } else {
             let (xp, xr) = span(-10.0 * f, half);
             let (zp, zr) = span(0.0, half);
@@ -822,7 +959,7 @@ pub fn water_textures(sources: &[PathBuf], kind: Kind) -> Vec<(String, Vec<u8>)>
     let (strength, ripples) = match kind {
         Kind::Rain => (1.25, 2.2),
         Kind::Storm => (1.9, 3.4),
-        Kind::Blizzard => return Vec::new(),
+        Kind::Blizzard | Kind::Fog | Kind::Sandstorm => return Vec::new(),
     };
     WATER_NORMALS
         .par_iter()
@@ -1315,9 +1452,11 @@ pub fn build(sources: &[PathBuf], scenario: &str, kind: Kind, amount: f32, dest:
         files.push((format!("textures/particles/{name}.win.dds"), data.clone()));
         files.push((format!("textures/particles/{name}.dds"), data));
     }
-    match ground_textures(sources, scenario, kind) {
-        Ok(ground) => files.extend(ground),
-        Err(e) => eprintln!("clima: {e}"),
+    if kind.dresses_ground() {
+        match ground_textures(sources, scenario, kind) {
+            Ok(ground) => files.extend(ground),
+            Err(e) => eprintln!("clima: {e}"),
+        }
     }
     files.extend(water_textures(sources, kind));
     let mut b = crate::scd::ScdBuilder::create(dest)?;
@@ -1346,6 +1485,8 @@ pub fn describe(kind: Kind) -> String {
         Kind::Rain => "Chuva na partida: gotas que caem no mapa, respingos no chão e na água e o chão molhado.".into(),
         Kind::Storm => "Tempestade na partida: chuva forte com vento, raios e o chão encharcado.".into(),
         Kind::Blizzard => "Nevasca na partida: neve caindo com vento, neve levantada do chão e o mapa coberto de neve.".into(),
+        Kind::Fog => "Neblina na partida: bancos de névoa baixos que passam devagar pelo mapa.".into(),
+        Kind::Sandstorm => "Tempestade de areia na partida: areia e poeira levadas por vento forte, rente ao chão.".into(),
     }
 }
 
@@ -1414,6 +1555,20 @@ mod tests {
         let row_alpha = |y: u32| (0..b.width).map(|x| b.pixels[((y * b.width + x) * 4 + 3) as usize] as u32).sum::<u32>();
         assert!(row_alpha(5) > 0 && row_alpha(240) > 0);
         assert_ne!(bolt(1), bolt(2));
+        // prévia das partículas (CP_PARTICLES_OUT): cada uma sobre um fundo escuro
+        if let Some(out) = std::env::var_os("CP_PARTICLES_OUT") {
+            for (name, img) in particle_images() {
+                let mut bg = img.clone();
+                for p in bg.pixels.chunks_exact_mut(4) {
+                    let a = p[3] as f32 / 255.0;
+                    for c in 0..3 {
+                        p[c] = (p[c] as f32 * a + 40.0 * (1.0 - a)) as u8;
+                    }
+                    p[3] = 255;
+                }
+                std::fs::write(PathBuf::from(&out).join(format!("{name}.png")), dds::to_png(&bg).unwrap()).unwrap();
+            }
+        }
     }
 
     #[test]
