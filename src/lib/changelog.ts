@@ -6,6 +6,19 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.35.0",
+    title: "Sala de convite com voz, mar e ilhas e um editor de mapas mais esperto",
+    items: [
+      { icon: "meeting_room", title: "Sala de convite", text: "Quem entra baixa sozinho os mods e o mapa personalizado do anfitrião, vê quem está pronto e o jogo de todos abre junto quando ele começa. O convite é cifrado: o IP não aparece.", page: "bigmatch" },
+      { icon: "mic", title: "Chat de voz", text: "Voz na sala, com microfone aberto ou apertar para falar com uma tecla que funciona dentro do jogo.", page: "bigmatch" },
+      { icon: "sailing", title: "Mar e ilhas", text: "Mares gigantes com cada base na sua ilha, uma ilha por time, continente ou arquipélago, com o tamanho das ilhas e a ligação à sua escolha.", page: "create" },
+      { icon: "draw", title: "Esboço vira mapa", text: "Desenhe com cores ou descreva o mapa em uma frase, e o editor monta o relevo.", page: "create" },
+      { icon: "balance", title: "Equilíbrio, régua, carimbos e erosão", text: "Nota de equilíbrio das bases, tempo de viagem, carimbos de terreno, pincel de erosão, câmera do jogo e linha do tempo das versões.", page: "create" },
+      { icon: "code", title: "Forja ainda melhor", text: "Erros de sintaxe na hora, trechos prontos, abas, busca, formulário do mod, testar no jogo com um clique e empacotar para o Hub.", page: "forja" },
+      { icon: "air", title: "Som do clima no jogo", text: "O vento e o mar do próprio jogo tocam dentro da partida, no lugar do som do launcher.", page: "bigmatch" },
+    ],
+  },
+  {
     version: "0.34.0",
     title: "Partidas com amigos, Forja turbinada e novos climas",
     items: [

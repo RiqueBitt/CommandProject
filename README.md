@@ -113,16 +113,23 @@ disponível em Sistema → Visual.
   partida (`/map` + `/cpmatch`); o mod que faz isso é montado na hora com o `SinglePlayerLaunch.lua`
   e o `GameSessionManager.lua` do seu jogo; ele só fica ligado nas partidas grandes (o Jogar comum
   o desliga), então o lobby do jogo continua igual.
-- **Partida grande com amigos** (experimental; Partida grande → Jogar com amigos): marque bases como
-  **Amigo**, clique em **Criar convite** e mande o código (`CPM1.…`) por onde quiser. Quem recebe cola
-  o código em **Entrar com convite**: o launcher mostra o mapa, as vagas e os mods do anfitrião (com um
-  botão para ligar os que faltam) e abre o jogo direto na partida. Nada fica guardado em servidor nem
-  precisa de conta: o código leva o endereço do anfitrião, a partida e a lista de mods, e o jogo de
-  quem entra conecta direto no jogo do anfitrião pela rede do próprio jogo (`lobbyComm`: `HostGame`,
-  `JoinGame`, `LaunchGame`), com mais de 8 jogadores. Cada amigo fica com uma base marcada na ordem em
-  que conecta; a partida começa sozinha quando todos entram (ou com ENTER no jogo do anfitrião, e as
-  vagas livres viram IA). Funciona na mesma rede, por VPN (Radmin VPN, ZeroTier, Hamachi) ou com a
-  porta UDP (padrão 15000) aberta no roteador de quem convida.
+- **Partida grande com amigos — sala de convite** (experimental; Partida grande → Jogar com amigos):
+  marque bases como **Amigo**, escolha como os amigos vão se conectar (mesma rede, Radmin VPN,
+  ZeroTier, Hamachi, Tailscale ou internet com a porta aberta) e clique em **Abrir sala e criar
+  convite**. O launcher do anfitrião vira um servidor pequeno, só para quem tem o código (sem
+  servidor dedicado, banco de dados nem conta). Quem cola o convite (`CPM2.…`, **cifrado: o IP não
+  aparece nele nem na tela**) entra na sala e **baixa sozinho, do PC do anfitrião, os mods que mudam
+  a partida e o mapa personalizado** (com o hash de cada arquivo conferido); os mods ficam num perfil
+  "Partida com amigos" (os perfis da pessoa não mudam, e ao sair da sala volta o de antes). Na sala:
+  quem está, quem já baixou tudo, **chat** e **chat de voz** (microfone aberto com detector de voz
+  ou apertar para falar com uma tecla que funciona dentro do jogo; mudo com Alt+M; volume e
+  silenciar cada amigo; Opus pelo WebCodecs, com cancelamento de eco), que passa pelo launcher do
+  anfitrião. O anfitrião clica em **Começar** e o jogo de todo mundo abre direto na partida, que liga
+  os jogos pela rede do próprio jogo (`lobbyComm`: `HostGame`, `JoinGame`, `LaunchGame`), com mais
+  de 8 jogadores. A sala usa a porta TCP escolhida (padrão 15000) e a partida a UDP do mesmo número.
+- **Som do clima dentro do jogo**: o vento das alturas e o mar dos próprios mapas do jogo (de
+  preferência os do mapa da partida), tocados como som 3D seguindo a câmera de cada jogador e
+  parando nas calmarias do clima que muda; numa partida com amigos, cada um tem o clima onde olha.
 - **Climas** (Partida grande → Clima): **chuva**, **tempestade**, **nevasca**, **neblina** ou
   **tempestade de areia** na partida, com a quantidade à escolha, e a opção **clima que muda**: o
   clima vai e volta durante a partida (períodos fortes, calmarias e às vezes céu limpo, sem raios na
@@ -173,6 +180,13 @@ disponível em Sistema → Visual.
     Com **Recarregar ao salvar**, cada Ctrl+S monta o mod de novo e substitui o instalado.
   - **Modelos** para começar: completo, balanceamento (vida, custo, velocidade e alcance com opções),
     painel, regra de jogo e biblioteca (`mod.Export`).
+  - **Erros de sintaxe de verdade** enquanto digita (a linha exata do `end` ou parêntese que falta),
+    **trechos prontos** (menu Inserir: eventos, timers, comandos, painéis, blueprints), **abas** de
+    arquivos e **busca em todos os arquivos** (Ctrl+Shift+F), **formulário do mod.json** (nome,
+    versão, dependências e as opções do launcher sem mexer no JSON), **unidades do jogo** para
+    procurar e inserir o id certo, **Testar no jogo** (salva, recarrega e abre uma partida rápida
+    contra uma IA fácil), **erros da última partida** com arquivo e linha (clicar abre no lugar) e
+    **Empacotar** (o `.scd` e a entrada pronta para um índice do Hub).
   - No **Hub**, mods da Forja (tag `forja`) têm selo e filtro, e as dependências são instaladas junto.
 - **Busca em tudo** (`Ctrl+K`): páginas, ações, perfis, mods, projetos, mapas da Partida grande e
   seções das Configurações, com ou sem acento.
@@ -283,6 +297,29 @@ disponível em Sistema → Visual.
   **serras curtas separam as bases vizinhas** e o mapa ganha mais montanhas — as duas opções também
   podem ser ligadas ou desligadas em qualquer mapa. **Massa simétrica** (expansões seguras e disputadas, centro disputado),
   paredões que criam gargalos e galeria de variações. Depois de gerar, tudo continua editável.
+- **Mar e ilhas** (estilo do gerador e os modelos "Ilhas no mar aberto" e "Continente e ilhas"): mar
+  gigante com **cada base na sua ilha**, **uma ilha por time**, um **continente no meio** ou um
+  **arquipélago**; tamanho das ilhas, quantas ilhas neutras pelo mar, recorte da costa (baías,
+  cabos e penínsulas), profundidade e a **ligação entre as ilhas** — só pelo mar (guerra naval e
+  aérea), bancos de areia rasos ou pontes. As ilhas seguem a simetria do mapa.
+- **Assistente do editor de mapas** (aba Assistente):
+  - **Esboço → mapa**: desenhe com cores (água, planície, morros, montanha, deserto, planalto,
+    abismo), espelhado se quiser, ponha as bases e o desenho vira relevo de verdade, com encostas,
+    detalhe e erosão.
+  - **Descrever o mapa**: escreva "arquipélago com 6 jogadores, muitos rios e florestas, ligado por
+    pontes" (ou em inglês) no gerador de mundo e ele se ajusta sozinho, sem internet.
+  - **Relevo de imagem**: um PNG em tons de cinza vira o relevo, com as alturas do preto e do branco.
+  - **Pincel de erosão**: chuva cava ravinas e leva terra encosta abaixo só onde você pinta.
+  - **Carimbos de terreno**: guarde uma montanha, um vale ou uma ilha e cole em outros lugares (ou
+    outros mapas), com tamanho, giro e espelho; a biblioteca de carimbos fica no launcher.
+  - **Régua**: distância em linha reta e a pé (desviando de água e encostas) e o tempo de uma tropa
+    leve, um tanque, um experimental e um avião.
+  - **Equilíbrio**: nota de 0 a 100 comparando a massa perto, a distância até a massa e até o
+    inimigo e quantas entradas cada base tem, com os problemas, o tempo de ataque entre as bases e um
+    botão que põe a massa que falta nas bases mais pobres.
+  - **Câmera do jogo** (a inclinação e o zoom do jogo), **passeio** em volta do mapa e vista de cima.
+  - **Linha do tempo**: arraste pelas versões salvas e compare cada uma com o mapa de agora; dá para
+    voltar para qualquer uma.
 - **Validação do mapa** com correção automática: bases na água/declive/isoladas, massa inacessível,
   em declive ou sobreposta, decorações em cima de bases e massa, distâncias e massa desiguais.
 - **Editor de mapas** no estilo de um editor de jogo:

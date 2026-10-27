@@ -865,5 +865,18 @@
  "Mudar uma unidade": "Change one unit",
  "Unidade nova copiando outra": "New unit copying another",
  "Opção do launcher": "Launcher option",
- "Usar outro mod (dependência)": "Use another mod (dependency)"
+ "Usar outro mod (dependência)": "Use another mod (dependency)",
+ "Sala de convite com voz, mar e ilhas e um editor de mapas mais esperto": "Invite room with voice, sea and islands and a smarter map editor",
+ "Sala de convite": "Invite room",
+ "Quem entra baixa sozinho os mods e o mapa personalizado do anfitrião, vê quem está pronto e o jogo de todos abre junto quando ele começa. O convite é cifrado: o IP não aparece.": "Guests download the host's mods and custom map automatically, see who's ready, and everyone's game opens together when the host starts. The invite is encrypted: the IP isn't shown.",
+ "Chat de voz": "Voice chat",
+ "Voz na sala, com microfone aberto ou apertar para falar com uma tecla que funciona dentro do jogo.": "Voice in the room, with open mic or push-to-talk on a key that works inside the game.",
+ "Mares gigantes com cada base na sua ilha, uma ilha por time, continente ou arquipélago, com o tamanho das ilhas e a ligação à sua escolha.": "Huge seas with each base on its own island, one island per team, a continent or an archipelago, with island size and links of your choice.",
+ "Esboço vira mapa": "Sketch becomes a map",
+ "Desenhe com cores ou descreva o mapa em uma frase, e o editor monta o relevo.": "Draw with colors or describe the map in one sentence, and the editor builds the terrain.",
+ "Equilíbrio, régua, carimbos e erosão": "Balance, ruler, stamps and erosion",
+ "Nota de equilíbrio das bases, tempo de viagem, carimbos de terreno, pincel de erosão, câmera do jogo e linha do tempo das versões.": "Base balance score, travel time, terrain stamps, erosion brush, game camera and a version timeline.",
+ "Forja ainda melhor": "An even better Forja",
+ "Erros de sintaxe na hora, trechos prontos, abas, busca, formulário do mod, testar no jogo com um clique e empacotar para o Hub.": "Live syntax errors, ready-made snippets, tabs, search, mod form, one-click test in game and packing for the Hub.",
+ "O vento e o mar do próprio jogo tocam dentro da partida, no lugar do som do launcher.": "The game's own wind and sea sounds play inside the match, replacing the launcher's sound."
 }
