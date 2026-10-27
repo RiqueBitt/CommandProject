@@ -113,8 +113,22 @@ disponível em Sistema → Visual.
   partida (`/map` + `/cpmatch`); o mod que faz isso é montado na hora com o `SinglePlayerLaunch.lua`
   e o `GameSessionManager.lua` do seu jogo; ele só fica ligado nas partidas grandes (o Jogar comum
   o desliga), então o lobby do jogo continua igual.
-- **Climas** (Partida grande → Clima): **chuva**, **tempestade** ou **nevasca** na partida, com a
-  quantidade à escolha. Tudo acontece no mundo, não na tela: as gotas e os flocos caem de cima do
+- **Partida grande com amigos** (experimental; Partida grande → Jogar com amigos): marque bases como
+  **Amigo**, clique em **Criar convite** e mande o código (`CPM1.…`) por onde quiser. Quem recebe cola
+  o código em **Entrar com convite**: o launcher mostra o mapa, as vagas e os mods do anfitrião (com um
+  botão para ligar os que faltam) e abre o jogo direto na partida. Nada fica guardado em servidor nem
+  precisa de conta: o código leva o endereço do anfitrião, a partida e a lista de mods, e o jogo de
+  quem entra conecta direto no jogo do anfitrião pela rede do próprio jogo (`lobbyComm`: `HostGame`,
+  `JoinGame`, `LaunchGame`), com mais de 8 jogadores. Cada amigo fica com uma base marcada na ordem em
+  que conecta; a partida começa sozinha quando todos entram (ou com ENTER no jogo do anfitrião, e as
+  vagas livres viram IA). Funciona na mesma rede, por VPN (Radmin VPN, ZeroTier, Hamachi) ou com a
+  porta UDP (padrão 15000) aberta no roteador de quem convida.
+- **Climas** (Partida grande → Clima): **chuva**, **tempestade**, **nevasca**, **neblina** ou
+  **tempestade de areia** na partida, com a quantidade à escolha, e a opção **clima que muda**: o
+  clima vai e volta durante a partida (períodos fortes, calmarias e às vezes céu limpo, sem raios na
+  calmaria), com o mesmo roteiro em todos os computadores. A neblina (bancos de névoa baixos e lentos)
+  e a areia (fios de areia e nuvens de poeira rente ao chão, com vento forte) não mudam o chão nem as
+  unidades. Tudo acontece no mundo, não na tela: as gotas e os flocos caem de cima do
   chão, e o terreno, os prédios e as unidades escondem cada um onde ele chega; a chuva faz anéis e
   respingos no chão e na água. A interface do jogo informa à simulação o pedaço do mapa que a câmera
   mostra (`SimCallback 'CPWeather'`), e um conjunto fixo de emissores (até 180) segue a câmera numa
@@ -154,7 +168,17 @@ disponível em Sistema → Visual.
   **Forja** do launcher. Cada mod roda isolado: um erro não derruba os outros nem o jogo, e o painel
   **F8** na partida mostra os mods e os erros. `cp forja new|check|pack|status|option` na linha de
   comando; guia completo em <https://commandproject.gitbook.io/forja/> e exemplo em `examples/forja-exemplo`.
-- **Ação rápida** (`Ctrl+K`): jogar, aplicar, trocar de perfil ou abrir qualquer tela pelo teclado.
+  - **Editor de mods** na tela da Forja: os arquivos do mod, autocompletar da API da Forja, ajuda ao
+    passar o mouse e avisos do que não existe no **Lua 5.0** do jogo (`#`, `%`, `gmatch`, `!=`…).
+    Com **Recarregar ao salvar**, cada Ctrl+S monta o mod de novo e substitui o instalado.
+  - **Modelos** para começar: completo, balanceamento (vida, custo, velocidade e alcance com opções),
+    painel, regra de jogo e biblioteca (`mod.Export`).
+  - No **Hub**, mods da Forja (tag `forja`) têm selo e filtro, e as dependências são instaladas junto.
+- **Busca em tudo** (`Ctrl+K`): páginas, ações, perfis, mods, projetos, mapas da Partida grande e
+  seções das Configurações, com ou sem acento.
+- **Novidades**: depois de atualizar, uma janela mostra o que mudou (e pela busca, "Novidades").
+- **Arte do jogo no launcher** (Configurações → Visual): cabeçalhos e janelas com as imagens dos
+  menus do próprio SC2, lidas da sua instalação (nada do jogo vem com o launcher).
 
 **Hub de mods**
 - **Mods do CommandProject** no topo do hub, todos num lugar só: Primeira Pessoa, IA esperta,
@@ -240,7 +264,9 @@ disponível em Sistema → Visual.
   nitidez, tabelas de cor/fontes/cubemaps não mudam, e a interface fica em "só nitidez" (o jogo
   desenha muitas imagens dela no tamanho da própria textura).
 - Calcula antes quanto de memória de vídeo as texturas vão ocupar e ajusta sozinho para caber.
-- **Remaster** (gerador 3.0, ligado por padrão, de 0 a 150%): fiel ao visual do jogo, só mais rico.
+- **Remaster** (gerador 3.0, ligado por padrão, de 0 a 150%): fiel ao visual do jogo, só mais rico,
+  em três **estilos** (Fiel, Vivo e Cinematográfico), com **força por tipo de superfície** e uma
+  **galeria** de prévias (uma textura de cada tipo, antes e depois).
   Contraste local sem halos (o detalhe pintado e o relevo aparecem mais), vivacidade que só reforça
   cores apagadas (cinzas, metal e cor do time ficam como estão), curva em S leve e mapas de normal com
   mais profundidade. Cada tipo de superfície tem a sua dose: chão e água, vegetação e objetos do mapa,
