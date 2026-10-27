@@ -47,6 +47,7 @@ pub mod units;
 pub mod update;
 pub mod ttf;
 pub mod vdf;
+pub mod weather;
 pub mod workspace;
 
 pub use error::{Error, Result};

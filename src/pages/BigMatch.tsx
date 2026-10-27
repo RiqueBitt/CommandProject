@@ -11,6 +11,7 @@ import { shuffleSpawns } from "../lib/matchSpawn";
 import { MAX_PLAYERS, maxPlayersFor, spreadBases } from "../lib/matchLimits";
 import { assignColors, GAME_COLORS, groupOf, type ColorMode } from "../lib/teamColors";
 import type { MatchMap, MatchOptions, MatchSlot, SlotKind } from "../lib/types";
+import * as weatherAudio from "../lib/weatherAudio";
 
 let mapCache: MatchMap[] | null = null;
 
@@ -61,7 +62,15 @@ const AI_LEVELS = [{ key: "Easy", label: "Fácil" }, { key: "Normal", label: "No
 const DEFAULT_OPTIONS: MatchOptions = {
   victory: "demoralization", unitCap: 500, fog: "explored", speed: "normal", noRush: 0, prebuilt: false, civilians: "enemy",
   restrictions: [], cheats: false, shareUnitCap: false, spawn: "fixed",
+  weather: "", weatherAmount: 1, weatherSound: true, weatherVolume: 0.6,
 };
+/** Climas da partida (mod Climas, montado para o mapa escolhido). */
+const WEATHERS: { key: MatchOptions["weather"]; label: string; icon: string; hint: string }[] = [
+  { key: "", label: "Limpo", icon: "wb_sunny", hint: "O mapa como ele é." },
+  { key: "rain", label: "Chuva", icon: "water_drop", hint: "Gotas caindo no mapa, respingos no chão e na água e o chão molhado." },
+  { key: "storm", label: "Tempestade", icon: "thunderstorm", hint: "Chuva forte com vento, raios e trovões ao fundo; chão encharcado, com poças." },
+  { key: "blizzard", label: "Nevasca", icon: "ac_unit", hint: "Neve caindo com vento, rajadas de neve no chão e o mapa todo coberto de neve." },
+];
 /** Restrições de unidades do lobby do jogo (mesmas chaves e efeito). */
 const RESTRICTIONS: { key: string; label: string; hint: string }[] = [
   { key: "EXPERIMENTALS", label: "Sem experimentais", hint: "Nenhuma unidade nem fábrica experimental." },
@@ -230,10 +239,15 @@ export default function BigMatch() {
 
   const play = async () => {
     if (!map || error) return;
+    // o som do clima só pode começar dentro do clique (o navegador exige um gesto)
+    if (options.weather && options.weatherSound) weatherAudio.prime();
     // posições sorteadas: cada vaga leva junto a cor dela
     const placed = shuffleSpawns(slots.map((x, i) => ({ ...x, color: colors[i] })), options.spawn);
     const r = await run("launch", () => api.launchBigMatch({ map: map.path, size: map.size[0], slots: placed, options }), (options.spawn !== "fixed" ? t("Abrindo o jogo: {what} em {map} (posições sorteadas).", { what: sum.text, map: map.name }) : t("Abrindo o jogo: {what} em {map}.", { what: sum.text, map: map.name })));
-    if (r) await refresh();
+    if (r) {
+      if (options.weather && options.weatherSound) weatherAudio.start(options.weather, options.weatherVolume);
+      await refresh();
+    }
   };
 
   // prévia das bases: o terreno do mapa (minimapa do jogo), posição de cada base, cor e você marcado
@@ -382,6 +396,46 @@ export default function BigMatch() {
                   ))}
                 </div>
                 </div>
+              </section>
+
+              <section className="card pad">
+                <div className="card-title"><Icon name="cloud" /><h3>{t("Clima")}</h3></div>
+                <div className="bm-weather" role="radiogroup" aria-label={t("Clima da partida")}>
+                  {WEATHERS.map((w) => (
+                    <button key={w.key || "clear"} type="button" role="radio" aria-checked={options.weather === w.key}
+                      className={`bm-weather-tile ${w.key || "clear"} ${options.weather === w.key ? "on" : ""}`}
+                      onClick={() => setOpt({ weather: w.key })} title={t(w.hint)}>
+                      <Icon name={w.icon} size={26} />
+                      <span className="name">{t(w.label)}</span>
+                      <span className="hint">{t(w.hint)}</span>
+                    </button>
+                  ))}
+                </div>
+                {options.weather && (
+                  <div className="bm-weather-opts">
+                    <label className="range">
+                      <span>{options.weather === "blizzard" ? t("Quantidade de neve") : t("Quantidade de chuva")}</span>
+                      <input type="range" min={0.4} max={2} step={0.1} value={options.weatherAmount} onChange={(e) => setOpt({ weatherAmount: Number(e.target.value) })} />
+                      <output>{Math.round(options.weatherAmount * 100)}%</output>
+                    </label>
+                    <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+                      <label className="row" style={{ gap: 10 }} title={t("O launcher toca o som do clima enquanto o jogo está aberto (o jogo não tem esses sons).")}>
+                        <Switch label={t("Som do clima")} checked={options.weatherSound} onChange={(v) => { setOpt({ weatherSound: v }); if (!v) weatherAudio.stop(1); }} /> {options.weather === "storm" ? t("Som de chuva e trovões") : options.weather === "blizzard" ? t("Som de vento") : t("Som de chuva")}
+                      </label>
+                      {options.weatherSound && (
+                        <>
+                          <label className="range grow" style={{ minWidth: 220 }}>
+                            <span>{t("Volume")}</span>
+                            <input type="range" min={0} max={1} step={0.05} value={options.weatherVolume} onChange={(e) => { const v = Number(e.target.value); setOpt({ weatherVolume: v }); weatherAudio.setVolume(v); }} />
+                            <output>{Math.round(options.weatherVolume * 100)}%</output>
+                          </label>
+                          <button type="button" className="btn sm" onClick={() => options.weather && weatherAudio.preview(options.weather, options.weatherVolume)}><Icon name="volume_up" size={16} /> {t("Ouvir")}</button>
+                        </>
+                      )}
+                    </div>
+                    <span className="muted small">{t("O clima segue a câmera: chove (ou neva) onde você está olhando, em qualquer zoom, com o mesmo peso no computador. A primeira partida em cada mapa leva alguns segundos a mais para preparar o chão.")}</span>
+                  </div>
+                )}
               </section>
 
               <section className="card pad">

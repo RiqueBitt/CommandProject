@@ -320,6 +320,14 @@ export interface MatchOptions {
   shareUnitCap: boolean;
   /** posições: fixas, sorteadas dentro de cada time ou sorteadas entre todos (só o launcher usa) */
   spawn: "fixed" | "team" | "all";
+  /** clima (mod Climas): "" = limpo */
+  weather: "" | "rain" | "storm" | "blizzard";
+  /** quantidade de chuva ou neve (0,4 a 2; 1 = normal) */
+  weatherAmount: number;
+  /** som do clima tocado pelo launcher enquanto o jogo está aberto (só o launcher usa) */
+  weatherSound: boolean;
+  /** volume desse som, 0 a 1 */
+  weatherVolume: number;
 }
 export interface BigMatch { map: string; /** lado do mapa (confere o limite de jogadores) */ size?: number; slots: MatchSlot[]; options: MatchOptions }
 /** O que o log do jogo diz sobre uma partida grande que fechou no meio. */

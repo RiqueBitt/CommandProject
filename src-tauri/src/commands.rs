@@ -482,6 +482,53 @@ fn apply_game_language(ws: &mut Workspace) -> cp_core::Result<()> {
     Ok(())
 }
 
+/// Clima da partida grande: monta o mod Climas para o mapa e o clima escolhidos (ou só liga a cópia
+/// já montada igual) e o desliga quando a partida é sem clima.
+fn apply_weather(ws: &mut Workspace, b: &cp_core::bigmatch::BigMatch, app: &AppHandle) -> cp_core::Result<()> {
+    use cp_core::weather;
+    let active = ws.profiles.active().clone();
+    let Some(kind) = cp_core::bigmatch::weather_of(&b.options)? else {
+        if active.mods.iter().any(|m| m.id == weather::MOD_ID && m.enabled) {
+            ws.profiles.set_enabled(&active.id, weather::MOD_ID, false)?;
+        }
+        return Ok(());
+    };
+    // de onde vêm o código e as texturas: o jogo e os mods ligados (o mapa pode ser de um mod, e as
+    // Texturas HD trocam o chão), na ordem em que o jogo monta; nunca o próprio clima
+    let mut mod_files: Vec<PathBuf> = Vec::new();
+    for m in ws.mods()? {
+        if m.manifest.id == weather::MOD_ID || !active.mods.iter().any(|x| x.id == m.manifest.id && x.enabled) {
+            continue;
+        }
+        mod_files.extend(m.manifest.files.iter().map(|f| m.file_path(&f.name)));
+    }
+    mod_files.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()));
+    let mut sources = ws.stock_sources()?;
+    sources.extend(mod_files);
+    let amount = weather::clamp_amount(b.options.weather_amount);
+    let version = weather::build_version(&sources, &b.map, kind, amount);
+    if ws.mods()?.iter().any(|m| m.manifest.id == weather::MOD_ID && m.manifest.version == version) {
+        return ws.profiles.set_enabled(&active.id, weather::MOD_ID, true);
+    }
+    emit_progress(app, "apply", 0, 1, "Preparando o clima (chão e partículas)…");
+    let dir = ws.data_dir.join("cache").join("weather");
+    std::fs::create_dir_all(&dir).map_err(|e| cp_core::Error::io(&dir, e))?;
+    let archive = weather::build(&sources, &b.map, kind, amount, &dir.join(weather::ARCHIVE))?;
+    let import = ImportOptions {
+        id: Some(weather::MOD_ID.into()),
+        name: Some("Climas (chuva, tempestade, nevasca)".into()),
+        version: Some(version),
+        category: Some(Category::Textures),
+        description: Some(weather::describe(kind)),
+        replace: true,
+        move_source: true,
+        ..Default::default()
+    };
+    ws.import_mod(&archive, &import, true)?;
+    let _ = std::fs::remove_file(&archive);
+    Ok(())
+}
+
 /// Começa uma partida grande: monta o mod (uma vez), aplica o perfil e abre o jogo direto com as vagas.
 #[tauri::command]
 pub async fn launch_big_match(app: AppHandle, state: State<'_, AppState>, spec: cp_core::bigmatch::BigMatch) -> R<LaunchResult> {
@@ -549,6 +596,8 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
                 let active = ws.profiles.active().id.clone();
                 ws.profiles.set_enabled(&active, ID, true)?;
             }
+            // clima: o mod é montado para a partida (o mapa e o clima entram nos arquivos)
+            apply_weather(ws, b, &app2)?;
             let game = ws.game()?.clone();
             // sem o steam_appid.txt o jogo aberto direto reabre pela Steam e perde os argumentos
             let appid = game.bin_dir().join("steam_appid.txt");
@@ -576,11 +625,13 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             eprintln!("tradução do jogo não aplicada: {e}");
         }
         if big.is_none() {
-            // o mod da partida grande só serve para ela: nas partidas comuns (pelo lobby do jogo) fica de fora
-            const ID: &str = "cp-partida-grande";
+            // os mods da partida grande e do clima só servem para ela: nas partidas comuns (pelo lobby
+            // do jogo) ficam de fora
             let active = ws.profiles.active().clone();
-            if active.mods.iter().any(|m| m.id == ID && m.enabled) {
-                ws.profiles.set_enabled(&active.id, ID, false)?;
+            for id in ["cp-partida-grande", cp_core::weather::MOD_ID] {
+                if active.mods.iter().any(|m| m.id == id && m.enabled) {
+                    ws.profiles.set_enabled(&active.id, id, false)?;
+                }
             }
         }
         let applied = if ws.settings.apply_before_launch || big.is_some() {
@@ -620,6 +671,7 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 let now = crash_dumps(&bin);
                 if let Some(new) = now.iter().find(|d| !before.contains(*d)) {
+                    let _ = app6.emit("cp://game-closed", ());
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     let _ = app6.emit("cp://game-crashed", crashed(Some(new), report(&log_path)));
                     return;
@@ -628,6 +680,8 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
                 seen_running |= running;
                 // fechou (com ou sem relatório) ou nem chegou a abrir em 2 min
                 if (seen_running && !running) || (!seen_running && tick > 40) {
+                    // a interface para o som do clima (e o que mais depender do jogo aberto)
+                    let _ = app6.emit("cp://game-closed", ());
                     tokio::time::sleep(std::time::Duration::from_secs(4)).await;
                     if KILLED_BY_USER.load(std::sync::atomic::Ordering::SeqCst) {
                         return;

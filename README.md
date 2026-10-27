@@ -113,11 +113,27 @@ disponível em Sistema → Visual.
   partida (`/map` + `/cpmatch`); o mod que faz isso é montado na hora com o `SinglePlayerLaunch.lua`
   e o `GameSessionManager.lua` do seu jogo; ele só fica ligado nas partidas grandes (o Jogar comum
   o desliga), então o lobby do jogo continua igual.
+- **Climas** (Partida grande → Clima): **chuva**, **tempestade** ou **nevasca** na partida, com a
+  quantidade à escolha. Tudo acontece no mundo, não na tela: as gotas e os flocos caem de cima do
+  chão, e o terreno, os prédios e as unidades escondem cada um onde ele chega; a chuva faz anéis e
+  respingos no chão e na água. A interface do jogo informa à simulação o pedaço do mapa que a câmera
+  mostra (`SimCallback 'CPWeather'`), e um conjunto fixo de emissores (até 180) segue a câmera numa
+  grade que engrossa quando ela sobe, então continua chovendo vendo o mapa inteiro, com o **mesmo
+  custo em qualquer zoom e em qualquer tamanho de mapa**. Na chuva o chão do mapa fica **molhado**:
+  a mesma textura, mais escura e com reflexo, e poças na terra. Na nevasca o chão de qualquer mapa
+  (do jogo ou de mods, inclusive com as Texturas HD) fica **coberto de neve**, mantendo o relevo; as
+  rochas ficam com neve só nas partes altas. A tempestade tem vento, **raios** ramificados (a maioria
+  onde você está olhando) e luz só em volta de onde caem. O jogo não tem som de chuva nem de trovão:
+  o launcher toca o **som do clima** (chuva, trovões ao fundo, vento da nevasca) enquanto o jogo está
+  aberto, com volume e botão de ouvir. O mod é montado para cada mapa e clima com os arquivos do seu
+  jogo (`ScenarioUtilities.lua` com a cópia da expansão, `timer.lua`, os emissores de clima das
+  campanhas e as texturas do chão do mapa) e fica ligado só nessa partida; a primeira vez em cada
+  mapa leva alguns segundos para preparar o chão.
 - **Ação rápida** (`Ctrl+K`): jogar, aplicar, trocar de perfil ou abrir qualquer tela pelo teclado.
 
 **Hub de mods**
 - **Mods do CommandProject** no topo do hub, todos num lugar só: Primeira Pessoa, IA esperta,
-  Trapaças, Otimização, Partida grande, Texturas HD e Menu moderno. Instalar, configurar, ligar,
+  Trapaças, Otimização, Partida grande, Climas, Texturas HD e Menu moderno. Instalar, configurar, ligar,
   desligar e remover com um clique, e **Atualizar todos** (monta de novo com as opções salvas,
   depois de atualizar o jogo ou o launcher). Eles são montados no seu PC com os arquivos do próprio
   jogo: nada é baixado de servidor e o hub funciona sem internet.

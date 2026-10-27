@@ -101,6 +101,10 @@ pub struct MatchOptions {
     pub cheats: bool,
     /// quando um jogador morre, o limite de unidades dele passa para os aliados
     pub share_unit_cap: bool,
+    /// clima: vazio (limpo), `rain`, `storm` ou `blizzard` (mod Climas, montado para a partida)
+    pub weather: String,
+    /// quantidade de chuva ou neve (1 = normal; de 0,4 a 2)
+    pub weather_amount: f32,
 }
 
 /// Restrições de unidades do lobby do jogo (`/lua/ui/lobby/restrictedUnitsData.lua`), na ordem da tela.
@@ -122,6 +126,8 @@ impl Default for MatchOptions {
             restrictions: Vec::new(),
             cheats: false,
             share_unit_cap: false,
+            weather: String::new(),
+            weather_amount: 1.0,
         }
     }
 }
@@ -148,6 +154,15 @@ fn pick<'a>(value: &'a str, allowed: &[&'a str], what: &str) -> Result<&'a str> 
 
 fn color(c: i32) -> String {
     if c < 0 { String::new() } else { c.min(COLORS - 1).to_string() }
+}
+
+/// Clima escolhido (`None` = limpo).
+pub fn weather_of(o: &MatchOptions) -> Result<Option<crate::weather::Kind>> {
+    let w = o.weather.trim();
+    if w.is_empty() || w.eq_ignore_ascii_case("none") || w.eq_ignore_ascii_case("clear") {
+        return Ok(None);
+    }
+    crate::weather::Kind::parse(w).map(Some).ok_or_else(|| Error::Other(format!("clima inválido: {w}")))
 }
 
 /// Confere a partida e escreve o texto de `/cpmatch` (sem espaços: vai como um argumento só).
@@ -209,6 +224,9 @@ pub fn encode(m: &BigMatch) -> Result<String> {
     );
     if !restrictions.is_empty() {
         out.push_str(&format!(";RestrictedCategories={}", restrictions.join(",")));
+    }
+    if let Some(kind) = weather_of(o)? {
+        out.push_str(&format!(";CPWeather={}", kind.key()));
     }
     for s in &m.slots {
         // no jogo o time 1 é "sozinho" e os times de verdade começam no 2
@@ -601,6 +619,14 @@ mod tests {
         assert!(rs.contains(";CheatsEnabled=true;DoNotShareUnitCap=false;RestrictedCategories=AIR,NUKE,ALL_RESEARCH|"), "{rs}");
         r.options.restrictions = vec!["NO_SUCH".into()];
         assert!(encode(&r).is_err());
+        // clima: vai como opção da partida; vazio = limpo
+        let mut w = m.clone();
+        w.options.weather = "Storm".into();
+        assert!(encode(&w).unwrap().contains(";CPWeather=storm|"));
+        w.options.weather = "none".into();
+        assert!(!encode(&w).unwrap().contains("CPWeather"));
+        w.options.weather = "sol".into();
+        assert!(encode(&w).is_err());
         assert!(s.ends_with("|H,2,0,,|A,2,0,Normal,|A,3,0,Normal,|X|A,3,0,Normal,"), "{s}");
         assert!(!s.contains(' '));
         // limite pela memória do jogo: 5 jogadores cabem em 4096 (até 16); 17 não

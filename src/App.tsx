@@ -131,17 +131,21 @@ export default function App() {
           </Suspense>
         )}
         {page === "performance" && (
-          <Suspense fallback={<div className="page muted">{t("Carregando…")}</div>}>
-            <Performance />
-          </Suspense>
+          <div className="scroll">
+            <Suspense fallback={<div className="page muted">{t("Carregando…")}</div>}>
+              <Performance />
+            </Suspense>
+          </div>
         )}
         {page === "bigmatch" && (
-          <Suspense fallback={<div className="page muted">{t("Carregando…")}</div>}>
-            <BigMatch />
-          </Suspense>
+          <div className="scroll">
+            <Suspense fallback={<div className="page muted">{t("Carregando…")}</div>}>
+              <BigMatch />
+            </Suspense>
+          </div>
         )}
         {page === "settings" && <SettingsPage />}
-        {page === "files" && <Files />}
+        {page === "files" && <div className="scroll"><Files /></div>}
         {page === "icons" && (
           <Suspense fallback={<div className="page muted">{t("Carregando…")}</div>}>
             <Icons />
