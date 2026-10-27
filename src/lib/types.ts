@@ -335,9 +335,7 @@ export interface MatchOptions {
 export interface BigMatch { map: string; /** lado do mapa (confere o limite de jogadores) */ size?: number; slots: MatchSlot[]; options: MatchOptions; /** partida com amigos pela rede */ net?: MatchNet }
 /** Papel numa partida com amigos: o anfitrião abre a porta, quem entra conecta no endereço do convite. */
 export interface MatchNet { host: boolean; port: number; address: string; name: string }
-/** Convite de partida (código CPM1.…): sem servidor, o jogo de quem entra conecta direto no anfitrião. */
-export interface MatchInvite { address: string; host: string; game: BigMatch; mods: [string, string][] }
-export interface InviteCheck { invite: MatchInvite; missing: [string, string][]; extra: [string, string][] }
+
 /** O que o log do jogo diz sobre uma partida grande que fechou no meio. */
 export interface GameLogReport { finished: boolean; started: boolean; players: number | null; size: number | null; problems: string[]; tail: string[]; hints: string[] }
 /** O jogo fechou com erro: relatório do Windows (.mdmp), mods ligados e o log (partida grande). */
@@ -389,3 +387,14 @@ export const CATEGORY_ICON: Record<Category, string> = {
   gameplay: "sports_esports", balance: "balance", maps: "map", textures: "texture", ui: "dashboard_customize",
   models: "view_in_ar", audio: "music_note", fixes: "build", library: "inventory_2", other: "category",
 };
+
+/** Sala de convite: um caminho de rede deste PC (o IP só aparece no "avançado" de quem convida). */
+export interface PartyRoute { kind: string; label: string; ip: string }
+export interface PartyHosted { code: string; room: string; port: number; mods: [string, string][] }
+export interface PartyMod { id: string; name: string; version: string; status: "ok" | "download" | "update"; size: number }
+export interface PartyJoined {
+  host: string; game: BigMatch; mods: PartyMod[]; download: number; capacity: number; members: number; started: boolean;
+  /** endereços usados pelo launcher (nunca mostrados) */
+  room: string; address: string;
+}
+export interface PartyMember { id: number; name: string; host: boolean; ready: boolean; progress: number; talking: boolean; muted: boolean }

@@ -514,5 +514,12 @@
  "o convite não tem o endereço do anfitrião": "the invite has no host address",
  "modelo \"{t}\" não existe": "template \"{t}\" doesn't exist",
  "arquivo {file} não pode ser editado aqui": "file {file} can't be edited here",
- "{path} não é a pasta de um mod da Forja": "{path} isn't a Forja mod folder"
+ "{path} não é a pasta de um mod da Forja": "{path} isn't a Forja mod folder",
+ "não deu para descobrir o IP público": "couldn't find out the public IP",
+ "este convite é de uma versão antiga do launcher: peça um novo para quem convidou": "this invite is from an older launcher version: ask the host for a new one",
+ "isso não é um convite do CommandProject (começa com CPM2.)": "this isn't a CommandProject invite (it starts with CPM2.)",
+ "este convite não vale mais: peça um novo para quem convidou": "this invite is no longer valid: ask the host for a new one",
+ "não deu para falar com a sala de {h}: ela pode ter fechado, ou vocês não estão na mesma rede/VPN (ou a porta não está aberta no roteador dele)": "couldn't reach {h}'s room: it may have closed, or you're not on the same network/VPN (or the port isn't open on their router)",
+ "não deu para abrir a sala na porta {port}: {e}. Feche outro programa que use a porta ou escolha outra": "couldn't open the room on port {port}: {e}. Close any other program using the port or choose another",
+ "{n}: nome de arquivo inválido": "{n}: invalid file name"
 }

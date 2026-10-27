@@ -1423,6 +1423,7 @@ pub fn ambient_sounds(sources: &[PathBuf], scenario: &str) -> (String, String) {
     (find(&["skyhigh"]).unwrap_or_else(|| WIND.into()), find(&["generic_ocean", "_ocean"]).unwrap_or_else(|| WATER.into()))
 }
 
+#[cfg(test)]
 fn sim_code(emitters: &[Emitter]) -> String {
     sim_code_with(emitters, &("".into(), "".into()))
 }

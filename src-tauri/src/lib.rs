@@ -5,6 +5,7 @@ mod commands;
 mod creator_cmds;
 mod files_cmds;
 mod forja_cmds;
+mod party;
 mod perf_cmds;
 
 use cp_core::hub::HubIndex;
@@ -29,6 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             let resources = app.path().resource_dir().ok();
             // em desenvolvimento os recursos ficam na raiz do repositório
@@ -131,10 +133,13 @@ pub fn run() {
             commands::big_match_preview,
             commands::kill_game,
             commands::launch_big_match,
-            commands::big_match_address,
-            commands::big_match_invite,
-            commands::big_match_read_invite,
-            commands::big_match_match_mods,
+            party::party_routes,
+            party::party_public_ip,
+            party::party_host,
+            party::party_stop,
+            party::party_read,
+            party::party_prepare,
+            party::party_leave,
             commands::fingerprint,
             commands::export_sync_code,
             commands::inspect_sync_code,

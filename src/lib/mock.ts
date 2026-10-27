@@ -823,17 +823,13 @@ export async function mock<R>(cmd: string, a: Record<string, unknown>): Promise<
     case "forja_dev_mods": return r([{ id: "vida-dupla", name: "Vida dupla", path: "C:/CommandProject/forja-dev/forja/vida-dupla", files: ["mod.json", "blueprints.lua", "sim.lua", "ui.lua", "lib/util.lua"] }]);
     case "forja_read_file": return r(forjaFiles[String(a.file)] ?? "");
     case "forja_write_file": forjaFiles[String(a.file)] = String(a.text); return r(a.reload ? forjaOv() : null);
-    // ---------------------------------------------------------------- convites (simulados)
-    case "big_match_address": return r("192.168.0.10");
-    case "big_match_invite": return r("CPM1." + btoa(unescape(encodeURIComponent(JSON.stringify({ address: a.address, host: a.name, game: a.spec, mods: [] })))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""));
-    case "big_match_read_invite": {
-      const code = String(a.code).replace(/\s+/g, "");
-      const i = code.indexOf("CPM1.");
-      if (i < 0) throw new Error("isso não é um convite do CommandProject (começa com CPM1.)");
-      const inv = JSON.parse(decodeURIComponent(escape(atob(code.slice(i + 5).replace(/-/g, "+").replace(/_/g, "/")))));
-      return r({ invite: inv, missing: [["cp-trapacas", "Trapaças"]], extra: [] });
-    }
-    case "big_match_match_mods": return r([]);
+    // ---------------------------------------------------------------- sala de convite (simulada)
+    case "party_routes": return r([{ kind: "radmin", label: "Radmin VPN", ip: "26.10.20.30" }, { kind: "lan", label: "Mesma rede (casa ou LAN)", ip: "192.168.0.10" }]);
+    case "party_public_ip": return r("200.100.50.25");
+    case "party_host": return r({ code: "CPM2.q8Zt1mXv0aB3kLwPn7sYcR2uE9hJfD4gT6oQ", room: "ws://127.0.0.1:18777/room?t=tk&k=hk&name=Rique", port: a.port, mods: [["vida-dupla", "Vida dupla"]] });
+    case "party_stop": case "party_leave": return r(undefined);
+    case "party_read": return r({ host: "Ana", game: { map: "/maps/Gigante/Gigante_scenario.lua", size: 4096, slots: [{ kind: "you", team: 1, faction: 1, ai: "Normal", color: -1 }, { kind: "guest", team: 1, faction: 2, ai: "Normal", color: -1 }, { kind: "ai", team: 2, faction: 0, ai: "Hard", color: -1 }], options: {} }, mods: [{ id: "vida-dupla", name: "Vida dupla", version: "1.0.0", status: "download", size: 3_400_000 }], download: 3_400_000, capacity: 3, members: 2, started: false, room: "ws://127.0.0.1:9/room", address: "x" });
+    case "party_prepare": await progress("party", ["Baixando Vida dupla do PC de Ana…", "Pronto"]); return r(undefined);
     default:
       throw new Error(`mock: comando não simulado: ${cmd}`);
   }

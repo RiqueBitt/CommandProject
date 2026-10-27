@@ -328,66 +328,6 @@ pub fn launch_args(m: &BigMatch) -> Result<Vec<String>> {
     Ok(args)
 }
 
-// ---------------------------------------------------------------- convites
-
-/// Começo de todo código de convite (com a versão do formato).
-pub const INVITE_PREFIX: &str = "CPM1.";
-
-/// Convite para uma partida com amigos: tudo o que o amigo precisa para entrar, num texto que se
-/// copia e cola (sem servidor nem banco de dados: o jogo de quem entra conecta direto no anfitrião).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "camelCase", default)]
-pub struct Invite {
-    /// `ip:porta` do anfitrião
-    pub address: String,
-    /// nome do anfitrião
-    pub host: String,
-    /// a partida (mapa, vagas, opções e clima), sem a parte de rede
-    pub game: BigMatch,
-    /// mods ligados no anfitrião (id, nome): os do amigo precisam bater
-    pub mods: Vec<(String, String)>,
-}
-
-/// Escreve o código do convite.
-pub fn encode_invite(inv: &Invite) -> Result<String> {
-    use base64::Engine;
-    let mut inv = inv.clone();
-    inv.game.net = None;
-    launch_args(&inv.game)?;
-    let json = serde_json::to_vec(&inv).map_err(|e| Error::Other(e.to_string()))?;
-    Ok(format!("{INVITE_PREFIX}{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json)))
-}
-
-/// Lê um código de convite (aceita espaços e quebras de linha de quem colou).
-pub fn decode_invite(code: &str) -> Result<Invite> {
-    use base64::Engine;
-    let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
-    let body = code
-        .find(INVITE_PREFIX)
-        .map(|i| &code[i + INVITE_PREFIX.len()..])
-        .ok_or_else(|| Error::Other("isso não é um convite do CommandProject (começa com CPM1.)".into()))?;
-    let body = body.trim_end_matches('=');
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(body)
-        .map_err(|_| Error::Other("convite incompleto: copie o código inteiro".into()))?;
-    let mut inv: Invite = serde_json::from_slice(&bytes).map_err(|_| Error::Other("convite inválido".into()))?;
-    inv.game.net = None;
-    launch_args(&inv.game)?;
-    if inv.address.trim().is_empty() {
-        return Err(Error::Other("o convite não tem o endereço do anfitrião".into()));
-    }
-    Ok(inv)
-}
-
-/// Endereço deste PC na rede (o que os amigos usam na mesma rede ou VPN): descoberto sem mandar
-/// nada (um socket UDP "conectado" só escolhe a placa de rede).
-pub fn local_address() -> Option<String> {
-    let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    s.connect("8.8.8.8:80").ok()?;
-    let ip = s.local_addr().ok()?.ip();
-    (!ip.is_unspecified() && !ip.is_loopback()).then(|| ip.to_string())
-}
-
 // ---------------------------------------------------------------- log do jogo
 
 /// Nome do log que o jogo grava nas partidas grandes (`/log`), na pasta de dados do launcher.
@@ -714,20 +654,13 @@ mod tests {
     }
 
     #[test]
-    fn invites_round_trip() {
+    fn friends_slots_and_net_args() {
         let game = BigMatch {
             map: "/maps/X/X_scenario.lua".into(),
             slots: vec![slot(SlotKind::You, 1), slot(SlotKind::Guest, 1), slot(SlotKind::Guest, 2), slot(SlotKind::Ai, 2)],
             ..Default::default()
         };
         assert!(encode(&game).unwrap().contains("|H,2,0,,|G,2,0,,|G,3,0,,|A,3,0,Normal,"));
-        let inv = Invite { address: "10.0.0.5:15000".into(), host: "Ana".into(), game: game.clone(), mods: vec![("a".into(), "A".into())] };
-        let code = encode_invite(&inv).unwrap();
-        assert!(code.starts_with(INVITE_PREFIX));
-        // colado com quebras de linha e texto em volta
-        let pasted = format!("entra aí: {}\n{}", &code[..20], &code[20..]);
-        assert_eq!(decode_invite(&pasted).unwrap(), inv);
-        assert!(decode_invite("CPM1.abc").is_err() && decode_invite("oi").is_err());
         // anfitrião e quem entra
         let mut host = game.clone();
         host.net = Some(Net { host: true, port: 15000, address: String::new(), name: "Ana Paula".into() });
