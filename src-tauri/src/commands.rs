@@ -488,8 +488,10 @@ fn apply_weather(ws: &mut Workspace, b: &cp_core::bigmatch::BigMatch, app: &AppH
     use cp_core::weather;
     let active = ws.profiles.active().clone();
     let Some(kind) = cp_core::bigmatch::weather_of(&b.options)? else {
-        if active.mods.iter().any(|m| m.id == weather::MOD_ID && m.enabled) {
-            ws.profiles.set_enabled(&active.id, weather::MOD_ID, false)?;
+        for id in [weather::MOD_ID, weather::MODELS_ID] {
+            if active.mods.iter().any(|m| m.id == id && m.enabled) {
+                ws.profiles.set_enabled(&active.id, id, false)?;
+            }
         }
         return Ok(());
     };
@@ -497,7 +499,7 @@ fn apply_weather(ws: &mut Workspace, b: &cp_core::bigmatch::BigMatch, app: &AppH
     // Texturas HD trocam o chão), na ordem em que o jogo monta; nunca o próprio clima
     let mut mod_files: Vec<PathBuf> = Vec::new();
     for m in ws.mods()? {
-        if m.manifest.id == weather::MOD_ID || !active.mods.iter().any(|x| x.id == m.manifest.id && x.enabled) {
+        if m.manifest.id == weather::MOD_ID || m.manifest.id == weather::MODELS_ID || !active.mods.iter().any(|x| x.id == m.manifest.id && x.enabled) {
             continue;
         }
         mod_files.extend(m.manifest.files.iter().map(|f| m.file_path(&f.name)));
@@ -505,6 +507,42 @@ fn apply_weather(ws: &mut Workspace, b: &cp_core::bigmatch::BigMatch, app: &AppH
     mod_files.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()));
     let mut sources = ws.stock_sources()?;
     sources.extend(mod_files);
+    // unidades e prédios no clima: não dependem do mapa, montados uma vez por clima (molhado ou neve)
+    let models_version = weather::models_version(&sources, kind);
+    if ws.mods()?.iter().any(|m| m.manifest.id == weather::MODELS_ID && m.manifest.version == models_version) {
+        ws.profiles.set_enabled(&active.id, weather::MODELS_ID, true)?;
+    } else {
+        emit_progress(app, "apply", 0, 1, "Preparando o clima nas unidades e prédios (só na primeira vez)…");
+        let dir = ws.data_dir.join("cache").join("weather");
+        std::fs::create_dir_all(&dir).map_err(|e| cp_core::Error::io(&dir, e))?;
+        match weather::build_models(&sources, kind, &dir.join(weather::MODELS_ARCHIVE)) {
+            Ok((archive, count)) => {
+                let import = ImportOptions {
+                    id: Some(weather::MODELS_ID.into()),
+                    name: Some("Climas: unidades e prédios".into()),
+                    version: Some(models_version),
+                    category: Some(Category::Textures),
+                    description: Some(format!(
+                        "{} em {count} unidades e prédios: {}. Liga só nas partidas grandes com clima.",
+                        if kind == weather::Kind::Blizzard { "Neve" } else { "Molhado" },
+                        if kind == weather::Kind::Blizzard { "neve acumulada só nas partes de cima (telhados e topos), sem cobrir a cor do time" } else { "mais brilho nas partes expostas à chuva, conforme o material" }
+                    )),
+                    replace: true,
+                    move_source: true,
+                    ..Default::default()
+                };
+                ws.import_mod(&archive, &import, true)?;
+                let _ = std::fs::remove_file(&archive);
+            }
+            Err(e) => {
+                // a partida segue com o clima; só os modelos ficam como estão
+                eprintln!("clima nos modelos não montado: {e}");
+                if active.mods.iter().any(|m| m.id == weather::MODELS_ID && m.enabled) {
+                    ws.profiles.set_enabled(&active.id, weather::MODELS_ID, false)?;
+                }
+            }
+        }
+    }
     let amount = weather::clamp_amount(b.options.weather_amount);
     let version = weather::build_version(&sources, &b.map, kind, amount);
     if ws.mods()?.iter().any(|m| m.manifest.id == weather::MOD_ID && m.manifest.version == version) {
@@ -628,7 +666,7 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             // os mods da partida grande e do clima só servem para ela: nas partidas comuns (pelo lobby
             // do jogo) ficam de fora
             let active = ws.profiles.active().clone();
-            for id in ["cp-partida-grande", cp_core::weather::MOD_ID] {
+            for id in ["cp-partida-grande", cp_core::weather::MOD_ID, cp_core::weather::MODELS_ID] {
                 if active.mods.iter().any(|m| m.id == id && m.enabled) {
                     ws.profiles.set_enabled(&active.id, id, false)?;
                 }

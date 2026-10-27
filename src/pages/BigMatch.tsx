@@ -62,7 +62,7 @@ const AI_LEVELS = [{ key: "Easy", label: "Fácil" }, { key: "Normal", label: "No
 const DEFAULT_OPTIONS: MatchOptions = {
   victory: "demoralization", unitCap: 500, fog: "explored", speed: "normal", noRush: 0, prebuilt: false, civilians: "enemy",
   restrictions: [], cheats: false, shareUnitCap: false, spawn: "fixed",
-  weather: "", weatherAmount: 1, weatherSound: true, weatherVolume: 0.6,
+  weather: "", weatherAmount: 1, weatherSound: true, weatherVolume: 0.45,
 };
 /** Climas da partida (mod Climas, montado para o mapa escolhido). */
 const WEATHERS: { key: MatchOptions["weather"]; label: string; icon: string; hint: string }[] = [
@@ -420,7 +420,7 @@ export default function BigMatch() {
                     </label>
                     <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
                       <label className="row" style={{ gap: 10 }} title={t("O launcher toca o som do clima enquanto o jogo está aberto (o jogo não tem esses sons).")}>
-                        <Switch label={t("Som do clima")} checked={options.weatherSound} onChange={(v) => { setOpt({ weatherSound: v }); if (!v) weatherAudio.stop(1); }} /> {options.weather === "storm" ? t("Som de chuva e trovões") : options.weather === "blizzard" ? t("Som de vento") : t("Som de chuva")}
+                        <Switch label={t("Som do clima")} checked={options.weatherSound} onChange={(v) => { setOpt({ weatherSound: v }); if (!v) weatherAudio.stop(1); }} /> {options.weather === "storm" ? t("Som de chuva e vento") : options.weather === "blizzard" ? t("Som de vento") : t("Som de chuva")}
                       </label>
                       {options.weatherSound && (
                         <>
@@ -433,7 +433,7 @@ export default function BigMatch() {
                         </>
                       )}
                     </div>
-                    <span className="muted small">{t("O clima segue a câmera: chove (ou neva) onde você está olhando, em qualquer zoom, com o mesmo peso no computador. A primeira partida em cada mapa leva alguns segundos a mais para preparar o chão.")}</span>
+                    <span className="muted small">{t("O clima segue a câmera: chove (ou neva) onde você está olhando, em qualquer zoom, com o mesmo peso no computador. Começa fraco e engrossa no primeiro minuto. Os trovões tocam no jogo, vindos de onde cada raio cai. A primeira partida em cada mapa leva alguns segundos a mais para preparar o chão (e, na primeira vez de cada clima, as unidades).")}</span>
                   </div>
                 )}
               </section>

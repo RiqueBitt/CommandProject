@@ -1,6 +1,7 @@
-// Som do clima da partida grande: chuva, tempestade (com trovões ao fundo) ou nevasca (vento), feito
-// na hora pelo launcher enquanto o jogo está aberto. O jogo não tem esses sons; tocar daqui evita mexer
-// nos bancos de som dele. Tudo sintetizado (ruído filtrado e envelopes), sem arquivos de áudio.
+// Som do clima da partida grande: chuva, chuva forte com vento (tempestade) ou vento da nevasca, feito
+// na hora pelo launcher enquanto o jogo está aberto, baixo e sempre variando. O jogo não tem som de
+// chuva nem de vento forte. Os trovões não são daqui: tocam dentro do jogo, com sons do próprio jogo,
+// no lugar de cada raio (som 3D, com a distância e a direção dele, depois do clarão).
 //
 // `prime()` precisa ser chamado no clique (o navegador só libera o áudio com um gesto do usuário);
 // `start()` começa e `stop()` para com um fade. O launcher para sozinho quando o jogo fecha.
@@ -34,7 +35,7 @@ export function prime() {
 }
 
 /** Ruído em loop: branco, rosa (mais grave) ou marrom (bem grave). */
-function noise(c: AudioContext, color: "white" | "pink" | "brown", seconds = 4): AudioBufferSourceNode {
+function noise(c: AudioContext, color: "white" | "pink" | "brown", seconds = 9): AudioBufferSourceNode {
   const len = Math.floor(c.sampleRate * seconds);
   const buf = c.createBuffer(2, len, c.sampleRate);
   for (let ch = 0; ch < 2; ch++) {
@@ -108,85 +109,47 @@ function wobble(c: AudioContext, param: AudioParam, rate: number, depth: number)
   nodes.push(lfo, amt);
 }
 
-/** Trovão: um estalo curto (às vezes) e o ronco grave que rola e some. */
-function thunder(c: AudioContext, near: boolean) {
-  if (!master) return;
-  const t = c.currentTime + 0.05;
-  const src = noise(c, "brown", 8);
-  const lp = filter(c, "lowpass", near ? 420 : 180, 0.5);
-  const g = gain(c, 0);
-  src.connect(lp);
-  lp.connect(g);
-  g.connect(master);
-  const peak = near ? 1.4 : 0.8;
-  const length = 4 + Math.random() * 4;
-  g.gain.setValueAtTime(0, t);
-  g.gain.linearRampToValueAtTime(peak, t + (near ? 0.08 : 0.6 + Math.random() * 0.8));
-  // o ronco rola: alguns repiques no caminho
-  let at = t + 0.8;
-  while (at < t + length - 1) {
-    g.gain.linearRampToValueAtTime(peak * (0.35 + Math.random() * 0.5), at);
-    at += 0.3 + Math.random() * 0.9;
-  }
-  g.gain.exponentialRampToValueAtTime(0.0001, t + length);
-  lp.frequency.setValueAtTime(near ? 900 : 260, t);
-  lp.frequency.exponentialRampToValueAtTime(110, t + length);
-  src.start(t);
-  src.stop(t + length + 0.2);
-  if (near) {
-    // estalo do raio perto
-    const crack = noise(c, "white", 1);
-    const hp = filter(c, "highpass", 1800, 0.6);
-    const cg = gain(c, 0);
-    crack.connect(hp);
-    hp.connect(cg);
-    cg.connect(master);
-    cg.gain.setValueAtTime(0.9, t);
-    cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
-    crack.start(t);
-    crack.stop(t + 0.4);
-  }
-}
-
-function scheduleThunder(c: AudioContext) {
-  const next = () => {
-    const wait = 7000 + Math.random() * 16000;
-    timers.push(window.setTimeout(() => {
-      if (current !== "storm") return;
-      thunder(c, Math.random() < 0.3);
-      next();
-    }, wait));
+/** Variação natural: o volume de uma camada vai mudando devagar para alvos sorteados (rajadas de
+ * chuva e de vento), sem ciclo fixo, então o som nunca se repete do mesmo jeito. */
+function drift(c: AudioContext, g: GainNode, base: number, spread: number, minS: number, maxS: number) {
+  const step = () => {
+    if (!current) return;
+    const target = Math.max(0, base * (1 + (Math.random() * 2 - 1) * spread));
+    const secs = minS + Math.random() * (maxS - minS);
+    g.gain.setTargetAtTime(target, c.currentTime, secs / 3);
+    timers.push(window.setTimeout(step, secs * 1000));
   };
-  next();
+  step();
 }
 
 function build(c: AudioContext, kind: WeatherKind) {
+  // volumes baixos de propósito: é um fundo, o som do jogo continua na frente
   if (kind === "rain" || kind === "storm") {
     const heavy = kind === "storm";
     // chiado da chuva no chão
-    layer(c, "white", [filter(c, "highpass", 500), filter(c, "lowpass", heavy ? 9000 : 7000)], heavy ? 0.32 : 0.22);
-    // corpo da chuva (gotas grossas)
-    layer(c, "pink", [filter(c, "bandpass", heavy ? 900 : 1200, 0.5)], heavy ? 0.45 : 0.28);
+    const hiss = layer(c, "white", [filter(c, "highpass", 650), filter(c, "lowpass", heavy ? 7500 : 6000)], heavy ? 0.1 : 0.07);
+    drift(c, hiss, heavy ? 0.1 : 0.07, 0.35, 4, 11);
+    // corpo da chuva (gotas grossas), mais grave
+    const body = layer(c, "pink", [filter(c, "bandpass", heavy ? 850 : 1100, 0.5)], heavy ? 0.14 : 0.09);
+    drift(c, body, heavy ? 0.14 : 0.09, 0.4, 5, 14);
     if (heavy) {
-      // vento da tempestade
-      const wind = layer(c, "pink", [filter(c, "bandpass", 380, 0.9)], 0.22);
-      wobble(c, wind.gain, 0.07, 0.12);
-      // ronco distante contínuo
-      layer(c, "brown", [filter(c, "lowpass", 140)], 0.18);
-      scheduleThunder(c);
+      // vento da tempestade: rajadas sem ritmo
+      const band = filter(c, "bandpass", 360, 0.9);
+      const wind = layer(c, "pink", [band], 0.07);
+      drift(c, wind, 0.07, 0.8, 3, 9);
+      wobble(c, band.frequency, 0.04, 90);
     }
   } else {
-    // nevasca: vento forte que sobe e desce, assobio alto e neve batendo
-    const band = filter(c, "bandpass", 520, 0.8);
-    const wind = layer(c, "pink", [band], 0.42);
-    wobble(c, wind.gain, 0.09, 0.22);
-    wobble(c, band.frequency, 0.05, 260);
-    const whistle = filter(c, "bandpass", 1500, 6);
-    const w2 = layer(c, "white", [whistle], 0.05);
-    wobble(c, w2.gain, 0.13, 0.04);
-    wobble(c, whistle.frequency, 0.03, 500);
-    layer(c, "white", [filter(c, "highpass", 3500)], 0.05);
-    layer(c, "brown", [filter(c, "lowpass", 200)], 0.2);
+    // nevasca: vento que sobe e desce sem ritmo, um assobio bem leve e o chiado da neve
+    const band = filter(c, "bandpass", 480, 0.8);
+    const wind = layer(c, "pink", [band], 0.13);
+    drift(c, wind, 0.13, 0.7, 3, 10);
+    wobble(c, band.frequency, 0.05, 220);
+    const whistle = filter(c, "bandpass", 1400, 6);
+    const w2 = layer(c, "white", [whistle], 0.015);
+    drift(c, w2, 0.015, 0.9, 4, 12);
+    wobble(c, whistle.frequency, 0.03, 400);
+    layer(c, "white", [filter(c, "highpass", 3800)], 0.015);
   }
 }
 
@@ -202,7 +165,7 @@ export function start(kind: WeatherKind, volume: number) {
   build(c, kind);
   // entra devagar (o jogo leva alguns segundos para abrir)
   master.gain.setValueAtTime(0, c.currentTime);
-  master.gain.linearRampToValueAtTime(Math.max(0, Math.min(1, volume)) * 0.8, c.currentTime + 6);
+  master.gain.linearRampToValueAtTime(Math.max(0, Math.min(1, volume)) * 0.8, c.currentTime + 20);
   void onEvent("cp://game-closed", () => stop()).then((off) => {
     if (current) unlisten = off;
     else off();
@@ -256,7 +219,6 @@ export function preview(kind: WeatherKind, volume: number, seconds = 6) {
     master.gain.cancelScheduledValues(ctx.currentTime);
     master.gain.setValueAtTime(0, ctx.currentTime);
     master.gain.linearRampToValueAtTime(Math.max(0, Math.min(1, volume)) * 0.8, ctx.currentTime + 0.8);
-    if (kind === "storm") thunder(ctx, true);
   }
   const mine = current;
   timers.push(window.setTimeout(() => { if (current === mine) stop(1.5); }, seconds * 1000));
