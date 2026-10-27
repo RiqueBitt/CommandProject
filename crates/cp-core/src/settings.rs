@@ -21,6 +21,9 @@ pub struct Settings {
     /// Ao fechar o jogo, devolve a pasta ao estado original (útil para jogar sem mods
     /// pela Steam depois, ou para manter a verificação de arquivos da Steam limpa).
     pub restore_on_exit: bool,
+    /// Mods só pelo launcher: os mods entram no jogo só quando ele é aberto pelo launcher; ao fechar
+    /// o jogo (ou o launcher) a pasta volta ao original, então o jogo aberto pela Steam fica sem mods.
+    pub mods_only_launcher: bool,
     /// Índices de hub de mods (JSON). O primeiro é tratado como o hub principal.
     pub hub_urls: Vec<String>,
     /// Python para o Estúdio de Mapas (vazio = embutido ou o do sistema).
@@ -67,6 +70,7 @@ impl Default for Settings {
             launch_args: vec![],
             apply_before_launch: true,
             restore_on_exit: false,
+            mods_only_launcher: true,
             hub_urls: vec![],
             python_path: None,
             check_mod_updates: true,

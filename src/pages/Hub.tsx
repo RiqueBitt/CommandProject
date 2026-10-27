@@ -5,7 +5,6 @@ import { locale, t, tr } from "../lib/i18n";
 import { errorText, fmtBytes, useStore } from "../lib/store";
 import { CATEGORY_LABEL, type Category, type HubIndex, type HubMod } from "../lib/types";
 import { CATEGORY_ICON } from "../lib/types";
-import CpModsHub from "../components/CpModsHub";
 
 type Item = { mod: HubMod; index: HubIndex };
 type Sort = "downloads" | "rating" | "recent" | "name";
@@ -103,10 +102,9 @@ export default function Hub() {
       <div className="scroll"><div className="page">
         <h1 className="page-title">{t("Hub de mods")}</h1>
         <p className="muted" style={{ marginTop: -6 }}>{t("Instale, configure, ligue e desligue os mods sem mexer nos arquivos do jogo: o launcher cuida de tudo ao jogar.")}</p>
-        <CpModsHub />
         <section>
           <div className="section-head"><Icon name="public" /><h2>{t("Mods da comunidade")}</h2></div>
-          {offline && <Notice kind="info">{t("O modo local está ligado: índices de mods da comunidade não são consultados. Os mods do CommandProject acima funcionam sem internet.")}</Notice>}
+          {offline && <Notice kind="info">{t("O modo local está ligado: índices de mods da comunidade não são consultados. Os recursos do launcher funcionam sem internet.")}</Notice>}
           <div className="card"><Empty icon="store" title={t("Nenhum índice da comunidade")} action={<button className="btn" onClick={() => useStore.getState().openSettings("hub")}>{t("Abrir configurações")}</button>}>
             {t("Opcional: adicione o endereço de um índice de mods em Configurações para ver mods feitos por outras pessoas aqui também.")}
           </Empty></div>
@@ -164,7 +162,6 @@ export default function Hub() {
           </div>
         </div>
         <div className="page">
-          <CpModsHub />
           <div className="section-head" style={{ marginBottom: -8 }}><Icon name="public" /><h2>{t("Mods da comunidade")}</h2></div>
           {errors.map((e) => <Notice key={e.url + e.message} kind="err">{e.url && <b>{e.url}: </b>}{tr(e.message)}</Notice>)}
           {!query && !cats.length && hero && (

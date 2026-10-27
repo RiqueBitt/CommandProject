@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { UNITS_ENABLED } from "../lib/features";
+import { isLauncherMod, UNITS_ENABLED } from "../lib/features";
 import { api, openUrl, windowAction } from "../lib/api";
 import { switchProfile, useStore, type Page } from "../lib/store";
 import { KIND_META, useTabs } from "../lib/tabs";
@@ -168,6 +168,7 @@ export function Rail() {
         {UNITS_ENABLED && <AreaItem label={t("Tropas")} icon="smart_toy" active={area("unit")} onClick={() => goCreate("unit")} />}
         <AreaItem label={t("Modelos")} icon="view_in_ar" active={area("model") || page === "studio"} onClick={() => goCreate("model")} />
         <AreaItem label={t("Ícones")} icon="photo_camera" active={page === "icons"} onClick={() => go("icons")} />
+        <AreaItem label={t("Recursos")} icon="verified" active={page === "features"} onClick={() => go("features")} />
         <AreaItem label={t("Mods")} icon="extension" active={page === "library" || page === "hub"} onClick={() => go("library")} />
         <AreaItem label={t("Forja")} icon="construction" active={page === "forja"} onClick={() => go("forja")} />
         <AreaItem label={t("Rede")} icon="hub" active={page === "multiplayer"} onClick={() => go("multiplayer")} off={offline} />
@@ -179,7 +180,7 @@ export function Rail() {
           const h = hueOf(p.id);
           const active = p.id === profiles.active;
           return (
-            <RailItem key={p.id} label={t("Perfil {name} ({n} mods)", { name: p.name, n: p.mods.filter((m) => m.enabled).length })} selected={active && (page === "home" || page === "library")}
+            <RailItem key={p.id} label={t("Perfil {name} ({n} mods)", { name: p.name, n: p.mods.filter((m) => m.enabled && !isLauncherMod(m.id)).length })} selected={active && (page === "home" || page === "library")}
               onClick={() => void switchProfile(p.id, p.name, active)}>
               <span className="instance-tile" style={{ ["--tile-a" as string]: `hsl(${h} 42% 38%)`, ["--tile-b" as string]: `hsl(${(h + 35) % 360} 45% 18%)` }}>
                 {monogram(p.name)}
@@ -290,6 +291,7 @@ export function CommandPalette() {
       { id: "purge", label: t("Voltar a pasta do jogo ao original"), icon: "restore", hint: t("ação"), run: async () => { await run("purge", () => api.purge(), t("Pasta do jogo restaurada.")); await refresh(); } },
       nav("home", t("Perfil ativo"), "sports_esports"),
       nav("library", t("Mods do perfil"), "extension"),
+      nav("features", t("Recursos do launcher: Climas, Remaster HD, Menu moderno, IA esperta…"), "verified"),
       nav("hub", t("Hub de mods"), "store"),
       nav("forja", t("Forja: carregador de mods e criar mods"), "construction"),
       nav("bigmatch", t("Partida grande: mais de 8 jogadores, times à vontade"), "groups"),
@@ -316,7 +318,7 @@ export function CommandPalette() {
         run: () => { try { localStorage.setItem("cp-bigmatch-map", m.path); } catch { /* ok */ } go("bigmatch"); },
       })),
       ...mods.map<Cmd>((m) => ({
-        id: "mod-" + m.manifest.id, label: m.enabled ? t("Desligar {name}", { name: m.manifest.name }) : t("Ligar {name}", { name: m.manifest.name }), icon: m.enabled ? "toggle_on" : "toggle_off", hint: "mod",
+        id: "mod-" + m.manifest.id, label: m.enabled ? t("Desligar {name}", { name: m.manifest.name }) : t("Ligar {name}", { name: m.manifest.name }), icon: m.enabled ? "toggle_on" : "toggle_off", hint: isLauncherMod(m.manifest.id) ? t("recurso") : "mod",
         run: async () => {
           const ok = await run("toggle:" + m.manifest.id, () => api.setModEnabled(m.manifest.id, !m.enabled), (m.enabled ? t("{name} desligado.", { name: m.manifest.name }) : t("{name} ligado.", { name: m.manifest.name })));
           if (ok !== undefined) await refreshMods();

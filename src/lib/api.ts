@@ -129,6 +129,7 @@ export const api = {
   setBaselineKind: (name: string, kind: "stock" | "unmanaged") => call<void>("set_baseline_kind", { name, kind }),
   adoptUnmanaged: (name: string) => call<T.Manifest>("adopt_unmanaged", { name }),
   conflicts: () => call<T.ConflictReport>("conflicts"),
+  ensureVanilla: () => call<boolean>("ensure_vanilla"),
   launchGame: () => call<{ plan: unknown; applied?: T.Plan | null; watching: boolean }>("launch_game"),
   killGame: () => call<number>("kill_game"),
   bigMatchMaps: () => call<T.MatchMap[]>("big_match_maps"),

@@ -6,6 +6,15 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.36.0",
+    title: "Mods só pelo launcher e recursos já incluídos",
+    items: [
+      { icon: "sports_esports", title: "Mods só pelo launcher", text: "Os mods entram no jogo só quando você joga pelo launcher. Abrindo o Supreme Commander 2 direto pela Steam, ele fica original, sem mods.", page: "settings" },
+      { icon: "verified", title: "Recursos do launcher", text: "Partida grande, Climas, Remaster HD, Menu moderno, IA esperta, Otimização e os outros já vêm com o launcher, numa tela própria: é só ligar.", page: "features" },
+      { icon: "extension", title: "Aba Mods mais limpa", text: "A aba Mods mostra só os seus mods e as Trapaças.", page: "library" },
+    ],
+  },
+  {
     version: "0.35.0",
     title: "Sala de convite com voz, mar e ilhas e um editor de mapas mais esperto",
     items: [

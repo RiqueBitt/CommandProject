@@ -47,7 +47,17 @@ pub fn run() {
             });
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // mods só pelo launcher: ao fechar, a pasta do jogo volta ao original (com o jogo aberto,
+            // o launcher espera ele fechar escondido)
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if !commands::on_close(window.app_handle()) {
+                    api.prevent_close();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            commands::ensure_vanilla,
             commands::mod_export_files,
             perf_cmds::perf_report,
             perf_cmds::perf_process,

@@ -28,6 +28,7 @@ const Performance = lazy(() => import("./pages/Performance"));
 const Icons = lazy(() => import("./pages/Icons"));
 const BigMatch = lazy(() => import("./pages/BigMatch"));
 const Forja = lazy(() => import("./pages/Forja"));
+const Features = lazy(() => import("./pages/Features"));
 
 export default function App() {
   const page = useStore((s) => s.page);
@@ -49,6 +50,8 @@ export default function App() {
       try {
         const recovered = await api.recover();
         if (recovered) toast("info", t("Uma operação interrompida foi resolvida: {detail}", { detail: tr(recovered) }));
+        // mods só pelo launcher: o que ficou na pasta do jogo (launcher fechado no meio) sai agora
+        void api.ensureVanilla().then((cleaned) => { if (cleaned) { toast("info", t("A pasta do jogo voltou ao original: os mods só entram quando você joga pelo launcher.")); void refresh(); } }).catch(() => {});
         const info = await api.appInfo();
         useStore.setState({ info });
         await refresh();
@@ -129,6 +132,7 @@ export default function App() {
         {page === "home" && <Home />}
         {page === "library" && <Library />}
         {page === "hub" && <Hub />}
+        {page === "features" && <Features />}
         {page === "multiplayer" && <Multiplayer />}
         {page === "studio" && (
           <Suspense fallback={<div className="page muted">{t("Carregando o Estúdio…")}</div>}>

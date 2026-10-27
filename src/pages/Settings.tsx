@@ -146,9 +146,15 @@ export default function SettingsPage() {
               </div>
               <MemoryLimit />
               <div className="setting-row">
-                <div className="txt"><b>{t("Voltar ao original quando o jogo fechar")}</b><span>{t("Útil se você também joga sem o launcher ou usa “Verificar integridade” da Steam.")}</span></div>
-                <Switch checked={s.restoreOnExit} onChange={(v) => commit({ ...s, restoreOnExit: v })} label={t("Restaurar ao fechar")} />
+                <div className="txt"><b>{t("Mods só pelo launcher")}</b><span>{t("Os mods entram no jogo só quando ele é aberto pelo launcher. Ao fechar o jogo (ou o launcher), a pasta volta ao original: aberto direto pela Steam, o jogo fica sem mods.")}</span></div>
+                <Switch checked={s.modsOnlyLauncher} onChange={(v) => commit({ ...s, modsOnlyLauncher: v })} label={t("Mods só pelo launcher")} />
               </div>
+              {!s.modsOnlyLauncher && (
+                <div className="setting-row">
+                  <div className="txt"><b>{t("Voltar ao original quando o jogo fechar")}</b><span>{t("Útil se você também joga sem o launcher ou usa “Verificar integridade” da Steam.")}</span></div>
+                  <Switch checked={s.restoreOnExit} onChange={(v) => commit({ ...s, restoreOnExit: v })} label={t("Restaurar ao fechar")} />
+                </div>
+              )}
             </div>
           </section>
 

@@ -34,7 +34,9 @@ disponível em Sistema → Visual.
 **Jogar**
 - Encontra o jogo sozinho (bibliotecas da Steam, GOG ou pasta escolhida).
 - Botão **Jogar**: aplica o perfil de mods e abre pela Steam (`steam://rungameid/40100`) ou pelo executável.
-- Opção de **voltar ao original** automaticamente quando o jogo fecha.
+- **Mods só pelo launcher** (ligado por padrão): os mods entram no jogo só quando ele é aberto pelo
+  launcher. Quando o jogo (ou o launcher) fecha, a pasta volta ao original — aberto direto pela
+  Steam, o Supreme Commander 2 fica sem mods.
 
 **Gerenciar mods (um "Forge" para o SC2)**
 - Importa `.scd`, `.zip` (com vários `.scd` + `mod.json`), pastas soltas (`lua/`, `textures/`… viram um `.scd`)
@@ -194,12 +196,12 @@ disponível em Sistema → Visual.
 - **Arte do jogo no launcher** (Configurações → Visual): cabeçalhos e janelas com as imagens dos
   menus do próprio SC2, lidas da sua instalação (nada do jogo vem com o launcher).
 
-**Hub de mods**
-- **Mods do CommandProject** no topo do hub, todos num lugar só: Primeira Pessoa, IA esperta,
-  Trapaças, Otimização, Partida grande, Climas, Texturas HD e Menu moderno. Instalar, configurar, ligar,
-  desligar e remover com um clique, e **Atualizar todos** (monta de novo com as opções salvas,
-  depois de atualizar o jogo ou o launcher). Eles são montados no seu PC com os arquivos do próprio
-  jogo: nada é baixado de servidor e o hub funciona sem internet.
+**Recursos do launcher**
+- Tela própria (**Recursos**, na barra lateral) com o que já vem com o CommandProject: Primeira Pessoa,
+  IA esperta, Otimização, Partida grande, Climas, Remaster HD, Menu moderno e o jogo em português.
+  Não precisa instalar: é só ligar (na primeira vez o recurso é montado no seu PC com os arquivos do
+  jogo, sem baixar nada), e **Atualizar todos** remonta com as opções salvas. Esses recursos não
+  aparecem na aba **Mods**, que mostra só os seus mods e as **Trapaças**.
 - **Primeira Pessoa** (novo): selecione uma unidade e aperte **F5** — a câmera do motor do jogo
   fica colada nela, na altura dela, e vira junto quando ela anda; F5 de novo, terceira pessoa
   atrás da unidade, seguindo pelo terreno (gira e dá zoom com os controles normais); com várias

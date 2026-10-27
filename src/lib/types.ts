@@ -64,6 +64,8 @@ export interface Settings {
   launchArgs: string[];
   applyBeforeLaunch: boolean;
   restoreOnExit: boolean;
+  /** os mods só entram no jogo aberto pelo launcher */
+  modsOnlyLauncher: boolean;
   hubUrls: string[];
   pythonPath?: string | null;
   checkModUpdates: boolean;

@@ -686,7 +686,7 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             Some(p) => p,
             None => ws.launch_plan()?,
         };
-        Ok((plan, applied, ws.settings.restore_on_exit, ws.settings.memory_mb(), ws.settings.game_priority.clone(), ws.settings.game_no_throttle, log_path))
+        Ok((plan, applied, ws.settings.restore_on_exit || ws.settings.mods_only_launcher, ws.settings.memory_mb(), ws.settings.game_priority.clone(), ws.settings.game_no_throttle, log_path))
     })
     .await?;
     match &plan {
@@ -2464,4 +2464,71 @@ pub async fn mod_export_files(state: State<'_, AppState>, id: String, dir: Strin
         Ok(out)
     })
     .await
+}
+
+
+// ---------------------------------------------------------------- mods só pelo launcher
+
+/// Há mods do launcher na pasta do jogo agora?
+fn deployed(ws: &Workspace) -> bool {
+    std::fs::read(ws.data_dir.join("deploy").join("journal.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<cp_core::deploy::Journal>(&b).ok())
+        .is_some_and(|j| !j.entries.is_empty())
+}
+
+/// Com "mods só pelo launcher": se o jogo não está aberto e ficaram mods na pasta (o launcher fechou
+/// no meio, ou o perfil foi aplicado sem jogar), devolve a pasta ao original. `true` = limpou.
+#[tauri::command]
+pub async fn ensure_vanilla(app: AppHandle, state: State<'_, AppState>) -> R<bool> {
+    let running = tauri::async_runtime::spawn_blocking(cp_core::game::is_running).await.unwrap_or(true);
+    if running {
+        return Ok(false);
+    }
+    with_ws(&state.ws, move |ws| {
+        if !ws.settings.mods_only_launcher || !deployed(ws) {
+            return Ok(false);
+        }
+        ws.purge(&mut |p: Progress| emit_progress(&app, "purge", p.step, p.total, p.message))?;
+        Ok(true)
+    })
+    .await
+}
+
+/// Ao fechar o launcher: com o jogo aberto, o launcher some da tela e espera o jogo fechar para
+/// tirar os mods; sem o jogo aberto, tira na hora. `true` = pode fechar já.
+pub(crate) fn on_close(app: &AppHandle) -> bool {
+    use tauri::Manager;
+    let Some(state) = app.try_state::<AppState>() else { return true };
+    let ws = state.ws.clone();
+    let wants = {
+        let g = ws.lock().unwrap_or_else(|p| p.into_inner());
+        g.settings.mods_only_launcher && deployed(&g)
+    };
+    if !wants {
+        return true;
+    }
+    if !cp_core::game::is_running() {
+        let mut g = ws.lock().unwrap_or_else(|p| p.into_inner());
+        let _ = g.purge(&mut |_| {});
+        return true;
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+    }
+    let app2 = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+            if !tauri::async_runtime::spawn_blocking(cp_core::game::is_running).await.unwrap_or(true) {
+                break;
+            }
+        }
+        {
+            let mut g = ws.lock().unwrap_or_else(|p| p.into_inner());
+            let _ = g.purge(&mut |_| {});
+        }
+        app2.exit(0);
+    });
+    false
 }

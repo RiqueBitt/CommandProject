@@ -1,5 +1,4 @@
-import MenuThemeCard from "../components/MenuThemeCard";
-import ShadersCard from "../components/ShadersCard";
+import { userMods } from "../lib/features";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -15,7 +14,9 @@ import { CATEGORY_ICON } from "../lib/types";
 export { CATEGORY_ICON };
 
 export default function Library() {
-  const mods = useStore((s) => s.mods);
+  const allMods = useStore((s) => s.mods);
+  // os recursos do launcher (Partida grande, Climas, Remaster HD, Menu moderno…) ficam na tela deles
+  const mods = useMemo(() => userMods(allMods), [allMods]);
   const d = useStore((s) => s.dashboard);
   const busyConflicts = useStore((s) => s.busy.conflicts);
   const { run, refreshMods, go } = useStore.getState();
@@ -88,15 +89,19 @@ export default function Library() {
           </div>
           <div className="row">
             <button className="btn text" disabled={busyConflicts} onClick={async () => setConflicts((await run("conflicts", () => api.conflicts())) ?? null)}><Icon name={busyConflicts ? "hourglass_top" : "compare_arrows"} /> {busyConflicts ? t("Analisando…") : t("Conflitos")}</button>
-            <button className="btn tonal" onClick={() => go("hub")} title={t("IA esperta, Trapaças, Otimização e os outros mods do CommandProject")}><Icon name="store" /> {t("Hub de mods")}</button>
+            <button className="btn tonal" onClick={() => go("hub")} title={t("Mods da comunidade")}><Icon name="store" /> {t("Hub de mods")}</button>
             <button className="btn text" onClick={() => setLink(true)}><Icon name="link" /> {t("De um link")}</button>
             <button className="btn" onClick={() => importFrom(true)}><Icon name="folder_open" /> {t("Pasta")}</button>
             <button className="btn primary" onClick={() => importFrom(false)}><Icon name="add" /> {t("Importar .scd ou .zip")}</button>
           </div>
         </div>
 
-        <ShadersCard />
-        <MenuThemeCard />
+        <div className="card pad row lib-cheats" style={{ gap: 12, alignItems: "center" }}>
+          <Icon name="auto_fix_high" size={26} style={{ color: "var(--primary)" }} />
+          <div className="grow"><b>{t("Trapaças")}</b><p className="muted small">{t("Massa, energia e pesquisa infinitas, modo deus e construção rápida, com um menu na partida (F3).")}</p></div>
+          <button className="btn" onClick={() => setCheats(true)}><Icon name={mods.some((m) => m.manifest.id === "cp-trapacas") ? "tune" : "download"} /> {mods.some((m) => m.manifest.id === "cp-trapacas") ? t("Configurar") : t("Instalar")}</button>
+        </div>
+        <p className="faint small">{t("Partida grande, Climas, Remaster HD, Menu moderno, IA esperta e os outros recursos do launcher ficam em")} <a href="#" onClick={(e) => { e.preventDefault(); go("features"); }}>{t("Recursos do launcher")}</a>.</p>
 
         <div className="row wrap" style={{ gap: 12 }}>
           <div className="search-bar" style={{ width: 340 }}>

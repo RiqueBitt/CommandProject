@@ -1,3 +1,4 @@
+import { isLauncherMod } from "../lib/features";
 import { useEffect, useRef, useState } from "react";
 import CrashNotice from "../components/CrashNotice";
 import { ConflictsModal, InstallLinkModal } from "../components/dialogs";
@@ -49,7 +50,8 @@ export default function Home() {
   const pending = d.pending;
   const changes = pending.add.length + pending.replace.length + pending.remove.length + pending.restore.length;
   const working = busy.apply || busy.purge || busy.launch;
-  const active = mods.filter((m) => m.enabled);
+  // os recursos do launcher não contam como "mods" (ficam em Recursos)
+  const active = mods.filter((m) => m.enabled && !isLauncherMod(m.manifest.id));
   const count = (cat: string) => active.filter((m) => m.manifest.category === cat).length;
 
   const chooseFolder = async () => {
