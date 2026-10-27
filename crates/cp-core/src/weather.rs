@@ -127,6 +127,13 @@ fn rain_drop() -> Rgba {
     sprite(n, [222, 232, 245], |x, y| (-(x / width).powi(2)).exp() * smooth(-1.0, 0.55, y) * (1.0 - smooth(0.82, 1.0, y)))
 }
 
+/// Outro risco (camada extra): mais longo e fino, com a cabeça mais marcada.
+fn rain_drop2() -> Rgba {
+    let n = 128;
+    let width = 1.6 / n as f32;
+    sprite(n, [215, 228, 245], |x, y| (-(x / width).powi(2)).exp() * (0.35 * smooth(-1.0, 0.7, y) + 0.65 * smooth(0.55, 0.85, y)) * (1.0 - smooth(0.9, 1.0, y)))
+}
+
 /// O mesmo risco mais grosso e curto, para a câmera de longe (senão some, mais fino que um pixel).
 fn rain_drop_far() -> Rgba {
     let n = 128;
@@ -169,6 +176,16 @@ fn snowflake() -> Rgba {
     sprite(64, [252, 253, 255], |x, y| {
         let r = (x * x + y * y).sqrt();
         ((-(r / 0.42).powi(2)).exp() * 0.85 + (-(r / 0.16).powi(2)).exp() * 0.35).min(1.0)
+    })
+}
+
+/// Floco pequeno e nítido (camada extra), com um brilho de seis pontas bem leve.
+fn snowflake2() -> Rgba {
+    sprite(32, [255, 255, 255], |x, y| {
+        let r = (x * x + y * y).sqrt();
+        let a = y.atan2(x);
+        let star = (3.0 * a).cos().abs().powf(8.0) * (-(r / 0.6).powi(2)).exp() * 0.35;
+        ((-(r / 0.3).powi(2)).exp() * 0.95 + star).min(1.0)
     })
 }
 
@@ -302,10 +319,12 @@ fn ramp(rgb: [u8; 3], alpha: impl Fn(f32) -> f32) -> Rgba {
 pub fn particle_images() -> Vec<(&'static str, Rgba)> {
     vec![
         ("cp_rain_drop", rain_drop()),
+        ("cp_rain_drop2", rain_drop2()),
         ("cp_rain_far", rain_drop_far()),
         ("cp_rain_ripple", ripple()),
         ("cp_rain_splash", splash()),
         ("cp_snowflake", snowflake()),
+        ("cp_snowflake2", snowflake2()),
         ("cp_snow_gust", snow_gust()),
         ("cp_bolt_1", bolt(1)),
         ("cp_bolt_2", bolt(2)),
@@ -352,22 +371,37 @@ struct Emitter {
 fn level_path(group: &str, i: usize) -> String {
     if i == 1 {
         let first = match group {
-            "fall" => "rain/weather_rainfall_01",
-            "snow" => "snow/weather_snow_falling_01",
-            _ => "snow/weather_snow_drifting_01",
+            "fall" => Some("rain/weather_rainfall_01"),
+            "snow" => Some("snow/weather_snow_falling_01"),
+            "drift" => Some("snow/weather_snow_drifting_01"),
+            _ => None,
         };
-        return format!("{EMIT_DIR}{first}_emit.bp");
+        if let Some(first) = first {
+            return format!("{EMIT_DIR}{first}_emit.bp");
+        }
     }
-    let n = match group {
-        "fall" => i - 1,
-        "snow" => i + 4,
-        _ => i + 9,
-    };
-    format!("{EMIT_DIR}clouds/weather_stratus_{n:02}_emit.bp")
+    // os mesmos nomes que o Lua monta (CPWeatherBP)
+    match group {
+        "fall" => format!("{EMIT_DIR}clouds/weather_stratus_{:02}_emit.bp", i - 1),
+        "snow" => format!("{EMIT_DIR}clouds/weather_stratus_{:02}_emit.bp", i + 4),
+        "drift" => format!("{EMIT_DIR}clouds/weather_stratus_{:02}_emit.bp", i + 9),
+        "fall2" => format!("{EMIT_DIR}clouds/weather_stratus_{:02}_emit.bp", i + 15),
+        _ => match i {
+            1 => format!("{EMIT_DIR}clouds/weather_stratus_22_emit.bp"),
+            2 => format!("{EMIT_DIR}clouds/weather_stratus_23_emit.bp"),
+            n => format!("{EMIT_DIR}clouds/weather_cumulus_snow_{:02}_emit.bp", n - 2),
+        },
+    }
 }
 
 fn tex(name: &str) -> String {
     format!("/textures/particles/{name}.dds")
+}
+
+/// O motor sorteia a posição de cada partícula em [valor - faixa, valor + faixa] (medido no jogo com
+/// um emissor de teste: uma linha de pontos com a mesma largura para os dois lados do centro).
+fn span(center: f32, half: f32) -> (f32, f32) {
+    (center, half)
 }
 
 fn emitters(kind: Kind, amount: f32) -> Vec<Emitter> {
@@ -376,52 +410,70 @@ fn emitters(kind: Kind, amount: f32) -> Vec<Emitter> {
     let mut out = Vec::new();
     for (idx, f) in LEVELS.iter().copied().enumerate() {
         let i = idx + 1;
-        // um pouco além da célula: as vizinhas se misturam, sem bordas retas
-        let spread = 0.6 * CELL * f;
+        // um pouco além da célula (0,7 do lado para cada lado do centro): as vizinhas se misturam,
+        // sem bordas retas nem buracos
+        let half = 0.7 * CELL * f;
         if kind.wet() {
-            let size = pick(1.6, 1.3) * f;
-            out.push(Emitter {
-                path: level_path("fall", i),
-                // de longe (níveis 3 em diante) o risco grosso
-                texture: tex(if i >= 3 { "cp_rain_far" } else { "cp_rain_drop" }),
-                ramp: tex(if i >= 3 { "cp_ramp_rain_far" } else { "cp_ramp_rain" }),
-                flags: vec![("AlignRotation", 1.0), ("LODCutoff", -1.0), ("EmitIfVisible", 0.0), ("Blendmode", 3.0)],
-                curves: vec![
-                    ("EmitRateCurve", pick(20.0, 13.0) * amount, 0.0),
-                    ("LifetimeCurve", 13.0, 2.0),
-                    ("VelocityCurve", pick(3.2, 2.6) * f, 0.3 * f),
-                    ("XDirectionCurve", pick(0.42, 0.06), 0.05),
-                    ("YDirectionCurve", -1.0, 0.0),
-                    ("ZDirectionCurve", pick(0.08, 0.0), 0.04),
-                    // o vento leva a gota de lado: ela nasce um pouco contra o vento
-                    ("XPosCurve", pick(-8.0, -1.0) * f, spread),
-                    ("YPosCurve", 17.0 * f, 13.0 * f),
-                    ("ZPosCurve", 0.0, spread),
-                    ("StartSizeCurve", size, 0.3 * f),
-                    ("EndSizeCurve", size, 0.3 * f),
-                ],
-            });
+            // o vento leva a gota de lado: ela nasce um pouco contra o vento
+            let (xp, xr) = span(pick(-8.0, -1.0) * f, half);
+            let (zp, zr) = span(0.0, half);
+            // camada principal e a extra (outro risco, outro tamanho, outra velocidade), que vai e
+            // volta com o tempo
+            for (layer, rate, tex_near, size, speed) in [
+                ("fall", pick(14.0, 9.0), "cp_rain_drop", pick(1.6, 1.3), pick(3.2, 2.6)),
+                ("fall2", pick(10.0, 6.0), "cp_rain_drop2", pick(2.0, 1.6), pick(3.6, 3.0)),
+            ] {
+                out.push(Emitter {
+                    path: level_path(layer, i),
+                    // de longe (níveis 3 em diante) o risco grosso
+                    texture: tex(if i >= 3 { "cp_rain_far" } else { tex_near }),
+                    ramp: tex(if i >= 3 { "cp_ramp_rain_far" } else { "cp_ramp_rain" }),
+                    flags: vec![("AlignRotation", 1.0), ("LODCutoff", -1.0), ("EmitIfVisible", 0.0), ("Blendmode", 3.0)],
+                    curves: vec![
+                        ("EmitRateCurve", rate * amount, 0.0),
+                        ("LifetimeCurve", 13.0, 2.0),
+                        ("VelocityCurve", speed * f, 0.3 * f),
+                        ("XDirectionCurve", pick(0.42, 0.06), 0.05),
+                        ("YDirectionCurve", -1.0, 0.0),
+                        ("ZDirectionCurve", pick(0.08, 0.0), 0.04),
+                        ("XPosCurve", xp, xr),
+                        ("YPosCurve", 17.0 * f, 13.0 * f),
+                        ("ZPosCurve", zp, zr),
+                        ("StartSizeCurve", size * f, 0.3 * f),
+                        ("EndSizeCurve", size * f, 0.3 * f),
+                    ],
+                });
+            }
         } else {
-            out.push(Emitter {
-                path: level_path("snow", i),
-                texture: tex("cp_snowflake"),
-                ramp: tex("cp_ramp_snow"),
-                flags: vec![("LODCutoff", -1.0), ("EmitIfVisible", 0.0), ("Blendmode", 0.0)],
-                curves: vec![
-                    ("EmitRateCurve", 4.5 * amount, 0.0),
-                    ("LifetimeCurve", 75.0, 15.0),
-                    ("VelocityCurve", 0.42 * f, 0.08 * f),
-                    ("XDirectionCurve", 0.8, 0.25),
-                    ("YDirectionCurve", -1.0, 0.12),
-                    ("ZDirectionCurve", 0.12, 0.25),
-                    ("XPosCurve", -10.0 * f, spread),
-                    ("YPosCurve", 17.0 * f, 13.0 * f),
-                    ("ZPosCurve", 0.0, spread),
-                    ("StartSizeCurve", 0.2 * f, 0.06 * f),
-                    ("EndSizeCurve", 0.2 * f, 0.06 * f),
-                    ("InitialRotationCurve", 0.0, 180.0),
-                ],
-            });
+            let (xp, xr) = span(-10.0 * f, half);
+            let (zp, zr) = span(0.0, half);
+            // flocos grandes e macios e, na camada extra, pequenos e mais rápidos
+            for (layer, rate, texture, size, speed) in [
+                ("snow", 3.2, "cp_snowflake", 0.22, 0.42),
+                ("snow2", 2.6, "cp_snowflake2", 0.13, 0.55),
+            ] {
+                out.push(Emitter {
+                    path: level_path(layer, i),
+                    texture: tex(texture),
+                    ramp: tex("cp_ramp_snow"),
+                    flags: vec![("LODCutoff", -1.0), ("EmitIfVisible", 0.0), ("Blendmode", 0.0)],
+                    curves: vec![
+                        ("EmitRateCurve", rate * amount, 0.0),
+                        ("LifetimeCurve", 75.0, 15.0),
+                        ("VelocityCurve", speed * f, 0.08 * f),
+                        ("XDirectionCurve", 0.8, 0.25),
+                        ("YDirectionCurve", -1.0, 0.12),
+                        ("ZDirectionCurve", 0.12, 0.25),
+                        ("XPosCurve", xp, xr),
+                        ("YPosCurve", 17.0 * f, 13.0 * f),
+                        ("ZPosCurve", zp, zr),
+                        ("StartSizeCurve", size * f, size * 0.3 * f),
+                        ("EndSizeCurve", size * f, size * 0.3 * f),
+                        ("InitialRotationCurve", 0.0, 360.0),
+                        ("RotationRateCurve", -30.0, 60.0),
+                    ],
+                });
+            }
             // neve levantada pelo vento rente ao chão
             out.push(Emitter {
                 path: level_path("drift", i),
@@ -435,56 +487,67 @@ fn emitters(kind: Kind, amount: f32) -> Vec<Emitter> {
                     ("XDirectionCurve", 1.0, 0.15),
                     ("YDirectionCurve", 0.0, 0.02),
                     ("ZDirectionCurve", 0.25, 0.2),
-                    ("XPosCurve", -10.0 * f, spread),
+                    ("XPosCurve", xp, xr),
                     // alto o bastante para o quadro não entrar no chão (o terreno cortaria a borda reta)
                     ("YPosCurve", 3.2 * f, 0.8 * f),
-                    ("ZPosCurve", 0.0, spread),
+                    ("ZPosCurve", zp, zr),
                     ("StartSizeCurve", 2.2 * f, 0.6 * f),
                     ("EndSizeCurve", 5.0 * f, 1.2 * f),
-                    ("InitialRotationCurve", 0.0, 180.0),
-                    ("RotationRateCurve", 0.0, 4.0),
+                    ("InitialRotationCurve", 0.0, 360.0),
+                    ("RotationRateCurve", -4.0, 8.0),
                 ],
             });
         }
     }
     if kind.wet() {
-        // respingos só perto do chão (nível 1), em toda célula que não seja penhasco
-        out.push(Emitter {
-            path: format!("{EMIT_DIR}dust/weather_sand_01_emit.bp"),
-            texture: tex("cp_rain_ripple"),
-            ramp: tex("cp_ramp_ripple"),
-            flags: vec![("Flat", 1.0), ("LODCutoff", 170.0), ("Blendmode", 3.0)],
-            curves: vec![
-                ("EmitRateCurve", pick(11.0, 7.0) * amount, 0.0),
-                ("LifetimeCurve", 7.0, 2.0),
-                ("VelocityCurve", 0.0, 0.0),
-                ("XPosCurve", 0.0, 12.0),
-                ("YPosCurve", 0.12, 0.0),
-                ("ZPosCurve", 0.0, 12.0),
-                ("StartSizeCurve", 0.06, 0.02),
-                ("EndSizeCurve", 0.55, 0.15),
-                ("InitialRotationCurve", 0.0, 180.0),
-            ],
-        });
+        // respingos só perto do chão (nível 1): quatro emissores por célula, um em cada quarto, na
+        // altura do chão daquele quarto (o Lua desloca cada um). Sempre ligados, como a chuva: com o
+        // teste de visibilidade e o corte por distância do motor, células inteiras ficavam sem
+        // respingo. Um pouco além do quarto (6,5 para cada lado, o quarto tem 10): os vizinhos se
+        // misturam e a borda não aparece. A quantidade é a da célula inteira (o Lua divide por 4)
+        // No nível 2 (a câmera um pouco mais alta) também há anéis, um pouco maiores e mais espaçados
+        // (a célula tem 40, o quarto 20): sem eles, os pingos no chão sumiam de uma vez ao afastar
+        let (p, r) = span(0.0, 6.5);
+        for (path, half, grow, rate) in [("dust/weather_sand_01", 6.5, 1.0, 1.0), ("dust/weather_sand_02", 13.0, 1.5, 2.4)] {
+            let (p, r) = if half == 6.5 { (p, r) } else { span(0.0, half) };
+            out.push(Emitter {
+                path: format!("{EMIT_DIR}{path}_emit.bp"),
+                texture: tex("cp_rain_ripple"),
+                ramp: tex("cp_ramp_ripple"),
+                flags: vec![("Flat", 1.0), ("LODCutoff", -1.0), ("EmitIfVisible", 0.0), ("Blendmode", 3.0)],
+                curves: vec![
+                    ("EmitRateCurve", pick(22.0, 14.0) * rate * amount, 0.0),
+                    ("LifetimeCurve", 7.0, 2.0),
+                    ("VelocityCurve", 0.0, 0.0),
+                    ("XPosCurve", p, r),
+                    ("YPosCurve", 0.12 * grow, 0.0),
+                    ("ZPosCurve", p, r),
+                    ("StartSizeCurve", 0.06 * grow, 0.02 * grow),
+                    ("EndSizeCurve", 0.55 * grow, 0.15 * grow),
+                    ("InitialRotationCurve", 0.0, 360.0),
+                ],
+            });
+        }
         out.push(Emitter {
             path: format!("{EMIT_DIR}dust/weather_redrock_01_emit.bp"),
             texture: tex("cp_rain_splash"),
             ramp: tex("cp_ramp_splash"),
-            flags: vec![("LODCutoff", 120.0), ("Blendmode", 3.0)],
+            flags: vec![("LODCutoff", -1.0), ("EmitIfVisible", 0.0), ("Blendmode", 3.0)],
             curves: vec![
-                ("EmitRateCurve", pick(8.0, 5.0) * amount, 0.0),
+                ("EmitRateCurve", pick(10.0, 6.0) * amount, 0.0),
                 ("LifetimeCurve", 3.0, 1.0),
                 ("VelocityCurve", 0.02, 0.0),
                 ("YDirectionCurve", 1.0, 0.0),
-                ("XPosCurve", 0.0, 12.0),
+                ("XPosCurve", p, r),
                 ("YPosCurve", 0.05, 0.0),
-                ("ZPosCurve", 0.0, 12.0),
+                ("ZPosCurve", p, r),
                 ("StartSizeCurve", 0.15, 0.04),
                 ("EndSizeCurve", 0.22, 0.05),
             ],
         });
-        // raio: um quadro do céu ao chão (o pé no ponto atingido), um só, que pisca e some
-        for k in 1..=3 {
+        // raio: um quadro do céu ao chão (o pé no ponto atingido), um só, que pisca e some; três
+        // formas, cada uma de um tamanho
+        for (k, size) in [(1, 28.0), (2, 36.0), (3, 46.0)] {
             out.push(Emitter {
                 path: format!("{EMIT_DIR}clouds/weather_cirrus_256_{k:02}_emit.bp"),
                 texture: tex(&format!("cp_bolt_{k}")),
@@ -497,9 +560,9 @@ fn emitters(kind: Kind, amount: f32) -> Vec<Emitter> {
                     ("LifetimeCurve", 6.0, 0.0),
                     ("VelocityCurve", 0.001, 0.0),
                     ("YDirectionCurve", -1.0, 0.0),
-                    ("YPosCurve", 17.0, 0.0),
-                    ("StartSizeCurve", 34.0, 0.0),
-                    ("EndSizeCurve", 34.0, 0.0),
+                    ("YPosCurve", size / 2.0, 0.0),
+                    ("StartSizeCurve", size, 0.0),
+                    ("EndSizeCurve", size, 0.0),
                 ],
             });
         }
@@ -605,48 +668,51 @@ fn tile_noise(w: u32, h: u32, seed: u32, freqs: &[(i32, f32)]) -> Vec<f32> {
     out
 }
 
-const PUDDLE_FREQS: &[(i32, f32)] = &[(4, 1.0), (6, 0.6), (9, 0.35), (13, 0.2)];
-const PATCH_FREQS: &[(i32, f32)] = &[(2, 1.0), (3, 0.6), (5, 0.35), (7, 0.2)];
-
-/// Quanto de poça cada tipo de chão aceita (rocha e neve escorrem, terra junta água).
-fn puddle_weight(g: Ground) -> f32 {
-    match g {
-        Ground::Snow => 0.0,
-        Ground::Rock => 0.15,
-        Ground::Grass => 0.4,
-        Ground::Soil => 1.0,
-    }
+/// Média e desvio da luminosidade de uma imagem (o claro e o escuro da própria textura).
+fn lum_stats(img: &Rgba) -> (Vec<f32>, f32, f32) {
+    let count = (img.pixels.len() / 4).max(1) as f32;
+    let lums: Vec<f32> = img.pixels.chunks_exact(4).map(|p| (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0).collect();
+    let mean = lums.iter().sum::<f32>() / count;
+    let std = (lums.iter().map(|l| (l - mean).powi(2)).sum::<f32>() / count).sqrt().max(1e-3);
+    (lums, mean, std)
 }
 
-/// Cor do chão molhado: mais escura e um pouco mais saturada, e ainda mais escura nas poças.
+// Tudo o que muda no chão sai do claro e escuro da própria textura (a água junta nas fendas, a neve
+// fica nas partes altas): nada de manchas novas, que se repetiriam a cada ladrilho e formariam um
+// padrão visível de longe.
+
+/// Cor do chão molhado: mais escura e um pouco mais saturada, e mais ainda nas fendas e partes
+/// baixas (as escuras), onde a água fica. Cada tipo de chão escurece de um jeito.
 fn wet_color(img: &mut Rgba, g: Ground) {
-    let dark = match g {
-        Ground::Snow => 0.85,
-        Ground::Rock => 0.62,
-        Ground::Grass => 0.66,
-        Ground::Soil => 0.58,
+    let (dark, pool) = match g {
+        Ground::Snow => (0.86, 0.05),
+        Ground::Rock => (0.66, 0.12),
+        Ground::Grass => (0.70, 0.08),
+        Ground::Soil => (0.60, 0.18),
     };
-    let noise = tile_noise(img.width, img.height, 7, PUDDLE_FREQS);
-    let weight = puddle_weight(g);
-    img.pixels.par_chunks_exact_mut(4).zip(noise.par_iter()).for_each(|(p, n)| {
-        let puddle = smooth(0.66, 0.8, *n) * weight;
+    let (lums, mean, std) = lum_stats(img);
+    img.pixels.par_chunks_exact_mut(4).zip(lums.par_iter()).for_each(|(p, l)| {
+        let low = smooth(0.0, -1.6, (l - mean) / std);
         let lum = (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0;
         for c in p.iter_mut().take(3) {
-            let sat = lum + (*c as f32 - lum) * 1.18;
-            *c = (sat * dark * (1.0 - 0.25 * puddle)).clamp(0.0, 255.0) as u8;
+            let sat = lum + (*c as f32 - lum) * 1.15;
+            *c = (sat * dark * (1.0 - pool * low)).clamp(0.0, 255.0) as u8;
         }
     });
 }
 
-/// Brilho do chão molhado: reflexo forte (o "espelho" da água), quase total nas poças.
+/// Brilho do chão molhado: o reflexo de uma película de água. Terra e rocha brilham muito (a água
+/// fica lisa nelas), a grama menos (as folhas quebram o reflexo).
 fn wet_shine(img: &mut Rgba, g: Ground) {
-    let noise = tile_noise(img.width, img.height, 7, PUDDLE_FREQS);
-    let weight = puddle_weight(g);
-    img.pixels.par_chunks_exact_mut(4).zip(noise.par_iter()).for_each(|(p, n)| {
-        let puddle = smooth(0.66, 0.8, *n) * weight;
+    let (gain, add) = match g {
+        Ground::Snow => (1.6, 30.0),
+        Ground::Rock => (2.4, 55.0),
+        Ground::Grass => (1.9, 38.0),
+        Ground::Soil => (2.7, 65.0),
+    };
+    img.pixels.par_chunks_exact_mut(4).for_each(|p| {
         for c in p.iter_mut().take(3) {
-            let s = (*c as f32 * 2.6 + 60.0).min(255.0);
-            *c = (s * (1.0 - puddle) + 240.0 * puddle).clamp(0.0, 255.0) as u8;
+            *c = (*c as f32 * gain + add).min(255.0) as u8;
         }
     });
 }
@@ -657,20 +723,12 @@ fn snow_color(img: &mut Rgba, g: Ground) {
     if g == Ground::Snow {
         return;
     }
-    let count = (img.pixels.len() / 4).max(1) as f32;
-    let lums: Vec<f32> = img.pixels.chunks_exact(4).map(|p| (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0).collect();
-    let mean = lums.iter().sum::<f32>() / count;
-    let std = (lums.iter().map(|l| (l - mean).powi(2)).sum::<f32>() / count).sqrt().max(1e-3);
-    let noise = tile_noise(img.width, img.height, 5, PATCH_FREQS);
+    let (lums, mean, std) = lum_stats(img);
     // um pouco azulada: a luz dos mapas costuma ser quente e deixaria a neve esverdeada
     const SNOW: [f32; 3] = [236.0, 241.0, 250.0];
-    img.pixels.par_chunks_exact_mut(4).zip(lums.par_iter().zip(noise.par_iter())).for_each(|(p, (l, n))| {
+    img.pixels.par_chunks_exact_mut(4).zip(lums.par_iter()).for_each(|(p, l)| {
         let detail = (l - mean) / std;
-        let cover = if g == Ground::Rock {
-            smooth(-0.6, 0.5, detail + 0.6 * (n - 0.5)) * 0.85
-        } else {
-            0.92 + 0.08 * smooth(0.3, 0.7, *n)
-        };
+        let cover = if g == Ground::Rock { smooth(-0.9, 0.4, detail) * 0.85 } else { 0.94 };
         for (k, c) in p.iter_mut().take(3).enumerate() {
             let snow = SNOW[k] * (1.0 + 0.12 * detail);
             *c = (*c as f32 * 0.85 * (1.0 - cover) + snow * cover).clamp(0.0, 255.0) as u8;
@@ -701,6 +759,54 @@ fn snow_relief(img: &mut Rgba, g: Ground) {
         p[0] = (128.0 + (p[0] as f32 - 128.0) * keep) as u8;
         p[1] = (128.0 + (p[1] as f32 - 128.0) * keep) as u8;
     });
+}
+
+// ------------------------------------------------------------------ água
+
+/// Texturas das ondas da água (mapas de normais do motor, iguais em todos os mapas).
+const WATER_NORMALS: &[&str] = &[
+    "/textures/Engine/waves.dds",
+    "/textures/Engine/waves000.dds",
+    "/textures/Engine/waves001.dds",
+    "/textures/Engine/waves7.dds",
+    "/textures/Engine/wavesbump.dds",
+];
+/// Ondinhas finas que a chuva faz na superfície (frequências altas: somem de longe, como na água real).
+const RIPPLE_FREQS: &[(i32, f32)] = &[(14, 1.0), (21, 0.7), (29, 0.45)];
+
+/// Água agitada: as ondas mais fundas (o desvio das normais cresce `strength` vezes) e, por cima,
+/// as ondinhas da chuva. Emenda nas bordas como a original (ela se repete na água inteira).
+fn stir_water(img: &mut Rgba, strength: f32, ripples: f32) {
+    let (w, h) = (img.width, img.height);
+    let noise = tile_noise(w, h, 13, RIPPLE_FREQS);
+    let at = |x: i64, y: i64| noise[(y.rem_euclid(h as i64) * w as i64 + x.rem_euclid(w as i64)) as usize];
+    img.pixels.par_chunks_exact_mut(4).enumerate().for_each(|(i, p)| {
+        let (x, y) = ((i as u32 % w) as i64, (i as u32 / w) as i64);
+        // inclinação das ondinhas (derivada do ruído)
+        let dx = at(x + 1, y) - at(x - 1, y);
+        let dy = at(x, y + 1) - at(x, y - 1);
+        let nx = ((p[0] as f32 - 127.5) / 127.5) * strength + dx * ripples;
+        let ny = ((p[1] as f32 - 127.5) / 127.5) * strength + dy * ripples;
+        let len = (nx * nx + ny * ny).sqrt();
+        let (nx, ny) = if len > 0.95 { (nx / len * 0.95, ny / len * 0.95) } else { (nx, ny) };
+        let nz = (1.0 - nx * nx - ny * ny).max(0.0).sqrt();
+        p[0] = (nx * 127.5 + 127.5).clamp(0.0, 255.0) as u8;
+        p[1] = (ny * 127.5 + 127.5).clamp(0.0, 255.0) as u8;
+        p[2] = (nz * 127.5 + 127.5).clamp(0.0, 255.0) as u8;
+    });
+}
+
+/// Texturas da água com a chuva (mais agitada na tempestade). Na nevasca a água fica como está.
+pub fn water_textures(sources: &[PathBuf], kind: Kind) -> Vec<(String, Vec<u8>)> {
+    let (strength, ripples) = match kind {
+        Kind::Rain => (1.25, 2.2),
+        Kind::Storm => (1.9, 3.4),
+        Kind::Blizzard => return Vec::new(),
+    };
+    WATER_NORMALS
+        .par_iter()
+        .filter_map(|path| transform(sources, path, |img| stir_water(img, strength, ripples)).ok())
+        .collect()
 }
 
 /// Caminho do `terrain.win.bdf` de um cenário (`/maps/X/X_scenario.lua` → `/maps/X/X.terrain.bdf`).
@@ -787,6 +893,249 @@ pub fn ground_textures(sources: &[PathBuf], scenario: &str, kind: Kind) -> Resul
     Ok(out)
 }
 
+// ------------------------------------------------------------------ unidades e prédios
+
+/// Mod com as texturas das unidades e prédios no clima (separado do mod da partida: não depende do
+/// mapa, então é montado uma vez por clima e reaproveitado).
+pub const MODELS_ID: &str = "cp-clima-modelos";
+pub const MODELS_ARCHIVE: &str = "zz_cp_zzz_clima_modelos.scd";
+
+/// Texturas de um modelo do jogo: cor, máscara (brilho e luzes), cor do time e a malha.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelSet {
+    pub diffuse: String,
+    pub mask: Option<String>,
+    pub team: Option<String>,
+    pub mesh: String,
+}
+
+/// Modelos de unidades e prédios dos arquivos (`/units/…/X_Diffuse.dds` com `X_LOD0.scm` ao lado),
+/// do jogo e dos mods; o último arquivo vence, como no jogo.
+pub fn model_sets(sources: &[PathBuf]) -> Vec<ModelSet> {
+    let mut keys = std::collections::BTreeSet::new();
+    for src in sources {
+        let Ok(mut scd) = crate::scd::Scd::open(src) else { continue };
+        let Ok(entries) = scd.entries() else { continue };
+        for e in entries {
+            if !e.is_dir && e.key.starts_with("/units/") {
+                keys.insert(e.key.replace(".win.", "."));
+            }
+        }
+    }
+    let has = |k: &str| keys.contains(k);
+    keys.iter()
+        .filter_map(|k| {
+            let stem = k.strip_suffix("_diffuse.dds")?;
+            let mesh = format!("{stem}_lod0.scm");
+            if !has(&mesh) {
+                return None;
+            }
+            let opt = |suffix: &str| Some(format!("{stem}_{suffix}.dds")).filter(|p| has(p));
+            Some(ModelSet { diffuse: k.clone(), mask: opt("mask"), team: opt("team"), mesh })
+        })
+        .collect()
+}
+
+/// Para cada texel da textura (w × h), quanto a superfície que ele pinta está virada para cima, de -1
+/// (para baixo) a 1 (para cima), pelas normais da malha; -2 onde nenhum triângulo usa o texel. Os
+/// texels de borda recebem o valor dos vizinhos (o mipmap mistura a borda com o lado de fora).
+fn up_map(model: &crate::scm::Model, w: u32, h: u32) -> Vec<f32> {
+    let (wf, hf) = (w as f32, h as f32);
+    let mut sum = vec![0f32; (w * h) as usize];
+    let mut count = vec![0u16; (w * h) as usize];
+    for tri in model.indices.chunks_exact(3) {
+        let v: Vec<&crate::scm::Vertex> = tri.iter().filter_map(|&i| model.vertices.get(i as usize)).collect();
+        if v.len() != 3 {
+            continue;
+        }
+        let p: Vec<(f32, f32)> = v.iter().map(|v| (v.uv0[0] * wf, v.uv0[1] * hf)).collect();
+        let area = (p[1].0 - p[0].0) * (p[2].1 - p[0].1) - (p[2].0 - p[0].0) * (p[1].1 - p[0].1);
+        if area.abs() < 1e-6 || !area.is_finite() {
+            continue;
+        }
+        let (x0, x1) = (p.iter().map(|q| q.0).fold(f32::MAX, f32::min).floor().max(0.0) as u32, p.iter().map(|q| q.0).fold(f32::MIN, f32::max).ceil().min(wf) as u32);
+        let (y0, y1) = (p.iter().map(|q| q.1).fold(f32::MAX, f32::min).floor().max(0.0) as u32, p.iter().map(|q| q.1).fold(f32::MIN, f32::max).ceil().min(hf) as u32);
+        if x1 <= x0 || y1 <= y0 || (x1 - x0) as u64 * (y1 - y0) as u64 > (w as u64 * h as u64) {
+            continue;
+        }
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                let w0 = ((p[1].0 - px) * (p[2].1 - py) - (p[2].0 - px) * (p[1].1 - py)) / area;
+                let w1 = ((p[2].0 - px) * (p[0].1 - py) - (p[0].0 - px) * (p[2].1 - py)) / area;
+                let w2 = 1.0 - w0 - w1;
+                if w0 < -1e-4 || w1 < -1e-4 || w2 < -1e-4 {
+                    continue;
+                }
+                let n = [0, 1, 2].map(|k| v[0].normal[k] * w0 + v[1].normal[k] * w1 + v[2].normal[k] * w2);
+                let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+                if len < 1e-6 {
+                    continue;
+                }
+                let i = (y * w + x) as usize;
+                sum[i] += n[1] / len;
+                count[i] = count[i].saturating_add(1);
+            }
+        }
+    }
+    let mut up: Vec<f32> = sum.iter().zip(&count).map(|(s, &c)| if c > 0 { s / c as f32 } else { -2.0 }).collect();
+    // borda: 4 passadas de vizinhos
+    for _ in 0..4 {
+        let prev = up.clone();
+        for y in 0..h as i64 {
+            for x in 0..w as i64 {
+                let i = (y * w as i64 + x) as usize;
+                if prev[i] > -1.5 {
+                    continue;
+                }
+                let (mut acc, mut n) = (0.0, 0);
+                for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx >= 0 && ny >= 0 && nx < w as i64 && ny < h as i64 {
+                        let q = prev[(ny * w as i64 + nx) as usize];
+                        if q > -1.5 {
+                            acc += q;
+                            n += 1;
+                        }
+                    }
+                }
+                if n > 0 {
+                    up[i] = acc / n as f32;
+                }
+            }
+        }
+    }
+    up
+}
+
+/// Ruído suave e fixo por posição (para a borda da neve não sair reta).
+fn value_noise(x: f32, y: f32, seed: u32) -> f32 {
+    let h = |i: i32, j: i32| {
+        let mut r = Rng::new((i as u32).wrapping_mul(73856093) ^ (j as u32).wrapping_mul(19349663) ^ seed);
+        r.next()
+    };
+    let (xi, yi) = (x.floor() as i32, y.floor() as i32);
+    let (fx, fy) = (x - xi as f32, y - yi as f32);
+    let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+    let a = h(xi, yi) + (h(xi + 1, yi) - h(xi, yi)) * sx;
+    let b = h(xi, yi + 1) + (h(xi + 1, yi + 1) - h(xi, yi + 1)) * sx;
+    a + (b - a) * sy
+}
+
+/// Uma imagem no tamanho de outra (as texturas de um modelo podem ter tamanhos diferentes).
+fn fit(img: Rgba, w: u32, h: u32) -> Rgba {
+    if img.width == w && img.height == h { img } else { dds::resize(&img, w, h) }
+}
+
+/// Neve no modelo: só nas superfícies viradas para cima (telhados, topos, ombros), com a borda
+/// irregular; nunca na cor do time nem nas luzes. O relevo da textura continua aparecendo.
+fn snow_on_model(diffuse: &mut Rgba, up: &[f32], team: Option<&Rgba>, mask: Option<&Rgba>) {
+    let w = diffuse.width;
+    let (lums, mean, std) = lum_stats(diffuse);
+    const SNOW: [f32; 3] = [232.0, 237.0, 246.0];
+    diffuse.pixels.par_chunks_exact_mut(4).enumerate().for_each(|(i, p)| {
+        let u = up[i];
+        if u < 0.0 {
+            return;
+        }
+        let (x, y) = ((i as u32 % w) as f32, (i as u32 / w) as f32);
+        let n = value_noise(x / 11.0, y / 11.0, 5) * 0.65 + value_noise(x / 3.5, y / 3.5, 9) * 0.35;
+        let mut amount = smooth(0.42 + 0.28 * (n - 0.5), 0.82, u);
+        if let Some(t) = team {
+            amount *= 1.0 - t.pixels[i * 4 + 1] as f32 / 255.0;
+        }
+        if let Some(m) = mask {
+            amount *= 1.0 - m.pixels[i * 4 + 1] as f32 / 255.0;
+        }
+        if amount <= 0.0 {
+            return;
+        }
+        // a neve segue o relevo pintado (painéis, frestas e rebites continuam aparecendo)
+        let detail = ((lums[i] - mean) / std).clamp(-2.5, 2.5);
+        let amount = amount * 0.86;
+        for (k, c) in p.iter_mut().take(3).enumerate() {
+            let snow = SNOW[k] * (0.86 + 0.07 * detail);
+            *c = (*c as f32 * (1.0 - amount) + snow * amount).clamp(0.0, 255.0) as u8;
+        }
+    });
+}
+
+/// Molhado no modelo: mais brilho (canais de brilho da máscara), muito mais nas superfícies expostas
+/// à chuva (as de cima) do que nas de lado e quase nada embaixo. Metal que já brilha muda pouco,
+/// superfícies foscas mudam mais. As luzes (canal verde) ficam como estão.
+fn wet_model_mask(mask: &mut Rgba, up: &[f32]) {
+    mask.pixels.par_chunks_exact_mut(4).enumerate().for_each(|(i, p)| {
+        let u = up[i];
+        if u < -1.5 {
+            return;
+        }
+        let wet = 0.25 + 0.75 * smooth(-0.2, 0.75, u);
+        for k in [0usize, 2] {
+            let v = p[k] as f32;
+            p[k] = (v + (255.0 - v) * 0.4 * wet).min(255.0) as u8;
+        }
+    });
+}
+
+fn read_dds(sources: &[PathBuf], path: &str) -> Result<(crate::dds::DdsInfo, Rgba)> {
+    dds::decode(&mapassets::read_game_file(sources, path)?)
+}
+
+fn encode_like(img: &Rgba, info: &crate::dds::DdsInfo) -> Result<Vec<u8>> {
+    let format = match info.format {
+        DdsFormat::Dxt1 | DdsFormat::Dxt3 | DdsFormat::Dxt5 | DdsFormat::Bgra8 | DdsFormat::Bgrx8 => info.format,
+        _ => DdsFormat::Dxt5,
+    };
+    dds::encode(img, format, info.mip_count.max(1), dds::Quality::Normal)
+}
+
+/// As texturas de um modelo no clima: (caminho no `.scd`, DDS).
+fn model_textures(sources: &[PathBuf], set: &ModelSet, kind: Kind) -> Result<Vec<(String, Vec<u8>)>> {
+    let mesh = crate::scm::read(&mapassets::read_game_file(sources, &set.mesh)?)?;
+    if kind.wet() {
+        let Some(mask_path) = &set.mask else { return Ok(Vec::new()) };
+        let (info, mut mask) = read_dds(sources, mask_path)?;
+        let up = up_map(&mesh, mask.width, mask.height);
+        wet_model_mask(&mut mask, &up);
+        Ok(vec![(scd_path(mask_path), encode_like(&mask, &info)?)])
+    } else {
+        let (info, mut diffuse) = read_dds(sources, &set.diffuse)?;
+        let (w, h) = (diffuse.width, diffuse.height);
+        let up = up_map(&mesh, w, h);
+        let team = set.team.as_ref().and_then(|p| read_dds(sources, p).ok()).map(|(_, t)| fit(t, w, h));
+        let mask = set.mask.as_ref().and_then(|p| read_dds(sources, p).ok()).map(|(_, m)| fit(m, w, h));
+        snow_on_model(&mut diffuse, &up, team.as_ref(), mask.as_ref());
+        Ok(vec![(scd_path(&set.diffuse), encode_like(&diffuse, &info)?)])
+    }
+}
+
+/// Versão do mod dos modelos: muda com o clima (molhado ou neve) e com os arquivos de origem.
+pub fn models_version(sources: &[PathBuf], kind: Kind) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(format!("{MOD_VERSION}|models|{}", if kind.wet() { "wet" } else { "snow" }));
+    for p in sources {
+        let size = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+        h.update(format!("|{}:{size}", p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default()));
+    }
+    format!("{MOD_VERSION}+{}", &hex::encode(h.finalize())[..12])
+}
+
+/// Monta o mod dos modelos (unidades e prédios no clima). Modelos que não deu para ler ficam como
+/// estão. Devolve o arquivo e quantos modelos mudaram.
+pub fn build_models(sources: &[PathBuf], kind: Kind, dest: &Path) -> Result<(PathBuf, usize)> {
+    let sets = model_sets(sources);
+    let done: Vec<Vec<(String, Vec<u8>)>> = sets.par_iter().filter_map(|s| model_textures(sources, s, kind).ok()).filter(|v| !v.is_empty()).collect();
+    if done.is_empty() {
+        return Err(Error::Other("nenhum modelo de unidade foi encontrado nos arquivos do jogo".into()));
+    }
+    let mut b = crate::scd::ScdBuilder::create(dest)?;
+    for (path, data) in done.iter().flatten() {
+        b.add_bytes(path, data)?;
+    }
+    Ok((b.finish()?, done.len()))
+}
+
 // ------------------------------------------------------------------ montagem
 
 fn latin1(raw: &[u8]) -> String {
@@ -821,10 +1170,27 @@ fn append(text: &str, code: &str) -> Result<String> {
 
 /// `ScenarioUtilities.lua` com o código da simulação (precisa de `CreateResources`, que ele envolve).
 pub fn patch_sim(text: &str) -> Result<String> {
+    patch_sim_with(text, SIM_CODE)
+}
+
+fn patch_sim_with(text: &str, code: &str) -> Result<String> {
     if !text.contains("function CreateResources(") {
         return Err(Error::Other("o ScenarioUtilities.lua do jogo é diferente do esperado: não deu para ligar o clima".into()));
     }
-    append(text, SIM_CODE)
+    append(text, code)
+}
+
+/// O código da simulação com a quantidade de partículas por segundo de cada emissor desta partida
+/// (o Lua muda todas juntas com a intensidade do momento, sem trocar emissores de célula em célula).
+fn sim_code(emitters: &[Emitter]) -> String {
+    let mut table = String::from("local CPWeatherRates = {\n");
+    for e in emitters {
+        if let Some((_, rate, _)) = e.curves.iter().find(|(n, _, _)| *n == "EmitRateCurve") {
+            table.push_str(&format!("    ['/{}'] = {rate:.4},\n", e.path.to_ascii_lowercase()));
+        }
+    }
+    table.push_str("}\n");
+    SIM_CODE.replacen("local CPWeatherRates = {}\n", &table, 1)
 }
 
 /// `timer.lua` com o código da interface (precisa de `CreateTimerDialog`, que ele envolve).
@@ -839,18 +1205,20 @@ pub fn patch_ui(text: &str) -> Result<String> {
 /// Sem o terreno do mapa (mapa que não dá para ler) o clima vale do mesmo jeito, com o chão original.
 pub fn build(sources: &[PathBuf], scenario: &str, kind: Kind, amount: f32, dest: &Path) -> Result<PathBuf> {
     let amount = clamp_amount(amount);
+    let emitters = emitters(kind, amount);
+    let code = sim_code(&emitters);
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
     for f in SIM_FILES {
         match game_lua(sources, f) {
-            Ok(text) => files.push((f.trim_start_matches('/').to_string(), to_latin1(&patch_sim(&text)?))),
+            Ok(text) => files.push((f.trim_start_matches('/').to_string(), to_latin1(&patch_sim_with(&text, &code)?))),
             // a cópia da expansão só existe com a expansão
             Err(e) if f.contains("/DLC1/") => eprintln!("clima: {e}"),
             Err(e) => return Err(e),
         }
     }
     files.push((UI_FILE.trim_start_matches('/').to_string(), to_latin1(&patch_ui(&game_lua(sources, UI_FILE)?)?)));
-    for e in emitters(kind, amount) {
-        files.push((e.path.clone(), blueprint(&e).into_bytes()));
+    for e in &emitters {
+        files.push((e.path.clone(), blueprint(e).into_bytes()));
     }
     let particles: Vec<(String, Vec<u8>)> = particle_images()
         .into_par_iter()
@@ -865,6 +1233,7 @@ pub fn build(sources: &[PathBuf], scenario: &str, kind: Kind, amount: f32, dest:
         Ok(ground) => files.extend(ground),
         Err(e) => eprintln!("clima: {e}"),
     }
+    files.extend(water_textures(sources, kind));
     let mut b = crate::scd::ScdBuilder::create(dest)?;
     for (path, data) in &files {
         b.add_bytes(path, data)?;
@@ -920,13 +1289,29 @@ mod tests {
             // os nomes da grade são montados no Lua (stratus_NN); os fixos aparecem inteiros
             assert!(lua.contains(file) || base.starts_with("weather_stratus_"), "{p} não aparece no Lua");
         }
-        assert_eq!(rain.len(), 6 + 2 + 3);
-        assert_eq!(snow.len(), 12);
+        assert_eq!(rain.len(), 6 * 2 + 3 + 3);
+        assert_eq!(snow.len(), 6 * 3);
+        // o Lua recebe a quantidade de cada emissor (para mudar todas juntas)
+        let code = sim_code(&emitters(Kind::Storm, 1.0));
+        assert!(!code.contains("local CPWeatherRates = {}\n"));
+        assert!(code.contains("    ['/effects/emitters/ambient/weather/dust/weather_sand_01_emit.bp'] = 22.0000,\n"), "{}", &code[..2000.min(code.len())]);
+        assert!(code.contains("    ['/effects/emitters/ambient/weather/rain/weather_rainfall_01_emit.bp'] = 14.0000,\n"));
+        // nenhum arquivo usado duas vezes
+        let mut all: Vec<&String> = rain.iter().collect();
+        all.sort();
+        all.dedup();
+        assert_eq!(all.len(), rain.len());
+        let mut all: Vec<&String> = snow.iter().collect();
+        all.sort();
+        all.dedup();
+        assert_eq!(all.len(), snow.len());
         let bp = blueprint(&emitters(Kind::Rain, 1.0)[0]);
         assert!(bp.starts_with("EmitterBlueprint {\r\n\tBlueprintId = 'weather_rainfall_01',"));
         assert!(bp.contains("\tEmitIfVisible = false,") && bp.contains("\tAlignRotation = true,"));
         assert!(bp.contains("[[/textures/particles/cp_rain_drop.dds]]"));
-        assert!(bp.contains("{ x=10.000,y=13.000,z=0.000 }"), "{bp}");
+        assert!(bp.contains("{ x=10.000,y=9.000,z=0.000 }"), "{bp}");
+        // posição sorteada para os dois lados do centro da célula, um pouco além dela
+        assert!(bp.contains("ZPosCurve = {\r\n\t\tXRange = 10.00,\r\n\t\tKeys = {\r\n\t\t\t{ x=0.000,y=0.000,z=14.000 }"), "{bp}");
     }
 
     #[test]
@@ -947,11 +1332,21 @@ mod tests {
 
     #[test]
     fn noise_wraps_around() {
-        let n = tile_noise(64, 64, 3, PATCH_FREQS);
+        let n = tile_noise(64, 64, 3, RIPPLE_FREQS);
         // a coluna 0 continua a coluna 63 (sem degrau na emenda do ladrilho)
         let jump: f32 = (0..64).map(|j| (n[j * 64] - n[j * 64 + 63]).abs()).fold(0.0, f32::max);
         let inside: f32 = (0..64).map(|j| (n[j * 64 + 31] - n[j * 64 + 32]).abs()).fold(0.0, f32::max);
         assert!(jump < inside * 3.0 + 0.05, "{jump} {inside}");
+    }
+
+    #[test]
+    fn water_gets_rougher() {
+        // normal quase plana: depois de agitar, desvia mais e continua normalizada
+        let mut img = Rgba { width: 16, height: 16, pixels: [140u8, 120, 250, 255].repeat(256) };
+        stir_water(&mut img, 1.9, 0.0);
+        assert!(img.pixels[0] > 140 && img.pixels[1] < 120 && img.pixels[3] == 255);
+        let (x, y, z) = [0, 1, 2].map(|k| (img.pixels[k] as f32 - 127.5) / 127.5).into();
+        assert!((x * x + y * y + z * z - 1.0).abs() < 0.05);
     }
 
     #[test]
@@ -993,6 +1388,28 @@ mod tests {
         let ui = patch_ui("function CreateTimerDialog(parent)\nend\n").unwrap();
         assert!(ui.contains("local CPWeatherCreateTimerDialog = CreateTimerDialog"));
         assert!(patch_ui("x").is_err());
+    }
+
+    /// Modelos reais (`CP_UNITS` = um .scd com unidades; `CP_WEATHER_OUT` = pasta das prévias PNG).
+    #[test]
+    fn real_models_preview() {
+        let Some(src) = std::env::var_os("CP_UNITS") else { return };
+        let out = std::env::var_os("CP_WEATHER_OUT").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+        let sources = vec![PathBuf::from(src)];
+        let sets = model_sets(&sources);
+        assert!(!sets.is_empty());
+        for set in &sets {
+            for kind in [Kind::Blizzard, Kind::Rain] {
+                let t = std::time::Instant::now();
+                let files = model_textures(&sources, set, kind).unwrap();
+                for (path, data) in files {
+                    let (_, img) = dds::decode(&data).unwrap();
+                    let name = format!("{}_{}.png", path.rsplit('/').next().unwrap(), kind.key());
+                    std::fs::write(out.join(name), dds::to_png(&img).unwrap()).unwrap();
+                }
+                eprintln!("{} {:?} {:?}", set.diffuse, kind, t.elapsed());
+            }
+        }
     }
 
     /// Monta com os arquivos reais do jogo (`CP_GAMEDATA` = pasta `gamedata`; `CP_WEATHER_OUT` = pasta

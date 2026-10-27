@@ -10,6 +10,13 @@
 -- goes up. So the cost is the same at any zoom and on any map size, and zooming out to see the whole
 -- map still shows rain or snow. The emitters are the game's own weather emitter files (only campaign
 -- weather uses them), rewritten for this match; one set per grid level.
+--
+-- Every cell has a main layer and an extra one, and every cell falls at the same rate (no squares):
+-- the weather starts light and thickens over the first minute, then the extra layer comes and goes
+-- slowly, so the rain is never the same for long. Storm lightning is rare, at random
+-- places (half of them where the player is looking), and its thunder is a sound of the game itself
+-- played at the strike, so it has the direction and the distance of the strike, and it arrives after
+-- the flash, later the farther it is.
 
 local CPWeatherKind = false
 -- grid levels: spacing CPWeatherBase * f; the emitter files of each level are made for its spacing
@@ -21,6 +28,8 @@ local CPWeatherMaxCells = 180
 local CPWeatherDir = '/effects/emitters/ambient/weather/'
 local CPWeatherBP = {
     ripple = CPWeatherDir .. 'dust/weather_sand_01_emit.bp',
+    -- bigger rings for the second grid level
+    ripple2 = CPWeatherDir .. 'dust/weather_sand_02_emit.bp',
     crown = CPWeatherDir .. 'dust/weather_redrock_01_emit.bp',
     -- three bolt shapes
     bolt = {
@@ -32,15 +41,41 @@ local CPWeatherBP = {
     fall = { CPWeatherDir .. 'rain/weather_rainfall_01_emit.bp' },
     snow = { CPWeatherDir .. 'snow/weather_snow_falling_01_emit.bp' },
     drift = { CPWeatherDir .. 'snow/weather_snow_drifting_01_emit.bp' },
+    -- the extra layer (other drops and flakes)
+    fall2 = {},
+    snow2 = {
+        CPWeatherDir .. 'clouds/weather_stratus_22_emit.bp',
+        CPWeatherDir .. 'clouds/weather_stratus_23_emit.bp',
+        CPWeatherDir .. 'clouds/weather_cumulus_snow_01_emit.bp',
+        CPWeatherDir .. 'clouds/weather_cumulus_snow_02_emit.bp',
+        CPWeatherDir .. 'clouds/weather_cumulus_snow_03_emit.bp',
+        CPWeatherDir .. 'clouds/weather_cumulus_snow_04_emit.bp',
+    },
 }
 for i = 2, 6 do
     CPWeatherBP.fall[i] = CPWeatherDir .. 'clouds/weather_stratus_0' .. (i - 1) .. '_emit.bp'
     CPWeatherBP.snow[i] = CPWeatherDir .. 'clouds/weather_stratus_' .. string.format('%02d', i + 4) .. '_emit.bp'
     CPWeatherBP.drift[i] = CPWeatherDir .. 'clouds/weather_stratus_' .. string.format('%02d', i + 9) .. '_emit.bp'
 end
+for i = 1, 6 do
+    CPWeatherBP.fall2[i] = CPWeatherDir .. 'clouds/weather_stratus_' .. string.format('%02d', i + 15) .. '_emit.bp'
+end
+-- thunder: the game has no thunder; its biggest explosions, heard from far away, rumble like one
+local CPWeatherThunder = {
+    'SC2/SC2/Destructions/Explosions/UEF/snd_Destroy_Huge',
+    'SC2/SC2/Destructions/Explosions/CYBRAN/snd_Destroy_Huge',
+    'SC2/SC2/Destructions/Explosions/ILLUMINATE/snd_Destroy_Huge',
+}
 
 -- everything made here stays referenced: an entity the Lua collector frees takes its emitters along
-local CPWeatherPool = { level = 0, cells = {}, spare = {}, view = false }
+local CPWeatherPool = { level = 0, cells = {}, spare = {}, view = false, retired = false }
+-- how much of each layer is falling now (0 to 1, the same in every cell), see CPWeatherIntensity
+local CPWeatherShare = { main = 0, extra = 0 }
+
+local function CPWeatherSmooth(e0, e1, x)
+    local t = math.min(1, math.max(0, (x - e0) / (e1 - e0)))
+    return t * t * (3 - 2 * t)
+end
 
 local function CPWeatherRect()
     local r = ScenarioInfo.MapData and ScenarioInfo.MapData.PlayableRect
@@ -55,44 +90,131 @@ local function CPWeatherEmit(entity, bp)
     return nil
 end
 
+-- base emit rate (particles per second) of each emitter file, filled in by the launcher with the
+-- values of the files it wrote for this match
+local CPWeatherRates = {}
+
+-- how hard an emitter works now: its base rate times the share of its layer. Every cell gets the
+-- same rate, so the weather thickens and thins evenly over the whole screen (cells switching on one
+-- by one made squares with and without rain)
+local function CPWeatherSetRate(entry)
+    local base = CPWeatherRates[string.lower(entry.bp)]
+    if not base then return end
+    local rate = base * entry.scale * (CPWeatherShare[entry.layer] or 1)
+    if entry.rate and math.abs(entry.rate - rate) < 0.005 then return end
+    entry.rate = rate
+    pcall(function() entry.fx:SetEmitterCurveParam('EMITRATE_CURVE', rate, 0) end)
+end
+
 local function CPWeatherClear(cell)
-    for _, fx in ipairs(cell.fx) do pcall(function() fx:Destroy() end) end
+    for _, entry in ipairs(cell.fx) do pcall(function() entry.fx:Destroy() end) end
     cell.fx = {}
 end
 
--- ground under a rain cell: not a cliff (a ring on a steep slope would float or sink)? Gentle slopes
--- get ripples too, or the cells with and without them would show as squares
-local function CPWeatherFlat(x, z, r)
-    local surface = GetSurfaceHeight(x, z)
-    local ground = GetTerrainHeight(x, z)
-    if surface > ground + 0.05 then return true end -- water
-    local lo, hi = ground, ground
-    for _, d in ipairs({ { -r, -r }, { r, -r }, { -r, r }, { r, r }, { 0, r }, { r, 0 }, { 0, -r }, { -r, 0 } }) do
-        local h = GetTerrainHeight(x + d[1], z + d[2])
-        if h < lo then lo = h elseif h > hi then hi = h end
-    end
-    return hi - lo < 4
+-- An emitter destroyed at once takes its particles along: a square of rain or snow would vanish in
+-- the middle of the screen. So when the grid changes level the old cells first stop making particles
+-- and only go away after the last ones have landed (CPWeatherReaper), while the new ones fill in.
+-- Seconds the particles take to land (rain falls in about 1.5 s, snow in about 8 s).
+local CPWeatherClock = 0
+local function CPWeatherLinger()
+    if CPWeatherKind == 'blizzard' then return 9 end
+    return 2.5
 end
 
--- puts a pool cell at (x, z) with the emitters of the current level
-local function CPWeatherFill(cell, x, z)
-    local level = CPWeatherPool.level
-    Warp(cell.e, Vector(x, GetSurfaceHeight(x, z), z))
-    CPWeatherClear(cell)
-    local add = function(bp)
-        local fx = CPWeatherEmit(cell.e, bp)
-        if fx then table.insert(cell.fx, fx) end
+-- the cells of the previous grid level, still raining out while the new level fills in
+local function CPWeatherFlushRetired()
+    local r = CPWeatherPool.retired
+    if not r then return end
+    for _, cell in ipairs(r.cells) do
+        CPWeatherClear(cell)
+        table.insert(CPWeatherPool.spare, cell)
     end
-    if CPWeatherKind == 'blizzard' then
-        add(CPWeatherBP.snow[level])
-        add(CPWeatherBP.drift[level])
-    else
-        add(CPWeatherBP.fall[level])
-        if level == 1 and CPWeatherFlat(x, z, CPWeatherBase * 0.45) then
-            add(CPWeatherBP.ripple)
-            add(CPWeatherBP.crown)
+    CPWeatherPool.retired = false
+end
+
+local function CPWeatherRetire(cells)
+    -- only one level rains out at a time (zooming through several levels does not pile them up)
+    CPWeatherFlushRetired()
+    local list = {}
+    for _, cell in pairs(cells) do
+        for _, entry in ipairs(cell.fx) do pcall(function() entry.fx:SetEmitterCurveParam('EMITRATE_CURVE', 0, 0) end) end
+        table.insert(list, cell)
+    end
+    CPWeatherPool.retired = { t = CPWeatherClock + CPWeatherLinger(), cells = list }
+end
+
+-- destroys what has finished raining out
+function CPWeatherReaper()
+    while true do
+        WaitSeconds(0.5)
+        CPWeatherClock = CPWeatherClock + 0.5
+        local r = CPWeatherPool.retired
+        if r and r.t <= CPWeatherClock then CPWeatherFlushRetired() end
+    end
+end
+
+-- ripples and splashes on the ground (grid levels 1 and 2): four emitters per cell, one on each quarter, each at the
+-- height of the highest ground of its quarter. A ring below the ground is hidden, so with one emitter
+-- at the height of the middle of the cell, every bump of the ground left a patch without ripples; a
+-- ring a little above a dip is not noticed from above. A quarter on a slope too steep for that (a
+-- cliff, a ramp) gets none
+local CPWeatherSamples = { { -1, -1 }, { 0, -1 }, { 1, -1 }, { -1, 0 }, { 0, 0 }, { 1, 0 }, { -1, 1 }, { 0, 1 }, { 1, 1 } }
+local function CPWeatherGround(cell, add, level)
+    local f = CPWeatherLevels[level]
+    local q = CPWeatherBase * f / 4
+    -- near the camera rings and splashes; a bit higher up only rings, bigger
+    local bps = { CPWeatherBP.ripple, CPWeatherBP.crown }
+    if level == 2 then bps = { CPWeatherBP.ripple2 } end
+    local base = GetSurfaceHeight(cell.x, cell.z)
+    for _, d in ipairs({ { -q, -q }, { q, -q }, { -q, q }, { q, q } }) do
+        local lo, hi = false, false
+        for _, o in ipairs(CPWeatherSamples) do
+            -- the quarter and the bit of the neighbours its ripples reach (1.3 of a quarter)
+            local h = GetSurfaceHeight(cell.x + d[1] + o[1] * q * 1.3, cell.z + d[2] + o[2] * q * 1.3)
+            if not lo or h < lo then lo = h end
+            if not hi or h > hi then hi = h end
+        end
+        if hi - lo < 2.5 * f then
+            for _, bp in ipairs(bps) do
+                local entry = add(bp, 'main', 0.25)
+                if entry then
+                    local x, y, z = d[1], hi - base, d[2]
+                    pcall(function() entry.fx:OffsetEmitter(x, y, z) end)
+                end
+            end
         end
     end
+end
+
+-- gives a cell its emitters: the main layer (drops or flakes, and the ripples and splashes on the
+-- ground near the camera) and the extra one (other drops or flakes), each at its layer's rate
+local function CPWeatherLayers(cell)
+    local level = CPWeatherPool.level
+    local add = function(bp, layer, scale)
+        local fx = CPWeatherEmit(cell.e, bp)
+        if not fx then return nil end
+        local entry = { fx = fx, bp = bp, layer = layer, scale = scale or 1 }
+        table.insert(cell.fx, entry)
+        CPWeatherSetRate(entry)
+        return entry
+    end
+    if CPWeatherKind == 'blizzard' then
+        add(CPWeatherBP.snow[level], 'main')
+        add(CPWeatherBP.drift[level], 'main')
+        add(CPWeatherBP.snow2[level], 'extra')
+    else
+        add(CPWeatherBP.fall[level], 'main')
+        add(CPWeatherBP.fall2[level], 'extra')
+        if level <= 2 then CPWeatherGround(cell, add, level) end
+    end
+end
+
+-- puts a pool cell on grid square (i, j), centered at (x, z), with the emitters of the current level
+local function CPWeatherFill(cell, i, j, x, z)
+    Warp(cell.e, Vector(x, GetSurfaceHeight(x, z), z))
+    CPWeatherClear(cell)
+    cell.i, cell.j, cell.x, cell.z = i, j, x, z
+    CPWeatherLayers(cell)
 end
 
 local function CPWeatherCount(x0, z0, x1, z1, s)
@@ -129,11 +251,9 @@ function CPWeatherView(x0, z0, x1, z1)
     if a1 < a0 or b1 < b0 then return end
     local cells = CPWeatherPool.cells
     if level ~= CPWeatherPool.level then
-        -- new level: every cell takes the emitters of the new size
-        for key, cell in pairs(cells) do
-            CPWeatherClear(cell)
-            table.insert(CPWeatherPool.spare, cell)
-        end
+        -- new level: new cells with the emitters of the new size; the old ones rain out meanwhile, so
+        -- the screen never goes empty while the new drops are still on their way down
+        CPWeatherRetire(cells)
         cells = {}
         CPWeatherPool.cells = cells
         CPWeatherPool.level = level
@@ -142,7 +262,7 @@ function CPWeatherView(x0, z0, x1, z1)
     local want = {}
     for i = math.floor(a0 / s), math.floor(a1 / s) do
         for j = math.floor(b0 / s), math.floor(b1 / s) do
-            want[i .. ',' .. j] = { (i + 0.5) * s, (j + 0.5) * s }
+            want[i .. ',' .. j] = { i, j, (i + 0.5) * s, (j + 0.5) * s }
         end
     end
     -- the ones that left the view free their entity; the ones that stayed keep raining as they were
@@ -158,7 +278,7 @@ function CPWeatherView(x0, z0, x1, z1)
         if not cells[key] then
             local cell = table.remove(CPWeatherPool.spare)
             if not cell then cell = { e = Entity(), fx = {} } end
-            CPWeatherFill(cell, p[1], p[2])
+            CPWeatherFill(cell, p[1], p[2], p[3], p[4])
             cells[key] = cell
         end
     end
@@ -187,59 +307,101 @@ local function CPWeatherHookCallbacks()
     end
 end
 
--- a random unit of a random army (nil when there is none)
-function CPWeatherSomeUnit()
-    local brains = ArmyBrains or {}
-    if table.getn(brains) == 0 then return nil end
-    local brain = brains[math.floor(Random() * table.getn(brains)) + 1]
-    local ok, units = pcall(brain.GetListOfUnits, brain, categories.ALLUNITS, false)
-    if not ok or not units or table.getn(units) == 0 then return nil end
-    local u = units[math.floor(Random() * table.getn(units)) + 1]
-    if u and not u:IsDead() then return u end
-    return nil
+-- how much it rains or snows over time (seconds since the weather started): it starts light and
+-- thickens over the first minute, then the extra layer comes and goes slowly, never in step
+function CPWeatherIntensity(t)
+    local onset = CPWeatherSmooth(0, 55, t)
+    local wave = 0.5 + 0.3 * math.sin(t / 71 + 0.7) + 0.2 * math.sin(t / 29 + 2.1)
+    return math.min(1, onset * 1.35), onset * math.min(1, math.max(0, wave))
 end
 
--- lightning: a short flash that lights the ground around the strike (not the whole map) and a bolt;
--- most strikes fall where the player is looking
-function CPWeatherLightning()
-    local Entity = import('/lua/sim/Entity.lua').Entity
+-- every couple of seconds every emitter takes the rates of the moment (the same everywhere)
+function CPWeatherBreathe()
+    local t = 0
     while true do
-        WaitSeconds(5 + Random() * 11)
+        local main, extra = CPWeatherIntensity(t)
+        if math.abs(main - CPWeatherShare.main) > 0.01 or math.abs(extra - CPWeatherShare.extra) > 0.01 then
+            CPWeatherShare.main, CPWeatherShare.extra = main, extra
+            for _, cell in pairs(CPWeatherPool.cells) do
+                for _, entry in ipairs(cell.fx) do CPWeatherSetRate(entry) end
+            end
+        end
+        WaitSeconds(2)
+        t = t + 2
+    end
+end
+
+-- thunder of a strike at (x, z): the sound starts at the strike after the time sound takes to reach
+-- the camera (the flash comes first); the game's 3D sound does direction and distance
+function CPWeatherThunderAt(x, z, power)
+    local v = CPWeatherPool.view
+    local delay = 0.2
+    if v then
+        local cx, cz = (v[1] + v[3]) / 2, (v[2] + v[4]) / 2
+        local d = math.sqrt((x - cx) * (x - cx) + (z - cz) * (z - cz))
+        delay = math.min(7, math.max(0.15, d / 340))
+    end
+    WaitSeconds(delay)
+    local Entity = import('/lua/sim/Entity.lua').Entity
+    local e = Entity()
+    Warp(e, Vector(x, GetSurfaceHeight(x, z) + 20, z))
+    pcall(e.PlaySound, e, CPWeatherThunder[math.floor(Random() * table.getn(CPWeatherThunder)) + 1])
+    -- a big strike rolls on: a second, weaker boom a moment later
+    if power > 0.65 then
+        WaitSeconds(0.6 + Random() * 1.2)
+        pcall(e.PlaySound, e, CPWeatherThunder[math.floor(Random() * table.getn(CPWeatherThunder)) + 1])
+    end
+    WaitSeconds(10)
+    e:Destroy()
+end
+
+-- one strike at (x, z): bolt (one of three shapes and sizes), a flash that lights the ground around
+-- it (not the whole map) and, after it, the thunder
+function CPWeatherStrike(x, z, power)
+    local Entity = import('/lua/sim/Entity.lua').Entity
+    -- (a local of this thread: it lives until the strike is over)
+    local e = Entity()
+    Warp(e, Vector(x, GetSurfaceHeight(x, z) + 4, z))
+    local shape = math.floor(Random() * 3) + 1
+    local size = 25 + power * 35
+    pcall(CreateLightParticle, e, -1, -1, size, 2, 'glow_03', 'cp_ramp_flash')
+    pcall(CreateEmitterAtEntity, e, -1, CPWeatherBP.bolt[shape])
+    ForkThread(CPWeatherThunderAt, x, z, power)
+    WaitTicks(2)
+    pcall(CreateLightParticle, e, -1, -1, size * 0.7, 3, 'glow_03', 'cp_ramp_flash')
+    WaitSeconds(2)
+    e:Destroy()
+end
+
+-- lightning: rare, at random places (about half near what the player is looking at), sometimes
+-- two or three close together, at random intervals
+function CPWeatherLightning()
+    WaitSeconds(15 + Random() * 30)
+    while true do
         local x0, z0, x1, z1 = CPWeatherRect()
         local v = CPWeatherPool.view
-        if v and Random() < 0.75 then
-            x0, z0, x1, z1 = math.max(x0, v[1]), math.max(z0, v[2]), math.min(x1, v[3]), math.min(z1, v[4])
-        else
-            local near = CPWeatherSomeUnit()
-            if near then
-                local p = near:GetPosition()
-                x0, z0, x1, z1 = math.max(x0, p[1] - 80), math.max(z0, p[3] - 80), math.min(x1, p[1] + 80), math.min(z1, p[3] + 80)
-            end
+        if v and Random() < 0.5 then
+            -- around the view (and a bit beyond it: some strikes are heard but not seen)
+            local w, h = v[3] - v[1], v[4] - v[2]
+            x0, z0 = math.max(x0, v[1] - w * 0.4), math.max(z0, v[2] - h * 0.4)
+            x1, z1 = math.min(x1, v[3] + w * 0.4), math.min(z1, v[4] + h * 0.4)
         end
         if x1 > x0 and z1 > z0 then
             local x = x0 + Random() * (x1 - x0)
             local z = z0 + Random() * (z1 - z0)
-            -- (a local of this thread: it lives until the strike is over)
-            local e = Entity()
-            Warp(e, Vector(x, GetSurfaceHeight(x, z) + 4, z))
-            local size = 35 + Random() * 20
-            pcall(CreateLightParticle, e, -1, -1, size, 2, 'glow_03', 'cp_ramp_flash')
-            pcall(CreateEmitterAtEntity, e, -1, CPWeatherBP.bolt[math.floor(Random() * 3) + 1])
-            WaitTicks(2)
-            pcall(CreateLightParticle, e, -1, -1, size * 0.7, 3, 'glow_03', 'cp_ramp_flash')
-            -- sometimes a second strike right after, a little to the side
-            if Random() < 0.35 then
-                WaitTicks(3)
-                local e2 = Entity()
-                Warp(e2, Vector(x + (Random() - 0.5) * 30, GetSurfaceHeight(x, z) + 4, z + (Random() - 0.5) * 30))
-                pcall(CreateEmitterAtEntity, e2, -1, CPWeatherBP.bolt[math.floor(Random() * 3) + 1])
-                pcall(CreateLightParticle, e2, -1, -1, size * 0.6, 2, 'glow_03', 'cp_ramp_flash')
-                WaitSeconds(2)
-                e2:Destroy()
-            else
-                WaitSeconds(2)
+            local power = Random()
+            CPWeatherStrike(x, z, power)
+            -- sometimes another strike close by, a moment later
+            if Random() < 0.3 then
+                WaitSeconds(0.4 + Random() * 2.5)
+                CPWeatherStrike(x + (Random() - 0.5) * 60, z + (Random() - 0.5) * 60, Random() * 0.7)
             end
-            e:Destroy()
+        end
+        -- rare and never on a beat: 20 s to 1 min 20 s, now and then a quick one
+        if Random() < 0.15 then
+            WaitSeconds(4 + Random() * 6)
+        else
+            WaitSeconds(20 + Random() * 60)
         end
     end
 end
@@ -269,6 +431,8 @@ function CPWeatherStart()
         if not ok then WARN('*CommandProject weather: ' .. tostring(err)) end
     end
     LOG('*CommandProject weather: ' .. kind)
+    ForkThread(CPWeatherBreathe)
+    ForkThread(CPWeatherReaper)
     if kind == 'storm' then CPWeatherLightning() end
 end
 
