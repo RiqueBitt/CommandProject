@@ -317,6 +317,23 @@ impl Workspace {
         Ok(Some(status))
     }
 
+    /// Mapas de escaramuça para a partida grande: os do jogo e os dos mods de mapa ligados no perfil,
+    /// os de mais bases primeiro.
+    pub fn match_maps(&mut self) -> Result<Vec<crate::bigmatch::MatchMap>> {
+        let mut out = Vec::new();
+        crate::bigmatch::maps_in(&self.stock_sources()?, "Jogo", &mut out);
+        let active = self.profiles.active().clone();
+        for m in self.mods()? {
+            if !active.mods.iter().any(|x| x.id == m.manifest.id && x.enabled) {
+                continue;
+            }
+            let files: Vec<PathBuf> = m.manifest.files.iter().map(|f| m.file_path(&f.name)).collect();
+            crate::bigmatch::maps_in(&files, &m.manifest.name, &mut out);
+        }
+        out.sort_by(|a, b| b.armies.len().cmp(&a.armies.len()).then_with(|| a.name.cmp(&b.name)));
+        Ok(out)
+    }
+
     /// O mod da Partida grande montado (com os arquivos do jogo do usuário) e ligado no perfil ativo.
     pub fn ensure_bigmatch_mod(&mut self) -> Result<()> {
         const ID: &str = "cp-partida-grande";
@@ -368,7 +385,30 @@ impl Workspace {
                 Err(e) => warnings.push(e.to_string()),
             }
         }
-        if !settings.shortcuts.is_empty() {
+        // a Partida grande dentro do jogo (tela própria, aberta pelo submenu da Escaramuça)
+        let mut bigmatch_scene = None;
+        if settings.enabled {
+            let pt = crate::gamelang::PT_LANGS.contains(&self.settings.ui_prefs.get("lang").and_then(|v| v.as_str()).unwrap_or("en"));
+            let maps = crate::bigmatch_menu::pick_maps(&self.match_maps()?);
+            let stock = self.stock_sources()?;
+            match crate::mapassets::read_game_file(&stock, crate::mainmenu::SCENE_PATH)
+                .and_then(|base| crate::bigmatch_menu::build(&base, &maps, if pt { &crate::bigmatch_menu::PT } else { &crate::bigmatch_menu::EN }))
+            {
+                Ok(scene) => {
+                    bigmatch_scene = Some(scene);
+                    edit.buttons.insert(0, crate::mainmenu::NewButton {
+                        key: "cp:partida_grande".into(),
+                        label: if pt { "PARTIDA GRANDE (ATÉ 32)".into() } else { "BIG MATCH (UP TO 32)".into() },
+                        place: crate::mainmenu::Place::Skirmish,
+                        native: None,
+                        lua: false,
+                        code: Some(format!("UILoadScene('{}')", crate::bigmatch_menu::SCENE)),
+                    });
+                }
+                Err(e) => warnings.push(format!("Partida grande no jogo: {e}")),
+            }
+        }
+        if !settings.shortcuts.is_empty() || bigmatch_scene.is_some() {
             // o código que monta a partida grande precisa estar no jogo
             if let Err(e) = self.ensure_bigmatch_mod() {
                 warnings.push(format!("atalhos de partida grande sem o mod da Partida grande: {e}"));
@@ -392,6 +432,10 @@ impl Workspace {
             use sha2::{Digest, Sha256};
             version.push('.');
             version.push_str(&hex::encode(Sha256::digest(&scene))[..8]);
+            if let Some(bm) = &bigmatch_scene {
+                // a lista de mapas da Partida grande no jogo muda com os mapas ligados
+                version.push_str(&hex::encode(Sha256::digest(bm))[..6]);
+            }
         }
         if self.mods()?.iter().any(|m| m.manifest.id == ss::MOD_ID && m.manifest.version == version) {
             self.profiles.set_enabled(&active, ss::MOD_ID, true)?;
@@ -410,6 +454,11 @@ impl Workspace {
                 .iter()
                 .filter_map(|p| crate::forja::effective_bytes(&stock, &mod_paths, p).map(|d| (p.to_string(), d)))
                 .collect();
+            let mut others = others;
+            if let Some(bm) = bigmatch_scene {
+                // a cena nova vai como está (já no visual novo)
+                others.push((crate::bigmatch_menu::SCENE_PATH.to_string(), bm));
+            }
             let (archive, w) = ss::build_all(&scene, &others, &edit, &settings, &stock, &self.data_dir, &dest)?;
             warnings.extend(w);
             archive

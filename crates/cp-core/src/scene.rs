@@ -458,6 +458,58 @@ impl Scene {
         Ok(())
     }
 
+    /// Deixa na cena só os elementos de `keep` (para montar uma cena nova a partir de outra): cada
+    /// tabela ganha uma cópia só com os que ficam, e os filhos que saíram somem das listas.
+    pub fn retain(&mut self, keep: &BTreeSet<u32>) -> Result<()> {
+        for (k, size) in SIZES.iter().enumerate() {
+            let (n, p) = self.table(k)?;
+            if n == 0 || p == NONE {
+                continue;
+            }
+            let p = p as usize;
+            let ids: Vec<u32> = match size {
+                Some(sz) => (0..n).map(|i| self.u32_at(p + i * sz + 28)).collect::<Result<_>>()?,
+                None => vec![self.u32_at(p + 28)?],
+            };
+            if ids.iter().all(|i| keep.contains(i)) {
+                continue;
+            }
+            let Some(size) = *size else {
+                // tipo de tamanho desconhecido (um registro só): a tabela fica vazia
+                self.put(8 + 8 * k, 0);
+                self.set_ptr(12 + 8 * k, NONE);
+                continue;
+            };
+            self.align();
+            let newp = self.pl.len();
+            let mut count = 0;
+            for (i, id) in ids.iter().enumerate() {
+                if !keep.contains(id) {
+                    continue;
+                }
+                let rec = p + i * size;
+                let bytes = self.pl[rec..rec + size].to_vec();
+                let dest = self.pl.len();
+                self.pl.extend_from_slice(&bytes);
+                let own: Vec<u32> = self.fixups.iter().copied().filter(|&f| (rec..rec + size).contains(&(f as usize))).collect();
+                for f in own {
+                    self.fixups.insert((f as usize - rec + dest) as u32);
+                }
+                count += 1;
+            }
+            self.put(8 + 8 * k, count as u32);
+            self.set_ptr(12 + 8 * k, if count == 0 { NONE } else { newp as u32 });
+        }
+        for e in self.elements()? {
+            let kids = self.children(e.id)?;
+            let kept: Vec<u32> = kids.iter().copied().filter(|c| keep.contains(c)).collect();
+            if kept.len() != kids.len() {
+                self.set_children(e.id, &kept)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Copia o elemento `src` (mesmo tipo e aparência) com outro nome e um id novo, no fim da
     /// tabela dele. Filhos, eventos e retângulo da cópia são listas próprias (mudar um não muda o
     /// outro). Devolve o id novo.

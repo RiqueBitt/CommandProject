@@ -392,21 +392,7 @@ static KILLED_BY_USER: std::sync::atomic::AtomicBool = std::sync::atomic::Atomic
 pub async fn big_match_maps(state: State<'_, AppState>) -> R<Vec<cp_core::bigmatch::MatchMap>> {
     // um mapa gerado de novo com o mesmo nome troca o minimapa: a prévia é lida outra vez
     *BIG_MATCH_PREVIEWS.lock().unwrap_or_else(|p| p.into_inner()) = None;
-    with_ws(&state.ws, |ws| {
-        let mut out = Vec::new();
-        cp_core::bigmatch::maps_in(&ws.stock_sources()?, "Jogo", &mut out);
-        let active = ws.profiles.active().clone();
-        for m in ws.mods()? {
-            if !active.mods.iter().any(|x| x.id == m.manifest.id && x.enabled) {
-                continue;
-            }
-            let files: Vec<std::path::PathBuf> = m.manifest.files.iter().map(|f| m.file_path(&f.name)).collect();
-            cp_core::bigmatch::maps_in(&files, &m.manifest.name, &mut out);
-        }
-        out.sort_by(|a, b| b.armies.len().cmp(&a.armies.len()).then_with(|| a.name.cmp(&b.name)));
-        Ok(out)
-    })
-    .await
+    with_ws(&state.ws, |ws| ws.match_maps()).await
 }
 
 /// Minimapas já convertidos para a prévia da partida grande (cenário → PNG em data URL).
@@ -657,7 +643,8 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             // do jogo) ficam de fora
             let active = ws.profiles.active().clone();
             // (a Partida grande fica quando há atalhos dela na tela inicial do jogo)
-            let shortcuts = !cp_core::startscreen::Settings::load(&ws.data_dir).shortcuts.is_empty();
+            let ss = cp_core::startscreen::Settings::load(&ws.data_dir);
+            let shortcuts = !ss.shortcuts.is_empty() || ss.enabled;
             for id in ["cp-partida-grande", cp_core::weather::MOD_ID, cp_core::weather::MODELS_ID] {
                 if shortcuts && id == "cp-partida-grande" {
                     continue;

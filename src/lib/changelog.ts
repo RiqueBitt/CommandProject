@@ -6,6 +6,13 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.41.0",
+    title: "Partida grande dentro do jogo",
+    items: [
+      { icon: "groups", title: "Partida grande no menu do jogo", text: "Com a Tela inicial nova ligada, Escaramuça → Partida grande (até 32) abre uma tela no próprio jogo: escolha jogadores (até 32), times, a IA e o mapa (os maiores, os seus também) e clique em Começar.", page: "features" },
+    ],
+  },
+  {
     version: "0.40.0",
     title: "Todos os menus no estilo novo",
     items: [

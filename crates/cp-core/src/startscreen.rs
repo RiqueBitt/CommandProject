@@ -325,6 +325,10 @@ pub fn build_all(
     }
     // os outros menus: cenas no visual novo e as texturas do jogo na cor escolhida
     for (path, data) in others {
+        if path == crate::bigmatch_menu::SCENE_PATH {
+            b.add_bytes(path.trim_start_matches('/'), data)?;
+            continue;
+        }
         match mainmenu::restyle_frontend(data) {
             Ok(new) => b.add_bytes(path.trim_start_matches('/'), &new)?,
             Err(e) => built.warnings.push(format!("{}: {e}", path.rsplit('/').next().unwrap_or(path))),

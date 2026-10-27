@@ -174,6 +174,42 @@ function CPBigMatchSession(mapName, spec)
     return sessionInfo
 end
 
+-- the big match screen inside the game (scene cp_bigmatch, made by the launcher): players in all,
+-- number of teams (0 = everyone for himself), AI difficulty and the map. You take the first base,
+-- the AIs the next ones; the bases of a team are side by side in the map's order. Capped by the
+-- bases of the map, the 32 armies of the engine and the memory of big maps (as the launcher does).
+function CPBigMatchQuick(mapName, players, teams, ai)
+    local MapUtils = import('/lua/ui/maputil.lua')
+    local scenario = MapUtils.LoadScenario(mapName)
+    if not scenario then error('CommandProject: mapa nao encontrado: ' .. tostring(mapName)) end
+    local armies = scenario.Configurations.standard.teams[1].armies
+    local bases = table.getn(armies)
+    local size = (scenario.size and scenario.size[1]) or 1024
+    local area = math.max(1, size / 1024) * math.max(1, size / 1024)
+    local memory = math.max(2, math.floor(256 / area + 0.000001))
+    local n = math.min(tonumber(players) or 8, bases, CPMaxArmies, memory)
+    if n < 2 then n = 2 end
+    teams = tonumber(teams) or 2
+    if teams > n then teams = n end
+    if ai ~= 'Easy' and ai ~= 'Normal' and ai ~= 'Hard' and ai ~= 'Cheat' then ai = 'Normal' end
+    local spec = 'Victory=demoralization;UnitCap=1000;FogOfWar=explored;GameSpeed=normal;NoRushOption=Off;PreBuiltUnits=Off;PrebuiltUnits=Off;CivilianAlliance=enemy;CheatsEnabled=false;DoNotShareUnitCap=true'
+    for i = 1, bases do
+        if i <= n then
+            local team = 1
+            if teams >= 2 then team = math.floor((i - 1) * teams / n) + 2 end
+            if i == 1 then
+                spec = spec .. '|H,' .. team .. ',0,,' .. (i - 1)
+            else
+                spec = spec .. '|A,' .. team .. ',0,' .. ai .. ',' .. (i - 1)
+            end
+        else
+            spec = spec .. '|X'
+        end
+    end
+    LOG('*CommandProject big match (in game): ' .. n .. ' players, ' .. teams .. ' teams, ' .. ai .. ' on ' .. tostring(mapName))
+    LaunchSinglePlayerSession(CPBigMatchSession(mapName, spec))
+end
+
 -- called first thing by StartCommandLineSession: true when the big match took over
 function CPBigMatchStart(mapName)
     if not HasCommandLineArg('/cpmatch') then return false end

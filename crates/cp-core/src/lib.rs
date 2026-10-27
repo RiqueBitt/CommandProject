@@ -4,6 +4,7 @@
 
 pub mod aimod;
 pub mod bigmatch;
+pub mod bigmatch_menu;
 pub mod anim;
 pub mod blueprint;
 pub mod cheats;

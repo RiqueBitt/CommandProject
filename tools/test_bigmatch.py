@@ -157,6 +157,27 @@ def run(source: str, label: str, real: bool):
           f"{label}: vagas vazias ficam de fora e você pode estar em qualquer base")
     check(players[1].ArmyName == "ARMY_1" and players[1].Team == 1 and players[1].AIPersonality == "Easy", f"{label}: todos contra todos")
 
+    # a tela "Partida grande" dentro do jogo: 12 jogadores em 3 times, IA difícil
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.execute(HARNESS)
+    lua.execute(moho_to_lua(source))
+    g = lua.globals()
+    g.CPBigMatchQuick("/maps/big/big_scenario.lua", 12, 3, "Hard")
+    info = g.World.launched
+    players = [p for p in info.teamInfo.values() if not p.Civilian] if info else []
+    check(len(players) == 12 and players[0].Human, f"{label}: tela no jogo: 12 jogadores, você na primeira base ({len(players)})")
+    check(sorted({p.Team for p in players}) == [2, 3, 4] and all(p.AIPersonality == "Hard" for p in players[1:]),
+          f"{label}: tela no jogo: 3 times de 4 e IA difícil")
+    # mais jogadores que bases: fica no que o mapa tem; todos contra todos = time 1
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.execute(HARNESS)
+    lua.execute(moho_to_lua(source))
+    g = lua.globals()
+    g.CPBigMatchQuick("/maps/big/big_scenario.lua", 32, 0, "nada")
+    players = [p for p in g.World.launched.teamInfo.values() if not p.Civilian]
+    check(len(players) == 24 and all(p.Team == 1 for p in players) and players[1].AIPersonality == "Normal",
+          f"{label}: tela no jogo: limitado às 24 bases, todos contra todos, IA normal sem escolha válida")
+
     # sem /cpmatch: o jogo segue como sempre
     if real:
         lua = LuaRuntime(unpack_returned_tuples=True)
