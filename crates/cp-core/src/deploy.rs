@@ -609,22 +609,22 @@ impl<'a> Deployer<'a> {
                 .collect();
             mods.push((n, entries));
         }
-        // um .scd novo no índice no máximo (veja crate::toc): o que mais substitui fica como .scd,
-        // os outros viram arquivos soltos quando dá
+        // um .scd novo no índice no máximo (veja crate::toc): o que mais substitui fica como .scd
+        // (menos arquivos para copiar), os outros viram arquivos soltos na pasta do jogo — inclusive
+        // os ".win" (texturas, cenas da interface), que o jogo também lê soltos
         let stats = crate::toc::override_stats(&original, &mods)?;
-        // prefere manter como .scd o que não pode ficar solto (arquivos ".win") e, depois, o maior
         let keep = stats
             .iter()
             .enumerate()
             .filter(|(_, (hits, _))| *hits > 0)
-            .max_by_key(|(_, (hits, loose_ok))| (!loose_ok, *hits))
+            .max_by_key(|(i, (hits, win))| (*hits, *win, std::cmp::Reverse(*i)))
             .map(|(i, _)| i);
         let plan: Vec<(String, Vec<crate::toc::ModEntry>, bool)> = mods
             .into_iter()
             .enumerate()
             .map(|(i, (n, e))| {
-                let (hits, loose_ok) = stats[i];
-                (n, e, hits > 0 && Some(i) != keep && loose_ok)
+                let (hits, _) = stats[i];
+                (n, e, hits > 0 && Some(i) != keep)
             })
             .collect();
         let (new, redirected, loose) = if plan.is_empty() {
@@ -993,14 +993,17 @@ mod tests {
         fs::create_dir_all(&src).unwrap();
         make_scd(&src.join("zz_cp_hd.scd"), &[("textures\\ui\\BG.win.dds", b"hd")]);
         make_scd(&src.join("zz_cp_zz_menu.scd"), &[("textures/ui/logo.dds", b"logo novo")]);
+        // um terceiro com ".win" (como a cena da tela inicial da Forja): solto também, sem .scd novo
+        make_scd(&src.join("zz_cp_zzz_cena.scd"), &[("textures/ui/bg.win.dds", b"cena")]);
         let a = e.lib.import(&src.join("zz_cp_hd.scd"), &ImportOptions::default()).unwrap();
         let b = e.lib.import(&src.join("zz_cp_zz_menu.scd"), &ImportOptions::default()).unwrap();
+        let c = e.lib.import(&src.join("zz_cp_zzz_cena.scd"), &ImportOptions::default()).unwrap();
         let mut w = vec![];
         let mut d = Deployer { game: &e.game, data_dir: &e.data, hashes: &mut e.cache };
         d.apply(&[], None, &mut |_| {}).unwrap(); // primeira varredura
         // sobra de teste com nome do launcher, depois da varredura: vai para a quarentena
         fs::write(e.game.gamedata.join("zz_cp_sobra.scd"), b"x").unwrap();
-        let targets = d.targets(&e.lib, &profile(&[a.id.as_str(), b.id.as_str()]), &mut w).unwrap();
+        let targets = d.targets(&e.lib, &profile(&[a.id.as_str(), b.id.as_str(), c.id.as_str()]), &mut w).unwrap();
         d.apply(&targets, Some("p"), &mut |_| {}).unwrap();
         assert!(!e.game.gamedata.join("zz_cp_sobra.scd").exists());
 
@@ -1010,6 +1013,9 @@ mod tests {
         assert_eq!((logo.archive, logo.size), (None, 9));
         let loose = e.game.root.join("textures/ui/logo.dds");
         assert_eq!(fs::read(&loose).unwrap(), b"logo novo");
+        let bg = toc.files().unwrap().into_iter().find(|f| f.key == "textures/ui/bg.dds").unwrap();
+        assert_eq!((bg.archive, bg.size, bg.win), (None, 4, true), "o último mod vence, solto e com .win");
+        assert_eq!(fs::read(e.game.root.join("textures/ui/bg.win.dds")).unwrap(), b"cena");
 
         // índice deixado com .scd do launcher (ex.: teste manual) não vira o "original"
         let patched = fs::read(&toc_path).unwrap();

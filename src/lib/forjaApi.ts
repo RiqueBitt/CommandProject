@@ -37,7 +37,7 @@ export const FORJA_API: ApiEntry[] = [
   f("Forja.Errors", "Forja.Errors()", "Erros dos mods até agora (mod, lado, texto)."),
   f("Forja.Copy", "Forja.Copy(tabela)", "Cópia profunda de uma tabela."),
   f("Forja.Log", "Forja.Log(text)", "Escreve no log do jogo."),
-  v("Forja.Side", "Forja.Side", "'sim', 'ui' ou 'blueprints': onde o código está rodando."),
+  v("Forja.Side", "Forja.Side", "'sim', 'ui', 'blueprints' ou 'menu': onde o código está rodando."),
   v("Forja.Version", "Forja.Version", "Versão da Forja."),
   // simulação
   f("Forja.Sim.OnCommand", "Forja.Sim.OnCommand(nome, fn(data, units))", "Recebe um comando mandado pela interface com Forja.UI.SendToSim."),
@@ -55,6 +55,13 @@ export const FORJA_API: ApiEntry[] = [
   f("Forja.UI.Panel", "Forja.UI.Panel({ title, subtitle })", "Painel do mod: panel:Button(rótulo, fn, valorFn), panel:Text(t), panel:Toggle(), panel:Refresh()."),
   f("Forja.UI.TogglePanel", "Forja.UI.TogglePanel()", "Abre ou fecha o painel da Forja."),
   v("Forja.UI.Colors", "Forja.UI.Colors.Ok | Warn | Err | Muted", "Cores do painel."),
+  // tela inicial (menu.lua)
+  f("Forja.Menu.OnClick", "Forja.Menu.OnClick('botao', fn(button))", "Roda quando o jogador clica no botão do mod na tela inicial (o id do botão no mod.json, em \"menu\")."),
+  f("Forja.Menu.Dialog", "Forja.Menu.Dialog(texto, rótuloDoBotão?)", "Mensagem na janela do próprio jogo, com um botão que fecha."),
+  f("Forja.Menu.OpenURL", "Forja.Menu.OpenURL('https://…')", "Abre um site no navegador do jogador."),
+  f("Forja.Menu.Get", "Forja.Menu.Get(chave, padrão)", "Valor guardado nas preferências do jogo (separado por mod)."),
+  f("Forja.Menu.Set", "Forja.Menu.Set(chave, valor)", "Guarda um valor nas preferências do jogo (vale nas próximas vezes)."),
+  f("Forja.Menu.Buttons", "Forja.Menu.Buttons()", "Os botões que os mods puseram na tela inicial ({ key, mod, id, label, message, url })."),
   // blueprints
   f("Forja.BP.EachUnit", "Forja.BP.EachUnit(categoria|nil, fn(bp, id))", "Para cada unidade (de uma categoria, ou todas)."),
   f("Forja.BP.Unit", "Forja.BP.Unit(id)", "Blueprint de uma unidade."),
@@ -182,7 +189,7 @@ export function lintLua50(src: string): LuaIssue[] {
 }
 
 /** Trechos prontos para inserir no código (menu "Inserir"). */
-export interface Snippet { label: string; side: "sim" | "ui" | "blueprints" | "any"; code: string }
+export interface Snippet { label: string; side: "sim" | "ui" | "blueprints" | "menu" | "any"; code: string }
 
 export const SNIPPETS: Snippet[] = [
   { label: "Quando uma unidade morrer", side: "sim", code: "Forja.On('UnitKilled', function(unit, instigator)\n    -- unit: quem morreu; instigator: quem matou (pode ser nil)\n    if instigator and instigator.GetArmy then\n        mod.Log('exército ' .. instigator:GetArmy() .. ' destruiu uma unidade')\n    end\nend)\n" },
@@ -194,6 +201,9 @@ export const SNIPPETS: Snippet[] = [
   { label: "Mensagem da simulação para a interface", side: "ui", code: "-- na simulação: Forja.Sim.SendToUI(mod.Id .. ':aviso', { texto = 'oi' })\nForja.UI.OnSim(mod.Id .. ':aviso', function(data)\n    Forja.UI.Notify(data.texto, 4)\nend)\n" },
   { label: "Painel com botão e tecla", side: "ui", code: "local panel = Forja.UI.Panel({ title = mod.Name, subtitle = 'F7 abre e fecha' })\npanel:Button('Fazer algo', function()\n    Forja.UI.Notify('feito!', 3)\nend)\npanel:Button('Tempo', nil, function() return tostring(math.floor(GetGameTimeSeconds())) end)\nForja.UI.AddKey('F7', mod.Name, function() panel:Toggle() end)\n" },
   { label: "Aviso na tela", side: "ui", code: "Forja.UI.Notify('Olá!', 4)\n" },
+  { label: "Clique num botão da tela inicial", side: "menu", code: "-- o botão fica no mod.json: \"menu\": { \"buttons\": [{ \"id\": \"abrir\", \"label\": \"MEU MOD\", \"where\": \"main\" }] }\nForja.Menu.OnClick('abrir', function(button)\n    Forja.Menu.Dialog(mod.Name .. ' ' .. mod.Version)\nend)\n" },
+  { label: "Contador salvo nas preferências", side: "menu", code: "local n = Forja.Menu.Get('vezes', 0) + 1\nForja.Menu.Set('vezes', n)\n" },
+  { label: "Abrir um site", side: "menu", code: "Forja.Menu.OpenURL('https://github.com/RiqueBitt/CommandProject')\n" },
   { label: "Mudar todas as unidades de uma categoria", side: "blueprints", code: "Forja.BP.EachUnit('LAND', function(bp, id)\n    Forja.BP.Scale(bp, 'Defense.MaxHealth', 1.5)\nend)\n" },
   { label: "Mudar uma unidade", side: "blueprints", code: "Forja.BP.Patch('uul0101', {\n    Defense = { MaxHealth = 500 },\n})\n" },
   { label: "Unidade nova copiando outra", side: "blueprints", code: "Forja.BP.Modify(function(B)\n    local bp = B.Clone('uul0101', 'cpx0101', { Defense = { MaxHealth = 900 } })\n    B.Set(bp, 'Economy.BuildTime', 20)\nend)\n" },

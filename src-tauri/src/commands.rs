@@ -689,7 +689,10 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
                 }
             }
         }
-        let applied = if ws.settings.apply_before_launch || big.is_some() {
+        // com "mods só pelo launcher" (ou "voltar ao original ao fechar") a pasta volta ao original
+        // quando o jogo fecha: sem aplicar de novo, o jogo abriria sem os mods do perfil
+        let restored_on_exit = ws.settings.restore_on_exit || ws.settings.mods_only_launcher;
+        let applied = if ws.settings.apply_before_launch || big.is_some() || restored_on_exit {
             Some(ws.apply_active(&mut |p: Progress| emit_progress(&app2, "apply", p.step, p.total, p.message))?)
         } else {
             None

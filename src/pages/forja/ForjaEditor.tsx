@@ -15,7 +15,7 @@ const LuaEditor = lazy(() => import("../../components/LuaEditor"));
 function stored(key: string, fallback: string) {
   try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
 }
-const sideOf = (file: string) => (file.startsWith("sim") ? "sim" : file.startsWith("ui") ? "ui" : file.startsWith("blueprints") ? "blueprints" : "any");
+const sideOf = (file: string) => (file.startsWith("sim") ? "sim" : file.startsWith("ui") ? "ui" : file.startsWith("blueprints") ? "blueprints" : file.startsWith("menu") ? "menu" : "any");
 
 interface Buf { saved: string; draft: string }
 interface Hit { file: string; line: number; text: string }

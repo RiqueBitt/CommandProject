@@ -1232,6 +1232,26 @@ textarea.pinput { height: auto; padding: 4px 6px; resize: vertical; }
 .forja-mod::before { content: counter(forja); position: absolute; left: 14px; top: 13px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600; background: rgba(242, 179, 61, .16); color: var(--warn); }
 .forja-mod .row.gap { gap: 8px; align-items: center; }
 .forja-sides { flex-wrap: wrap; }
+/* prévia da tela inicial do jogo (botões dos mods da Forja) */
+.menu-preview-wrap { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .menu-preview-wrap { grid-template-columns: 1fr; } }
+.menu-preview { position: relative; aspect-ratio: 4 / 3; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); isolation: isolate;
+  background: radial-gradient(120% 70% at 55% 8%, #4d6f93 0%, #1b2f47 38%, #0b1726 62%, #071019 100%); }
+.menu-preview .mp-logo { position: absolute; left: 24%; top: 25%; color: #d7dee6; font: 800 clamp(10px, 1.5vw, 17px)/1 "Arial Narrow", "Roboto Condensed", Arial, sans-serif; letter-spacing: .08em; text-shadow: 0 2px 0 #000; }
+.menu-preview .mp-logo b { color: #e8eef5; font-size: 1.15em; }
+.menu-preview .mp-band { position: absolute; left: 0; right: 0; top: 52%; bottom: 0; background: linear-gradient(180deg, rgba(40, 92, 150, .55), rgba(16, 45, 82, .75)); border-top: 1px solid rgba(140, 190, 240, .35); z-index: -1; }
+.menu-preview .mp-col { position: absolute; left: 7.6%; width: 36.8%; top: 57%; display: flex; flex-direction: column; gap: 1.1%; }
+.menu-preview .mp-col.tight { top: 53.5%; gap: .4%; }
+.menu-preview .mp-sub { position: absolute; left: 45%; width: 36.8%; bottom: 3.5%; display: flex; flex-direction: column; gap: 1.1%; }
+.menu-preview .mp-btn { display: flex; align-items: center; justify-content: space-between; height: clamp(14px, 2.3vw, 24px); padding: 0 8% 0 6%; border-radius: 3px 3px 8px 3px;
+  background: linear-gradient(180deg, rgba(76, 128, 186, .65), rgba(25, 58, 104, .85)); border: 1px solid rgba(150, 200, 250, .45); color: #f1f5fa;
+  font: 700 clamp(7px, 1vw, 11.5px)/1 "Arial Narrow", "Roboto Condensed", Arial, sans-serif; letter-spacing: .05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
+.menu-preview .mp-btn.small { font-size: clamp(6.5px, .9vw, 10px); }
+.menu-preview .mp-btn.active { background: linear-gradient(180deg, rgba(110, 160, 220, .8), rgba(35, 80, 140, .9)); box-shadow: 0 0 0 1px rgba(200, 230, 255, .5); }
+.menu-preview .mp-btn.mod { background: linear-gradient(180deg, color-mix(in srgb, var(--primary) 55%, #23466f), color-mix(in srgb, var(--primary) 30%, #10294a)); border-color: color-mix(in srgb, var(--primary) 75%, white); box-shadow: 0 0 10px color-mix(in srgb, var(--primary) 35%, transparent); }
+.mp-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.mp-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; padding: 7px 10px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); }
+.menu-preview-legend { gap: 10px; }
 .forja-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; padding-top: 6px; border-top: 1px solid var(--border); align-items: end; }
 .forja-problems { margin: 6px 0 0; padding-left: 18px; }
 .warn-text { color: var(--warn); }

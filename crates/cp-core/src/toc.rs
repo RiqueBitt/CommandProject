@@ -21,6 +21,9 @@
 //! abrir (falha ao listar `/sounds/mod/*.fev`, visto nos relatórios de travamento). Por isso só o mod
 //! que mais substitui arquivos ganha uma entrada de `.scd`; os outros têm os arquivos extraídos
 //! soltos na pasta do jogo (como os sons e o executável, que o índice já lista como "soltos").
+//! Arquivos com `.win` também podem ficar soltos: no disco o nome mantém o `.win` (como os vídeos do
+//! jogo, `movies/*.win.usm`) e o registro do índice marca "tem .win" (conferido no jogo com a cena
+//! da tela inicial).
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -280,8 +283,8 @@ pub struct LooseFile {
     pub size: u32,
 }
 
-/// Quantos arquivos do índice cada `.scd` substitui e se dá para servi-los soltos (nenhum com `.win`).
-pub fn override_stats(original: &[u8], mods: &[(String, Vec<ModEntry>)]) -> Result<Vec<(usize, bool)>> {
+/// Quantos arquivos do índice cada `.scd` substitui e quantos deles têm `.win`.
+pub fn override_stats(original: &[u8], mods: &[(String, Vec<ModEntry>)]) -> Result<Vec<(usize, usize)>> {
     let toc = Toc::parse(original)?;
     let keys: std::collections::HashSet<String> = toc.files()?.into_iter().map(|f| f.key).collect();
     Ok(mods
@@ -294,7 +297,7 @@ pub fn override_stats(original: &[u8], mods: &[(String, Vec<ModEntry>)]) -> Resu
                     keys.contains(&k).then_some(win)
                 })
                 .collect();
-            (hits.len(), hits.iter().all(|w| !w))
+            (hits.len(), hits.iter().filter(|w| **w).count())
         })
         .collect())
 }
@@ -311,9 +314,11 @@ pub fn apply_mixed(original: &[u8], mods: &[(String, Vec<ModEntry>, bool)]) -> R
         for e in entries {
             let (key, win) = toc_key(&e.name);
             let Some(&rec) = index.get(&key) else { continue }; // arquivo novo: o jogo acha sozinho
-            if *as_loose && !win {
-                toc.redirect(rec, LOOSE, 0, e.size, false)?;
-                loose.insert(rec, LooseFile { mod_index: mi, entry: e.index, path: key, size: e.size });
+            if *as_loose {
+                toc.redirect(rec, LOOSE, 0, e.size, win)?;
+                // no disco, com o nome de dentro do .scd (o ".win" fica, como nos vídeos do jogo)
+                let disk = if win { disk_name(&e.name) } else { key };
+                loose.insert(rec, LooseFile { mod_index: mi, entry: e.index, path: disk, size: e.size });
                 changed.insert(rec);
                 continue;
             }
@@ -333,6 +338,11 @@ pub fn apply_mixed(original: &[u8], mods: &[(String, Vec<ModEntry>, bool)]) -> R
     let mut files: Vec<LooseFile> = loose.into_values().collect();
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok((toc.to_bytes()?, changed.len(), files))
+}
+
+/// Caminho no disco de uma entrada de `.scd` (minúsculo, com `/`, sem `/` no começo).
+pub fn disk_name(entry_name: &str) -> String {
+    entry_name.replace('\\', "/").to_ascii_lowercase().trim_start_matches('/').to_string()
 }
 
 /// O índice tem `.scd` colocados pelo launcher (`_cp_…`/`zz_cp_…`)? Então não é o original do jogo.
@@ -519,7 +529,16 @@ pub(crate) mod tests {
         assert!(has_launcher_archives(&out));
         assert!(!has_launcher_archives(&bytes));
         let st = override_stats(&bytes, &mods.iter().map(|(a, b, _)| (a.clone(), b.clone())).collect::<Vec<_>>()).unwrap();
-        assert_eq!(st, vec![(1, false), (1, true)]);
+        assert_eq!(st, vec![(1, 1), (1, 0)]);
+        // um ".win" de outro mod também fica solto, com o nome de dentro do .scd no disco
+        let mut mods = mods;
+        mods.push(("zz_cp_c.scd".to_string(), vec![e("Textures\\UI\\BG.win.dds", 3, 12)], true));
+        let (out, _, loose) = apply_mixed(&bytes, &mods).unwrap();
+        let t = Toc::parse(&out).unwrap();
+        assert_eq!(t.archives().unwrap().len(), 3, "continua só um .scd novo");
+        let bg = t.files().unwrap().into_iter().find(|f| f.key == "textures/ui/bg.dds").unwrap();
+        assert_eq!((bg.archive, bg.size, bg.win), (None, 12, true));
+        assert!(loose.contains(&LooseFile { mod_index: 2, entry: 3, path: "textures/ui/bg.win.dds".into(), size: 12 }));
     }
 
     /// Com `CP_REAL_TOC` apontando para o toc.win.bdf do jogo, confere leitura e regravação.

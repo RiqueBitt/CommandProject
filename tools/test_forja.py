@@ -3,7 +3,7 @@ Forja (carregador de mods) num mundo falso: o Lua que o launcher gera para a sim
 e os blueprints roda com o Lua do lupa e funções do jogo de mentira. Confere que os mods registram,
 que um mod quebrado não derruba os outros, eventos e prioridades, comandos interface → simulação,
 mensagens simulação → interface, opções, módulos (mod.Require), APIs entre mods (Export/Use),
-ajudas de blueprint e os eventos das unidades (Unit.lua).
+ajudas de blueprint, os eventos das unidades (Unit.lua) e os botões da tela inicial (uimain.lua).
 
     cargo test -p cp-core forja::tests::dump_generated  (com CP_FORJA_DUMP=<pasta>)
     python tools/test_forja.py <pasta>
@@ -60,6 +60,15 @@ Unit = {}
 function Unit.OnCreate(self, a) created = created + 1 end
 function Unit.OnKilled(self, instigator, kind, overkill) killed = killed + 1 end
 function Unit.OnDamage(self, instigator, amount, vector, kind) end
+"""
+
+MENU_WORLD = r"""
+dialogs, urls, prefs = {}, {}, {}
+function UIShowDialog(text, b1) table.insert(dialogs, text) end
+function OpenURL(u) table.insert(urls, u) end
+function GetPreference(k) return prefs[k] end
+function SetPreference(k, v) prefs[k] = v end
+function SavePreferences() end
 """
 
 fails = []
@@ -191,6 +200,25 @@ def main(dump):
           "categorias do clone")
     ok = lua.eval("(pcall(Forja.BP.Unit, 'x'))")
     check(ok is False, "Forja.BP fora do carregamento avisa")
+
+    # ------------------------------------------------------------- tela inicial
+    lua = world(MENU_WORLD, load(os.path.join(dump, "menu.lua")))
+    check(lua.eval("Forja.Side") == "menu" and lua.eval("Forja.Menu ~= nil"), "motor da tela inicial no ar")
+    mods = lua.eval("(function() local t = {} for _, m in ipairs(Forja.Mods()) do table.insert(t, m.Id) end return table.concat(t, ',') end)()")
+    check(mods == "bad,inicio", f"só os mods que mexem na tela inicial ({mods})")
+    check(lua.eval("Forja.Get('bad').Failed") and not lua.eval("Forja.Get('inicio').Failed"), "erro no menu.lua isola o mod")
+    check(lua.eval("table.getn(Forja.Menu.Buttons())") == 6, "os botões do mod.json ficam definidos")
+    lua.execute("ForjaMenuClick('inicio:sobre') ForjaMenuClick('inicio:sobre')")
+    check(lua.eval("dialogs[2]") == "Inicio 1.0.0: aberto 2 vez(es).", f"OnClick + Get/Set ({lua.eval('dialogs[2]')})")
+    check(lua.eval("prefs.forja_inicio_abertos") == 2, "o valor fica nas preferências, separado por mod")
+    lua.execute("ForjaMenuClick('inicio:site')")
+    check(lua.eval("urls[1]") == "https://github.com/RiqueBitt/CommandProject", "botão sem código abre o site do mod.json")
+    lua.execute("ForjaMenuClick('bad:x') ForjaMenuClick('nada:nada') ForjaMenuClick(nil)")
+    check(any("falhou no clique" in str(w) for w in lua.eval("warns").values()), "erro no clique vai para o log, sem derrubar o menu")
+    check(any("clique em inicio:sobre" in str(l) for l in lua.eval("logs").values()), "evento MenuClick")
+    # a interface da partida põe o motor dela em _G.Forja: o clique continua indo para o da tela inicial
+    lua.execute("_G.Forja = { Side = 'ui' } ForjaMenuClick('inicio:sobre')")
+    check(lua.eval("table.getn(dialogs)") == 3 and lua.eval("_G.Forja.Side") == "ui", "clique com o motor da partida carregado")
 
     print("\n" + ("tudo certo" if not fails else f"{len(fails)} falha(s)"))
     return 1 if fails else 0

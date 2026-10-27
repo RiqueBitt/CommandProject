@@ -148,7 +148,7 @@ export default function Home() {
                 </div>
                 <div className="meta">
                   <Icon name="extension" />
-                  <div><div className="overline">{t("Mods ativos")}</div><div className="v">{t("{n} de {total}", { n: d.enabledMods, total: d.installedMods })}</div></div>
+                  <div><div className="overline">{t("Mods ativos")}</div><div className="v">{t("{n} de {total}", { n: active.length, total: mods.filter((m) => !isLauncherMod(m.manifest.id)).length })}</div></div>
                 </div>
                 <div className="meta">
                   <Icon name="history" />

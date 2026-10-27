@@ -47,6 +47,7 @@ const SIM: &str = include_str!("forja/forja_sim.lua");
 const UNIT: &str = include_str!("forja/forja_unit.lua");
 const UI: &str = include_str!("forja/forja_ui.lua");
 const BP: &str = include_str!("forja/forja_bp.lua");
+const MENU: &str = include_str!("forja/forja_menu.lua");
 
 /// Tamanho máximo de um arquivo Lua de mod (proteção contra arquivos errados).
 const MAX_LUA: usize = 2 * 1024 * 1024;
@@ -116,7 +117,51 @@ pub struct ForjaManifest {
     pub conflicts: Vec<String>,
     #[serde(default)]
     pub options: Vec<ForjaOption>,
+    /// Mudanças na tela inicial do jogo (botões novos, nomes, botões escondidos).
+    #[serde(default, skip_serializing_if = "MenuSpec::is_empty")]
+    pub menu: MenuSpec,
 }
+
+/// `menu` no mod.json: o que o mod muda na tela inicial do jogo.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MenuSpec {
+    pub buttons: Vec<MenuButtonSpec>,
+    /// Botão do jogo → nome novo (`campaign`, `skirmish`, `multiplayer`, `options`, `extras`,
+    /// `quit`, `replays`, `credits`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub rename: BTreeMap<String, String>,
+    /// Botões do jogo escondidos (menos `quit`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hide: Vec<String>,
+}
+
+impl MenuSpec {
+    pub fn is_empty(&self) -> bool {
+        self.buttons.is_empty() && self.rename.is_empty() && self.hide.is_empty()
+    }
+}
+
+/// Um botão novo na tela inicial. No clique: o `Forja.Menu.OnClick(id)` do `menu.lua` do mod; sem
+/// ele, a mensagem (`message`) ou o site (`url`); e, se tiver, a ação do jogo (`native`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MenuButtonSpec {
+    pub id: String,
+    pub label: String,
+    #[serde(default, rename = "where")]
+    pub place: crate::mainmenu::Place,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Uma ação do próprio jogo (veja [`crate::mainmenu::NATIVE`]): `lan`, `skirmish`, `replays`...
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native: Option<String>,
+}
+
+/// Botões de um mod na tela inicial (proteção contra mods que enchem a tela).
+pub const MAX_MENU_BUTTONS: usize = 6;
 
 fn valid_id(id: &str) -> bool {
     !id.is_empty()
@@ -182,6 +227,61 @@ impl ForjaManifest {
                 return bad(format!("o padrão da opção \"{}\" não combina com o tipo dela", o.key));
             }
         }
+        self.validate_menu()
+    }
+
+    fn validate_menu(&self) -> Result<()> {
+        let bad = |m: String| Err(Error::Manifest(format!("{}: menu: {m}", self.id)));
+        let menu = &self.menu;
+        if menu.buttons.len() > MAX_MENU_BUTTONS {
+            return bad(format!("no máximo {MAX_MENU_BUTTONS} botões por mod"));
+        }
+        let label_ok = |l: &str| {
+            let n = l.trim().chars().count();
+            (1..=40).contains(&n) && !l.chars().any(|c| c.is_control())
+        };
+        let mut ids = BTreeSet::new();
+        for b in &menu.buttons {
+            if !valid_key(&b.id) {
+                return bad(format!("botão com id inválido: \"{}\" (letras, números e _)", b.id));
+            }
+            if !ids.insert(b.id.clone()) {
+                return bad(format!("botão repetido: {}", b.id));
+            }
+            if !label_ok(&b.label) {
+                return bad(format!("o texto do botão \"{}\" precisa ter de 1 a 40 letras", b.id));
+            }
+            if let Some(u) = &b.url {
+                if !(u.starts_with("https://") || u.starts_with("http://")) || u.len() > 500 || u.chars().any(|c| c.is_whitespace() || c == '"') {
+                    return bad(format!("o site do botão \"{}\" precisa começar com https://", b.id));
+                }
+            }
+            if let Some(m) = &b.message {
+                if m.chars().count() > 300 {
+                    return bad(format!("a mensagem do botão \"{}\" passa de 300 letras", b.id));
+                }
+            }
+            if let Some(n) = &b.native {
+                if !crate::mainmenu::NATIVE.iter().any(|x| x.0 == n) {
+                    let all: Vec<&str> = crate::mainmenu::NATIVE.iter().map(|x| x.0).collect();
+                    return bad(format!("ação do jogo \"{n}\" não existe (use uma de: {})", all.join(", ")));
+                }
+            }
+        }
+        let stock = |k: &str| crate::mainmenu::MAIN.iter().chain(crate::mainmenu::EXTRAS).any(|x| x.0 == k);
+        for (k, v) in &menu.rename {
+            if !stock(k) {
+                return bad(format!("não existe botão \"{k}\" para renomear"));
+            }
+            if !label_ok(v) {
+                return bad(format!("o nome novo de \"{k}\" precisa ter de 1 a 40 letras"));
+            }
+        }
+        for k in &menu.hide {
+            if !stock(k) || k == "quit" {
+                return bad(format!("não dá para esconder \"{k}\""));
+            }
+        }
         Ok(())
     }
 }
@@ -205,11 +305,20 @@ impl ForjaMod {
 
     /// As partes do jogo onde o mod tem código.
     pub fn sides(&self) -> Vec<&'static str> {
-        [("sim.lua", "sim"), ("ui.lua", "ui"), ("blueprints.lua", "blueprints")]
+        let mut out: Vec<&'static str> = [("sim.lua", "sim"), ("ui.lua", "ui"), ("blueprints.lua", "blueprints")]
             .into_iter()
             .filter(|(f, _)| self.has(f))
             .map(|(_, s)| s)
-            .collect()
+            .collect();
+        if self.has_menu() {
+            out.push("menu");
+        }
+        out
+    }
+
+    /// O mod mexe na tela inicial (botões no mod.json ou código em `menu.lua`)?
+    pub fn has_menu(&self) -> bool {
+        self.has("menu.lua") || !self.manifest.menu.is_empty()
     }
 
     /// Problemas que dá para ver sem rodar (blocos sem `end`, parênteses...).
@@ -235,8 +344,8 @@ fn parse_mod(id_dir: &str, manifest: &[u8], files: BTreeMap<String, Vec<u8>>, li
     if m.id != id_dir {
         return Err(Error::Manifest(format!("forja/{id_dir}/mod.json: o id \"{}\" precisa ser igual ao nome da pasta", m.id)));
     }
-    if files.is_empty() {
-        return Err(Error::Manifest(format!("forja/{id_dir}: nenhum arquivo .lua (sim.lua, ui.lua ou blueprints.lua)")));
+    if files.is_empty() && m.menu.is_empty() {
+        return Err(Error::Manifest(format!("forja/{id_dir}: nenhum arquivo .lua (sim.lua, ui.lua, blueprints.lua ou menu.lua) nem \"menu\" no mod.json")));
     }
     Ok(ForjaMod { manifest: m, library_id: library_id.into(), files })
 }
@@ -599,6 +708,8 @@ pub enum Side {
     Sim,
     Ui,
     Blueprints,
+    /// Tela inicial do jogo (antes da partida).
+    Menu,
 }
 
 impl Side {
@@ -607,6 +718,7 @@ impl Side {
             Side::Sim => "sim",
             Side::Ui => "ui",
             Side::Blueprints => "blueprints",
+            Side::Menu => "menu",
         }
     }
     fn entry(self) -> &'static str {
@@ -614,6 +726,7 @@ impl Side {
             Side::Sim => "sim.lua",
             Side::Ui => "ui.lua",
             Side::Blueprints => "blueprints.lua",
+            Side::Menu => "menu.lua",
         }
     }
 }
@@ -631,9 +744,31 @@ pub fn side_code(plan: &Plan, side: Side, settings: &Settings) -> String {
         Side::Sim => SIM,
         Side::Ui => UI,
         Side::Blueprints => BP,
+        Side::Menu => MENU,
     }));
     out.push('\n');
+    if side == Side::Menu {
+        // os botões dos mods (o que fazer no clique quando o mod não tem código para ele)
+        for m in plan.mods.iter().filter(|m| m.has_menu()) {
+            for b in &m.manifest.menu.buttons {
+                let opt = |v: &Option<String>| v.as_deref().map(lua_utf8).unwrap_or_else(|| "nil".into());
+                out.push_str(&format!(
+                    "Forja.Menu._Define({{ key = {}, mod = {}, id = {}, label = {}, message = {}, url = {} }})\n",
+                    lua_str(&format!("{}:{}", m.manifest.id, b.id)),
+                    lua_str(&m.manifest.id),
+                    lua_str(&b.id),
+                    lua_utf8(&b.label),
+                    opt(&b.message),
+                    opt(&b.url),
+                ));
+            }
+        }
+    }
     for m in &plan.mods {
+        // na tela inicial só entram os mods que mexem nela
+        if side == Side::Menu && !m.has_menu() {
+            continue;
+        }
         let man = &m.manifest;
         let options = option_values(man, settings.mods.get(&man.id));
         out.push_str("Forja._Register({\n");
@@ -644,7 +779,7 @@ pub fn side_code(plan: &Plan, side: Side, settings: &Settings) -> String {
         ));
         out.push_str("    modules = {\n");
         for (path, data) in &m.files {
-            if ["sim.lua", "ui.lua", "blueprints.lua"].contains(&path.as_str()) {
+            if ["sim.lua", "ui.lua", "blueprints.lua", "menu.lua"].contains(&path.as_str()) {
                 continue;
             }
             let key = path.trim_end_matches(".lua");
@@ -685,6 +820,9 @@ const SYNC_HOOK: &str = "\tif Sync.Forja and _G.Forja and _G.Forja._Deliver then
 /// O comando da interface para a simulação (o mesmo em todos os mods do CommandProject).
 pub const CALLBACK: &str = "Callbacks.Forja = function(data, units) if _G.Forja and _G.Forja._Command then _G.Forja._Command(data, units) end end\n";
 const UI_KEY_FN: &str = "\n-- CommandProject Forja: keys of the Forja panel and of mods (IN_AddKeyMapTable calls this)\nfunction ForjaKey(name) if _G.Forja and _G.Forja._Key then _G.Forja._Key(name) end end\n";
+/// Os botões da tela inicial chamam esta função (veja [`crate::mainmenu::click_lua`]). O motor da
+/// tela inicial fica guardado: a interface da partida põe o dela em `_G.Forja`.
+const MENU_DISPATCH: &str = "\n-- CommandProject Forja: the buttons that mods put on the start screen call this\nlocal ForjaMenuEngine = _G.Forja\nfunction ForjaMenuClick(key)\n    local engine = ForjaMenuEngine\n    if not (engine and engine._MenuClick) then return end\n    local prev = _G.Forja\n    _G.Forja = engine\n    local ok, err = pcall(engine._MenuClick, key)\n    _G.Forja = prev\n    if not ok then WARN('[Forja] ' .. tostring(err)) end\nend\n";
 const BP_HOOK: &str = "\n-- CommandProject Forja: mods change the blueprints after the game's own ModBlueprints\nlocal ForjaBaseModBlueprints = ModBlueprints\nfunction ModBlueprints(all_blueprints)\n    ForjaBaseModBlueprints(all_blueprints)\n    if _G.Forja and _G.Forja._Blueprints then _G.Forja._Blueprints(all_blueprints) end\nend\n";
 
 fn append(text: &str, code: &str) -> String {
@@ -750,6 +888,12 @@ pub fn patch(path: &str, text: &str, plan: &Plan, settings: &Settings) -> Result
             let hooked = before_end(text, "OnFirstUpdate()", UI_HOOK).ok_or_else(|| changed("sem OnFirstUpdate"))?;
             append(&hooked, &format!("{}{UI_KEY_FN}", side_code(plan, Side::Ui, settings)))
         }
+        "/lua/ui/uimain.lua" => {
+            if text.trim().is_empty() {
+                return Err(changed("vazio"));
+            }
+            append(text, &format!("{}{MENU_DISPATCH}", side_code(plan, Side::Menu, settings)))
+        }
         "/lua/system/blueprints.lua" => {
             if !text.contains("function ModBlueprints(") {
                 return Err(changed("sem ModBlueprints"));
@@ -790,6 +934,63 @@ pub struct Status {
     pub problems: Vec<Problem>,
     /// Arquivos do jogo que receberam a Forja.
     pub patched: Vec<String>,
+    /// Botões que os mods puseram na tela inicial e onde cada um ficou.
+    #[serde(default)]
+    pub menu: Vec<MenuPlaced>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MenuPlaced {
+    /// `<mod>:<botão>`
+    pub key: String,
+    pub place: crate::mainmenu::Place,
+}
+
+/// Junta o que os mods pedem para a tela inicial, na ordem de carga (o último nome vence). Devolve
+/// também (texto do botão, mod) para dar o aviso ao mod certo, e os avisos de nomes disputados.
+pub fn menu_edit(plan: &Plan) -> (crate::mainmenu::MenuEdit, Vec<(String, String)>, Vec<Problem>) {
+    let mut edit = crate::mainmenu::MenuEdit::default();
+    let mut owners = Vec::new();
+    let mut problems = Vec::new();
+    let mut renamed_by: BTreeMap<String, String> = BTreeMap::new();
+    for m in plan.mods.iter().filter(|m| m.has_menu()) {
+        let id = &m.manifest.id;
+        let menu = &m.manifest.menu;
+        for b in &menu.buttons {
+            let native = b.native.as_deref().and_then(|n| crate::mainmenu::NATIVE.iter().find(|x| x.0 == n)).map(|x| x.1.to_string());
+            // sem código, mensagem nem site, o botão só chama a ação do jogo
+            let lua = native.is_none() || b.message.is_some() || b.url.is_some() || m.has("menu.lua");
+            edit.buttons.push(crate::mainmenu::NewButton { key: format!("{id}:{}", b.id), label: b.label.trim().to_string(), place: b.place, native, lua });
+            owners.push((b.label.trim().to_string(), id.clone()));
+        }
+        for (k, v) in &menu.rename {
+            if let Some(prev) = renamed_by.insert(k.clone(), id.clone()) {
+                if &prev != id {
+                    problems.push(Problem { mod_id: id.clone(), message: format!("tela inicial: o nome de \"{k}\" também é trocado por \"{prev}\" (vale o deste mod, que carrega depois)"), fatal: false });
+                }
+            }
+            edit.rename.insert(k.clone(), v.trim().to_string());
+        }
+        edit.hide.extend(menu.hide.iter().cloned());
+    }
+    (edit, owners, problems)
+}
+
+/// Um arquivo do jogo como ele fica com os mods ligados (o do último mod que o traz, ou o do jogo).
+pub fn effective_bytes(stock: &[PathBuf], mods: &[PathBuf], path: &str) -> Option<Vec<u8>> {
+    let key = normalize_key(path);
+    let plain = crate::toc::toc_key(&key).0;
+    for archive in mods.iter().rev() {
+        let Ok(mut scd) = Scd::open(archive) else { continue };
+        let Ok(entries) = scd.entries() else { continue };
+        if let Some(i) = entries.iter().position(|e| !e.is_dir && (e.key == key || crate::toc::toc_key(&e.key).0 == plain)) {
+            if let Ok(data) = scd.read_at(i) {
+                return Some(data);
+            }
+        }
+    }
+    crate::mapassets::read_game_file(stock, path).ok()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -805,6 +1006,8 @@ pub struct LoadedMod {
     pub options: Vec<ForjaOption>,
     pub values: BTreeMap<String, Value>,
     pub warnings: Vec<String>,
+    #[serde(default)]
+    pub menu: MenuSpec,
 }
 
 /// Os mods ligados que trazem mods da Forja, lidos e resolvidos. `archives` = (id na biblioteca,
@@ -848,6 +1051,31 @@ pub fn build(stock: &[PathBuf], mods: &[PathBuf], plan: &Plan, settings: &Settin
             files.push((full.trim_start_matches('/').to_string(), to_bytes(&patched)));
         }
     }
+    // tela inicial: só quando algum mod mexe nela
+    let mut problems = plan.problems.clone();
+    let mut menu_buttons = Vec::new();
+    if plan.mods.iter().any(|m| m.has_menu()) {
+        let text = effective_text(stock, mods, crate::mainmenu::DISPATCH)
+            .ok_or_else(|| Error::Other("o jogo não tem o uimain.lua em texto (uncompiled_lua.scd): não dá para mexer na tela inicial".into()))?;
+        let patched = patch(crate::mainmenu::DISPATCH, &text, plan, settings)?;
+        files.push((crate::mainmenu::DISPATCH.trim_start_matches('/').to_string(), to_bytes(&patched)));
+        let (edit, owners, warnings) = menu_edit(plan);
+        problems.extend(warnings);
+        if !edit.is_empty() {
+            let scene = effective_bytes(stock, mods, crate::mainmenu::SCENE_PATH)
+                .ok_or_else(|| Error::Other("a tela inicial do jogo (pc_main_menu) não foi encontrada".into()))?;
+            let built = crate::mainmenu::build(&scene, &edit)?;
+            for w in built.warnings {
+                // o aviso é do mod do botão, quando dá para saber
+                let who = owners.iter().find(|(label, _)| w.contains(&format!("\"{label}\""))).map(|(_, id)| id.clone()).unwrap_or_default();
+                problems.push(Problem { mod_id: who, message: format!("tela inicial: {w}"), fatal: false });
+            }
+            for (key, place) in built.placed {
+                menu_buttons.push(MenuPlaced { key, place });
+            }
+            files.push((crate::mainmenu::SCENE_PATH.trim_start_matches('/').to_string(), built.scene));
+        }
+    }
     let mut b = crate::scd::ScdBuilder::create(dest)?;
     for (path, data) in &files {
         b.add_bytes(path, data)?;
@@ -857,8 +1085,9 @@ pub fn build(stock: &[PathBuf], mods: &[PathBuf], plan: &Plan, settings: &Settin
         loader_version: LOADER_VERSION.into(),
         built_at: chrono::Utc::now().to_rfc3339(),
         loaded: describe(plan, settings),
-        problems: plan.problems.clone(),
+        problems,
         patched: files.iter().map(|(p, _)| p.clone()).collect(),
+        menu: menu_buttons,
     };
     Ok((archive, status))
 }
@@ -878,6 +1107,7 @@ pub fn describe(plan: &Plan, settings: &Settings) -> Vec<LoadedMod> {
             options: m.manifest.options.clone(),
             values: option_values(&m.manifest, settings.mods.get(&m.manifest.id)),
             warnings: m.lint(),
+            menu: m.manifest.menu.clone(),
         })
         .collect()
 }
@@ -894,6 +1124,7 @@ pub fn build_version(stock: &[PathBuf], mods: &[PathBuf], plan: &Plan, settings:
             h.update(d);
         }
         h.update(serde_json::to_vec(&option_values(&m.manifest, settings.mods.get(&m.manifest.id))).unwrap_or_default());
+        h.update(serde_json::to_vec(&m.manifest.menu).unwrap_or_default());
     }
     for p in stock.iter().chain(mods) {
         let meta = std::fs::metadata(p).ok();
@@ -957,6 +1188,7 @@ pub const TEMPLATES: &[(&str, &str, &str)] = &[
     ("painel", "Painel", "Só interface: um painel com tecla própria que mostra informações da partida."),
     ("regra", "Regra de jogo", "Só simulação: uma regra nova para a partida (unidades que destroem outras se recuperam)."),
     ("biblioteca", "Biblioteca", "Funções para outros mods usarem com Forja.Use (dependência)."),
+    ("tela-inicial", "Tela inicial", "Botões novos no menu principal do jogo: mensagem, site, ação do jogo e código Lua."),
 ];
 
 /// Cria um mod novo a partir de um dos [`TEMPLATES`].
@@ -985,6 +1217,7 @@ pub fn scaffold_with(dir: &Path, id: &str, name: &str, template: &str) -> Result
         load_before: vec![],
         conflicts: vec![],
         options: vec![],
+        menu: MenuSpec::default(),
     };
     let number = |key: &str, label: &str, description: &str, default: f64, min: f64, max: f64, step: f64| ForjaOption {
         key: key.into(),
@@ -1009,6 +1242,25 @@ pub fn scaffold_with(dir: &Path, id: &str, name: &str, template: &str) -> Result
         "painel" | "biblioteca" => vec![],
         _ => vec![number("multiplier", "Multiplicador de vida", "Quanto a vida das unidades terrestres é multiplicada.", 1.5, 1.0, 5.0, 0.5)],
     };
+    if template == "tela-inicial" {
+        manifest.description = "Botões novos na tela inicial do jogo.".into();
+        manifest.menu = MenuSpec {
+            buttons: vec![
+                MenuButtonSpec { id: "sobre".into(), label: name.to_uppercase(), place: crate::mainmenu::Place::Main, message: None, url: None, native: None },
+                MenuButtonSpec {
+                    id: "site".into(),
+                    label: "SITE DO MOD".into(),
+                    place: crate::mainmenu::Place::Extras,
+                    message: None,
+                    url: Some("https://github.com/RiqueBitt/CommandProject".into()),
+                    native: None,
+                },
+                MenuButtonSpec { id: "lan".into(), label: "REDE LOCAL (LAN)".into(), place: crate::mainmenu::Place::Extras, message: None, url: None, native: Some("lan".into()) },
+            ],
+            rename: BTreeMap::from([("extras".to_string(), "EXTRAS E MODS".to_string())]),
+            hide: vec![],
+        };
+    }
     if template == "biblioteca" {
         manifest.description = "Funções para outros mods: Forja.Use('@ID@').".replace("@ID@", id);
     }
@@ -1022,6 +1274,7 @@ pub fn scaffold_with(dir: &Path, id: &str, name: &str, template: &str) -> Result
         "painel" => &[("ui.lua", TEMPLATE_PANEL)],
         "regra" => &[("sim.lua", TEMPLATE_RULE)],
         "biblioteca" => &[("sim.lua", TEMPLATE_LIBRARY), ("ui.lua", TEMPLATE_LIBRARY)],
+        "tela-inicial" => &[("menu.lua", TEMPLATE_MENU)],
         _ => &[("blueprints.lua", TEMPLATE_BP), ("sim.lua", TEMPLATE_SIM), ("ui.lua", TEMPLATE_UI), ("lib/util.lua", TEMPLATE_LIB)],
     };
     for (file, text) in files {
@@ -1081,6 +1334,24 @@ end)
 
 Forja.UI.AddKey('F7', mod.Name, function() panel:Toggle() end)
 Forja.UI.AddMenuItem(mod.Name, function() panel:Toggle() end)
+";
+
+const TEMPLATE_MENU: &str = "-- Tela inicial: roda no menu principal do jogo (antes da partida).
+-- Os botões ficam no mod.json, em \"menu\": \"where\" é \"main\" (coluna principal) ou
+-- \"extras\" (submenu Extras). Sem código para um botão, vale a \"message\" ou a \"url\" dele;
+-- \"native\" chama uma tela do próprio jogo (\"lan\", \"skirmish\", \"replays\"...).
+
+-- quantas vezes o jogador já abriu (fica salvo nas preferências do jogo)
+Forja.Menu.OnClick('sobre', function(button)
+    local n = Forja.Menu.Get('abertos', 0) + 1
+    Forja.Menu.Set('abertos', n)
+    Forja.Menu.Dialog(mod.Name .. ' ' .. mod.Version .. ': aberto ' .. n .. ' vez(es).')
+end)
+
+-- qualquer botão de qualquer mod (útil para estatísticas ou atalhos)
+Forja.On('MenuClick', function(key)
+    mod.Log('clique em ' .. key)
+end)
 ";
 
 const TEMPLATE_RULE: &str = "-- Regra de jogo: roda na simulação (a mesma em todos os jogadores, então vale no multijogador).
@@ -1323,6 +1594,58 @@ mod tests {
         let bp = patch("/lua/system/Blueprints.lua", "function ModBlueprints(all_blueprints)\nend\n", &plan, &s).unwrap();
         assert!(bp.contains("defer = true") && bp.ends_with(BP_HOOK));
         assert!(patch("/lua/UserSync.lua", "nada", &plan, &s).is_err());
+        // tela inicial: só entram os mods que mexem nela
+        let menu = patch("/lua/ui/uimain.lua", "-- uimain\n", &plan, &s).unwrap();
+        assert!(menu.contains("function ForjaMenuClick(key)") && menu.contains("Side = 'menu'"));
+        assert!(!menu.contains("Forja._Register({"), "o demo não mexe na tela inicial");
+        let mut m = manifest("tela");
+        m.menu.buttons.push(MenuButtonSpec { id: "abrir".into(), label: "Ação".into(), place: crate::mainmenu::Place::Main, message: Some("Olá".into()), url: None, native: None });
+        let plan = resolve(vec![fmod(manifest("demo")), fmod(m)]);
+        let menu = patch("/lua/ui/uimain.lua", "-- uimain\n", &plan, &s).unwrap();
+        assert!(menu.contains("Forja.Menu._Define({ key = 'tela:abrir', mod = 'tela', id = 'abrir', label = "), "{menu}");
+        assert_eq!(to_bytes(&lua_utf8("Ação")), "'Ação'".as_bytes());
+        assert_eq!(menu.matches("Forja._Register({").count(), 1);
+    }
+
+    #[test]
+    fn menu_manifest_and_merge() {
+        let ok = |f: &dyn Fn(&mut MenuSpec)| {
+            let mut m = manifest("x");
+            f(&mut m.menu);
+            m.validate()
+        };
+        let b = |id: &str| MenuButtonSpec { id: id.into(), label: "OK".into(), place: Default::default(), message: None, url: None, native: None };
+        assert!(ok(&|m| m.buttons.push(b("a"))).is_ok());
+        assert!(ok(&|m| m.buttons.push(b("a b"))).is_err());
+        assert!(ok(&|m| m.buttons.extend([b("a"), b("a")])).is_err());
+        assert!(ok(&|m| m.buttons.push(MenuButtonSpec { label: "".into(), ..b("a") })).is_err());
+        assert!(ok(&|m| m.buttons.push(MenuButtonSpec { url: Some("javascript:x".into()), ..b("a") })).is_err());
+        assert!(ok(&|m| m.buttons.push(MenuButtonSpec { native: Some("lan".into()), ..b("a") })).is_ok());
+        assert!(ok(&|m| m.buttons.push(MenuButtonSpec { native: Some("format_c".into()), ..b("a") })).is_err());
+        assert!(ok(&|m| m.buttons.extend((0..7).map(|i| b(&format!("b{i}"))))).is_err());
+        assert!(ok(&|m| { m.rename.insert("extras".into(), "MAIS".into()); }).is_ok());
+        assert!(ok(&|m| { m.rename.insert("lobby".into(), "X".into()); }).is_err());
+        assert!(ok(&|m| m.hide.push("quit".into())).is_err());
+        // mod só com botões no mod.json (sem .lua) vale
+        let json = br#"{"id":"so-botao","name":"S","version":"1.0.0","menu":{"buttons":[{"id":"x","label":"X","where":"main","native":"lan"}]}}"#;
+        let m = parse_mod("so-botao", json, BTreeMap::new(), "").unwrap();
+        assert_eq!(m.sides(), ["menu"]);
+        assert_eq!(m.manifest.menu.buttons[0].place, crate::mainmenu::Place::Main);
+        // juntar: ordem de carga, último nome vence com aviso, ação do jogo sem Lua
+        let mut a = manifest("a");
+        a.menu.rename.insert("extras".into(), "A".into());
+        a.menu.buttons.push(MenuButtonSpec { native: Some("lan".into()), ..b("lan") });
+        let mut z = manifest("z");
+        z.menu.rename.insert("extras".into(), "Z".into());
+        z.menu.hide.push("credits".into());
+        let (edit, owners, problems) = menu_edit(&resolve(vec![fmod(z), fmod(a)]));
+        assert_eq!(edit.rename["extras"], "Z");
+        assert_eq!(problems.len(), 1);
+        assert!(edit.hide.contains("credits"));
+        assert_eq!(edit.buttons[0].key, "a:lan");
+        assert_eq!(edit.buttons[0].native.as_deref(), Some("RequestLanGame"));
+        assert!(!edit.buttons[0].lua);
+        assert_eq!(owners[0], ("OK".to_string(), "a".to_string()));
     }
 
     /// Com `CP_FORJA_DUMP` (pasta), grava o Lua gerado de cada parte para o mod de exemplo (usado
@@ -1356,6 +1679,19 @@ mod tests {
             std::fs::write(dir.join(format!("{}.lua", side.key())), to_bytes(&side_code(&plan, side, &settings))).unwrap();
         }
         std::fs::write(dir.join("unit.lua"), UNIT).unwrap();
+        // tela inicial: o modelo "tela-inicial", um mod sem nada nela e um com erro no menu.lua
+        let _ = std::fs::remove_dir_all(dir.join("menu-src"));
+        scaffold_with(&dir.join("menu-src"), "inicio", "Inicio", "tela-inicial").unwrap();
+        let mut menu_mods = read_folder(&dir.join("menu-src")).unwrap();
+        let mut bad = menu_mods[0].clone();
+        bad.manifest.id = "bad".into();
+        bad.manifest.menu.rename.clear();
+        bad.files.insert("menu.lua".into(), b"Forja.Menu.OnClick('x', function() error('falhou no clique') end)\nerror('falhou ao carregar')".to_vec());
+        menu_mods.push(bad);
+        menu_mods.push(read_folder(&dir.join("src")).unwrap().remove(0));
+        let plan = resolve(menu_mods);
+        let menu = patch(crate::mainmenu::DISPATCH, "-- uimain\n", &plan, &settings).unwrap();
+        std::fs::write(dir.join("menu.lua"), to_bytes(&menu)).unwrap();
     }
 
     #[test]

@@ -9,6 +9,7 @@ import { t } from "../lib/i18n";
 import type { ForjaCheck, ForjaMod, ForjaOption, ForjaOverview } from "../lib/types";
 
 const ForjaEditor = lazy(() => import("./forja/ForjaEditor"));
+const MenuPreview = lazy(() => import("./forja/MenuPreview"));
 
 export const FORJA_WIKI = "https://commandproject.gitbook.io/forja/";
 
@@ -16,6 +17,7 @@ const SIDE: Record<string, { label: string; icon: string }> = {
   sim: { label: "Simulação", icon: "memory" },
   ui: { label: "Interface", icon: "web" },
   blueprints: { label: "Blueprints", icon: "schema" },
+  menu: { label: "Tela inicial", icon: "home" },
 };
 
 export default function Forja() {
@@ -63,7 +65,7 @@ export default function Forja() {
         <div>
           <span className="overline"><Icon name="construction" size={15} /> {t("Carregador de mods")} · Forja {ov?.loaderVersion ?? ""}</span>
           <h1>{t("Forja")}</h1>
-          <p className="muted">{t("Mods feitos com a Forja não editam arquivos do jogo: eles registram eventos, comandos, painéis e mudanças de unidades por uma API. A Forja junta todos na ordem certa, confere dependências e isola erros, então vários mods funcionam juntos.")}</p>
+          <p className="muted">{t("Mods feitos com a Forja não editam arquivos do jogo: eles registram eventos, comandos, painéis, mudanças de unidades e botões na tela inicial por uma API. A Forja junta todos na ordem certa, confere dependências e isola erros, então vários mods funcionam juntos.")}</p>
           <div className="row wrap gap">
             <button className="btn primary" onClick={() => setCreating(true)}><Icon name="add" /> {t("Criar um mod")}</button>
             <button className="btn" onClick={() => void doImport()}><Icon name="upload" /> {t("Importar pasta de mod")}</button>
@@ -115,6 +117,7 @@ export default function Forja() {
               </ol>
             </section>
           )}
+          <Suspense fallback={null}><MenuPreview mods={ov.mods} built={ov.built} /></Suspense>
           {ov.built && (
             <p className="faint small">{t("Última montagem: {date} · arquivos do jogo com a Forja: {files}", {
               date: new Date(ov.built.builtAt).toLocaleString(),

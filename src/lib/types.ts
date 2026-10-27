@@ -369,9 +369,13 @@ export interface ForjaMod {
   options: ForjaOption[];
   values: Record<string, unknown>;
   warnings: string[];
+  /** o que o mod muda na tela inicial do jogo (mod.json "menu") */
+  menu?: ForjaMenu;
 }
+export interface ForjaMenuButton { id: string; label: string; where?: "main" | "extras"; message?: string; url?: string; native?: string }
+export interface ForjaMenu { buttons?: ForjaMenuButton[]; rename?: Record<string, string>; hide?: string[] }
 export interface ForjaProblem { modId: string; message: string; fatal: boolean }
-export interface ForjaStatus { loaderVersion: string; builtAt: string; loaded: ForjaMod[]; problems: ForjaProblem[]; patched: string[] }
+export interface ForjaStatus { loaderVersion: string; builtAt: string; loaded: ForjaMod[]; problems: ForjaProblem[]; patched: string[]; menu?: { key: string; place: "main" | "extras" }[] }
 export interface ForjaOverview {
   loaderVersion: string;
   key: string;

@@ -949,7 +949,20 @@ const forjaFiles: Record<string, string> = {
 function forjaOv(): T.ForjaOverview {
   return {
     loaderVersion: "1.0.0", key: "F8", keys: ["F8", "F9", "F10"], problems: [], built: null, devDir: "C:/CommandProject/forja-dev",
-    mods: [{ id: "vida-dupla", name: "Vida dupla", version: "1.0.0", libraryId: "vida-dupla", sides: ["blueprints", "sim", "ui"], description: "Dobra a vida das unidades terrestres.", authors: ["Rique"], options: [], values: {}, warnings: [] } as unknown as T.ForjaMod],
+    mods: [
+      { id: "vida-dupla", name: "Vida dupla", version: "1.0.0", libraryId: "vida-dupla", sides: ["blueprints", "sim", "ui"], description: "Dobra a vida das unidades terrestres.", authors: ["Rique"], options: [], values: {}, warnings: [] } as unknown as T.ForjaMod,
+      {
+        id: "inicio", name: "Tela inicial", version: "1.0.0", libraryId: "inicio", sides: ["menu"], description: "Botões novos na tela inicial do jogo.", authors: ["Rique"], options: [], values: {}, warnings: [],
+        menu: {
+          buttons: [
+            { id: "sobre", label: "MEU MOD", where: "main" },
+            { id: "site", label: "SITE DO MOD", where: "extras", url: "https://github.com/RiqueBitt/CommandProject" },
+            { id: "lan", label: "REDE LOCAL (LAN)", where: "extras", native: "lan" },
+          ],
+          rename: { extras: "EXTRAS E MODS" },
+        },
+      } as T.ForjaMod,
+    ],
   };
 }
 
