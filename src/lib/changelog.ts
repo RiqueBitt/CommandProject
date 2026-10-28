@@ -6,6 +6,16 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.50.0",
+    title: "HUD nova, cores no jogo e sala com amigos",
+    items: [
+      { icon: "palette", title: "HUD das partidas no estilo do menu", text: "A HUD das partidas (barra de cima, recursos, construção, fila, seleção, pesquisa e upgrades, placar, bate-papo e menu da partida) ganha a mesma cor e o mesmo acabamento da tela inicial: painéis mais escuros e nítidos e destaques na sua cor. Ícones com cor de significado ficam como no jogo.", page: "settings" },
+      { icon: "tune", title: "Cor e HUD nas Opções do jogo", text: "Em Opções → Vídeo: Cor da interface (7 cores) e Estilo da HUD (nova ou original). O launcher aplica na próxima vez que o jogo abrir por ele, nos menus e na HUD juntos.", page: "settings" },
+      { icon: "groups", title: "Sala com amigos dentro do jogo", text: "A sala da partida grande com amigos agora é uma sala de verdade dentro do jogo: cada jogador escolhe facção, cor (sem repetir) e time, todos veem a mesma lista e o anfitrião começa. Abra em Multijogador → Sala com amigos: abrir, ou entre em Sala com amigos: entrar; depois de um convite do launcher aparece Entrar na sala de quem convidou.", page: "settings" },
+      { icon: "sports_esports", title: "Sala original com os mods iguais", text: "Depois de entrar num convite, os mods ficam iguais aos de quem convidou, então vocês também podem usar a sala original do jogo (até 8): Multijogador → Criar partida → Somente amigos e convite pela Steam.", page: "settings" },
+    ],
+  },
+  {
     version: "0.49.0",
     title: "Mais minigames, mutadores e desafios",
     items: [

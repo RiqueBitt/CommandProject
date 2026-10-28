@@ -25,6 +25,9 @@ pub const THEME_VERSION: &str = "2.1.0";
 /// (`zz_cp_texturas_hd.scd`), senão as texturas do menu ficam com a versão das Texturas HD.
 pub const ARCHIVE_NAME: &str = "zz_cp_zz_menu_moderno.scd";
 pub const FRONTEND: &str = "textures/ui/common/pc/frontend/";
+/// Texturas da HUD das partidas (barra de cima, recursos, construção, fila, seleção, pesquisa,
+/// placar, construtores ociosos, bate-papo, menu da partida).
+pub const HUD: &[&str] = &["textures/ui/common/pc/ingame/", "textures/ui/common/pc/10_7/ingame/"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -49,6 +52,8 @@ pub struct ThemeOptions {
     /// Nitidez (0..1.5) e remoção de blocos DXT (0..1).
     pub sharpness: f32,
     pub deblock: f32,
+    /// Também a HUD das partidas (mesma cor e estilo dos menus).
+    pub hud: bool,
 }
 
 impl Default for ThemeOptions {
@@ -65,6 +70,7 @@ impl Default for ThemeOptions {
             glow: 0.3,
             sharpness: 0.5,
             deblock: 0.5,
+            hud: false,
         }
     }
 }
@@ -110,6 +116,36 @@ pub enum Kind {
     Background,
     /// Cores com significado (facções, times, medalhas, logos): só nitidez.
     Keep,
+}
+
+/// Papel de uma textura da HUD das partidas (`None` = fora da HUD).
+pub fn hud_kind_of(key: &str) -> Option<Kind> {
+    let k = key.to_ascii_lowercase().replace('\\', "/");
+    let k = k.trim_start_matches('/');
+    let rel = HUD.iter().find_map(|p| k.strip_prefix(p))?;
+    if !rel.ends_with(".dds") {
+        return None;
+    }
+    let file = rel.rsplit('/').next().unwrap_or(rel);
+    // cores com significado: energia e massa, vida/escudo/veterania, terra/ar/mar, estado das
+    // pesquisas, ícones de ordens, a cara e o minimapa do comunicador, bateria do notebook
+    const KEEP: &[&str] = &[
+        "icons/", "orders_icons/", "resource_icons/", "tooltip/bar_", "tooltip/rank_", "research/grid", "research/icons",
+        "detailed_view/bar_", "slot_bgs/air", "slot_bgs/land", "slot_bgs/sea", "pip/head_overlay", "pip/minimap_overlay",
+        "laptop", "icon_research", "status_score_player", "vignette", "720p_grid",
+    ];
+    if KEEP.iter().any(|p| rel.contains(p)) {
+        return Some(Kind::Keep);
+    }
+    if file.contains("bg") || file.contains("overlay") || file.starts_with("bar_") || file.contains("_bg_") {
+        return Some(Kind::Background);
+    }
+    Some(Kind::Accent)
+}
+
+/// Papel de uma textura no tema, com ou sem a HUD das partidas.
+pub fn kind_with(key: &str, hud: bool) -> Option<Kind> {
+    kind_of(key).or_else(|| if hud { hud_kind_of(key) } else { None })
 }
 
 /// Papel de uma textura no tema (`None` = fora do menu).
@@ -234,7 +270,7 @@ pub fn theme_image(img: &Rgba, kind: Kind, hover: bool, format: dds::DdsFormat, 
 
 /// Versão do tema de uma textura DDS do menu (`None` se ela não muda).
 pub fn theme_dds(key: &str, data: &[u8], opts: &ThemeOptions) -> Result<Option<Vec<u8>>> {
-    let Some(kind) = kind_of(key) else { return Ok(None) };
+    let Some(kind) = kind_with(key, opts.hud) else { return Ok(None) };
     let (info, img) = dds::decode(data)?;
     if info.is_cubemap || info.is_volume || info.width.min(info.height) < 4 {
         return Ok(None);
@@ -293,7 +329,7 @@ struct Entry {
 }
 
 /// Entradas do menu e das fontes nos arquivos do jogo (o último montado vence).
-fn entries(sources: &[PathBuf], fonts: bool) -> Result<Vec<Entry>> {
+fn entries(sources: &[PathBuf], fonts: bool, hud: bool) -> Result<Vec<Entry>> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for src in sources.iter().rev() {
@@ -303,7 +339,7 @@ fn entries(sources: &[PathBuf], fonts: bool) -> Result<Vec<Entry>> {
                 continue;
             }
             let font = fonts && e.key.starts_with("/fonts/") && e.key.ends_with(".ttf");
-            if font || kind_of(&e.key).is_some() {
+            if font || kind_with(&e.key, hud).is_some() {
                 out.push(Entry { src: src.clone(), index, name: e.name, key: e.key });
             }
         }
@@ -320,7 +356,7 @@ pub fn build(
     dest: &Path,
     progress: &mut dyn FnMut(usize, usize, &str),
 ) -> Result<ThemeResult> {
-    let todo = entries(sources, opts.fonts)?;
+    let todo = entries(sources, opts.fonts, opts.hud)?;
     if todo.iter().all(|e| !e.key.ends_with(".dds")) {
         return Err(Error::Other("as texturas do menu não foram encontradas nos arquivos do jogo".into()));
     }
@@ -384,7 +420,7 @@ pub fn build(
 /// As texturas dos menus com o tema (sem as fontes), para quem monta junto com outras coisas (a
 /// tela inicial nova): (nome dentro do jogo, DDS).
 pub fn themed_textures(sources: &[PathBuf], opts: &ThemeOptions) -> Result<Vec<(String, Vec<u8>)>> {
-    let todo: Vec<Entry> = entries(sources, false)?.into_iter().filter(|e| e.key.ends_with(".dds")).collect();
+    let todo: Vec<Entry> = entries(sources, false, opts.hud)?.into_iter().filter(|e| e.key.ends_with(".dds")).collect();
     let mut out = Vec::new();
     let mut open: Option<(PathBuf, Scd)> = None;
     for batch in todo.chunks(48) {
@@ -479,6 +515,23 @@ mod tests {
         recolor(&mut d, Kind::Background, &dark, false);
         recolor(&mut l, Kind::Background, &light, false);
         assert!(d.pixels[0] < l.pixels[0]);
+    }
+
+    #[test]
+    fn hud_textures_join_only_when_asked() {
+        let top = "/textures/ui/common/pc/ingame/hud/top_btn_u.dds";
+        assert_eq!(kind_with(top, false), None);
+        assert_eq!(kind_with(top, true), Some(Kind::Accent));
+        assert_eq!(hud_kind_of("/textures/ui/common/pc/ingame/hud/top_bg.dds"), Some(Kind::Background));
+        assert_eq!(hud_kind_of("/textures/ui/common/pc/10_7/ingame/build_queue/buildqueue_bg_u.dds"), Some(Kind::Background));
+        assert_eq!(hud_kind_of("/textures/ui/common/pc/ingame/research/btn_o.dds"), Some(Kind::Accent));
+        // cores com significado ficam
+        assert_eq!(hud_kind_of("/textures/ui/common/pc/ingame/hud/icons/energy.dds"), Some(Kind::Keep));
+        assert_eq!(hud_kind_of("/textures/ui/common/pc/10_7/ingame/tooltip/bar_health.dds"), Some(Kind::Keep));
+        assert_eq!(hud_kind_of("/textures/ui/common/pc/ingame/research/grid/locked_u.dds"), Some(Kind::Keep));
+        assert_eq!(hud_kind_of("/textures/ui/common/pc/frontend/line.dds"), None);
+        // os menus continuam como antes
+        assert_eq!(kind_with("/textures/ui/common/pc/frontend/line.dds", true), kind_of("/textures/ui/common/pc/frontend/line.dds"));
     }
 
     #[test]

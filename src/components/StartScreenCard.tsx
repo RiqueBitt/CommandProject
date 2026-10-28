@@ -110,6 +110,10 @@ export default function StartScreenCard() {
               <input type="color" value={draft.accent} onChange={(e) => set({ accent: e.target.value })} aria-label={t("Outra cor")} title={t("Outra cor")} />
             </div>
           </div>
+          <label className="row small" style={{ gap: 10 }} title={t("Barra de cima, recursos, construção, fila, seleção, pesquisa (upgrades), placar e bate-papo das partidas com a mesma cor, painéis mais escuros e nítidos. Ícones com cor de significado (massa, energia, vida, terra/ar/mar) ficam como no jogo.")}>
+            <Switch label={t("HUD das partidas no mesmo estilo")} checked={draft.hud !== false} onChange={(on) => set({ hud: on })} />
+            <span><b>{t("HUD das partidas no mesmo estilo")}</b><span className="faint" style={{ display: "block" }}>{t("Construção, upgrades, seleção e placar na cor escolhida. Também dá para trocar no jogo, em Opções → Vídeo.")}</span></span>
+          </label>
           <div className="col" style={{ gap: 6 }}>
             <b className="small">{t("Logo")}</b>
             <div className="row wrap" style={{ gap: 8 }}>

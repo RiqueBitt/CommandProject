@@ -409,6 +409,28 @@ impl Workspace {
                 code: lua(format!("if m.CPBigMatchMode then m.CPBigMatchMode('{}', {players}, {teams}) end", map.path)),
             });
         }
+        // sala com amigos dentro do jogo (Multijogador): abrir, entrar digitando o endereço e, depois
+        // de um convite do launcher, entrar direto na sala de quem convidou
+        if let Some(first) = maps.iter().find(|m| crate::bigmatch_menu::safe(&m.path)) {
+            let mut room: Vec<(String, String, String)> = vec![
+                ("cp:sala_abrir".into(), if pt { "SALA COM AMIGOS: ABRIR" } else { "ROOM WITH FRIENDS: OPEN" }.into(), format!("if m.CPNetHostFromMenu then m.CPNetHostFromMenu('{}') end", first.path)),
+                ("cp:sala_entrar".into(), if pt { "SALA COM AMIGOS: ENTRAR" } else { "ROOM WITH FRIENDS: JOIN" }.into(), "if m.CPNetJoinFromMenu then m.CPNetJoinFromMenu('') end".into()),
+            ];
+            let group = self.settings.ui_prefs.get("groupHost");
+            let host_name: String = group.and_then(|g| g.get("name")).and_then(|v| v.as_str()).unwrap_or("").chars().filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '_' || *c == '-').take(16).collect();
+            let address = group.and_then(|g| g.get("address")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let address_ok = !address.is_empty() && address.len() < 64 && address.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-' | '[' | ']'));
+            if address_ok {
+                let who = if host_name.trim().is_empty() { if pt { "AMIGO" } else { "FRIEND" }.to_string() } else { host_name.trim().to_uppercase() };
+                room.insert(0, ("cp:sala_grupo".into(), if pt { format!("ENTRAR NA SALA DE {who}") } else { format!("JOIN {who}'S ROOM") }, format!("if m.CPNetJoinDirect then m.CPNetJoinDirect('{address}') end")));
+            }
+            for (key, label, code) in room {
+                if 3 + used(edit, Place::Multiplayer) >= MAX_SUBMENU {
+                    break;
+                }
+                edit.buttons.push(NewButton { key, label, place: Place::Multiplayer, native: None, lua: false, code: lua(code) });
+            }
+        }
         // minigames prontos (os outros ficam na seção MODO da sala de Batalha)
         let games: [(&str, &str, &str, usize, u32); 3] = [
             ("defense", "ÚLTIMA LINHA DE DEFESA", "LAST LINE OF DEFENSE", 4, 2),
@@ -507,6 +529,14 @@ impl Workspace {
                 ss.accent = a.clone();
                 ss.save(&self.data_dir)?;
                 done.push(format!("cor {a}"));
+            }
+        }
+        if let Some(on) = req.hud {
+            let mut ss = crate::startscreen::Settings::load(&self.data_dir);
+            if ss.hud != on {
+                ss.hud = on;
+                ss.save(&self.data_dir)?;
+                done.push(if on { "HUD no estilo novo".into() } else { "HUD original".into() });
             }
         }
         if let Some(mb) = req.memory_mb {

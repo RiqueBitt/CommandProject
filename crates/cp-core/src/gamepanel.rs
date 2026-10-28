@@ -265,6 +265,8 @@ pub struct GameRequests {
     pub memory_mb: Option<u32>,
     pub priority: Option<String>,
     pub mods: Vec<(String, bool)>,
+    /// HUD das partidas no estilo novo (Opções → Vídeo do jogo)
+    pub hud: Option<bool>,
 }
 
 /// O bloco `{ ... }` depois de `name =` (com as chaves de dentro).
@@ -352,6 +354,11 @@ pub fn parse_requests(prefs: &str) -> Option<GameRequests> {
     r.accent = field(b, "accent").filter(|v| v.len() == 7 && v.starts_with('#') && v[1..].chars().all(|c| c.is_ascii_hexdigit()));
     r.memory_mb = field(b, "memory").and_then(|v| v.parse::<f64>().ok()).map(|v| v as u32).filter(|v| (1024..=4096).contains(v));
     r.priority = field(b, "priority").filter(|v| PRIORITY.iter().any(|p| p.0 == v));
+    r.hud = field(b, "hud").and_then(|v| match v.as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    });
     if let Some(m) = block(b, "mods") {
         for part in m.split(',') {
             let Some((k, v)) = part.split_once('=') else { continue };
@@ -529,6 +536,8 @@ mod tests {
         let prefs = "profile = {\n    profiles = {\n        {\n            Name = 'Rique',\n            CPBigMatch = { players = 12 },\n            CPLauncher = {\n                accent = '#22c55e',\n                memory = 3072,\n                mods = {\n                    ['cp-ia-esperta'] = false,\n                    ['texturas-hd'] = true,\n                },\n                priority = 'high',\n                profile = 'teste-2',\n                seq = 7,\n            },\n        },\n    },\n}\n";
         let r = parse_requests(prefs).unwrap();
         assert_eq!(r.seq, 7);
+        assert_eq!(r.hud, None);
+        assert_eq!(parse_requests("CPLauncher = { hud = false, seq = 2 }").unwrap().hud, Some(false));
         assert_eq!(r.profile.as_deref(), Some("teste-2"));
         assert_eq!(r.accent.as_deref(), Some("#22c55e"));
         assert_eq!(r.memory_mb, Some(3072));

@@ -399,6 +399,8 @@ export interface ForjaMenu { buttons?: ForjaMenuButton[]; rename?: Record<string
 export interface StartScreenSettings {
   enabled: boolean; accent: string; newsTitle: string; newsText: string; customLogo: boolean; customVideo: boolean; videoName: string;
   shortcuts: { label: string; map: string; spec: string }[];
+  /** HUD das partidas no mesmo estilo e cor */
+  hud?: boolean;
 }
 export interface StartScreenView {
   settings: StartScreenSettings; logo: string | null; video: { name: string; size: number } | null; ffmpeg: string | null; active: boolean;

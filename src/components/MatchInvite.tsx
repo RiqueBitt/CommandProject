@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { t } from "../lib/i18n";
 import { useRoom } from "../lib/room";
-import { errorText, useStore } from "../lib/store";
+import { errorText, setUiPref, useStore } from "../lib/store";
 import type { BigMatch, MatchMap, PartyHosted, PartyJoined, PartyRoute } from "../lib/types";
 import RoomPanel from "./RoomPanel";
 import { CopyButton, Field, Icon, Notice, TaskProgress } from "./ui";
@@ -168,6 +168,7 @@ function HostRoom({ spec, busy, running, launch, hosted, name, onClose }: Props 
         <CopyButton text={hosted.code} label={t("Copiar convite")} />
       </div>
       {hosted.mods.length > 0 && <p className="faint small">{t("Vão junto para os amigos: {list}", { list: hosted.mods.map((m) => m[1]).join(", ") })}</p>}
+      <p className="faint small">{t("Quando o jogo abrir, a sala com amigos aparece dentro dele: cada um escolhe facção, cor e time, e você começa a partida com ENTER (as vagas livres viram IA).")}</p>
       <RoomPanel room={room} hostView />
       <div className="row bm-invite-actions">
         <button className="btn text" onClick={onClose}><Icon name="close" /> {t("Fechar a sala")}</button>
@@ -263,6 +264,8 @@ function GuestRoom({ busy, running, launch, code, info, name, onLeave }: Props &
         if (!alive) return;
         setPhase("ready");
         report({ ready: true, progress: 1 });
+        // o jogo ganha "Entrar na sala de <anfitrião>" no Multijogador (na próxima vez que abrir)
+        setUiPref("groupHost", { name: info.host, address: info.address });
       } catch (e) {
         if (!alive) return;
         setPhase("error");
@@ -279,6 +282,7 @@ function GuestRoom({ busy, running, launch, code, info, name, onLeave }: Props &
     <div className="col" style={{ gap: 14 }}>
       {phase === "download" && <TaskProgress task="party" label={t("Preparando os mods da partida…")} />}
       {phase === "ready" && <Notice kind="ok">{launched ? t("O jogo está abrindo na partida de {host}.", { host: info.host }) : t("Tudo pronto. O jogo abre sozinho quando {host} começar a partida — deixe o launcher aberto.", { host: info.host })}</Notice>}
+      {phase === "ready" && <p className="faint small">{t("Com os mods iguais vocês também podem jogar pela sala original do jogo (até 8): {host} vai em Multijogador → Criar partida → Somente amigos e convida pela Steam. E no jogo, em Multijogador, aparece \"Entrar na sala de {host}\" para a sala com amigos do CommandProject.", { host: info.host })}</p>}
       {phase === "error" && <Notice kind="err">{t("Não deu para baixar os mods: {error}", { error: error ?? "" })}</Notice>}
       {(room.status === "closed" || room.status === "kicked") && !launched && <Notice kind="warn">{room.status === "kicked" ? t("O anfitrião tirou você da sala.") : t("A sala fechou.")}</Notice>}
       <RoomPanel room={room} hostView={false} />

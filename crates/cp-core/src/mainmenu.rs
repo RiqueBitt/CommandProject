@@ -897,7 +897,7 @@ fn more_options(s: &mut Scene) -> Result<()> {
     }
     // vídeo: o céu depois das três linhas; os botões descem
     let gv = find(s, "g_video")?;
-    for (n, fallback) in [(6, "Sky"), (7, "Lite graphics")] {
+    for (n, fallback) in [(6, "Sky"), (7, "Lite graphics"), (8, "Interface color"), (9, "HUD style")] {
         let name = format!("video_{n}_btn");
         if find(s, &name).is_ok() {
             continue;
@@ -921,7 +921,7 @@ fn more_options(s: &mut Scene) -> Result<()> {
         vk.push(btn);
         s.set_children(gv, &vk)?;
     }
-    for (n, y) in [("video_1_btn", top), ("video_2_btn", top + row_h), ("video_3_btn", top + 2 * row_h), ("video_6_btn", top + 3 * row_h), ("video_7_btn", top + 4 * row_h), ("video_5_btn", top + 5 * row_h + 18), ("video_4_btn", top + 5 * row_h + 70)] {
+    for (n, y) in [("video_1_btn", top), ("video_2_btn", top + row_h), ("video_3_btn", top + 2 * row_h), ("video_6_btn", top + 3 * row_h), ("video_7_btn", top + 4 * row_h), ("video_8_btn", top + 5 * row_h), ("video_9_btn", top + 6 * row_h), ("video_5_btn", top + 7 * row_h + 18), ("video_4_btn", top + 7 * row_h + 70)] {
         if let Ok(id) = find(s, n) {
             put(s, id, y)?;
         }
@@ -998,6 +998,8 @@ pub const OPTIONS_LUA_CONTROLS: &[(u32, &str, &str)] = &[
     (13, "interface_13_value", "<LOC OPTIONS_0210>Show Lifebars of Attached Units"),
     (6, "video_6_value", "<LOC OPTIONS_0168>Render Sky"),
     (7, "video_7_value", "<LOC CP_LITE>Lite graphics (big matches)"),
+    (8, "video_8_value", "<LOC CP_UI_COLOR>Interface color (next start)"),
+    (9, "video_9_value", "<LOC CP_UI_HUD>Match HUD style (next start)"),
 ];
 
 /// Liga as opções escondidas às linhas novas da tela de opções (`ui_control`). `None` se o
@@ -1020,6 +1022,9 @@ pub fn patch_options_lua(text: &str) -> Option<String> {
     // chão), para as partidas grandes rodarem melhor; vale desde a abertura do jogo
     if !out.contains(LITE_MARK) {
         out.push_str(LITE_OPTION);
+    }
+    if !out.contains(UI_MARK) {
+        out.push_str(&ui_option());
     }
     Some(out)
 }
@@ -1053,6 +1058,69 @@ if options and options.video and options.video.items then
     })
 end
 "#;
+
+const UI_MARK: &str = "-- CommandProject: cor da interface";
+
+/// Cor da interface e estilo da HUD nas Opções do jogo: viram pedidos para o launcher (como o
+/// painel do Extras), que pinta as texturas na próxima vez que o jogo abrir por ele.
+fn ui_option() -> String {
+    let mut states = String::from("                { text = \"<LOC CP_UI_LAUNCHER>As in the launcher\", key = 0 },\n");
+    let mut hexes = String::new();
+    for (i, (hex, _, en)) in crate::gamepanel::COLORS.iter().enumerate() {
+        let name: String = en.chars().take(1).chain(en.chars().skip(1).flat_map(|c| c.to_lowercase())).collect();
+        states.push_str(&format!("                {{ text = \"<LOC CP_COLOR_{en}>{name}\", key = {} }},\n", i + 1));
+        hexes.push_str(&format!("'{hex}', "));
+    }
+    format!(
+        r#"
+
+{UI_MARK} e estilo da HUD (pedidos para o launcher)
+local CPUIColors = {{ {hexes}}}
+local function CPLauncherAsk(key, value)
+    pcall(function()
+        local m = import('/lua/SinglePlayerLaunch.lua')
+        if m.CPLauncherSet then m.CPLauncherSet(key, value) end
+    end)
+end
+if options and options.video and options.video.items then
+    table.insert(options.video.items, {{
+        title = "<LOC CP_UI_COLOR>Interface color (next start)",
+        key = 'cp_ui_color',
+        type = 'toggle',
+        default = 0,
+        ui_control = 'video_8_value',
+        set = function(key, value, startup)
+            value = tonumber(value) or 0
+            if not startup and CPUIColors[value] then CPLauncherAsk('accent', CPUIColors[value]) end
+        end,
+        custom = {{
+            states = {{
+{states}            }},
+        }},
+    }})
+    table.insert(options.video.items, {{
+        title = "<LOC CP_UI_HUD>Match HUD style (next start)",
+        key = 'cp_ui_hud',
+        type = 'toggle',
+        default = 0,
+        ui_control = 'video_9_value',
+        set = function(key, value, startup)
+            value = tonumber(value) or 0
+            if not startup and value == 1 then CPLauncherAsk('hud', true) end
+            if not startup and value == 2 then CPLauncherAsk('hud', false) end
+        end,
+        custom = {{
+            states = {{
+                {{ text = "<LOC CP_UI_LAUNCHER>As in the launcher", key = 0 }},
+                {{ text = "<LOC CP_UI_HUD_NEW>New (interface color)", key = 1 }},
+                {{ text = "<LOC CP_UI_HUD_OLD>Original", key = 2 }},
+            }},
+        }},
+    }})
+end
+"#
+    )
+}
 
 /// Troca o logo da tela "Comandante" por outra textura (`w`×`h` em pixels), na mesma largura e
 /// com a altura da proporção dela (centrado na faixa do logo).
@@ -1206,6 +1274,12 @@ mod tests {
         // de novo não duplica
         assert_eq!(patch_options_lua(&out).unwrap(), out);
         assert!(patch_options_lua("nada").is_none());
+        // cor da interface e HUD: pedidos para o launcher, com as 7 cores
+        assert!(out.contains("ui_control = 'video_8_value'") && out.contains("ui_control = 'video_9_value'"));
+        assert!(out.contains("'#2b8cff', '#e21e24'") && out.contains("<LOC CP_COLOR_SILVER>Silver"));
+        if let Ok(p) = std::env::var("CP_OPT_LUA_OUT") {
+            std::fs::write(p, &out).unwrap();
+        }
     }
 
     #[test]

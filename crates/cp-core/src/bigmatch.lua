@@ -178,7 +178,8 @@ end
 -- number of teams (0 = everyone for himself), AI difficulty and the map. You take the first base,
 -- the AIs the next ones; the bases of a team are side by side in the map's order. Capped by the
 -- bases of the map, the 32 armies of the engine and the memory of big maps (as the launcher does).
-function CPBigMatchQuick(mapName, players, teams, ai, faction, victory, unitCap)
+-- friends = true: the other bases are for friends (the room below); the empty ones become AI
+function CPBigMatchQuick(mapName, players, teams, ai, faction, victory, unitCap, friends)
     local MapUtils = import('/lua/ui/maputil.lua')
     local scenario = MapUtils.LoadScenario(mapName)
     if not scenario then error('CommandProject: mapa nao encontrado: ' .. tostring(mapName)) end
@@ -220,7 +221,11 @@ function CPBigMatchQuick(mapName, players, teams, ai, faction, victory, unitCap)
             if i == 1 then
                 spec = spec .. '|H,' .. team .. ',' .. faction .. ',,' .. (i - 1)
             else
-                spec = spec .. '|A,' .. team .. ',0,' .. ai .. ',' .. (i - 1)
+                if friends then
+                    spec = spec .. '|G,' .. team .. ',0,,' .. (i - 1)
+                else
+                    spec = spec .. '|A,' .. team .. ',0,' .. ai .. ',' .. (i - 1)
+                end
             end
         else
             spec = spec .. '|X'
@@ -229,6 +234,12 @@ function CPBigMatchQuick(mapName, players, teams, ai, faction, victory, unitCap)
     LOG('*CommandProject big match (in game): ' .. n .. ' players, ' .. teams .. ' teams, ' .. ai .. ', faction ' .. faction .. ', ' .. victory .. ', cap ' .. unitCap .. ', mode ' .. mode .. ' on ' .. tostring(mapName))
     -- para o "Jogar de novo" da tela de resultado
     CPBMSet('last', { mapName, n, teams, ai, faction, victory, unitCap, mode })
+    if friends then
+        CPNet.ai = ai
+        CPNet.fromMenu = true
+        CPNetOpen({ host = true, map = mapName, spec = spec, mode = mode })
+        return
+    end
     LaunchSinglePlayerSession(CPBigMatchSession(mapName, spec))
 end
 
@@ -359,14 +370,18 @@ function CPBigMatchStart(mapName)
 end
 
 
----------------------------------------------------------------------------- match with friends
--- The launcher's invite: the host starts the game with  /cphost <port>  and each friend with
---  /cpjoin <address:port>  (and /cpname <name>), all with the same /map and /cpmatch. Nothing is
--- stored anywhere: the friends connect straight to the host's game (same network, VPN such as
--- Radmin/ZeroTier, or the host's port open on the router), the host puts each one on a base marked
--- 'G' (friend) in the order they arrive and starts the match for everybody with the game's own
--- network session (lobby comm: HostGame, JoinGame, LaunchGame).
-local CPNet = { comm = false, host = false, info = false, guests = {}, panel = false, lines = {}, started = false }
+---------------------------------------------------------------------------- room with friends
+-- A room of the CommandProject inside the game, for the big match with friends (up to 32
+-- armies, minigames). The host opens it (launcher invite with /cphost <port>, or Battle ->
+-- "Sala com amigos" in the game) and each friend connects straight to the host's game (launcher
+-- invite with /cpjoin <address>, or Multiplayer -> "Entrar na sala de um amigo"): same network,
+-- VPN (Radmin, ZeroTier) or the host's port open on the router. In the room every player picks
+-- faction, color and team, everybody sees the same list (the host sends it), and the host starts
+-- the match for all with the game's own network session (lobby comm). Bases nobody took become AI.
+CPNet = { comm = false, host = false, info = false, panel = false, lines = {}, started = false, view = false, myId = false, hostId = false, ai = 'Normal', fromMenu = false }
+
+local CPNET_ACCENT = 'FF2B8CFF'
+local CPNET_BUTTON = 'FF1C2733'
 
 local function CPArg(name)
     local ok, a = pcall(GetCommandLineArg, name, 1)
@@ -374,50 +389,151 @@ local function CPArg(name)
     return nil
 end
 
-local function CPNetText()
+local function CPNetColors()
+    local ok, n = pcall(function() return table.getn(import('/lua/common/gameColors.lua').GameColors.PlayerColors) end)
+    if ok and n and n > 0 then return n end
+    return 10
+end
+
+-- the bright color of an army (the one of the minimap)
+local function CPNetSwatch(faction, color)
+    local ok, c = pcall(function()
+        local fc = import('/lua/common/gameColors.lua').GameColors.FactionColors
+        local list = fc[(faction >= 1 and faction <= 3) and faction or 1]
+        return list[math.mod(color, table.getn(list)) + 1].icon
+    end)
+    if ok and c then return c end
+    return 'FFFFFFFF'
+end
+
+local function CPNetFactionName(f)
+    if f == 1 then return 'UEF' elseif f == 2 then return 'Cybran' elseif f == 3 then return 'Illuminate' end
+    return LOC('<LOC CP_NET_RANDOM>Random')
+end
+
+local function CPNetTeamName(t)
+    if not t or t <= 1 then return LOC('<LOC CP_NET_ALONE>Alone') end
+    return LOCF('<LOC CP_NET_TEAM>Team %d', t - 1)
+end
+
+-- host: the room as everybody sees it
+local function CPNetSlots()
     local out = {}
-    if CPNet.host then
-        local free, total = 0, 0
-        for _, p in CPNet.info.teamInfo do
+    for i, p in CPNet.info.teamInfo do
+        if not p.Civilian then
+            local kind = 'A'
             if p.CPGuest then
-                total = total + 1
-                if not p.OwnerID then free = free + 1 end
+                if p.OwnerID then kind = 'F' else kind = 'G' end
+            elseif p.Human then
+                kind = 'H'
             end
+            table.insert(out, {
+                name = tostring(p.PlayerName or ''), faction = p.CPFaction or p.Faction or 0, color = p.PlayerColor or 0,
+                team = p.Team or 1, kind = kind, owner = p.OwnerID or '',
+            })
         end
-        table.insert(out, 'Partida grande com amigos - voce e o anfitriao')
-        table.insert(out, 'Amigos conectados: ' .. (total - free) .. ' de ' .. total)
-        for _, p in CPNet.info.teamInfo do
-            if p.CPGuest and p.OwnerID then table.insert(out, '  + ' .. tostring(p.PlayerName)) end
-        end
-        if free > 0 then
-            table.insert(out, 'Esperando... (ENTER comeca agora: as vagas livres viram IA)')
-        end
-    else
-        table.insert(out, 'Partida grande com amigos')
-        for _, l in CPNet.lines do table.insert(out, l) end
     end
     return out
 end
 
-local function CPNetShow()
-    local ok = pcall(function()
-        local UIUtil = import('/lua/ui/uiutil.lua')
+local function CPNetMine()
+    if not CPNet.view or not CPNet.myId then return nil end
+    for _, s in CPNet.view.slots or {} do
+        if s.owner == CPNet.myId then return s end
+    end
+    return nil
+end
+
+function CPNetClose()
+    if CPNet.comm then pcall(function() CPNet.comm:Destroy() end) end
+    if CPNet.panel then pcall(function() CPNet.panel:Destroy() end) end
+    CPNet.comm, CPNet.panel, CPNet.view, CPNet.started, CPNet.info = false, false, false, false, false
+    CPNet.lines = {}
+    if not CPNet.fromMenu then ExitApplication() end
+end
+
+local function CPNetButton(parent, items, label, x, y, w, h, onClick)
+    local UIUtil = import('/lua/ui/uiutil.lua')
+    local LayoutHelpers = import('/lua/maui/layouthelpers.lua')
+    local Bitmap = import('/lua/maui/bitmap.lua').Bitmap
+    local b = Bitmap(parent)
+    b:SetSolidColor(CPNET_BUTTON)
+    b.Width:Set(w)
+    b.Height:Set(h)
+    LayoutHelpers.AtLeftTopIn(b, parent, x, y)
+    b.Depth:Set(parent.Depth() + 2)
+    local t = UIUtil.CreateText(b, label, 16, UIUtil.bodyFont)
+    t:DisableHitTest()
+    t:SetColor('FFE6EEF5')
+    t.Depth:Set(b.Depth() + 1)
+    LayoutHelpers.AtCenterIn(t, b)
+    b.HandleEvent = function(self, event)
+        if event.Type == 'MouseEnter' then
+            self:SetSolidColor(CPNET_ACCENT)
+        elseif event.Type == 'MouseExit' then
+            self:SetSolidColor(CPNET_BUTTON)
+        elseif event.Type == 'ButtonPress' then
+            pcall(function() PlaySound(Sound({ Bank = 'Interface', Cue = 'UI_Opt_Mini_Button_Click' })) end)
+            onClick()
+        end
+        return true
+    end
+    table.insert(items, b)
+    table.insert(items, t)
+    return b
+end
+
+local function CPNetText(parent, items, text, size, color, x, y)
+    local UIUtil = import('/lua/ui/uiutil.lua')
+    local LayoutHelpers = import('/lua/maui/layouthelpers.lua')
+    local t = UIUtil.CreateText(parent, text, size, UIUtil.bodyFont)
+    t:DisableHitTest()
+    t:SetColor(color)
+    t:SetDropShadow(true)
+    t.Depth:Set(parent.Depth() + 2)
+    LayoutHelpers.AtLeftTopIn(t, parent, x, y)
+    table.insert(items, t)
+    return t
+end
+
+-- my own choice: faction, color or team one step back or forward
+function CPNetChange(what, delta)
+    local mine = CPNetMine()
+    if not mine or CPNet.started then return end
+    local change = {}
+    if what == 'faction' then
+        change.Faction = math.mod(mine.faction + delta + 4, 4)
+    elseif what == 'color' then
+        local n = CPNetColors()
+        change.Color = math.mod(mine.color + delta + n, n)
+    elseif what == 'team' then
+        change.Team = math.mod(mine.team - 1 + delta + 9, 9) + 1
+    end
+    if CPNet.host then
+        CPNetApply(CPNet.myId, change)
+    elseif CPNet.comm and CPNet.hostId then
+        CPNet.comm:SendData(CPNet.hostId, { Type = 'CPSet', Change = change })
+    end
+end
+
+function CPNetShow()
+    local ok, err = pcall(function()
         local LayoutHelpers = import('/lua/maui/layouthelpers.lua')
         local Bitmap = import('/lua/maui/bitmap.lua').Bitmap
         local frame = GetFrame(0)
         if not CPNet.panel then
             local p = Bitmap(frame)
-            p:SetSolidColor('F00E161E')
+            p:SetSolidColor('F20B1118')
             p.Depth:Set(frame:GetTopmostDepth() + 100)
             LayoutHelpers.FillParent(p, frame)
-            p.texts = {}
+            p.items = {}
             p.HandleEvent = function(self, event)
                 if event.Type == 'KeyDown' and (event.KeyCode == 13 or event.RawKeyCode == 13) and CPNet.host then
                     CPNetLaunch()
                     return true
                 end
                 if event.Type == 'KeyDown' and (event.KeyCode == 27 or event.RawKeyCode == 27) then
-                    ExitApplication()
+                    CPNetClose()
                     return true
                 end
                 return true
@@ -425,31 +541,138 @@ local function CPNetShow()
             CPNet.panel = p
         end
         local p = CPNet.panel
-        for _, t in p.texts do t:Destroy() end
-        p.texts = {}
-        local lines = CPNetText()
-        table.insert(lines, '')
-        table.insert(lines, 'ESC sai do jogo')
-        local above = nil
-        for i, line in lines do
-            local t = UIUtil.CreateText(p, line, i == 1 and 22 or 16, UIUtil.bodyFont)
-            t:SetColor(i == 1 and 'FFF2B33D' or 'FFE6EEF5')
-            if above then LayoutHelpers.Below(t, above, 8) else LayoutHelpers.AtLeftTopIn(t, p, 80, 120) end
-            table.insert(p.texts, t)
-            above = t
+        for _, c in p.items do pcall(function() c:Destroy() end) end
+        p.items = {}
+        local items = p.items
+        local x0 = 80
+        local title = LOC('<LOC CP_NET_TITLE>ROOM WITH FRIENDS')
+        if CPNet.host then title = title .. '  -  ' .. LOC('<LOC CP_NET_YOU_HOST>you are the host') end
+        CPNetText(p, items, title, 26, 'FFF2B33D', x0, 50)
+        local view = CPNet.view or {}
+        if view.map then
+            local line = LOC('<LOC CP_NET_MAP>Map') .. ': ' .. tostring(view.map)
+            if view.mode and view.mode ~= '' then
+                local names = {
+                    total = '<LOC CP_MG_TOTAL_TITLE>TOTAL WAR', arena = '<LOC CP_MG_ARENA_TITLE>EXPERIMENTAL ARENA',
+                    defense = '<LOC CP_MG_DEF_TITLE>LAST LINE OF DEFENSE', domination = '<LOC CP_MG_DOM_TITLE>STRATEGIC DOMINATION',
+                    supreme = '<LOC CP_MG_SUP_TITLE>SUPREME PROJECT', survival = '<LOC CP_MG_SURV_TITLE>ENDLESS SURVIVAL',
+                    koth = '<LOC CP_MG_KOTH_TITLE>KING OF THE HILL', vip = '<LOC CP_MG_VIP_TITLE>ESCORT',
+                    race = '<LOC CP_MG_RACE_TITLE>RESOURCE RACE', treasure = '<LOC CP_MG_TREASURE_TITLE>TREASURE HUNT',
+                }
+                line = line .. '   -   ' .. LOC('<LOC CP_NET_MODE>Mode') .. ': ' .. LOC(names[view.mode] or tostring(view.mode))
+            end
+            CPNetText(p, items, line, 16, 'FFB8C7D6', x0, 88)
+        end
+        local y = 120
+        for _, l in CPNet.lines do
+            CPNetText(p, items, l, 15, 'FFE6EEF5', x0, y)
+            y = y + 20
+        end
+        y = math.max(y + 10, 190)
+        -- the players: name, faction, color, team (your line has the buttons)
+        CPNetText(p, items, LOC('<LOC CP_NET_PLAYER>Player'), 14, 'FF8FA3B8', x0, y)
+        CPNetText(p, items, LOC('<LOC CP_NET_FACTION>Faction'), 14, 'FF8FA3B8', x0 + 330, y)
+        CPNetText(p, items, LOC('<LOC CP_NET_COLOR>Color'), 14, 'FF8FA3B8', x0 + 560, y)
+        CPNetText(p, items, LOC('<LOC CP_NET_TEAMS>Team'), 14, 'FF8FA3B8', x0 + 720, y)
+        y = y + 24
+        local shown = 0
+        for i, s in view.slots or {} do
+            if shown >= 16 then
+                CPNetText(p, items, LOCF('<LOC CP_NET_MORE>... and %d more AI', table.getn(view.slots) - shown), 14, 'FF8FA3B8', x0, y)
+                break
+            end
+            shown = shown + 1
+            local mine = CPNet.myId and s.owner == CPNet.myId
+            local who = s.name
+            if s.kind == 'G' then who = LOC('<LOC CP_NET_FREE>(free: a friend can join; becomes AI)') end
+            if s.kind == 'A' then who = who .. '  (' .. LOC('<LOC CP_NET_AI>AI') .. ')' end
+            CPNetText(p, items, i .. '.  ' .. who, 17, mine and 'FF7CFF7C' or 'FFE6EEF5', x0, y + 4)
+            local swatch = Bitmap(p)
+            swatch:SetSolidColor(CPNetSwatch(s.faction, s.color))
+            swatch.Width:Set(48)
+            swatch.Height:Set(20)
+            LayoutHelpers.AtLeftTopIn(swatch, p, x0 + 600, y + 5)
+            swatch.Depth:Set(p.Depth() + 2)
+            swatch:DisableHitTest()
+            table.insert(items, swatch)
+            if mine and not CPNet.started then
+                CPNetButton(p, items, '<', x0 + 330, y, 28, 30, function() CPNetChange('faction', -1) end)
+                CPNetText(p, items, CPNetFactionName(s.faction), 17, 'FFFFFFFF', x0 + 366, y + 4)
+                CPNetButton(p, items, '>', x0 + 500, y, 28, 30, function() CPNetChange('faction', 1) end)
+                CPNetButton(p, items, '<', x0 + 560, y, 28, 30, function() CPNetChange('color', -1) end)
+                CPNetButton(p, items, '>', x0 + 660, y, 28, 30, function() CPNetChange('color', 1) end)
+                CPNetButton(p, items, '<', x0 + 720, y, 28, 30, function() CPNetChange('team', -1) end)
+                CPNetText(p, items, CPNetTeamName(s.team), 17, 'FFFFFFFF', x0 + 756, y + 4)
+                CPNetButton(p, items, '>', x0 + 860, y, 28, 30, function() CPNetChange('team', 1) end)
+            else
+                CPNetText(p, items, CPNetFactionName(s.faction), 17, 'FFB8C7D6', x0 + 366, y + 4)
+                CPNetText(p, items, CPNetTeamName(s.team), 17, 'FFB8C7D6', x0 + 756, y + 4)
+            end
+            y = y + 34
+        end
+        y = y + 16
+        if CPNet.host and not CPNet.started then
+            CPNetButton(p, items, LOC('<LOC CP_NET_START>START THE MATCH (ENTER)'), x0, y, 320, 40, function() CPNetLaunch() end)
+            CPNetButton(p, items, LOC('<LOC CP_NET_LEAVE>LEAVE (ESC)'), x0 + 340, y, 200, 40, function() CPNetClose() end)
+        elseif not CPNet.started then
+            CPNetText(p, items, LOC('<LOC CP_NET_WAIT>Waiting for the host to start the match...'), 16, 'FFB8C7D6', x0, y + 8)
+            CPNetButton(p, items, LOC('<LOC CP_NET_LEAVE>LEAVE (ESC)'), x0 + 420, y, 200, 40, function() CPNetClose() end)
         end
         p:AcquireKeyboardFocus(false)
     end)
     if not ok then
-        for _, l in CPNetText() do LOG('*CommandProject net: ' .. l) end
+        WARN('*CommandProject room: ' .. tostring(err))
+        for _, l in CPNet.lines do LOG('*CommandProject room: ' .. l) end
     end
 end
 
 local function CPNetStatus(text)
-    LOG('*CommandProject net: ' .. text)
+    LOG('*CommandProject room: ' .. text)
     table.insert(CPNet.lines, text)
-    if table.getn(CPNet.lines) > 8 then table.remove(CPNet.lines, 1) end
+    if table.getn(CPNet.lines) > 3 then table.remove(CPNet.lines, 1) end
     CPNetShow()
+end
+
+-- host: the room changed, everybody gets the new list
+local function CPNetBroadcast()
+    if not CPNet.host or not CPNet.info then return end
+    CPNet.view = { slots = CPNetSlots(), map = CPNet.mapName, mode = CPNet.mode }
+    pcall(function() CPNet.comm:BroadcastData({ Type = 'CPLobby', View = CPNet.view }) end)
+    CPNetShow()
+end
+
+-- host: a player changed faction, color or team (a color already taken goes to the next free one)
+function CPNetApply(owner, change)
+    if not CPNet.info or CPNet.started then return end
+    local colors = CPNetColors()
+    for _, p in CPNet.info.teamInfo do
+        if p.OwnerID == owner then
+            local f = tonumber(change.Faction or '')
+            if f and f >= 0 and f <= 3 then
+                p.CPFaction = f
+                if f >= 1 then p.Faction = f end
+            end
+            local c = tonumber(change.Color or '')
+            if c then
+                c = math.mod(math.max(0, c), colors)
+                local step = 1
+                if c < (p.PlayerColor or 0) then step = -1 end
+                for tries = 1, colors do
+                    local taken = false
+                    for _, o in CPNet.info.teamInfo do
+                        if o ~= p and not o.Civilian and o.PlayerColor == c then taken = true end
+                    end
+                    if not taken then break end
+                    c = math.mod(c + step + colors, colors)
+                end
+                p.PlayerColor = c
+                p.ArmyColor = c
+            end
+            local t = tonumber(change.Team or '')
+            if t and t >= 1 and t <= 9 then p.Team = t end
+        end
+    end
+    CPNetBroadcast()
 end
 
 -- the host starts the match for everybody: free friend bases become AI
@@ -463,11 +686,13 @@ function CPNetLaunch()
         local q = table.copy(p)
         if q.CPGuest and not q.OwnerID then
             q.Human = false
-            q.AIPersonality = 'Normal'
-            q.PlayerName = GetRandomName(q.Faction, 'Normal')
+            q.AIPersonality = CPNet.ai or 'Normal'
+            q.PlayerName = GetRandomName(q.Faction, q.AIPersonality)
         end
+        if q.CPFaction == 0 then q.Faction = GetRandomFaction() end
         if not q.OwnerID then q.OwnerID = hostID end
         q.CPGuest = nil
+        q.CPFaction = nil
         q.Ready = true
         table.insert(players, q)
     end
@@ -479,44 +704,57 @@ function CPNetLaunch()
         Observers = {},
         GameMods = CPNet.info.scenarioMods or {},
     }
-    LOG('*CommandProject net: starting with ' .. table.getn(players) .. ' armies')
+    LOG('*CommandProject room: starting with ' .. table.getn(players) .. ' armies')
+    CPNetStatus(LOC('<LOC CP_NET_STARTING>Starting...'))
     comm:BroadcastData({ Type = 'CPLaunch', GameInfo = gameInfo })
     comm:LaunchGame(gameInfo)
 end
 
-function CPNetStart(mapName, spec)
+-- opens the room. o = { host = true, map, spec, port, name, mode } or { host = false, address, name }
+function CPNetOpen(o)
     local Comm = import('/lua/ui/lobby/lobbyComm.lua')
-    local name = CPArg('/cpname') or Prefs.GetFromCurrentProfile('Name') or 'Player'
-    CPNet.host = HasCommandLineArg('/cphost')
-    CPNet.map = mapName
+    local Prefs = import('/lua/user/prefs.lua')
+    local name = o.name or Prefs.GetFromCurrentProfile('Name') or 'Player'
+    CPNet.host = o.host and true or false
+    CPNet.map = o.map
+    CPNet.lines = {}
+    CPNet.started = false
     if CPNet.host then
-        CPNet.info = CPBigMatchSession(mapName, spec)
+        CPNet.info = CPBigMatchSession(o.map, o.spec)
         for _, p in CPNet.info.teamInfo do
             if p.Human and not p.CPGuest then CPNet.me = p end
         end
         if not CPNet.me then error('no base for the host') end
         CPNet.me.PlayerName = name
+        CPNet.me.CPFaction = CPNet.me.Faction
+        local scen = CPNet.info.scenarioInfo or {}
+        CPNet.mapName = LOC(scen.name or o.map or '')
+        CPNet.mode = o.mode or (scen.Options and scen.Options.CPMode) or ''
     end
     -- more than the game's 8 people: room for every friend base
     Comm.maxConnections = 31
-    local port = CPNet.host and (tonumber(CPArg('/cphost') or '') or 15000) or 0
+    local port = CPNet.host and (tonumber(o.port or '') or 15000) or 0
     local comm = Comm.CreateLobbyComm('UDP', port, name, nil, nil)
     if not comm then error('could not open the network (port ' .. tostring(port) .. ')') end
     CPNet.comm = comm
 
     comm.Hosting = function(self)
-        CPNet.me.OwnerID = self:GetLocalPlayerID()
-        CPNetStatus('Aberto na porta ' .. tostring(port) .. '. Mande o convite para os amigos.')
+        CPNet.myId = self:GetLocalPlayerID()
+        CPNet.me.OwnerID = CPNet.myId
+        CPNetStatus(LOCF('<LOC CP_NET_OPEN>Open on port %d. Friends join with the launcher invite (Big match -> Invite) or with your IP.', port))
+        CPNetBroadcast()
     end
     comm.ConnectionFailed = function(self, reason)
-        CPNetStatus('Nao deu para conectar: ' .. tostring(reason) .. '. Confira o endereco do convite e a rede (VPN ou porta aberta).')
+        CPNetStatus(LOC('<LOC CP_NET_FAILED>Could not connect:') .. ' ' .. tostring(reason))
     end
     comm.ConnectionToHostEstablished = function(self, ourID, hostID)
-        CPNetStatus('Conectado ao anfitriao. Esperando ele comecar a partida...')
+        CPNet.myId = ourID
+        CPNet.hostId = hostID
+        CPNetStatus(LOC('<LOC CP_NET_CONNECTED>Connected to the host. Pick your faction, color and team.'))
         self:SendData(hostID, { Type = 'CPHello', Name = name })
     end
     comm.Ejected = function(self, reason)
-        CPNetStatus('O anfitriao recusou: ' .. tostring(reason))
+        CPNetStatus(LOC('<LOC CP_NET_REFUSED>The host refused:') .. ' ' .. tostring(reason))
     end
     comm.PeerDisconnected = function(self, peerName, uid)
         if CPNet.host and not CPNet.started then
@@ -526,36 +764,42 @@ function CPNetStart(mapName, spec)
                     p.PlayerName = 'Convidado'
                 end
             end
-            CPNetStatus(tostring(peerName) .. ' saiu')
+            CPNetStatus(LOCF('<LOC CP_NET_LEFT>%s left', tostring(peerName)))
+            CPNetBroadcast()
         elseif not CPNet.host then
-            CPNetStatus('O anfitriao saiu.')
+            CPNetStatus(LOC('<LOC CP_NET_HOST_LEFT>The host left.'))
         end
     end
     comm.LaunchFailed = function(self, reason)
         CPNet.started = false
-        CPNetStatus('A partida nao comecou: ' .. tostring(reason))
+        CPNetStatus(LOC('<LOC CP_NET_NOSTART>The match did not start:') .. ' ' .. tostring(reason))
     end
     comm.DataReceived = function(self, data)
         if CPNet.host and data.Type == 'CPHello' and not CPNet.started then
             local slot = nil
             for _, p in CPNet.info.teamInfo do
-                if p.CPGuest and not p.OwnerID then slot = p break end
+                if p.CPGuest and not p.OwnerID then
+                    slot = p
+                    break
+                end
             end
             if not slot then
-                self:EjectPeer(data.SenderID, 'a partida esta cheia')
+                self:EjectPeer(data.SenderID, 'full')
                 return
             end
             slot.OwnerID = data.SenderID
             slot.PlayerName = tostring(data.Name or data.SenderName or 'Amigo')
-            CPNetStatus(slot.PlayerName .. ' entrou')
-            -- everybody in: the match starts by itself
-            local free = 0
-            for _, p in CPNet.info.teamInfo do
-                if p.CPGuest and not p.OwnerID then free = free + 1 end
-            end
-            if free == 0 then CPNetLaunch() end
+            slot.CPFaction = 0
+            CPNetStatus(LOCF('<LOC CP_NET_JOINED>%s joined', slot.PlayerName))
+            CPNetBroadcast()
+        elseif CPNet.host and data.Type == 'CPSet' and type(data.Change) == 'table' then
+            CPNetApply(data.SenderID, data.Change)
+        elseif not CPNet.host and data.Type == 'CPLobby' and type(data.View) == 'table' then
+            CPNet.view = data.View
+            CPNetShow()
         elseif not CPNet.host and data.Type == 'CPLaunch' and data.GameInfo then
-            CPNetStatus('Comecando...')
+            CPNet.started = true
+            CPNetStatus(LOC('<LOC CP_NET_STARTING>Starting...'))
             self:LaunchGame(data.GameInfo)
         end
     end
@@ -563,10 +807,103 @@ function CPNetStart(mapName, spec)
     if CPNet.host then
         comm:HostGame()
     else
-        local address = CPArg('/cpjoin')
-        if not address then error('/cpjoin without address') end
-        CPNetStatus('Conectando a ' .. address .. '...')
-        comm:JoinGame(address, nil, nil)
+        if not o.address or o.address == '' then error('no address') end
+        pcall(function()
+            Prefs.SetToCurrentProfile('CPNetLast', o.address)
+            if SavePreferences then SavePreferences() end
+        end)
+        CPNetStatus(LOCF('<LOC CP_NET_CONNECTING>Connecting to %s...', o.address))
+        comm:JoinGame(o.address, nil, nil)
     end
     CPNetShow()
+end
+
+-- invite from the launcher: /cphost <port> or /cpjoin <address> (and /cpname <name>)
+function CPNetStart(mapName, spec)
+    CPNet.fromMenu = false
+    if HasCommandLineArg('/cphost') then
+        CPNetOpen({ host = true, map = mapName, spec = spec, port = CPArg('/cphost'), name = CPArg('/cpname') })
+    else
+        CPNetOpen({ host = false, address = CPArg('/cpjoin'), name = CPArg('/cpname') })
+    end
+end
+
+-- Battle -> "Sala com amigos": the big match choices kept in the room, the other bases for friends
+function CPNetHostFromMenu(defaultMap)
+    local ok, err = pcall(function()
+        local map = CPBMGet('map')
+        if not map or not import('/lua/ui/maputil.lua').LoadScenario(map) then map = defaultMap end
+        CPBigMatchQuick(map, CPBMGet('players'), CPBMGet('teams'), CPBMGet('ai'), CPBMGet('faction'), CPBMGet('victory'), CPBMGet('units'), true)
+    end)
+    if not ok then
+        WARN('*CommandProject room: ' .. tostring(err))
+        CPNetStatus(tostring(err))
+    end
+end
+
+-- Multiplayer -> "Entrar na sala de um amigo": asks the address (the last one, or the launcher
+-- group's host, already written)
+function CPNetJoinFromMenu(address)
+    local ok, err = pcall(function()
+        local UIUtil = import('/lua/ui/uiutil.lua')
+        local LayoutHelpers = import('/lua/maui/layouthelpers.lua')
+        local Bitmap = import('/lua/maui/bitmap.lua').Bitmap
+        local Edit = import('/lua/maui/edit.lua').Edit
+        local frame = GetFrame(0)
+        local p = Bitmap(frame)
+        p:SetSolidColor('F20B1118')
+        p.Depth:Set(frame:GetTopmostDepth() + 100)
+        LayoutHelpers.FillParent(p, frame)
+        local items = {}
+        CPNetText(p, items, LOC('<LOC CP_NET_JOIN_TITLE>JOIN A FRIEND\'S ROOM'), 26, 'FFF2B33D', 80, 60)
+        CPNetText(p, items, LOC('<LOC CP_NET_JOIN_HINT>The host\'s address (IP or IP:port), from the launcher invite. ENTER joins, ESC goes back.'), 16, 'FFB8C7D6', 80, 100)
+        local box = Bitmap(p)
+        box:SetSolidColor('FF1C2733')
+        box.Width:Set(420)
+        box.Height:Set(40)
+        LayoutHelpers.AtLeftTopIn(box, p, 80, 140)
+        box.Depth:Set(p.Depth() + 1)
+        local e = Edit(box)
+        e.Width:Set(400)
+        e.Height:Set(30)
+        LayoutHelpers.AtLeftTopIn(e, box, 10, 6)
+        e.Depth:Set(box.Depth() + 1)
+        e:SetFont(UIUtil.bodyFont, 20)
+        e:SetForegroundColor('FFFFFFFF')
+        e:ShowBackground(false)
+        e:SetMaxChars(60)
+        local last = address
+        if not last or last == '' then
+            local okp, v = pcall(function() return import('/lua/user/prefs.lua').GetFromCurrentProfile('CPNetLast') end)
+            if okp and v then last = v end
+        end
+        e:SetText(last or '')
+        local function go(text)
+            text = tostring(text or '')
+            if text == '' then return end
+            p:Destroy()
+            CPNet.fromMenu = true
+            local okj, errj = pcall(CPNetOpen, { host = false, address = text })
+            if not okj then WARN('*CommandProject room: ' .. tostring(errj)) end
+        end
+        e.OnEnterPressed = function(self, text)
+            go(text)
+            return true
+        end
+        e.OnEscPressed = function(self, text)
+            p:Destroy()
+            return true
+        end
+        CPNetButton(p, items, LOC('<LOC CP_NET_JOIN>JOIN'), 520, 140, 160, 40, function() go(e:GetText()) end)
+        CPNetButton(p, items, LOC('<LOC CP_NET_BACK>BACK'), 700, 140, 120, 40, function() p:Destroy() end)
+        e:AcquireFocus()
+    end)
+    if not ok then WARN('*CommandProject room (join): ' .. tostring(err)) end
+end
+
+-- Multiplayer -> "Entrar na sala de <anfitrião>": the host of the launcher's last invite
+function CPNetJoinDirect(address)
+    CPNet.fromMenu = true
+    local ok, err = pcall(CPNetOpen, { host = false, address = address })
+    if not ok then WARN('*CommandProject room: ' .. tostring(err)) end
 end

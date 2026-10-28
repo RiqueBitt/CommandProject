@@ -296,6 +296,8 @@ def network(source: str, label: str):
     def world(args):
         lua = LuaRuntime(unpack_returned_tuples=True)
         lua.execute(HARNESS)
+        lua.execute("LOC = LOC or function(s) return (string.gsub(s, '^<LOC [^>]*>', '')) end "
+                    "LOCF = LOCF or function(f, ...) return string.format(LOC(f), ...) end")
         lua.execute(moho_to_lua(source))
         lua.execute(NET)
         g = lua.globals()
@@ -308,8 +310,12 @@ def network(source: str, label: str):
     lua.execute("Comm.comm:DataReceived({ Type = 'CPHello', Name = 'Bia', SenderID = 7 })")
     check(not g.Comm.launched, f"{label}: com vaga livre ainda espera")
     lua.execute("Comm.comm:DataReceived({ Type = 'CPHello', Name = 'Caio', SenderID = 9 })")
+    # todos dentro: a sala espera cada um escolher facção, cor e time; o anfitrião começa
+    check(not g.Comm.launched and g.Comm.broadcast and g.Comm.broadcast.Type == "CPLobby", f"{label}: todos dentro, a sala mostra a lista para todos")
+    lua.execute("CPNetApply(9, { Faction = 3, Team = 2 })")
+    lua.execute("CPNetLaunch()")
     info = g.Comm.launched
-    check(bool(info) and g.Comm.broadcast and g.Comm.broadcast.Type == "CPLaunch", f"{label}: todos dentro, a partida começa para todo mundo")
+    check(bool(info) and g.Comm.broadcast and g.Comm.broadcast.Type == "CPLaunch", f"{label}: o anfitrião começa a partida para todo mundo")
     if info:
         ps = [info.PlayerOptions[i] for i in range(1, lua.eval("table.getn")(info.PlayerOptions) + 1)]
         owners = [(p.PlayerName, p.OwnerID, bool(p.Human)) for p in ps]

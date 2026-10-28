@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 pub const MOD_ID: &str = "cp-tela-inicial";
 pub const ARCHIVE: &str = "zz_cp_tela_inicial.scd";
 /// Muda quando o visual muda (o launcher remonta).
-pub const STYLE_VERSION: &str = "1.4.0";
+pub const STYLE_VERSION: &str = "1.5.0";
 pub const SETTINGS_FILE: &str = "start-screen.json";
 /// Pasta (nos dados do launcher) com o logo e o vídeo do jogador.
 pub const USER_DIR: &str = "start-screen";
@@ -44,6 +44,8 @@ pub struct Settings {
     pub video_name: String,
     /// Partidas grandes prontas no submenu da Escaramuça do jogo.
     pub shortcuts: Vec<Shortcut>,
+    /// HUD das partidas no mesmo estilo e cor da tela inicial.
+    pub hud: bool,
 }
 
 /// Uma partida grande salva como botão no jogo (Escaramuça): o cenário e as vagas/opções no formato
@@ -84,6 +86,7 @@ impl Default for Settings {
             custom_video: false,
             video_name: String::new(),
             shortcuts: Vec::new(),
+            hud: true,
         }
     }
 }
@@ -294,7 +297,7 @@ pub struct GameExtras<'a> {
 }
 
 /// Opções do tema dos outros menus (as texturas do jogo pintadas na cor da tela inicial).
-pub fn theme_options(accent: &str) -> crate::menu_theme::ThemeOptions {
+pub fn theme_options(accent: &str, hud: bool) -> crate::menu_theme::ThemeOptions {
     crate::menu_theme::ThemeOptions {
         name: "Tela inicial nova".into(),
         recolor: true,
@@ -307,6 +310,7 @@ pub fn theme_options(accent: &str) -> crate::menu_theme::ThemeOptions {
         glow: 0.5,
         sharpness: 0.5,
         deblock: 0.5,
+        hud,
     }
 }
 
@@ -394,7 +398,7 @@ pub fn build_all(
     }
     if !others.is_empty() {
         let own: std::collections::HashSet<String> = files.iter().map(|(p, _)| p.to_ascii_lowercase()).collect();
-        for (name, data) in themed_cached(stock, &settings.accent, data_dir)? {
+        for (name, data) in themed_cached(stock, &settings.accent, settings.hud, data_dir)? {
             if !own.contains(&name.to_ascii_lowercase().replace('\\', "/")) {
                 b.add_bytes(&name, &data)?;
             }
@@ -441,11 +445,12 @@ fn map_tiles(png: &[u8], accent: [u8; 3]) -> Result<Vec<(&'static str, Vec<u8>)>
 /// As texturas do jogo pintadas na cor da tela inicial, guardadas em `cache/start-screen` (a
 /// pintura de centenas de texturas é a parte mais demorada de montar a tela inicial; só é refeita
 /// quando a cor, o estilo ou os arquivos do jogo mudam).
-fn themed_cached(stock: &[PathBuf], accent: &str, data_dir: &Path) -> Result<Vec<(String, Vec<u8>)>> {
+fn themed_cached(stock: &[PathBuf], accent: &str, hud: bool, data_dir: &Path) -> Result<Vec<(String, Vec<u8>)>> {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(STYLE_VERSION);
     h.update(accent.to_ascii_lowercase());
+    h.update(if hud { "hud" } else { "menus" });
     for p in stock {
         let m = std::fs::metadata(p).ok();
         h.update(format!("{}:{}:{:?}", p.display(), m.as_ref().map(|m| m.len()).unwrap_or(0), m.and_then(|m| m.modified().ok())));
@@ -471,7 +476,7 @@ fn themed_cached(stock: &[PathBuf], accent: &str, data_dir: &Path) -> Result<Vec
             }
         }
     }
-    let files = crate::menu_theme::themed_textures(stock, &theme_options(accent))?;
+    let files = crate::menu_theme::themed_textures(stock, &theme_options(accent, hud))?;
     // os temas antigos saem (uma cor por vez basta)
     if let Ok(rd) = std::fs::read_dir(&dir) {
         for e in rd.flatten() {
