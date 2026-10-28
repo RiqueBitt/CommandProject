@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 pub const MOD_ID: &str = "cp-tela-inicial";
 pub const ARCHIVE: &str = "zz_cp_tela_inicial.scd";
 /// Muda quando o visual muda (o launcher remonta).
-pub const STYLE_VERSION: &str = "1.1.0";
+pub const STYLE_VERSION: &str = "1.2.0";
 pub const SETTINGS_FILE: &str = "start-screen.json";
 /// Pasta (nos dados do launcher) com o logo e o vídeo do jogador.
 pub const USER_DIR: &str = "start-screen";
@@ -170,7 +170,7 @@ macro_rules! art {
 const ART: &[(&str, &[u8])] = art![
     "btn_u", "btn_o", "btn_at", "btn_w", "sub_u", "sub_o", "sub_at", "sub_w", "icon_campaign", "icon_skirmish", "icon_multiplayer",
     "icon_options", "icon_extras", "icon_quit", "icon_mod", "shade", "tint", "panel", "gamertag", "avatar_frame", "topbar", "opt_u",
-    "opt_o", "opt_at", "opt_w", "p9_tl", "p9_t", "p9_tr", "p9_l", "p9_c", "p9_r", "p9_bl", "p9_b", "p9_br", "p3_l", "p3_c", "p3_r",
+    "opt_o", "opt_at", "opt_w", "p9_tl", "p9_t", "p9_tr", "p9_l", "p9_c", "p9_r", "p9_bl", "p9_b", "p9_br", "p3_l", "p3_c", "p3_r", "line", "f8_tl", "f8_t", "f8_tr", "f8_l", "f8_r", "f8_bl", "f8_b", "f8_br", "big_u", "big_o", "big_at", "big_w",
 ];
 
 fn to_dds(img: &Rgba) -> Result<Vec<u8>> {
@@ -308,7 +308,7 @@ pub fn build_all(
     panel: Option<Panel>,
 ) -> Result<(PathBuf, Vec<String>)> {
     let accent = crate::menu_theme::parse_hex(&settings.accent).unwrap_or([43, 140, 255]);
-    let look = Look::Commander(Commander { news_title: settings.news_title.clone(), news_text: settings.news_text.clone() });
+    let look = Look::Commander(Commander { news_title: settings.news_title.clone(), news_text: settings.news_text.clone(), panel: panel.is_some() });
     let logo = if settings.custom_logo {
         let p = Settings::logo_path(data_dir);
         let data = std::fs::read(&p).map_err(|e| Error::io(&p, e))?;
@@ -338,6 +338,13 @@ pub fn build_all(
     }
     // os outros menus: cenas no visual novo e as texturas do jogo na cor escolhida
     for (path, data) in others {
+        if path == mainmenu::OPTIONS_LUA {
+            match std::str::from_utf8(data).ok().and_then(mainmenu::patch_options_lua) {
+                Some(text) => b.add_bytes(path.trim_start_matches('/'), &text.chars().map(|c| c as u32 as u8).collect::<Vec<u8>>())?,
+                None => built.warnings.push("opções do jogo: o options.lua é diferente do esperado (ficaram as do jogo)".into()),
+            }
+            continue;
+        }
         match mainmenu::restyle_frontend(data) {
             Ok(new) => b.add_bytes(path.trim_start_matches('/'), &new)?,
             Err(e) => built.warnings.push(format!("{}: {e}", path.rsplit('/').next().unwrap_or(path))),
@@ -442,6 +449,10 @@ fn real_build_when_available() {
                 others.push((p.to_string(), d));
             }
         }
+    }
+    if let Ok(o) = std::env::var("CP_SS_OPTIONS") {
+        let text: String = std::fs::read(o).unwrap().iter().map(|&b| b as char).collect();
+        others.push((mainmenu::OPTIONS_LUA.to_string(), text.into_bytes()));
     }
     let mut edit = MenuEdit::default();
     edit.buttons.push(mainmenu::NewButton { key: "cp:atalho0".into(), label: "MEGA: 4 CONTRA 4".into(), place: mainmenu::Place::Skirmish, native: None, lua: false, code: Some("LOG('atalho')".into()) });

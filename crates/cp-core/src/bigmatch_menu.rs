@@ -1,8 +1,10 @@
-//! Partida grande dentro do jogo: um painel que aparece ao lado do submenu da Escaramuça na tela
-//! inicial nova, com jogadores (até 32), times, dificuldade da IA e o mapa (os maiores que o
-//! jogador tem, os do launcher também). Cada escolha é um botão de opção do próprio jogo (fica
-//! aceso) que guarda o valor em Lua; "Começar" monta a partida com o código da Partida grande
-//! (`CPBigMatchQuick` no `SinglePlayerLaunch.lua`, do mod `cp-partida-grande`).
+//! "Criar jogo" dentro da tela inicial nova: um painel ao lado do submenu da Escaramuça que cria
+//! a partida do jeito do launcher — de 2 a 32 jogadores, times, dificuldade da IA, a sua facção,
+//! o tipo de vitória, o limite de unidades e o mapa (os do jogo e os do jogador, os grandes
+//! também). Cada escolha é um botão de opção do próprio jogo (fica aceso) que guarda o valor em
+//! Lua; "Começar" monta a partida com `CPBigMatchQuick` (no `SinglePlayerLaunch.lua`, do mod
+//! `cp-partida-grande`). A sala do jogo (até 8, com facção e cor de cada um) continua no submenu
+//! como "Sala clássica".
 //!
 //! O painel mora dentro do grupo `g_skirmish_options` da própria tela inicial: o jogo só sabe
 //! mostrar e esconder os quatro submenus dele (`ShowMainMenuGroup`) e não abre cenas novas
@@ -10,13 +12,13 @@
 //! escondidos (o campo "visível" do registro em 0), como os itens dos submenus.
 
 use crate::error::{Error, Result};
-use crate::mainmenu::TEX;
+use crate::mainmenu::{ORDER, TEX};
 use crate::scene::{event, kind, Anchors, Event, Rect, Scene};
 
 /// Mapas na lista, no máximo.
-pub const MAX_MAPS: usize = 6;
+pub const MAX_MAPS: usize = 8;
 /// Campo "visível" de um registro (1 = aparece sozinho; 0 = só quando o grupo dele é mostrado).
-const VISIBLE: usize = 32;
+pub const VISIBLE: usize = 32;
 
 /// Um mapa da lista: cenário, nome e bases.
 #[derive(Debug, Clone, PartialEq)]
@@ -33,50 +35,72 @@ pub struct Texts {
     pub players: &'static str,
     pub teams: &'static str,
     pub ai: &'static str,
+    pub faction: &'static str,
+    pub victory: &'static str,
+    pub units: &'static str,
     pub map: &'static str,
     pub team_labels: [&'static str; 4],
     pub ai_labels: [&'static str; 4],
-    pub bases: &'static str,
+    pub faction_labels: [&'static str; 4],
+    pub victory_labels: [&'static str; 3],
     pub start: &'static str,
     pub note: &'static str,
+    /// item do submenu que abre a sala do jogo
+    pub classic: &'static str,
 }
 
 pub const PT: Texts = Texts {
-    title: "PARTIDA GRANDE · ATÉ 32 JOGADORES",
+    title: "CRIAR JOGO",
     players: "JOGADORES",
     teams: "TIMES",
-    ai: "INTELIGÊNCIA ARTIFICIAL",
+    ai: "DIFICULDADE DA IA",
+    faction: "SUA FACÇÃO",
+    victory: "VITÓRIA",
+    units: "LIMITE DE UNIDADES",
     map: "MAPA",
-    team_labels: ["2 TIMES", "3 TIMES", "4 TIMES", "CADA UM POR SI"],
-    ai_labels: ["FÁCIL", "NORMAL", "DIFÍCIL", "TRAPAÇA"],
-    bases: "bases",
+    team_labels: ["2 TIMES", "3 TIMES", "4 TIMES", "TODOS CONTRA TODOS"],
+    ai_labels: ["FÁCIL", "NORMAL", "DIFÍCIL", "MUITO DIFÍCIL"],
+    faction_labels: ["ALEATÓRIA", "UEF", "CYBRAN", "ILLUMINATE"],
+    victory_labels: ["COMANDANTE", "DESTRUIR TUDO", "SEM FIM"],
     start: "COMEÇAR",
     note: "Sem escolher: 8 jogadores, 2 times, IA normal e o primeiro mapa.",
+    classic: "SALA CLÁSSICA (FACÇÃO E COR)",
 };
 
 pub const EN: Texts = Texts {
-    title: "BIG MATCH · UP TO 32 PLAYERS",
+    title: "CREATE GAME",
     players: "PLAYERS",
     teams: "TEAMS",
-    ai: "ARTIFICIAL INTELLIGENCE",
+    ai: "AI DIFFICULTY",
+    faction: "YOUR FACTION",
+    victory: "VICTORY",
+    units: "UNIT CAP",
     map: "MAP",
     team_labels: ["2 TEAMS", "3 TEAMS", "4 TEAMS", "FREE FOR ALL"],
-    ai_labels: ["EASY", "NORMAL", "HARD", "CHEATING"],
-    bases: "bases",
+    ai_labels: ["EASY", "NORMAL", "HARD", "VERY HARD"],
+    faction_labels: ["RANDOM", "UEF", "CYBRAN", "ILLUMINATE"],
+    victory_labels: ["COMMANDER", "DESTROY ALL", "ENDLESS"],
     start: "START",
     note: "Without choosing: 8 players, 2 teams, normal AI and the first map.",
+    classic: "CLASSIC LOBBY (FACTION AND COLOR)",
 };
 
-const PLAYERS: [u32; 9] = [4, 6, 8, 10, 12, 16, 20, 24, 32];
+const PLAYERS: [u32; 11] = [2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 32];
 const AI_KEYS: [&str; 4] = ["Easy", "Normal", "Hard", "Cheat"];
+const VICTORY_KEYS: [&str; 3] = ["demoralization", "domination", "sandbox"];
+const UNIT_CAPS: [u32; 3] = [250, 500, 1000];
 
 // medidas do painel (unidades da cena, no quadro 16:9 da "Comandante": o submenu vai de 173 a 593)
 const X0: i32 = 611;
 const X1: i32 = 1440;
-const Y0: i32 = 404;
-const Y1: i32 = 920;
+/// topo: logo abaixo das notícias (com o painel, os atalhos do lado direito sobem; veja
+/// `mainmenu::commander`)
+pub const Y0: i32 = 262;
+const Y1: i32 = 904;
 const IN0: i32 = X0 + 20;
 const IN1: i32 = X1 - 20;
+/// altura de uma linha de escolhas (título + botões)
+const ROW: i32 = 66;
 
 fn find(s: &Scene, name: &str) -> Result<u32> {
     s.by_name(name).map(|e| e.id).map_err(|_| Error::Other(format!("a tela inicial do jogo é diferente do esperado (sem {name})")))
@@ -89,12 +113,13 @@ fn safe(t: &str) -> bool {
 /// Código do botão "Começar".
 pub fn start_code(first_map: &str) -> String {
     format!(
-        "local m = import('/lua/SinglePlayerLaunch.lua') if m.CPBigMatchQuick then m.CPBigMatchQuick(CPBM_map or '{first_map}', CPBM_players or 8, CPBM_teams or 2, CPBM_ai or 'Normal') else LOG('CommandProject: mod da Partida grande ausente') end"
+        "local m = import('/lua/SinglePlayerLaunch.lua') if m.CPBigMatchQuick then m.CPBigMatchQuick(CPBM_map or '{first_map}', CPBM_players or 8, CPBM_teams or 2, CPBM_ai or 'Normal', CPBM_faction or 0, CPBM_victory or 'demoralization', CPBM_units or 1000) else LOG('CommandProject: mod da Partida grande ausente') end"
     )
 }
 
-/// Põe o painel da Partida grande no submenu da Escaramuça da tela inicial `scene` (já no visual
-/// "Comandante"). Sem mapas de 4 bases ou mais, devolve a cena como está.
+/// Põe o painel "Criar jogo" no submenu da Escaramuça da tela inicial `scene` (já no visual
+/// "Comandante"); o item "Criar jogo" do submenu deixa de abrir a sala do jogo (o painel já está
+/// ao lado). Sem mapas, devolve a cena como está.
 pub fn add_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<u8>> {
     let maps: Vec<&MenuMap> = maps.iter().filter(|m| safe(&m.path) && m.path.starts_with("/maps/")).take(MAX_MAPS).collect();
     let Some(first) = maps.first() else { return Ok(scene.to_vec()) };
@@ -106,18 +131,16 @@ pub fn add_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<u8>> {
     let label_t = s.children(button_t)?.into_iter().find(|c| s.by_id(*c).map(|e| e.kind == kind::TEXT).unwrap_or(false)).ok_or_else(|| Error::Other("botão modelo sem texto".into()))?;
     let bitmap_t = find(&s, "avatar")?;
     let sounds: Vec<Event> = s.events(button_t)?.into_iter().filter(|e| e.name == "PlaySound").collect();
+    // "Criar jogo" é o painel: o item só acende
+    s.set_events(button_t, &sounds)?;
     let mut panel: Vec<u32> = Vec::new();
     let hide = |s: &mut Scene, id: u32| s.set_u32(id, VISIBLE, 0);
+    let top_order = s.u32_field(button_t, ORDER)?;
 
-    // fundo
-    let bg = s.clone_element(bitmap_t, "cp_bm_bg")?;
-    s.set_str_field(bg, 112, &tex("p9_c"))?;
-    s.set_rect(bg, Rect::new(X0, X1, Y0, Y1))?;
-    hide(&mut s, bg)?;
-    panel.push(bg);
-    // moldura (os cantos e as bordas do painel dos outros menus)
+    // fundo e moldura (os 9 pedaços do painel dos outros menus)
     let edge = 32;
     for (n, r) in [
+        ("c", Rect::new(X0, X1, Y0, Y1)),
         ("tl", Rect::new(X0, X0 + edge, Y0, Y0 + edge)),
         ("t", Rect::new(X0 + edge, X1 - edge, Y0, Y0 + edge)),
         ("tr", Rect::new(X1 - edge, X1, Y0, Y0 + edge)),
@@ -133,6 +156,13 @@ pub fn add_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<u8>> {
         hide(&mut s, id)?;
         panel.push(id);
     }
+    // filete de destaque embaixo do título
+    let line = s.clone_element(bitmap_t, "cp_bm_line")?;
+    s.set_str_field(line, 112, &tex("line"))?;
+    s.set_rect(line, Rect::new(IN0, IN1, Y0 + 52, Y0 + 55))?;
+    s.set_u32(line, ORDER, top_order + 1)?;
+    hide(&mut s, line)?;
+    panel.push(line);
 
     let mut n = 0;
     let mut text = |s: &mut Scene, panel: &mut Vec<u32>, txt: &str, font: &str, r: Rect| -> Result<u32> {
@@ -147,7 +177,7 @@ pub fn add_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<u8>> {
         panel.push(id);
         Ok(id)
     };
-    text(&mut s, &mut panel, t.title, "pc_title_font_4", Rect::new(IN0, IN1, Y0 + 8, Y0 + 50))?;
+    text(&mut s, &mut panel, t.title, "pc_title_font_5", Rect::new(IN0, IN1, Y0 + 6, Y0 + 52))?;
 
     // um grupo de botões de opção (cada um com o código dele)
     let mut g = 0;
@@ -174,7 +204,7 @@ pub fn add_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<u8>> {
             s.set_text(l, &label)?;
             s.set_str_field(l, 108, if big { "pc_title_font_4" } else { "pc_title_font_2" })?;
             s.set_u32(l, 128, 1)?; // no meio
-            s.set_rect(l, Rect::new(r.x0 + 6, r.x1 - if big { 40 } else { 6 }, r.y0 + 4, r.y1 - 4))?;
+            s.set_rect(l, Rect::new(r.x0 + 4, r.x1 - if big { 40 } else { 4 }, r.y0 + 3, r.y1 - 3))?;
             s.set_u32(l, VISIBLE, 0)?;
             s.set_children(b, &[l])?;
             kids.push(b);
@@ -185,63 +215,59 @@ pub fn add_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<u8>> {
         panel.push(gid);
         Ok(())
     };
-    let row = |count: i32, i: i32, gap: i32| -> (i32, i32) {
-        let w = (IN1 - IN0 - gap * (count - 1)) / count;
-        let x = IN0 + (w + gap) * i;
+    // `count` botões entre `x0` e `x1`
+    let cells = |count: i32, i: i32, x0: i32, x1: i32| -> (i32, i32) {
+        let gap = 6;
+        let w = (x1 - x0 - gap * (count - 1)) / count;
+        let x = x0 + (w + gap) * i;
         (x, x + w)
     };
+    // uma linha: título em cima, botões embaixo
+    let mut y = Y0 + 62;
+    let label_h = 28;
+    let button_h = 34;
+    let mut row = |s: &mut Scene, panel: &mut Vec<u32>, title: &str, x0: i32, x1: i32, y: i32, items: Vec<(String, String)>| -> Result<()> {
+        text(s, panel, title, "pc_title_font_2", Rect::new(x0, x1, y, y + label_h))?;
+        let count = items.len() as i32;
+        let list = items
+            .into_iter()
+            .enumerate()
+            .map(|(i, (l, c))| {
+                let (a, b) = cells(count, i as i32, x0, x1);
+                (l, c, Rect::new(a, b, y + label_h, y + label_h + button_h), false)
+            })
+            .collect();
+        group(s, panel, list)
+    };
+    let mid = (IN0 + IN1) / 2;
 
-    // jogadores: uma linha de 9
-    text(&mut s, &mut panel, t.players, "pc_title_font_2", Rect::new(IN0, IN1, Y0 + 52, Y0 + 82))?;
-    let items = PLAYERS
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            let (x0, x1) = row(9, i as i32, 6);
-            (p.to_string(), format!("CPBM_players = {p}"), Rect::new(x0, x1, Y0 + 84, Y0 + 122), false)
-        })
-        .collect();
-    group(&mut s, &mut panel, items)?;
-    // times
-    text(&mut s, &mut panel, t.teams, "pc_title_font_2", Rect::new(IN0, IN1, Y0 + 126, Y0 + 156))?;
-    let items = t
-        .team_labels
-        .iter()
-        .enumerate()
-        .map(|(i, l)| {
-            let (x0, x1) = row(4, i as i32, 6);
-            (l.to_string(), format!("CPBM_teams = {}", [2, 3, 4, 0][i]), Rect::new(x0, x1, Y0 + 158, Y0 + 196), false)
-        })
-        .collect();
-    group(&mut s, &mut panel, items)?;
-    // inteligência artificial
-    text(&mut s, &mut panel, t.ai, "pc_title_font_2", Rect::new(IN0, IN1, Y0 + 200, Y0 + 230))?;
-    let items = t
-        .ai_labels
-        .iter()
-        .enumerate()
-        .map(|(i, l)| {
-            let (x0, x1) = row(4, i as i32, 6);
-            (l.to_string(), format!("CPBM_ai = '{}'", AI_KEYS[i]), Rect::new(x0, x1, Y0 + 232, Y0 + 270), false)
-        })
-        .collect();
-    group(&mut s, &mut panel, items)?;
+    row(&mut s, &mut panel, t.players, IN0, IN1, y, PLAYERS.iter().map(|p| (p.to_string(), format!("CPBM_players = {p}"))).collect())?;
+    y += ROW;
+    row(&mut s, &mut panel, t.teams, IN0, IN1, y, t.team_labels.iter().enumerate().map(|(i, l)| (l.to_string(), format!("CPBM_teams = {}", [2, 3, 4, 0][i]))).collect())?;
+    y += ROW;
+    row(&mut s, &mut panel, t.ai, IN0, IN1, y, t.ai_labels.iter().enumerate().map(|(i, l)| (l.to_string(), format!("CPBM_ai = '{}'", AI_KEYS[i]))).collect())?;
+    y += ROW;
+    row(&mut s, &mut panel, t.faction, IN0, IN1, y, t.faction_labels.iter().enumerate().map(|(i, l)| (l.to_string(), format!("CPBM_faction = {i}"))).collect())?;
+    y += ROW;
+    row(&mut s, &mut panel, t.victory, IN0, mid + 70, y, t.victory_labels.iter().enumerate().map(|(i, l)| (l.to_string(), format!("CPBM_victory = '{}'", VICTORY_KEYS[i]))).collect())?;
+    row(&mut s, &mut panel, t.units, mid + 82, IN1, y, UNIT_CAPS.iter().map(|u| (u.to_string(), format!("CPBM_units = {u}"))).collect())?;
+    y += ROW;
     // mapas: 2 colunas
-    text(&mut s, &mut panel, t.map, "pc_title_font_2", Rect::new(IN0, IN1, Y0 + 274, Y0 + 304))?;
+    text(&mut s, &mut panel, t.map, "pc_title_font_2", Rect::new(IN0, IN1, y, y + label_h))?;
     let items = maps
         .iter()
         .enumerate()
         .map(|(i, m)| {
-            let (x0, x1) = row(2, i as i32 % 2, 8);
-            let y = Y0 + 306 + 42 * (i as i32 / 2);
-            let name: String = m.name.chars().filter(|c| !c.is_control()).take(24).collect();
-            (format!("{} · {} {}", name.to_uppercase(), m.bases, t.bases), format!("CPBM_map = '{}'", m.path), Rect::new(x0, x1, y, y + 36), false)
+            let (x0, x1) = cells(2, i as i32 % 2, IN0, IN1);
+            let my = y + label_h + 38 * (i as i32 / 2);
+            let name: String = m.name.chars().filter(|c| !c.is_control()).take(26).collect();
+            (format!("[{}] {}", m.bases, name.to_uppercase()), format!("CPBM_map = '{}'", m.path), Rect::new(x0, x1, my, my + button_h), false)
         })
         .collect();
     group(&mut s, &mut panel, items)?;
     // começar
-    text(&mut s, &mut panel, t.note, "pc_body_font_narrow_2", Rect::new(IN0, IN1 - 290, Y1 - 62, Y1 - 24))?;
-    let items = vec![(t.start.to_string(), start_code(&first.path), Rect::new(IN1 - 280, IN1, Y1 - 82, Y1 - 14), true)];
+    text(&mut s, &mut panel, t.note, "pc_body_font_narrow_2", Rect::new(IN0, IN1 - 300, Y1 - 60, Y1 - 24))?;
+    let items = vec![(t.start.to_string(), start_code(&first.path), Rect::new(IN1 - 290, IN1, Y1 - 84, Y1 - 14), true)];
     group(&mut s, &mut panel, items)?;
 
     let mut kids = s.children(host)?;
@@ -250,17 +276,34 @@ pub fn add_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<u8>> {
     Ok(s.to_bytes())
 }
 
-/// Os mapas para a lista: os de mais bases primeiro (só os que dão uma partida de verdade).
+/// Os mapas para a lista: os de mais bases primeiro (os grandes do jogador), mas sempre com alguns
+/// do jogo para as partidas de sempre.
 pub fn pick_maps(all: &[crate::bigmatch::MatchMap]) -> Vec<MenuMap> {
-    let mut v: Vec<MenuMap> = all
+    let mut v: Vec<(bool, MenuMap)> = all
         .iter()
-        .filter(|m| m.armies.len() >= 4)
-        .map(|m| MenuMap { path: m.path.clone(), name: m.name.clone(), bases: m.armies.len(), size: m.size[0] })
+        .filter(|m| m.armies.len() >= 2)
+        .map(|m| (m.source == "Jogo", MenuMap { path: m.path.clone(), name: m.name.clone(), bases: m.armies.len(), size: m.size[0] }))
         .collect();
-    v.sort_by(|a, b| b.bases.cmp(&a.bases).then(a.name.cmp(&b.name)));
-    v.dedup_by(|a, b| a.path.eq_ignore_ascii_case(&b.path));
-    v.truncate(MAX_MAPS);
-    v
+    v.sort_by(|a, b| b.1.bases.cmp(&a.1.bases).then(a.1.name.cmp(&b.1.name)));
+    v.dedup_by(|a, b| a.1.path.eq_ignore_ascii_case(&b.1.path));
+    let stock_slots = 3.min(v.iter().filter(|m| m.0).count());
+    let mut out: Vec<MenuMap> = Vec::new();
+    let mut stock_taken = 0;
+    for (stock, m) in &v {
+        let room = MAX_MAPS - out.len();
+        if room == 0 {
+            break;
+        }
+        // guarda lugar para os do jogo
+        if !stock && room <= stock_slots - stock_taken {
+            continue;
+        }
+        if *stock {
+            stock_taken += 1;
+        }
+        out.push(m.clone());
+    }
+    out
 }
 
 #[cfg(test)]
@@ -287,7 +330,8 @@ mod tests {
         for e in s.elements().unwrap().iter().filter(|e| e.name.starts_with("cp_bm")) {
             assert_eq!(s.u32_field(e.id, VISIBLE).unwrap(), 0, "{}", e.name);
         }
-        let start = s.by_name("cp_bm_g5_b0").unwrap().id;
+        let start = s.by_name("cp_bm_g8_b0").unwrap().id;
+        assert!(s.events(s.by_name("rb_creategame").unwrap().id).unwrap().iter().all(|e| e.name == "PlaySound"));
         assert!(s.events(start).unwrap().iter().any(|e| e.param.contains("CPBigMatchQuick(CPBM_map or '/maps/CP_32/CP_32_scenario.lua'")));
         // sem mapas, nada muda
         assert_eq!(add_panel(&menu, &[], &PT).unwrap(), menu);
@@ -309,7 +353,7 @@ mod tests {
             lobby_risk: false,
         };
         let picked = pick_maps(&[mk("/maps/a", 2), mk("/maps/b", 16), mk("/maps/c", 8)]);
-        assert_eq!(picked.iter().map(|m| m.bases).collect::<Vec<_>>(), [16, 8]);
+        assert_eq!(picked.iter().map(|m| m.bases).collect::<Vec<_>>(), [16, 8, 2]);
         assert!(!safe("/maps/x'y"));
         assert!(start_code("/maps/a").contains("CPBM_players or 8"));
     }

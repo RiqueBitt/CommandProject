@@ -178,7 +178,7 @@ end
 -- number of teams (0 = everyone for himself), AI difficulty and the map. You take the first base,
 -- the AIs the next ones; the bases of a team are side by side in the map's order. Capped by the
 -- bases of the map, the 32 armies of the engine and the memory of big maps (as the launcher does).
-function CPBigMatchQuick(mapName, players, teams, ai)
+function CPBigMatchQuick(mapName, players, teams, ai, faction, victory, unitCap)
     local MapUtils = import('/lua/ui/maputil.lua')
     local scenario = MapUtils.LoadScenario(mapName)
     if not scenario then error('CommandProject: mapa nao encontrado: ' .. tostring(mapName)) end
@@ -192,13 +192,18 @@ function CPBigMatchQuick(mapName, players, teams, ai)
     teams = tonumber(teams) or 2
     if teams > n then teams = n end
     if ai ~= 'Easy' and ai ~= 'Normal' and ai ~= 'Hard' and ai ~= 'Cheat' then ai = 'Normal' end
-    local spec = 'Victory=demoralization;UnitCap=1000;FogOfWar=explored;GameSpeed=normal;NoRushOption=Off;PreBuiltUnits=Off;PrebuiltUnits=Off;CivilianAlliance=enemy;CheatsEnabled=false;DoNotShareUnitCap=true'
+    faction = tonumber(faction) or 0
+    if faction < 0 or faction > 3 then faction = 0 end
+    if victory ~= 'demoralization' and victory ~= 'domination' and victory ~= 'sandbox' then victory = 'demoralization' end
+    unitCap = tonumber(unitCap) or 1000
+    if unitCap < 50 or unitCap > 2000 then unitCap = 1000 end
+    local spec = 'Victory=' .. victory .. ';UnitCap=' .. unitCap .. ';FogOfWar=explored;GameSpeed=normal;NoRushOption=Off;PreBuiltUnits=Off;PrebuiltUnits=Off;CivilianAlliance=enemy;CheatsEnabled=false;DoNotShareUnitCap=true'
     for i = 1, bases do
         if i <= n then
             local team = 1
             if teams >= 2 then team = math.floor((i - 1) * teams / n) + 2 end
             if i == 1 then
-                spec = spec .. '|H,' .. team .. ',0,,' .. (i - 1)
+                spec = spec .. '|H,' .. team .. ',' .. faction .. ',,' .. (i - 1)
             else
                 spec = spec .. '|A,' .. team .. ',0,' .. ai .. ',' .. (i - 1)
             end
@@ -206,7 +211,7 @@ function CPBigMatchQuick(mapName, players, teams, ai)
             spec = spec .. '|X'
         end
     end
-    LOG('*CommandProject big match (in game): ' .. n .. ' players, ' .. teams .. ' teams, ' .. ai .. ' on ' .. tostring(mapName))
+    LOG('*CommandProject big match (in game): ' .. n .. ' players, ' .. teams .. ' teams, ' .. ai .. ', faction ' .. faction .. ', ' .. victory .. ', cap ' .. unitCap .. ' on ' .. tostring(mapName))
     LaunchSinglePlayerSession(CPBigMatchSession(mapName, spec))
 end
 

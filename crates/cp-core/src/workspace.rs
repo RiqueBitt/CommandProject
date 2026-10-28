@@ -398,6 +398,21 @@ impl Workspace {
         } else {
             Vec::new()
         };
+        if !panel_maps.is_empty() {
+            // a sala do jogo (até 8, com facção e cor de cada um) continua, com outro nome
+            let texts = if pt { &crate::bigmatch_menu::PT } else { &crate::bigmatch_menu::EN };
+            edit.buttons.insert(
+                0,
+                crate::mainmenu::NewButton {
+                    key: "cp:sala_classica".into(),
+                    label: texts.classic.into(),
+                    place: crate::mainmenu::Place::Skirmish,
+                    native: Some("RequestSkirmishMenu".into()),
+                    lua: false,
+                    code: None,
+                },
+            );
+        }
         if !settings.shortcuts.is_empty() || !panel_maps.is_empty() {
             // o código que monta a partida grande precisa estar no jogo
             if let Err(e) = self.ensure_bigmatch_mod() {
@@ -443,6 +458,7 @@ impl Workspace {
             let others: Vec<(String, Vec<u8>)> = crate::mainmenu::FRONTEND_SCENES
                 .iter()
                 .filter_map(|p| crate::forja::effective_bytes(&stock, &mod_paths, p).map(|d| (p.to_string(), d)))
+                .chain(crate::forja::effective_text(&stock, &mod_paths, crate::mainmenu::OPTIONS_LUA).map(|t| (crate::mainmenu::OPTIONS_LUA.to_string(), t.into_bytes())))
                 .collect();
             let texts = if pt { &crate::bigmatch_menu::PT } else { &crate::bigmatch_menu::EN };
             let panel = (!panel_maps.is_empty()).then_some((panel_maps.as_slice(), texts));

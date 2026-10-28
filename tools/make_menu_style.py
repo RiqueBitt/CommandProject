@@ -50,7 +50,7 @@ def button_shape(w, h, tip):
     return [(c, 0), (w - tip, 0), (w - 1, h // 2), (w - tip, h - 1), (0, h - 1), (0, c)]
 
 
-def button(name, w, h, state):
+def button(name, w, h, state, arrows=True):
     W, H = w * SS, h * SS
     tip = int(h * 0.55 * SS)
     pad = 6 * SS  # espaço para o brilho
@@ -99,7 +99,7 @@ def button(name, w, h, state):
     # filete de luz à esquerda
     ld.line([(pad + 2 * SS, pad + 8 * SS), (pad + 2 * SS, pad + H - 8 * SS)], fill=border + (255,), width=3 * SS)
     # setas » na ponta
-    n = 3 if state in ("o", "at") else 2
+    n = (3 if state in ("o", "at") else 2) if arrows else 0
     for i in range(n):
         x0 = pad + W - tip - (18 + 13 * i) * SS
         alpha = 255 if state in ("o", "at") else 150
@@ -447,13 +447,50 @@ def frame3():
         img.crop((i * w * 2, 0, (i + 1) * w * 2, h * 2)).save(os.path.join(OUT, f"p3_{n}.png"), optimize=True)
 
 
+def accent_line():
+    """filete de destaque (embaixo dos títulos): forte no meio, some nas pontas"""
+    w, h = 512, 6
+    img = Image.new("RGBA", (w, h))
+    px = img.load()
+    for x in range(w):
+        t = abs(x / (w - 1) - 0.5) * 2
+        a = (1 - t ** 2.2)
+        for y in range(h):
+            core = 1.0 if 2 <= y <= 3 else 0.35
+            px[x, y] = (RED_HI if core == 1.0 else RED) + (int(255 * a * core),)
+    img.save(os.path.join(OUT, "line.png"), optimize=True)
+
+
+def frame8():
+    """moldura sem fundo (em volta de imagens): 8 pedaços de 20 px, cantos cortados e brilho"""
+    s = 20
+    full = canvas(s * 3, s * 3)
+    W = s * 3 * SS
+    c = 8 * SS
+    o = 3 * SS
+    shape = [(c + o, o), (W - 1 - o, o), (W - 1 - o, W - c - o), (W - c - o, W - 1 - o), (o, W - 1 - o), (o, c + o)]
+    line = canvas(s * 3, s * 3)
+    ImageDraw.Draw(line).line(shape + [shape[0]], fill=RED_HI + (255,), width=2 * SS)
+    full.alpha_composite(glow(line, 1.4, 1.4))
+    full = full.resize((s * 3, s * 3), Image.LANCZOS)
+    names = [["tl", "t", "tr"], ["l", None, "r"], ["bl", "b", "br"]]
+    for j in range(3):
+        for i in range(3):
+            if names[j][i]:
+                full.crop((i * s, j * s, (i + 1) * s, (j + 1) * s)).save(os.path.join(OUT, f"f8_{names[j][i]}.png"), optimize=True)
+
+
 if __name__ == "__main__":
+    accent_line()
+    frame8()
     for st in ("u", "o", "at", "w"):
         opt_button(f"opt_{st}", 200, 48, st)
     frame9()
     frame3()
     for st in ("u", "o", "at", "w"):
         button(f"btn_{st}", 377, 52, st)
+        # sem as setas (Voltar e Iniciar dos outros menus já têm a seta deles)
+        button(f"big_{st}", 240, 52, st, arrows=False)
     for n, fn in [("icon_campaign", star), ("icon_skirmish", swords), ("icon_multiplayer", globe), ("icon_options", gear),
                   ("icon_extras", folder), ("icon_quit", power), ("icon_mod", puzzle)]:
         icon(n, fn)

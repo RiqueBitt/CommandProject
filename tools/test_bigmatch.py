@@ -177,6 +177,17 @@ def run(source: str, label: str, real: bool):
     players = [p for p in g.World.launched.teamInfo.values() if not p.Civilian]
     check(len(players) == 24 and all(p.Team == 1 for p in players) and players[1].AIPersonality == "Normal",
           f"{label}: tela no jogo: limitado às 24 bases, todos contra todos, IA normal sem escolha válida")
+    # facção, vitória e limite de unidades escolhidos no jogo
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.execute(HARNESS)
+    lua.execute(moho_to_lua(source))
+    g = lua.globals()
+    g.CPBigMatchQuick("/maps/big/big_scenario.lua", 4, 2, "Easy", 2, "domination", 500)
+    info = g.World.launched
+    players = [p for p in info.teamInfo.values() if not p.Civilian]
+    opts = info.scenarioInfo.Options if hasattr(info, "scenarioInfo") and info.scenarioInfo else None
+    check(players[0].Faction == 2, f"{label}: tela no jogo: você com a facção escolhida")
+    check(opts is None or (opts.Victory == "domination" and str(opts.UnitCap) == "500"), f"{label}: tela no jogo: vitória e limite de unidades")
 
     # sem /cpmatch: o jogo segue como sempre
     if real:

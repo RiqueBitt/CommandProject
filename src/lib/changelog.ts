@@ -6,6 +6,15 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.43.0",
+    title: "Criar jogo de até 32 no próprio jogo, mais opções",
+    items: [
+      { icon: "sports_esports", title: "Criar jogo novo na Escaramuça", text: "O painel ao lado da Escaramuça agora é o Criar jogo: de 2 a 32 jogadores, times, dificuldade da IA, a sua facção, o tipo de vitória, o limite de unidades e os mapas (os do jogo e os seus). A sala antiga do jogo virou \"Sala clássica\".", page: "features" },
+      { icon: "tune", title: "Mais opções no jogo", text: "Opções que o jogo tinha escondidas no PC aparecem: informações na dica de construção, atraso das dicas, barras de vida das unidades, alertas de economia, barras das unidades acopladas e renderizar o céu. A janela ficou maior e mais organizada.", page: "features" },
+      { icon: "auto_awesome", title: "Campanha e menus mais bonitos", text: "Moldura neon na imagem da operação, filetes de destaque nos títulos e botões Voltar/Iniciar no estilo novo. A IA \"Trapaça\" agora se chama \"Muito difícil\".", page: "features" },
+    ],
+  },
+  {
     version: "0.42.0",
     title: "Partida grande no menu do jogo, menus novos",
     items: [

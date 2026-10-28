@@ -162,6 +162,9 @@ pub enum Look {
 pub struct Commander {
     pub news_title: String,
     pub news_text: String,
+    /// o painel "Criar jogo" vai ao lado do submenu da Escaramuça: os atalhos do lado direito
+    /// (classificação, chat) sobem para baixo da caixa do jogador e o do DLC vai para baixo da coluna
+    pub panel: bool,
 }
 
 /// Campo com a ordem de desenho do elemento (quem tem o número maior fica por cima).
@@ -614,10 +617,16 @@ fn commander(s: &mut Scene, c: &Commander, column: &[(u32, Option<&str>)]) -> Re
         s.set_u32(e.id, 128, 0)?; // nome à esquerda, colado na foto
     }
     let has_news = !c.news_title.trim().is_empty() || !c.news_text.trim().is_empty();
-    let mut y = if has_news { 268 } else { -60 };
-    for n in ["g_steam_leaderboards", "g_steam_chat", "g_DLC"] {
-        place(s, n, 1436, y)?;
-        y += 34;
+    if c.panel {
+        place(s, "g_steam_leaderboards", 1436, -72)?;
+        place(s, "g_steam_chat", 1300, -72)?;
+        place(s, "g_DLC", C_X1, C_BOTTOM - 140)?;
+    } else {
+        let mut y = if has_news { 268 } else { -60 };
+        for n in ["g_steam_leaderboards", "g_steam_chat", "g_DLC"] {
+            place(s, n, 1436, y)?;
+            y += 34;
+        }
     }
     let mut extra = Vec::new();
     if has_news {
@@ -689,7 +698,7 @@ pub fn restyle_texture(kind: u32, path: &str) -> Option<String> {
     match kind {
         // botões comuns (Voltar, Começar, Enviar, ...) e as barras das opções ao passar o mouse
         // os grandes (Voltar, Iniciar) ficam como os da tela inicial; os outros, caixas de escolha
-        kind::BUTTON if common && file.starts_with("button07") => tex(&format!("btn_{}", state(file))),
+        kind::BUTTON if common && file.starts_with("button07") => tex(&format!("big_{}", state(file))),
         kind::BUTTON if common && file.starts_with("button") => tex(&format!("opt_{}", state(file))),
         kind::BUTTON if dir.ends_with("/frontend/options/") && (file == "bar_o" || file == "bar_w") => tex(&format!("opt_{}", state(file))),
         // abas e botões de escolha
@@ -741,6 +750,14 @@ pub fn restyle_frontend(scene: &[u8]) -> Result<Vec<u8>> {
         }
         all.iter().map(|e| e.id).filter(|i| !kids.contains(i)).collect()
     };
+    // um "blue_overlay" dentro de um grupo é o fundo de uma janela (as opções): escuro, sem o tom
+    let blue = match blue {
+        Some(b) if !root_ids.contains(&b) => {
+            s.set_str_field(b, 112, &tex("p9_c"))?;
+            None
+        }
+        other => other,
+    };
     let tint_target = black.or(blue);
     if let Some(id) = tint_target {
         s.set_str_field(id, 112, &tex("tint"))?;
@@ -778,7 +795,209 @@ pub fn restyle_frontend(scene: &[u8]) -> Result<Vec<u8>> {
             }
         }
     }
+    // filetes de destaque embaixo do título e em cima dos botões de baixo
+    for n in ["topline", "btmline"] {
+        if let Some(id) = has(&s, n) {
+            s.set_str_field(id, 112, &tex("line"))?;
+            if let Some(r) = s.rect(id)? {
+                s.set_rect(id, Rect::new(r.x0, r.x1, r.y0 - 1, r.y0 + 3))?;
+            }
+        }
+    }
+    // a imagem da operação da campanha numa moldura
+    if let (Some(img), Some(info)) = (has(&s, "op_image"), has(&s, "g_opinfo")) {
+        if let Some(r) = s.rect(img)? {
+            let over = has(&s, "op_movie").map(|m| s.u32_field(m, ORDER)).transpose()?.unwrap_or(0).max(s.u32_field(img, ORDER)?);
+            let pieces = frame(&mut s, img, r, over + 1, "cp_op")?;
+            let mut kids = s.children(info)?;
+            kids.extend(pieces);
+            s.set_children(info, &kids)?;
+        }
+    }
+    // opções: as que o jogo tem mas não mostra no PC
+    if has(&s, "interface_11_btn").is_some() {
+        more_options(&mut s)?;
+    }
     Ok(s.to_bytes())
+}
+
+/// Moldura neon (os 8 pedaços de borda do painel) em volta de `r`, copiada da figura `src`;
+/// devolve os elementos novos (para pôr no grupo certo).
+fn frame(s: &mut Scene, src: u32, r: Rect, order: u32, name: &str) -> Result<Vec<u32>> {
+    let e = 16;
+    let mut out = Vec::new();
+    for (n, rr) in [
+        ("tl", Rect::new(r.x0 - 4, r.x0 + e, r.y0 - 4, r.y0 + e)),
+        ("t", Rect::new(r.x0 + e, r.x1 - e, r.y0 - 4, r.y0 + e)),
+        ("tr", Rect::new(r.x1 - e, r.x1 + 4, r.y0 - 4, r.y0 + e)),
+        ("l", Rect::new(r.x0 - 4, r.x0 + e, r.y0 + e, r.y1 - e)),
+        ("r", Rect::new(r.x1 - e, r.x1 + 4, r.y0 + e, r.y1 - e)),
+        ("bl", Rect::new(r.x0 - 4, r.x0 + e, r.y1 - e, r.y1 + 4)),
+        ("b", Rect::new(r.x0 + e, r.x1 - e, r.y1 - e, r.y1 + 4)),
+        ("br", Rect::new(r.x1 - e, r.x1 + 4, r.y1 - e, r.y1 + 4)),
+    ] {
+        let id = s.clone_element(src, &format!("{name}_frame_{n}"))?;
+        s.set_str_field(id, 112, &format!("{TEX}f8_{n}.dds"))?;
+        s.set_rect(id, rr)?;
+        s.set_u32(id, ORDER, order)?;
+        out.push(id);
+    }
+    Ok(out)
+}
+
+/// Linhas novas na tela de opções (as do `options.lua` que o jogo esconde no PC, ligadas em
+/// [`OPTIONS_LUA_CONTROLS`]) e a janela mais alta para caber tudo.
+fn more_options(s: &mut Scene) -> Result<()> {
+    let row_h = 26;
+    let top = 222;
+    let find = |s: &Scene, n: &str| s.by_name(n).map(|e| e.id);
+    // copia uma linha (botão com texto, valor e seta) com outro número
+    let clone_row = |s: &mut Scene, tab: &str, n: u32, title: &str| -> Result<u32> {
+        let src = find(s, &format!("{tab}_11_btn")).or_else(|_| find(s, "interface_11_btn"))?;
+        let btn = s.clone_element(src, &format!("{tab}_{n}_btn"))?;
+        let mut kids = Vec::new();
+        for c in s.children(src)? {
+            let old = s.by_id(c)?.name;
+            let part = old.rsplit('_').next().unwrap_or("x").to_string();
+            let id = s.clone_element(c, &format!("{tab}_{n}_{part}"))?;
+            if part == "label" {
+                s.set_text(id, title)?;
+            }
+            kids.push(id);
+        }
+        s.set_children(btn, &kids)?;
+        Ok(btn)
+    };
+    // põe a linha (e o que está dentro) na altura `y`
+    let put = |s: &mut Scene, id: u32, y: i32| -> Result<()> {
+        let Some(r) = s.rect(id)? else { return Ok(()) };
+        let dy = y - r.y0;
+        let mut seen = BTreeSet::new();
+        let mut moved = Vec::new();
+        shift_tree(s, id, 0, dy, &HashMap::new(), &mut seen, &mut moved)
+    };
+    // interface: 12 linhas
+    let g = find(s, "g_interface")?;
+    let mut kids = s.children(g)?;
+    for (n, _, title) in OPTIONS_LUA_CONTROLS.iter().filter(|c| c.1.starts_with("interface")) {
+        if find(s, &format!("interface_{n}_btn")).is_err() {
+            let id = clone_row(s, "interface", *n, title)?;
+            kids.push(id);
+        }
+    }
+    s.set_children(g, &kids)?;
+    for (i, n) in [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13].iter().enumerate() {
+        if let Ok(id) = find(s, &format!("interface_{n}_btn")) {
+            put(s, id, top + row_h * i as i32)?;
+        }
+    }
+    let rows_end = top + row_h * 12;
+    if let Ok(id) = find(s, "interface_8_btn") {
+        put(s, id, rows_end + 14)?;
+    }
+    // vídeo: o céu depois das três linhas; os botões descem
+    let gv = find(s, "g_video")?;
+    if find(s, "video_6_btn").is_err() {
+        let title = OPTIONS_LUA_CONTROLS.iter().find(|c| c.1 == "video_6_value").map(|c| c.2).unwrap_or("Sky");
+        // linha de valor do vídeo: copia a da interface e troca o prefixo
+        let src = find(s, "interface_11_btn")?;
+        let btn = s.clone_element(src, "video_6_btn")?;
+        let mut kids = Vec::new();
+        for c in s.children(src)? {
+            let part = s.by_id(c)?.name.rsplit('_').next().unwrap_or("x").to_string();
+            let id = s.clone_element(c, &format!("video_6_{part}"))?;
+            if part == "label" {
+                s.set_text(id, title)?;
+            }
+            kids.push(id);
+        }
+        s.set_children(btn, &kids)?;
+        let mut vk = s.children(gv)?;
+        vk.push(btn);
+        s.set_children(gv, &vk)?;
+    }
+    for (n, y) in [("video_1_btn", top), ("video_2_btn", top + row_h), ("video_3_btn", top + 2 * row_h), ("video_6_btn", top + 3 * row_h), ("video_5_btn", top + 4 * row_h + 18), ("video_4_btn", top + 4 * row_h + 70)] {
+        if let Ok(id) = find(s, n) {
+            put(s, id, y)?;
+        }
+    }
+    // nomes mais compridos (em português): a coluna dos valores vai para a direita
+    let shift = 60;
+    for e in s.elements()? {
+        let n = e.name.as_str();
+        let is_row = ["interface_", "video_", "controls_", "sound_"].iter().any(|p| n.starts_with(p));
+        if !is_row {
+            continue;
+        }
+        let Some(r) = s.rect(e.id)? else { continue };
+        if n.ends_with("_value") {
+            s.set_rect(e.id, Rect::new(r.x0 + shift, r.x1, r.y0, r.y1))?;
+        } else if n.ends_with("_downarr") {
+            s.set_rect(e.id, r.shifted(shift, 0))?;
+        } else if let Some(prefix) = n.strip_suffix("_label") {
+            // só nas linhas de valor (nas de barra, a seta da barra vem logo depois do nome)
+            if r.x1 < 700 && s.by_name(&format!("{prefix}_value")).is_ok() {
+                s.set_rect(e.id, Rect::new(r.x0, r.x1 + shift, r.y0, r.y1))?;
+            }
+        }
+    }
+    // janela, fundo de dentro e OK/Cancelar mais para baixo
+    let bottom = rows_end + 14 + 42;
+    if let Ok(id) = find(s, "g_btm_buttons") {
+        put(s, id, bottom + 16)?;
+    }
+    if let Ok(id) = find(s, "g_options") {
+        if let Some(r) = s.rect(id)? {
+            s.set_rect(id, Rect::new(r.x0, r.x1, r.y0, bottom + 16 + 54 + 14))?;
+        }
+    }
+    if let Ok(id) = find(s, "blue_overlay") {
+        if let Some(r) = s.rect(id)? {
+            s.set_rect(id, Rect::new(r.x0, r.x1, r.y0, bottom + 6))?;
+        }
+    }
+    for n in ["g_interface", "g_video"] {
+        if let Ok(id) = find(s, n) {
+            if let Some(r) = s.rect(id)? {
+                s.set_rect(id, Rect::new(r.x0, r.x1, r.y0, bottom))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// As opções do jogo (texto Lua).
+pub const OPTIONS_LUA: &str = "/lua/ui/options/options.lua";
+
+/// Opções do `options.lua` do jogo que existem mas não aparecem no PC: (número da linha, controle,
+/// título). As três primeiras já apontam para a linha; as outras ganham o `ui_control` em
+/// [`patch_options_lua`].
+pub const OPTIONS_LUA_CONTROLS: &[(u32, &str, &str)] = &[
+    (1, "interface_1_value", "<LOC OPTIONS_0107>Construction Tooltip Information"),
+    (2, "interface_2_value", "<LOC OPTIONS_0078>Tooltip Delay"),
+    (4, "interface_4_value", "<LOC OPTIONS_0228>Unit Health Bars"),
+    (12, "interface_12_value", "<LOC OPTIONS_0076>Economy Warnings"),
+    (13, "interface_13_value", "<LOC OPTIONS_0210>Show Lifebars of Attached Units"),
+    (6, "video_6_value", "<LOC OPTIONS_0168>Render Sky"),
+];
+
+/// Liga as opções escondidas às linhas novas da tela de opções (`ui_control`). `None` se o
+/// arquivo não tem o que esperamos.
+pub fn patch_options_lua(text: &str) -> Option<String> {
+    let mut out = text.to_string();
+    for (key, control) in [("econ_warnings", "interface_12_value"), ("show_attached_unit_lifebars", "interface_13_value"), ("render_skydome", "video_6_value")] {
+        let pat = format!("key = '{key}',");
+        let at = out.find(&pat)?;
+        if out[at + pat.len()..].trim_start().starts_with("ui_control =") {
+            continue;
+        }
+        let nl = if out.contains("\r\n") { "\r\n" } else { "\n" };
+        let line_start = out[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let indent: String = out[line_start..at].chars().take_while(|c| c.is_whitespace()).collect();
+        let insert = format!("{nl}{indent}ui_control = '{control}',");
+        out.insert_str(at + pat.len(), &insert);
+    }
+    Some(out)
 }
 
 /// Troca o logo da tela "Comandante" por outra textura (`w`×`h` em pixels), na mesma largura e
@@ -903,7 +1122,7 @@ mod tests {
     #[test]
     fn other_menus_get_the_new_textures() {
         let f = "/textures/ui/common/pc/frontend/";
-        assert_eq!(restyle_texture(kind::BUTTON, &format!("{f}common/button07_o.dds")), Some(format!("{TEX}btn_o.dds")));
+        assert_eq!(restyle_texture(kind::BUTTON, &format!("{f}common/button07_o.dds")), Some(format!("{TEX}big_o.dds")));
         assert_eq!(restyle_texture(kind::BUTTON, &format!("{f}common/button09_d.dds")), Some(format!("{TEX}opt_u.dds")));
         assert_eq!(restyle_texture(kind::RADIO_BUTTON, &format!("{f}options/btn_at.dds")), Some(format!("{TEX}opt_at.dds")));
         assert_eq!(restyle_texture(kind::THREE_SLICE, &format!("{f}skirmish/left_bg_c.dds")), Some(format!("{TEX}p3_c.dds")));
@@ -913,6 +1132,17 @@ mod tests {
         // setas, ícones e o resto ficam
         assert_eq!(restyle_texture(kind::BUTTON, &format!("{f}common/arr_01_dn_u.dds")), None);
         assert_eq!(restyle_texture(kind::BITMAP, &format!("{f}blackbg.dds")), None);
+    }
+
+    #[test]
+    fn hidden_options_get_their_rows() {
+        let text = "    {\r\n        key = 'econ_warnings',\r\n    },\r\n    {\r\n        key = 'show_attached_unit_lifebars',\r\n    },\r\n    { key = 'render_skydome',\r\n }";
+        let out = patch_options_lua(text).unwrap();
+        assert!(out.contains("key = 'econ_warnings',\r\n        ui_control = 'interface_12_value',"), "{out}");
+        assert!(out.contains("ui_control = 'video_6_value',"));
+        // de novo não duplica
+        assert_eq!(patch_options_lua(&out).unwrap(), out);
+        assert!(patch_options_lua("nada").is_none());
     }
 
     #[test]
@@ -971,7 +1201,7 @@ fn real_scene_when_available() {
     if let Ok(dest) = std::env::var("CP_TEST_SCENE_OUT") {
         std::fs::write(dest, &out.scene).unwrap();
     }
-    let look = Look::Commander(Commander { news_title: "Bem-vindo ao CommandProject".into(), news_text: "Tela inicial nova, feita pelo launcher.".into() });
+    let look = Look::Commander(Commander { news_title: "Bem-vindo ao CommandProject".into(), news_text: "Tela inicial nova, feita pelo launcher.".into(), panel: false });
     let out = build_with(&data, &edit, &look).unwrap();
     assert!(out.warnings.is_empty(), "{:?}", out.warnings);
     let (main, extras) = describe(&out.scene).unwrap();
