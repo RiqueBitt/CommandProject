@@ -1,15 +1,13 @@
-//! "Criar jogo" dentro da tela inicial nova: um painel ao lado do submenu da Escaramuça que cria
-//! a partida do jeito do launcher — de 2 a 32 jogadores, times, dificuldade da IA, a sua facção,
-//! o tipo de vitória, o limite de unidades e o mapa (os do jogo e os do jogador, os grandes
-//! também). Cada escolha é um botão de opção do próprio jogo (fica aceso) que guarda o valor em
-//! Lua; "Começar" monta a partida com `CPBigMatchQuick` (no `SinglePlayerLaunch.lua`, do mod
-//! `cp-partida-grande`). A sala do jogo (até 8, com facção e cor de cada um) continua no submenu
-//! como "Sala clássica".
+//! Partida grande dentro da sala de escaramuça do próprio jogo ("Criar jogo"): um painel do lado
+//! esquerdo da sala, dentro da mesma janela, para as partidas com mais de 8 jogadores contra a IA —
+//! jogadores (10 a 32), times, dificuldade da IA e o mapa (os grandes do jogador primeiro). A sala
+//! do jogo continua igual para as partidas de até 8 (facção, cor, opções). Cada escolha é um botão
+//! de opção (fica aceso) que guarda o valor em Lua; "Iniciar partida grande" monta a partida com
+//! `CPBigMatchQuick` (no `SinglePlayerLaunch.lua`, do mod `cp-partida-grande`).
 //!
-//! O painel mora dentro do grupo `g_skirmish_options` da própria tela inicial: o jogo só sabe
-//! mostrar e esconder os quatro submenus dele (`ShowMainMenuGroup`) e não abre cenas novas
-//! (`UILoadScene` carrega a cena, mas ela não aparece). Todos os elementos do painel começam
-//! escondidos (o campo "visível" do registro em 0), como os itens dos submenus.
+//! A sala é nativa (só 8 vagas, e o jogo não abre cenas novas: `UILoadScene` carrega mas não
+//! mostra), então o painel são elementos novos na própria cena da sala; a cena não tem grupos de
+//! botões de opção, e o primeiro é feito de um grupo comum ([`Scene::clone_as`]).
 
 use crate::error::{Error, Result};
 use crate::mainmenu::{ORDER, TEX};
@@ -45,8 +43,10 @@ pub struct Texts {
     pub victory_labels: [&'static str; 3],
     pub start: &'static str,
     pub note: &'static str,
-    /// item do submenu que abre a sala do jogo
-    pub classic: &'static str,
+    /// título, explicação e botão do painel na sala do jogo
+    pub lobby_title: &'static str,
+    pub lobby_sub: &'static str,
+    pub lobby_start: &'static str,
 }
 
 pub const PT: Texts = Texts {
@@ -64,7 +64,9 @@ pub const PT: Texts = Texts {
     victory_labels: ["COMANDANTE", "DESTRUIR TUDO", "SEM FIM"],
     start: "COMEÇAR",
     note: "Sem escolher: 8 jogadores, 2 times, IA normal e o primeiro mapa.",
-    classic: "SALA CLÁSSICA (FACÇÃO E COR)",
+    lobby_title: "PARTIDA GRANDE",
+    lobby_sub: "Mais de 8 jogadores contra a IA, nos mapas grandes.",
+    lobby_start: "INICIAR PARTIDA GRANDE",
 };
 
 pub const EN: Texts = Texts {
@@ -82,25 +84,25 @@ pub const EN: Texts = Texts {
     victory_labels: ["COMMANDER", "DESTROY ALL", "ENDLESS"],
     start: "START",
     note: "Without choosing: 8 players, 2 teams, normal AI and the first map.",
-    classic: "CLASSIC LOBBY (FACTION AND COLOR)",
+    lobby_title: "BIG MATCH",
+    lobby_sub: "More than 8 players against the AI, on the big maps.",
+    lobby_start: "START BIG MATCH",
 };
 
-const PLAYERS: [u32; 11] = [2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 32];
 const AI_KEYS: [&str; 4] = ["Easy", "Normal", "Hard", "Cheat"];
-const VICTORY_KEYS: [&str; 3] = ["demoralization", "domination", "sandbox"];
-const UNIT_CAPS: [u32; 3] = [250, 500, 1000];
 
-// medidas do painel (unidades da cena, no quadro 16:9 da "Comandante": o submenu vai de 173 a 593)
-const X0: i32 = 611;
-const X1: i32 = 1440;
-/// topo: logo abaixo das notícias (com o painel, os atalhos do lado direito sobem; veja
-/// `mainmenu::commander`)
-pub const Y0: i32 = 262;
-const Y1: i32 = 904;
-const IN0: i32 = X0 + 20;
-const IN1: i32 = X1 - 20;
-/// altura de uma linha de escolhas (título + botões)
-const ROW: i32 = 66;
+// medidas do painel (unidades da cena da sala, 640 × 480: a área 16:9 vai de x −640 a 1280; a
+// janela da sala começa em −209)
+const LX0: i32 = -620;
+const LX1: i32 = -224;
+const LY0: i32 = -72;
+const LY1: i32 = 600;
+const LIN0: i32 = LX0 + 16;
+const LIN1: i32 = LX1 - 16;
+/// Mapas na lista da sala.
+const LOBBY_MAPS: usize = 4;
+/// Jogadores (as partidas de até 8 são as da própria sala).
+const LOBBY_PLAYERS: [u32; 6] = [10, 12, 16, 20, 24, 32];
 
 fn find(s: &Scene, name: &str) -> Result<u32> {
     s.by_name(name).map(|e| e.id).map_err(|_| Error::Other(format!("a tela inicial do jogo é diferente do esperado (sem {name})")))
@@ -117,95 +119,102 @@ pub fn start_code(first_map: &str) -> String {
     )
 }
 
-/// Põe o painel "Criar jogo" no submenu da Escaramuça da tela inicial `scene` (já no visual
-/// "Comandante"); o item "Criar jogo" do submenu deixa de abrir a sala do jogo (o painel já está
-/// ao lado). Sem mapas, devolve a cena como está.
-pub fn add_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<u8>> {
-    let maps: Vec<&MenuMap> = maps.iter().filter(|m| safe(&m.path) && m.path.starts_with("/maps/")).take(MAX_MAPS).collect();
+/// Põe o painel da Partida grande na sala de escaramuça do jogo (`scene`, a cena
+/// `frontend_skirmish` já no visual novo): à esquerda da sala, dentro da janela dela (que fica mais
+/// larga). Sem mapas, devolve a cena como está.
+pub fn add_lobby_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<u8>> {
+    let maps: Vec<&MenuMap> = maps.iter().filter(|m| safe(&m.path) && m.path.starts_with("/maps/")).take(LOBBY_MAPS).collect();
     let Some(first) = maps.first() else { return Ok(scene.to_vec()) };
     let mut s = Scene::parse(scene)?;
     let tex = |n: &str| format!("{TEX}{n}.dds");
-    let host = find(&s, "g_skirmish_options")?;
-    let group_t = find(&s, "rg_menu_group")?;
-    let button_t = find(&s, "rb_creategame")?;
-    let label_t = s.children(button_t)?.into_iter().find(|c| s.by_id(*c).map(|e| e.kind == kind::TEXT).unwrap_or(false)).ok_or_else(|| Error::Other("botão modelo sem texto".into()))?;
-    let bitmap_t = find(&s, "avatar")?;
-    let sounds: Vec<Event> = s.events(button_t)?.into_iter().filter(|e| e.name == "PlaySound").collect();
-    // "Criar jogo" é o painel: o item só acende
-    s.set_events(button_t, &sounds)?;
+    let host = find(&s, "g_main")?;
+    let group_t = find(&s, "g_options")?;
+    let button_t = find(&s, "p1_ready")?;
+    let text_t = find(&s, "label_map")?;
+    let bitmap_t = find(&s, "playerlist_bg")?;
+    let launch_t = find(&s, "btn_launch")?;
+    let launch_label_t = find(&s, "label_launch")?;
+    let sounds: Vec<Event> = s.events(launch_t)?.into_iter().filter(|e| e.name == "PlaySound").collect();
+    let order = s.u32_field(text_t, ORDER)?;
     let mut panel: Vec<u32> = Vec::new();
-    let hide = |s: &mut Scene, id: u32| s.set_u32(id, VISIBLE, 0);
-    let top_order = s.u32_field(button_t, ORDER)?;
+    // sem o grupo de opções da cena por baixo: sem eventos, sem âncoras, visível
+    let show = |s: &mut Scene, id: u32| -> Result<()> {
+        s.set_u32(id, VISIBLE, 1)?;
+        s.set_u32(id, ORDER, order)
+    };
 
-    // fundo e moldura (os 9 pedaços do painel dos outros menus)
-    let edge = 32;
-    for (n, r) in [
-        ("c", Rect::new(X0, X1, Y0, Y1)),
-        ("tl", Rect::new(X0, X0 + edge, Y0, Y0 + edge)),
-        ("t", Rect::new(X0 + edge, X1 - edge, Y0, Y0 + edge)),
-        ("tr", Rect::new(X1 - edge, X1, Y0, Y0 + edge)),
-        ("l", Rect::new(X0, X0 + edge, Y0 + edge, Y1 - edge)),
-        ("r", Rect::new(X1 - edge, X1, Y0 + edge, Y1 - edge)),
-        ("bl", Rect::new(X0, X0 + edge, Y1 - edge, Y1)),
-        ("b", Rect::new(X0 + edge, X1 - edge, Y1 - edge, Y1)),
-        ("br", Rect::new(X1 - edge, X1, Y1 - edge, Y1)),
-    ] {
-        let id = s.clone_element(bitmap_t, &format!("cp_bm_frame_{n}"))?;
-        s.set_str_field(id, 112, &tex(&format!("p9_{n}")))?;
-        s.set_rect(id, r)?;
-        hide(&mut s, id)?;
-        panel.push(id);
+    // a janela da sala fica mais larga e o painel entra nela
+    if let Ok(bg) = find(&s, "main_bg") {
+        if let Some(r) = s.rect(bg)? {
+            s.set_rect(bg, Rect::new(LX0 - 16, r.x1, r.y0, r.y1))?;
+        }
     }
-    // filete de destaque embaixo do título
-    let line = s.clone_element(bitmap_t, "cp_bm_line")?;
+    // fundo do painel e o filete embaixo do título
+    let bg = s.clone_element(bitmap_t, "cp_lb_bg")?;
+    s.set_str_field(bg, 112, &tex("p9_c"))?;
+    s.set_rect(bg, Rect::new(LX0, LX1, LY0, LY1))?;
+    show(&mut s, bg)?;
+    panel.push(bg);
+    let line = s.clone_element(bitmap_t, "cp_lb_line")?;
     s.set_str_field(line, 112, &tex("line"))?;
-    s.set_rect(line, Rect::new(IN0, IN1, Y0 + 52, Y0 + 55))?;
-    s.set_u32(line, ORDER, top_order + 1)?;
-    hide(&mut s, line)?;
+    s.set_rect(line, Rect::new(LIN0, LIN1, LY0 + 62, LY0 + 65))?;
+    show(&mut s, line)?;
     panel.push(line);
 
     let mut n = 0;
     let mut text = |s: &mut Scene, panel: &mut Vec<u32>, txt: &str, font: &str, r: Rect| -> Result<u32> {
         n += 1;
-        // do texto de um item do submenu (os de outros grupos não aparecem dentro do painel)
-        let id = s.clone_element(label_t, &format!("cp_bm_text{n}"))?;
+        let id = s.clone_element(text_t, &format!("cp_lb_text{n}"))?;
+        s.set_events(id, &[])?;
         s.set_text(id, txt)?;
         s.set_str_field(id, 108, font)?;
         s.set_u32(id, 128, 0)?;
         s.set_rect(id, r)?;
-        s.set_u32(id, VISIBLE, 0)?;
+        show(s, id)?;
         panel.push(id);
         Ok(id)
     };
-    text(&mut s, &mut panel, t.title, "pc_title_font_5", Rect::new(IN0, IN1, Y0 + 6, Y0 + 52))?;
+    text(&mut s, &mut panel, t.lobby_title, "pc_title_font_4", Rect::new(LIN0, LIN1, LY0 + 8, LY0 + 40))?;
+    text(&mut s, &mut panel, t.lobby_sub, "pc_body_font_narrow_2", Rect::new(LIN0, LIN1, LY0 + 38, LY0 + 60))?;
 
-    // um grupo de botões de opção (cada um com o código dele)
+    // o primeiro grupo de botões de opção sai de um grupo comum; os outros, dele
+    let mut radio_t: Option<u32> = None;
     let mut g = 0;
-    let mut group = |s: &mut Scene, panel: &mut Vec<u32>, items: Vec<(String, String, Rect, bool)>| -> Result<()> {
+    let mut group = |s: &mut Scene, panel: &mut Vec<u32>, items: Vec<(String, String, Rect)>| -> Result<()> {
         g += 1;
-        let gid = s.clone_element(group_t, &format!("cp_bm_group{g}"))?;
+        let gid = match radio_t {
+            Some(r) => s.clone_element(r, &format!("cp_lb_group{g}"))?,
+            None => {
+                let r = s.clone_as(group_t, kind::RADIO_GROUP, &format!("cp_lb_group{g}"))?;
+                radio_t = Some(r);
+                r
+            }
+        };
         s.set_events(gid, &[])?;
         s.set_anchors(gid, Anchors::default())?;
-        s.set_u32(gid, VISIBLE, 0)?;
+        show(s, gid)?;
         let mut kids = Vec::new();
         let mut bound = Rect::new(i32::MAX, i32::MIN, i32::MAX, i32::MIN);
-        for (i, (label, code, r, big)) in items.into_iter().enumerate() {
-            let b = s.clone_element(button_t, &format!("cp_bm_g{g}_b{i}"))?;
-            let prefix = if big { "btn" } else { "opt" };
-            for (off, state) in [(112, "u"), (116, "o"), (120, "w"), (124, "at"), (128, "at"), (132, "at")] {
-                s.set_str_field(b, off, &tex(&format!("{prefix}_{state}")))?;
+        for (i, (label, code, r)) in items.into_iter().enumerate() {
+            let b = s.clone_element(button_t, &format!("cp_lb_g{g}_b{i}"))?;
+            for (off, state) in [(112, "u"), (116, "o"), (120, "w"), (124, "at"), (128, "at"), (132, "at"), (136, "at"), (140, "at")] {
+                if s.str_field(b, off).is_ok() {
+                    s.set_str_field(b, off, &tex(&format!("opt_{state}")))?;
+                }
             }
             s.set_rect(b, r)?;
-            s.set_u32(b, VISIBLE, 0)?;
+            show(s, b)?;
             let mut evs = sounds.clone();
             evs.push(Event::new(event::SELECT, "ConsoleExecute", &format!("UI_Lua {code}")));
             s.set_events(b, &evs)?;
-            let l = s.clone_element(label_t, &format!("cp_bm_g{g}_b{i}_label"))?;
+            let l = s.clone_element(text_t, &format!("cp_lb_g{g}_b{i}_label"))?;
+            s.set_events(l, &[])?;
             s.set_text(l, &label)?;
-            s.set_str_field(l, 108, if big { "pc_title_font_4" } else { "pc_title_font_2" })?;
+            s.set_str_field(l, 108, "pc_title_font_2")?;
             s.set_u32(l, 128, 1)?; // no meio
-            s.set_rect(l, Rect::new(r.x0 + 4, r.x1 - if big { 40 } else { 4 }, r.y0 + 3, r.y1 - 3))?;
-            s.set_u32(l, VISIBLE, 0)?;
+            s.set_rect(l, Rect::new(r.x0 + 4, r.x1 - 4, r.y0 + 3, r.y1 - 3))?;
+            show(s, l)?;
+            s.set_u32(l, ORDER, order + 1)?;
             s.set_children(b, &[l])?;
             kids.push(b);
             bound = Rect::new(bound.x0.min(r.x0), bound.x1.max(r.x1), bound.y0.min(r.y0), bound.y1.max(r.y1));
@@ -215,60 +224,58 @@ pub fn add_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<u8>> {
         panel.push(gid);
         Ok(())
     };
-    // `count` botões entre `x0` e `x1`
-    let cells = |count: i32, i: i32, x0: i32, x1: i32| -> (i32, i32) {
+    // `cols` botões por linha, de `y` para baixo
+    let grid = |count: usize, cols: i32, y: i32, h: i32| -> Vec<Rect> {
         let gap = 6;
-        let w = (x1 - x0 - gap * (count - 1)) / count;
-        let x = x0 + (w + gap) * i;
-        (x, x + w)
-    };
-    // uma linha: título em cima, botões embaixo
-    let mut y = Y0 + 62;
-    let label_h = 28;
-    let button_h = 34;
-    let mut row = |s: &mut Scene, panel: &mut Vec<u32>, title: &str, x0: i32, x1: i32, y: i32, items: Vec<(String, String)>| -> Result<()> {
-        text(s, panel, title, "pc_title_font_2", Rect::new(x0, x1, y, y + label_h))?;
-        let count = items.len() as i32;
-        let list = items
-            .into_iter()
-            .enumerate()
-            .map(|(i, (l, c))| {
-                let (a, b) = cells(count, i as i32, x0, x1);
-                (l, c, Rect::new(a, b, y + label_h, y + label_h + button_h), false)
+        let w = (LIN1 - LIN0 - gap * (cols - 1)) / cols;
+        (0..count as i32)
+            .map(|i| {
+                let (c, r) = (i % cols, i / cols);
+                let x = LIN0 + (w + gap) * c;
+                let yy = y + (h + 4) * r;
+                Rect::new(x, x + w, yy, yy + h)
             })
-            .collect();
-        group(s, panel, list)
+            .collect()
     };
-    let mid = (IN0 + IN1) / 2;
-
-    row(&mut s, &mut panel, t.players, IN0, IN1, y, PLAYERS.iter().map(|p| (p.to_string(), format!("CPBM_players = {p}"))).collect())?;
-    y += ROW;
-    row(&mut s, &mut panel, t.teams, IN0, IN1, y, t.team_labels.iter().enumerate().map(|(i, l)| (l.to_string(), format!("CPBM_teams = {}", [2, 3, 4, 0][i]))).collect())?;
-    y += ROW;
-    row(&mut s, &mut panel, t.ai, IN0, IN1, y, t.ai_labels.iter().enumerate().map(|(i, l)| (l.to_string(), format!("CPBM_ai = '{}'", AI_KEYS[i]))).collect())?;
-    y += ROW;
-    row(&mut s, &mut panel, t.faction, IN0, IN1, y, t.faction_labels.iter().enumerate().map(|(i, l)| (l.to_string(), format!("CPBM_faction = {i}"))).collect())?;
-    y += ROW;
-    row(&mut s, &mut panel, t.victory, IN0, mid + 70, y, t.victory_labels.iter().enumerate().map(|(i, l)| (l.to_string(), format!("CPBM_victory = '{}'", VICTORY_KEYS[i]))).collect())?;
-    row(&mut s, &mut panel, t.units, mid + 82, IN1, y, UNIT_CAPS.iter().map(|u| (u.to_string(), format!("CPBM_units = {u}"))).collect())?;
-    y += ROW;
-    // mapas: 2 colunas
-    text(&mut s, &mut panel, t.map, "pc_title_font_2", Rect::new(IN0, IN1, y, y + label_h))?;
-    let items = maps
+    let bh = 34;
+    let mut y = LY0 + 74;
+    let mut section = |s: &mut Scene, panel: &mut Vec<u32>, title: &str, items: Vec<(String, String)>, cols: i32, y: &mut i32| -> Result<()> {
+        text(s, panel, title, "pc_title_font_2", Rect::new(LIN0, LIN1, *y, *y + 26))?;
+        let rects = grid(items.len(), cols, *y + 28, bh);
+        let rows = (items.len() as i32 + cols - 1) / cols;
+        let list = items.into_iter().zip(rects).map(|((l, c), r)| (l, c, r)).collect();
+        group(s, panel, list)?;
+        *y += 28 + rows * (bh + 4) + 8;
+        Ok(())
+    };
+    section(&mut s, &mut panel, t.players, LOBBY_PLAYERS.iter().map(|p| (p.to_string(), format!("CPBM_players = {p}"))).collect(), 3, &mut y)?;
+    section(&mut s, &mut panel, t.teams, t.team_labels.iter().enumerate().map(|(i, l)| (l.to_string(), format!("CPBM_teams = {}", [2, 3, 4, 0][i]))).collect(), 2, &mut y)?;
+    section(&mut s, &mut panel, t.ai, t.ai_labels.iter().enumerate().map(|(i, l)| (l.to_string(), format!("CPBM_ai = '{}'", AI_KEYS[i]))).collect(), 2, &mut y)?;
+    let map_items = maps
         .iter()
-        .enumerate()
-        .map(|(i, m)| {
-            let (x0, x1) = cells(2, i as i32 % 2, IN0, IN1);
-            let my = y + label_h + 38 * (i as i32 / 2);
-            let name: String = m.name.chars().filter(|c| !c.is_control()).take(26).collect();
-            (format!("[{}] {}", m.bases, name.to_uppercase()), format!("CPBM_map = '{}'", m.path), Rect::new(x0, x1, my, my + button_h), false)
+        .map(|m| {
+            let name: String = m.name.chars().filter(|c| !c.is_control()).take(28).collect();
+            (format!("[{}] {}", m.bases, name.to_uppercase()), format!("CPBM_map = '{}'", m.path))
         })
         .collect();
-    group(&mut s, &mut panel, items)?;
-    // começar
-    text(&mut s, &mut panel, t.note, "pc_body_font_narrow_2", Rect::new(IN0, IN1 - 300, Y1 - 60, Y1 - 24))?;
-    let items = vec![(t.start.to_string(), start_code(&first.path), Rect::new(IN1 - 290, IN1, Y1 - 84, Y1 - 14), true)];
-    group(&mut s, &mut panel, items)?;
+    section(&mut s, &mut panel, t.map, map_items, 1, &mut y)?;
+
+    // iniciar: o botão grande da sala (com o texto e a seta dele)
+    let start = s.clone_element(launch_t, "cp_lb_start")?;
+    let mut evs = sounds.clone();
+    evs.push(Event::new(event::SELECT, "ConsoleExecute", &format!("UI_Lua {}", start_code(&first.path))));
+    s.set_events(start, &evs)?;
+    let r = Rect::new(LIN0, LIN1, LY1 - 66, LY1 - 12);
+    s.set_rect(start, r)?;
+    show(&mut s, start)?;
+    let label = s.clone_element(launch_label_t, "cp_lb_start_label")?;
+    s.set_text(label, t.lobby_start)?;
+    s.set_u32(label, 128, 1)?;
+    s.set_rect(label, Rect::new(r.x0 + 10, r.x1 - 30, r.y0 + 6, r.y1 - 6))?;
+    show(&mut s, label)?;
+    s.set_u32(label, ORDER, order + 1)?;
+    s.set_children(start, &[label])?;
+    panel.push(start);
 
     let mut kids = s.children(host)?;
     kids.extend(panel);
@@ -311,31 +318,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn panel_goes_hidden_into_the_skirmish_submenu() {
-        // a tela inicial do jogo (CP_TEST_SCENE), no visual novo
-        let Ok(path) = std::env::var("CP_TEST_SCENE") else { return };
-        let look = crate::mainmenu::Look::Commander(crate::mainmenu::Commander::default());
-        let menu = crate::mainmenu::build_with(&std::fs::read(path).unwrap(), &Default::default(), &look).unwrap().scene;
+    fn panel_goes_into_the_game_lobby() {
+        // a sala de escaramuça do jogo (CP_TEST_LOBBY)
+        let Ok(path) = std::env::var("CP_TEST_LOBBY") else { return };
+        let lobby = std::fs::read(path).unwrap();
         let maps = vec![
             MenuMap { path: "/maps/CP_32/CP_32_scenario.lua".into(), name: "Meu mapa 32".into(), bases: 32, size: 2048 },
             MenuMap { path: "/maps/SC2_MP_308/SC2_MP_308_scenario.lua".into(), name: "Seton's Clutch".into(), bases: 8, size: 1024 },
         ];
-        let out = add_panel(&menu, &maps, &PT).unwrap();
+        let out = add_lobby_panel(&lobby, &maps, &PT).unwrap();
         let s = Scene::parse(&out).unwrap();
-        let host = s.by_name("g_skirmish_options").unwrap().id;
-        let kids = s.children(host).unwrap();
-        let bg = s.by_name("cp_bm_bg").unwrap().id;
-        assert!(kids.contains(&bg));
-        // tudo do painel começa escondido
-        for e in s.elements().unwrap().iter().filter(|e| e.name.starts_with("cp_bm")) {
-            assert_eq!(s.u32_field(e.id, VISIBLE).unwrap(), 0, "{}", e.name);
-        }
-        let start = s.by_name("cp_bm_g8_b0").unwrap().id;
-        assert!(s.events(s.by_name("rb_creategame").unwrap().id).unwrap().iter().all(|e| e.name == "PlaySound"));
+        let g = s.by_name("cp_lb_group1").unwrap();
+        assert_eq!(g.kind, kind::RADIO_GROUP);
+        assert_eq!(s.by_name("cp_lb_group2").unwrap().kind, kind::RADIO_GROUP);
+        assert_eq!(s.children(g.id).unwrap().len(), 6);
+        let start = s.by_name("cp_lb_start").unwrap().id;
         assert!(s.events(start).unwrap().iter().any(|e| e.param.contains("CPBigMatchQuick(CPBM_map or '/maps/CP_32/CP_32_scenario.lua'")));
-        // sem mapas, nada muda
-        assert_eq!(add_panel(&menu, &[], &PT).unwrap(), menu);
-        if let Ok(dest) = std::env::var("CP_TEST_BM_OUT") {
+        assert!(s.events(start).unwrap().iter().all(|e| e.name != "SkirmishLaunch"));
+        assert_eq!(add_lobby_panel(&lobby, &[], &PT).unwrap(), lobby);
+        if let Ok(dest) = std::env::var("CP_TEST_LOBBY_OUT") {
             std::fs::write(dest, &out).unwrap();
         }
     }

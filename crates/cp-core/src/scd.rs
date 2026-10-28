@@ -332,6 +332,61 @@ mod tests {
     }
 }
 
+/// Índice de um `.scd` (chave normalizada → posição), guardado enquanto o arquivo não muda
+/// (tamanho e data). Abrir e listar um `.scd` grande (texturas HD, 1 GB+) custa caro e o launcher
+/// procura nos mesmos arquivos várias vezes a cada "Jogar".
+pub type Index = std::sync::Arc<std::collections::HashMap<String, RawLoc>>;
+type IndexCache = std::collections::HashMap<PathBuf, (u64, Option<std::time::SystemTime>, Index)>;
+static INDEXES: std::sync::Mutex<Option<IndexCache>> = std::sync::Mutex::new(None);
+
+pub fn index(path: &Path) -> Result<Index> {
+    let meta = fs::metadata(path).at(path)?;
+    let (len, modified) = (meta.len(), meta.modified().ok());
+    if let Some((l, m, idx)) = INDEXES.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(|c| c.get(path)) {
+        if *l == len && *m == modified {
+            return Ok(idx.clone());
+        }
+    }
+    let map: std::collections::HashMap<String, RawLoc> = Scd::open(path)?.locations()?.into_iter().collect();
+    let idx = std::sync::Arc::new(map);
+    let mut g = INDEXES.lock().unwrap_or_else(|p| p.into_inner());
+    let cache = g.get_or_insert_with(Default::default);
+    if cache.len() > 256 {
+        cache.clear();
+    }
+    cache.insert(path.to_path_buf(), (len, modified, idx.clone()));
+    Ok(idx)
+}
+
+type EntriesCache = std::collections::HashMap<PathBuf, (u64, Option<std::time::SystemTime>, std::sync::Arc<Vec<ScdEntry>>)>;
+static ENTRIES: std::sync::Mutex<Option<EntriesCache>> = std::sync::Mutex::new(None);
+
+/// Como [`Scd::entries`], guardado enquanto o arquivo não muda (tamanho e data).
+pub fn entries_cached(path: &Path) -> Result<std::sync::Arc<Vec<ScdEntry>>> {
+    let meta = fs::metadata(path).at(path)?;
+    let (len, modified) = (meta.len(), meta.modified().ok());
+    if let Some((l, m, e)) = ENTRIES.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(|c| c.get(path)) {
+        if *l == len && *m == modified {
+            return Ok(e.clone());
+        }
+    }
+    let e = std::sync::Arc::new(Scd::open(path)?.entries()?);
+    let mut g = ENTRIES.lock().unwrap_or_else(|p| p.into_inner());
+    let cache = g.get_or_insert_with(Default::default);
+    if cache.len() > 256 {
+        cache.clear();
+    }
+    cache.insert(path.to_path_buf(), (len, modified, e.clone()));
+    Ok(e)
+}
+
+/// Lê uma entrada pela chave usando o índice guardado ([`index`]).
+pub fn read_indexed(path: &Path, key: &str) -> Option<Vec<u8>> {
+    let idx = index(path).ok()?;
+    let loc = idx.get(&normalize_key(key))?;
+    read_raw(path, loc).ok()
+}
+
 /// Posição de uma entrada dentro do `.scd` (ver [`Scd::locations`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RawLoc {

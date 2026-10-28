@@ -595,14 +595,12 @@ impl<'a> Deployer<'a> {
         let mut mods = Vec::new();
         for n in names {
             let p = self.game.gamedata.join(&n);
-            let mut scd = crate::scd::Scd::open(&p)?;
-            let entries = scd
-                .entries()?
-                .into_iter()
+            let entries = crate::scd::entries_cached(&p)?
+                .iter()
                 .enumerate()
                 .filter(|(_, e)| !e.is_dir)
                 .map(|(i, e)| crate::toc::ModEntry {
-                    name: e.name,
+                    name: e.name.clone(),
                     index: i as u32,
                     size: e.size.min(u32::MAX as u64) as u32,
                 })

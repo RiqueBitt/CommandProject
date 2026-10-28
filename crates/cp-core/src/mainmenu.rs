@@ -966,6 +966,19 @@ fn more_options(s: &mut Scene) -> Result<()> {
     Ok(())
 }
 
+/// Os vídeos de abertura do jogo (texto Lua).
+pub const SPLASH_LUA: &str = "/lua/ui/splash/splash.lua";
+
+/// Pula os vídeos de abertura (logos e aviso legal): o jogo vai direto para a tela inicial, como
+/// com a preferência `movie.nologo`. `None` se o arquivo é diferente do esperado.
+pub fn patch_splash_lua(text: &str) -> Option<String> {
+    let pat = "if GetPreference(\"movie.nologo\") then";
+    if text.contains("if true or GetPreference(\"movie.nologo\") then") {
+        return Some(text.to_string());
+    }
+    text.contains(pat).then(|| text.replacen(pat, "if true or GetPreference(\"movie.nologo\") then", 1))
+}
+
 /// As opções do jogo (texto Lua).
 pub const OPTIONS_LUA: &str = "/lua/ui/options/options.lua";
 
@@ -1132,6 +1145,15 @@ mod tests {
         // setas, ícones e o resto ficam
         assert_eq!(restyle_texture(kind::BUTTON, &format!("{f}common/arr_01_dn_u.dds")), None);
         assert_eq!(restyle_texture(kind::BITMAP, &format!("{f}blackbg.dds")), None);
+    }
+
+    #[test]
+    fn intro_movies_are_skipped() {
+        let t = "function CreateUI()\r\n    if GetPreference(\"movie.nologo\") then\r\n        EngineStartFrontEndUI()";
+        let out = patch_splash_lua(t).unwrap();
+        assert!(out.contains("if true or GetPreference"));
+        assert_eq!(patch_splash_lua(&out).unwrap(), out);
+        assert!(patch_splash_lua("x").is_none());
     }
 
     #[test]

@@ -570,18 +570,36 @@ pub fn parse_scenario(text: &str) -> Option<ScenarioSummary> {
 }
 
 /// Mapas de escaramuça de um conjunto de `.scd` (`source` = de onde vieram).
+/// Cenários já lidos de cada `.scd` (enquanto o arquivo não muda): a lista de mapas é pedida a
+/// cada "Jogar" e abrir os arquivos grandes do jogo de novo deixava o jogo demorando para abrir.
+type ScenarioCache = std::collections::HashMap<(PathBuf, String), (u64, Option<std::time::SystemTime>, Option<ScenarioSummary>)>;
+static SCENARIOS: std::sync::Mutex<Option<ScenarioCache>> = std::sync::Mutex::new(None);
+
 pub fn maps_in(archives: &[PathBuf], source: &str, out: &mut Vec<MatchMap>) {
     for a in archives {
-        let Ok(mut scd) = crate::scd::Scd::open(a) else { continue };
-        let Ok(entries) = scd.entries() else { continue };
-        for e in entries {
-            let key = e.key.strip_prefix("/uncompiled").unwrap_or(&e.key).to_string();
-            if e.is_dir || !key.starts_with("/maps/") || !key.ends_with("_scenario.lua") {
-                continue;
-            }
-            let Ok(raw) = scd.read(&e.name) else { continue };
-            let text: String = raw.iter().map(|&b| b as char).collect();
-            let Some((name, kind, size, armies, starts)) = parse_scenario(&text) else { continue };
+        let Ok(idx) = crate::scd::index(a) else { continue };
+        let meta = std::fs::metadata(a).ok();
+        let (len, modified) = (meta.as_ref().map(|m| m.len()).unwrap_or(0), meta.and_then(|m| m.modified().ok()));
+        let mut keys: Vec<&String> = idx.keys().filter(|k| {
+            let k = k.strip_prefix("/uncompiled").unwrap_or(k);
+            k.starts_with("/maps/") && k.ends_with("_scenario.lua")
+        }).collect();
+        keys.sort();
+        for full in keys {
+            let key = full.strip_prefix("/uncompiled").unwrap_or(full).to_string();
+            let ck = (a.clone(), full.clone());
+            let cached = SCENARIOS.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(|c| c.get(&ck).cloned());
+            let parsed = match cached {
+                Some((l, m, p)) if l == len && m == modified => p,
+                _ => {
+                    let Ok(raw) = crate::scd::read_raw(a, &idx[full]) else { continue };
+                    let text: String = raw.iter().map(|&b| b as char).collect();
+                    let p = parse_scenario(&text);
+                    SCENARIOS.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(Default::default).insert(ck, (len, modified, p.clone()));
+                    p
+                }
+            };
+            let Some((name, kind, size, armies, starts)) = parsed else { continue };
             if kind != "skirmish" && kind != BIG_MAP_TYPE {
                 continue;
             }

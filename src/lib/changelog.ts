@@ -6,6 +6,14 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.44.0",
+    title: "Partida grande na sala do jogo, abertura rápida",
+    items: [
+      { icon: "sports_esports", title: "Partida grande dentro do Criar jogo do jogo", text: "A Partida grande agora fica na própria sala de escaramuça (Escaramuça → Criar jogo), num painel à esquerda da mesma janela: 10 a 32 jogadores, times, dificuldade da IA e os mapas grandes, com o botão Iniciar partida grande. As partidas de até 8 continuam pela sala como sempre.", page: "features" },
+      { icon: "bolt", title: "O jogo abre mais rápido", text: "Sem os vídeos de abertura (logos e aviso legal): o jogo vai direto para a tela inicial. O launcher também guarda o índice dos arquivos grandes (texturas HD, mapas) e não lê tudo de novo a cada Jogar.", page: "features" },
+    ],
+  },
+  {
     version: "0.43.0",
     title: "Criar jogo de até 32 no próprio jogo, mais opções",
     items: [

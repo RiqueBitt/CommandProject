@@ -909,13 +909,9 @@ pub fn patch(path: &str, text: &str, plan: &Plan, settings: &Settings) -> Result
 pub fn effective_text(stock: &[PathBuf], mods: &[PathBuf], path: &str) -> Option<String> {
     let key = normalize_key(path);
     for archive in mods.iter().rev() {
-        let Ok(mut scd) = Scd::open(archive) else { continue };
-        let Ok(entries) = scd.entries() else { continue };
-        if let Some(i) = entries.iter().position(|e| !e.is_dir && e.key == key) {
-            if let Ok(data) = scd.read_at(i) {
-                if !crate::lua::inspect(&data).compiled {
-                    return Some(latin1(&data));
-                }
+        if let Some(data) = crate::scd::read_indexed(archive, &key) {
+            if !crate::lua::inspect(&data).compiled {
+                return Some(latin1(&data));
             }
         }
     }
@@ -982,10 +978,10 @@ pub fn effective_bytes(stock: &[PathBuf], mods: &[PathBuf], path: &str) -> Optio
     let key = normalize_key(path);
     let plain = crate::toc::toc_key(&key).0;
     for archive in mods.iter().rev() {
-        let Ok(mut scd) = Scd::open(archive) else { continue };
-        let Ok(entries) = scd.entries() else { continue };
-        if let Some(i) = entries.iter().position(|e| !e.is_dir && (e.key == key || crate::toc::toc_key(&e.key).0 == plain)) {
-            if let Ok(data) = scd.read_at(i) {
+        let Ok(idx) = crate::scd::index(archive) else { continue };
+        let hit = idx.get(&key).or_else(|| idx.iter().find(|(k, _)| crate::toc::toc_key(k).0 == plain).map(|(_, l)| l));
+        if let Some(loc) = hit {
+            if let Ok(data) = crate::scd::read_raw(archive, loc) {
                 return Some(data);
             }
         }

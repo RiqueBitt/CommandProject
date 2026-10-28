@@ -538,23 +538,34 @@ impl Scene {
     /// tabela dele. Filhos, eventos e retângulo da cópia são listas próprias (mudar um não muda o
     /// outro). Devolve o id novo.
     pub fn clone_element(&mut self, src: u32, new_name: &str) -> Result<u32> {
+        let k = self.by_id(src)?.kind;
+        self.clone_as(src, k, new_name)
+    }
+
+    /// Como [`Scene::clone_element`], num registro de outro tipo (o começo do registro é comum a
+    /// todos; o que sobra fica zerado). Serve para criar, por exemplo, um grupo de botões de opção
+    /// numa cena que só tem grupos comuns.
+    pub fn clone_as(&mut self, src: u32, kind: u32, new_name: &str) -> Result<u32> {
         let e = self.by_id(src)?;
-        let k = e.kind as usize;
-        let size = SIZES[k].ok_or_else(|| bad("tipo desconhecido"))?;
+        let src_size = SIZES[e.kind as usize].ok_or_else(|| bad("tipo desconhecido"))?;
+        let k = kind as usize;
+        let size = SIZES.get(k).copied().flatten().ok_or_else(|| bad("tipo desconhecido"))?;
         let (n, p) = self.table(k)?;
-        let p = p as usize;
+        let p = if n == 0 { 0 } else { p as usize };
         let new_id = self.max_id()? + 1;
         self.align();
         let newp = self.pl.len();
         let old = self.pl[p..p + n * size].to_vec();
-        let rec_bytes = self.pl[e.rec..e.rec + size].to_vec();
+        let keep = src_size.min(size);
+        let mut rec_bytes = self.pl[e.rec..e.rec + keep].to_vec();
+        rec_bytes.resize(size, 0);
         self.pl.extend_from_slice(&old);
         self.pl.extend_from_slice(&rec_bytes);
-        let moved: Vec<u32> = self.fixups.iter().copied().filter(|&f| (p..p + n * size).contains(&(f as usize))).collect();
+        let moved: Vec<u32> = self.fixups.iter().copied().filter(|&f| n > 0 && (p..p + n * size).contains(&(f as usize))).collect();
         for f in moved {
             self.fixups.insert((f as usize - p + newp) as u32);
         }
-        let own: Vec<u32> = self.fixups.iter().copied().filter(|&f| (e.rec..e.rec + size).contains(&(f as usize))).collect();
+        let own: Vec<u32> = self.fixups.iter().copied().filter(|&f| (e.rec..e.rec + keep).contains(&(f as usize))).collect();
         for f in own {
             self.fixups.insert((f as usize - e.rec + newp + n * size) as u32);
         }

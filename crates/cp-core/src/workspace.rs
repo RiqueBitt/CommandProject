@@ -208,6 +208,14 @@ impl Workspace {
 
     pub fn apply_active(&mut self, progress: &mut dyn FnMut(Progress)) -> Result<Plan> {
         self.guard_not_running()?;
+        // quanto cada parte leva (logs/aplicar-tempos.log): para achar o que atrasa o "Jogar"
+        let started = std::time::Instant::now();
+        let mut times: Vec<(&str, u128)> = Vec::new();
+        let mut lap = std::time::Instant::now();
+        let mut mark = |name: &'static str, times: &mut Vec<(&str, u128)>| {
+            times.push((name, lap.elapsed().as_millis()));
+            lap = std::time::Instant::now();
+        };
         // a Forja é montada antes: ela entra (ou sai) do perfil conforme os mods dela ligados
         let mut early = Vec::new();
         match self.prepare_forja() {
@@ -220,11 +228,13 @@ impl Workspace {
             Ok(None) => {}
             Err(e) => early.push(format!("Forja não montada: {e}")),
         }
+        mark("forja", &mut times);
         // a tela inicial (o visual novo e os botões dos mods da Forja) depois da Forja
         match self.prepare_start_screen() {
             Ok(w) => early.extend(w.into_iter().map(|w| format!("Tela inicial: {w}"))),
             Err(e) => early.push(format!("Tela inicial não montada: {e}")),
         }
+        mark("tela inicial", &mut times);
         let active = self.profiles.active().clone();
         let lib = &self.library;
         let game = self.game.as_ref().ok_or(Error::GameNotFound)?;
@@ -235,9 +245,20 @@ impl Workspace {
         };
         let mut w = vec![];
         let t = dep.targets(lib, &active, &mut w)?;
+        mark("conferir os mods", &mut times);
         let mut p = dep.apply(&t, Some(&active.id), progress)?;
+        mark("instalar no jogo", &mut times);
         p.warnings.extend(early);
         p.warnings.extend(w);
+        let log = self.data_dir.join("logs").join("aplicar-tempos.log");
+        if let Some(dir) = log.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let mut text = format!("{} · total {} ms\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), started.elapsed().as_millis());
+        for (n, ms) in &times {
+            text.push_str(&format!("  {n}: {ms} ms\n"));
+        }
+        let _ = std::fs::write(&log, text);
         Ok(p)
     }
 
@@ -385,7 +406,7 @@ impl Workspace {
                 Err(e) => warnings.push(e.to_string()),
             }
         }
-        // a Partida grande dentro do jogo (painel ao lado do submenu da Escaramuça)
+        // a Partida grande dentro do jogo (painel na sala de escaramuça, o "Criar jogo")
         let pt = crate::gamelang::PT_LANGS.contains(&self.settings.ui_prefs.get("lang").and_then(|v| v.as_str()).unwrap_or("en"));
         let panel_maps = if settings.enabled {
             match self.match_maps() {
@@ -398,21 +419,6 @@ impl Workspace {
         } else {
             Vec::new()
         };
-        if !panel_maps.is_empty() {
-            // a sala do jogo (até 8, com facção e cor de cada um) continua, com outro nome
-            let texts = if pt { &crate::bigmatch_menu::PT } else { &crate::bigmatch_menu::EN };
-            edit.buttons.insert(
-                0,
-                crate::mainmenu::NewButton {
-                    key: "cp:sala_classica".into(),
-                    label: texts.classic.into(),
-                    place: crate::mainmenu::Place::Skirmish,
-                    native: Some("RequestSkirmishMenu".into()),
-                    lua: false,
-                    code: None,
-                },
-            );
-        }
         if !settings.shortcuts.is_empty() || !panel_maps.is_empty() {
             // o código que monta a partida grande precisa estar no jogo
             if let Err(e) = self.ensure_bigmatch_mod() {
@@ -458,7 +464,11 @@ impl Workspace {
             let others: Vec<(String, Vec<u8>)> = crate::mainmenu::FRONTEND_SCENES
                 .iter()
                 .filter_map(|p| crate::forja::effective_bytes(&stock, &mod_paths, p).map(|d| (p.to_string(), d)))
-                .chain(crate::forja::effective_text(&stock, &mod_paths, crate::mainmenu::OPTIONS_LUA).map(|t| (crate::mainmenu::OPTIONS_LUA.to_string(), t.into_bytes())))
+                .chain(
+                    [crate::mainmenu::OPTIONS_LUA, crate::mainmenu::SPLASH_LUA]
+                        .into_iter()
+                        .filter_map(|p| crate::forja::effective_text(&stock, &mod_paths, p).map(|t| (p.to_string(), t.into_bytes()))),
+                )
                 .collect();
             let texts = if pt { &crate::bigmatch_menu::PT } else { &crate::bigmatch_menu::EN };
             let panel = (!panel_maps.is_empty()).then_some((panel_maps.as_slice(), texts));
