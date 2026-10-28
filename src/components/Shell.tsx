@@ -161,17 +161,13 @@ export function Rail() {
         <RailItem label={t("Eu e meus perfis")} page="me"><span className="avatar">{monogram(nick)}</span></RailItem>
       </div>
       <div className="rail-areas">
+        {/* o launcher é o editor (mapas, modelos e código) e o Jogar; o resto fica dentro do jogo */}
         <AreaItem label={t("Início")} icon="sports_esports" active={page === "home"} onClick={() => go("home")} />
-        <AreaItem label={t("Partida grande")} icon="groups" active={page === "bigmatch"} onClick={() => go("bigmatch")} />
-        <AreaItem label={t("Arquivos")} icon="folder_open" active={page === "files"} onClick={() => go("files")} />
         <AreaItem label={t("Mapas")} icon="map" active={area("map")} onClick={() => goCreate("map")} />
         {UNITS_ENABLED && <AreaItem label={t("Tropas")} icon="smart_toy" active={area("unit")} onClick={() => goCreate("unit")} />}
         <AreaItem label={t("Modelos")} icon="view_in_ar" active={area("model") || page === "studio"} onClick={() => goCreate("model")} />
-        <AreaItem label={t("Ícones")} icon="photo_camera" active={page === "icons"} onClick={() => go("icons")} />
-        <AreaItem label={t("Recursos")} icon="verified" active={page === "features"} onClick={() => go("features")} />
         <AreaItem label={t("Mods")} icon="extension" active={page === "library" || page === "hub"} onClick={() => go("library")} />
         <AreaItem label={t("Forja")} icon="construction" active={page === "forja"} onClick={() => go("forja")} />
-        <AreaItem label={t("Rede")} icon="hub" active={page === "multiplayer"} onClick={() => go("multiplayer")} off={offline} />
         <AreaItem label={t("Sistema")} icon="settings" active={page === "settings" || page === "performance"} onClick={() => go("settings")} badge={appUpdate ? 1 : 0} />
       </div>
       <div className="rail-divider" />
@@ -229,6 +225,7 @@ interface Cmd { id: string; label: string; icon: string; hint?: string; run: () 
 /** Seções das Configurações (mesmos ids da página), para a busca. */
 const SETTINGS_SECTIONS: [string, string, string][] = [
   ["jogo", "Jogo: pasta, modo de abrir, memória e prioridade", "sports_esports"],
+  ["telainicial", "Tela inicial do jogo: cor, logo e vídeo", "space_dashboard"],
   ["local", "Modo local e cópias de segurança", "cloud_off"],
   ["visual", "Visual: tema, facção, idioma e animações", "palette"],
   ["diagnostico", "Diagnóstico", "monitor_heart"],

@@ -410,21 +410,10 @@ impl Workspace {
             });
         }
         // Extras: trapaças da partida grande e perfis de mods
-        let mut extras: Vec<(String, String, String)> = vec![
+        let extras: Vec<(String, String, String)> = vec![
             ("cp:trapacas_on".into(), if pt { "TRAPAÇAS: LIGAR" } else { "CHEATS: ON" }.into(), "if m.CPBMSet then m.CPBMSet('cheats', true) end".into()),
             ("cp:trapacas_off".into(), if pt { "TRAPAÇAS: DESLIGAR" } else { "CHEATS: OFF" }.into(), "if m.CPBMSet then m.CPBMSet('cheats', false) end".into()),
         ];
-        let active = self.profiles.active().id.clone();
-        for p in self.profiles.set.profiles.iter().filter(|p| crate::bigmatch_menu::safe(&p.id)).take(3) {
-            let name: String = p.name.chars().filter(|c| !c.is_control()).take(22).collect::<String>().to_uppercase();
-            let label = match (pt, p.id == active) {
-                (true, true) => format!("PERFIL: {name} (ATUAL)"),
-                (true, false) => format!("PERFIL: {name}"),
-                (false, true) => format!("PROFILE: {name} (CURRENT)"),
-                (false, false) => format!("PROFILE: {name}"),
-            };
-            extras.push((format!("cp:perfil_{}", p.id), label, format!("if m.CPNextProfile then m.CPNextProfile('{}') end", p.id)));
-        }
         for (key, label, code) in extras {
             if 2 + used(edit, Place::Extras) >= MAX_EXTRAS {
                 break;
@@ -433,25 +422,84 @@ impl Workspace {
         }
     }
 
-    /// Perfil de mods pedido de dentro do jogo (Extras → Perfil), lido no `Game.prefs`. Troca o
-    /// perfil ativo quando o pedido é novo (cada pedido vale uma vez: o último atendido fica
-    /// guardado nas configurações). Devolve o nome do perfil trocado.
-    pub fn take_game_profile_request(&mut self) -> Result<Option<String>> {
-        let Some(path) = crate::perf::prefs_path() else { return Ok(None) };
-        let Ok(bytes) = std::fs::read(&path) else { return Ok(None) };
-        let Some(id) = game_profile_request(&String::from_utf8_lossy(&bytes)) else { return Ok(None) };
-        let last = self.settings.ui_prefs.get("gameProfileRequest").and_then(|v| v.as_str()).map(str::to_string);
-        if last.as_deref() == Some(id.as_str()) {
-            return Ok(None);
+    /// O que o painel do launcher dentro do jogo mostra: perfis, os mods do perfil ativo (os do
+    /// jogador, sem os que o launcher monta), cor, memória e prioridade.
+    fn launcher_panel(&self, ss_settings: &crate::startscreen::Settings) -> crate::gamepanel::LauncherPanel {
+        let active = self.profiles.active().clone();
+        let names: std::collections::HashMap<String, String> =
+            self.mods().map(|v| v.into_iter().map(|m| (m.manifest.id, m.manifest.name)).collect()).unwrap_or_default();
+        let internal = |id: &str| {
+            id == crate::startscreen::MOD_ID
+                || id == crate::forja::LOADER_ID
+                || id == "cp-partida-grande"
+                || id == crate::gamelang::MOD_ID
+                || id == crate::weather::MOD_ID
+                || id == crate::weather::MODELS_ID
+        };
+        crate::gamepanel::LauncherPanel {
+            profiles: self.profiles.set.profiles.iter().map(|p| (p.id.clone(), p.name.clone(), p.id == active.id)).collect(),
+            mods: active
+                .mods
+                .iter()
+                .filter(|m| !internal(&m.id) && names.contains_key(&m.id))
+                .map(|m| (m.id.clone(), names[&m.id].clone(), m.enabled))
+                .collect(),
+            accent: ss_settings.accent.clone(),
+            memory_mb: Some(self.settings.memory_mb()),
+            priority: self.settings.game_priority.clone(),
         }
-        self.settings.ui_prefs.insert("gameProfileRequest".into(), serde_json::Value::String(id.clone()));
+    }
+
+    /// Pedidos feitos no painel do launcher dentro do jogo (`CPLauncher` no `Game.prefs`): aplica
+    /// os novos (o número da última mudança atendida fica nas configurações) — perfil, mods do
+    /// perfil, cor da tela inicial, memória e prioridade. Devolve o que mudou.
+    pub fn take_game_requests(&mut self) -> Result<Vec<String>> {
+        let Some(path) = crate::perf::prefs_path() else { return Ok(vec![]) };
+        let Ok(bytes) = std::fs::read(&path) else { return Ok(vec![]) };
+        let Some(req) = crate::gamepanel::parse_requests(&String::from_utf8_lossy(&bytes)) else { return Ok(vec![]) };
+        let last = self.settings.ui_prefs.get("gameRequestSeq").and_then(|v| v.as_u64()).unwrap_or(0);
+        if req.seq <= last {
+            return Ok(vec![]);
+        }
+        let mut done = Vec::new();
+        if let Some(id) = &req.profile {
+            if self.profiles.active().id != *id && self.profiles.set.profiles.iter().any(|p| p.id == *id) {
+                self.profiles.set_active(id)?;
+                done.push(format!("perfil {id}"));
+            }
+        }
+        let active = self.profiles.active().clone();
+        for (id, on) in &req.mods {
+            if let Some(m) = active.mods.iter().find(|m| m.id == *id) {
+                if m.enabled != *on {
+                    self.profiles.set_enabled(&active.id, id, *on)?;
+                    done.push(format!("{id} {}", if *on { "ligado" } else { "desligado" }));
+                }
+            }
+        }
+        if let Some(a) = &req.accent {
+            let mut ss = crate::startscreen::Settings::load(&self.data_dir);
+            if !ss.accent.eq_ignore_ascii_case(a) {
+                ss.accent = a.clone();
+                ss.save(&self.data_dir)?;
+                done.push(format!("cor {a}"));
+            }
+        }
+        if let Some(mb) = req.memory_mb {
+            if self.settings.memory_limit_mb != Some(mb) {
+                self.settings.memory_limit_mb = Some(mb);
+                done.push(format!("memória {mb} MB"));
+            }
+        }
+        if let Some(p) = &req.priority {
+            if self.settings.game_priority != *p {
+                self.settings.game_priority = p.clone();
+                done.push(format!("prioridade {p}"));
+            }
+        }
+        self.settings.ui_prefs.insert("gameRequestSeq".into(), serde_json::Value::from(req.seq));
         self.save_settings()?;
-        let Some(p) = self.profiles.set.profiles.iter().find(|p| p.id == id).cloned() else { return Ok(None) };
-        if self.profiles.active().id == p.id {
-            return Ok(None);
-        }
-        self.profiles.set_active(&p.id)?;
-        Ok(Some(p.name))
+        Ok(done)
     }
 
     /// Tela inicial: monta o mod `cp-tela-inicial` com o visual novo (se ligado) e os botões dos mods
@@ -510,6 +558,8 @@ impl Workspace {
                 warnings.push(format!("atalhos de partida grande sem o mod da Partida grande: {e}"));
             }
         }
+        // o launcher dentro do jogo (painel do submenu Extras)
+        let launcher_panel = settings.enabled.then(|| self.launcher_panel(&settings));
         let active = self.profiles.active().id.clone();
         if !settings.enabled && edit.is_empty() {
             if self.profiles.active().mods.iter().any(|m| m.id == ss::MOD_ID && m.enabled) {
@@ -528,9 +578,9 @@ impl Workspace {
             use sha2::{Digest, Sha256};
             version.push('.');
             version.push_str(&hex::encode(Sha256::digest(&scene))[..8]);
-            if !panel_maps.is_empty() {
-                // a lista de mapas da Partida grande no jogo muda com os mapas ligados
-                version.push_str(&hex::encode(Sha256::digest(format!("{pt}{panel_maps:?}")))[..6]);
+            if !panel_maps.is_empty() || launcher_panel.is_some() {
+                // a lista de mapas da Partida grande e o painel do launcher mudam com os mods ligados
+                version.push_str(&hex::encode(Sha256::digest(format!("{pt}{panel_maps:?}{launcher_panel:?}")))[..6]);
             }
         }
         if self.mods()?.iter().any(|m| m.manifest.id == ss::MOD_ID && m.manifest.version == version) {
@@ -556,8 +606,12 @@ impl Workspace {
                 )
                 .collect();
             let texts = if pt { &crate::bigmatch_menu::PT } else { &crate::bigmatch_menu::EN };
-            let panel = (!panel_maps.is_empty()).then_some((panel_maps.as_slice(), texts));
-            let (archive, w) = ss::build_all(&scene, &others, &edit, &settings, &stock, &self.data_dir, &dest, panel)?;
+            let extras = ss::GameExtras {
+                lobby: (!panel_maps.is_empty()).then_some((panel_maps.as_slice(), texts)),
+                launcher: launcher_panel.as_ref(),
+                pt,
+            };
+            let (archive, w) = ss::build_all(&scene, &others, &edit, &settings, &stock, &self.data_dir, &dest, &extras)?;
             warnings.extend(w);
             archive
         } else {
@@ -1113,15 +1167,6 @@ fn has_forja(path: &Path) -> bool {
 }
 
 
-/// O pedido de perfil feito dentro do jogo (`CPNextProfile = 'id'` no `Game.prefs`).
-pub fn game_profile_request(prefs: &str) -> Option<String> {
-    let at = prefs.find("CPNextProfile")?;
-    let rest = prefs[at + "CPNextProfile".len()..].trim_start().strip_prefix('=')?.trim_start();
-    let q = rest.chars().next().filter(|c| *c == '\'' || *c == '"')?;
-    let end = rest[1..].find(q)?;
-    Some(rest[1..1 + end].to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1174,13 +1219,6 @@ mod tests {
         assert_eq!(m["ucl0103"].team, None);
     }
 
-    #[test]
-    fn reads_the_profile_asked_in_the_game() {
-        let prefs = "profile = {\n    profiles = {\n        { Name = 'Rique', CPNextProfile = 'teste-2', },\n    },\n}\n";
-        assert_eq!(super::game_profile_request(prefs).as_deref(), Some("teste-2"));
-        assert_eq!(super::game_profile_request("CPNextProfile = \"mods\""), Some("mods".into()));
-        assert_eq!(super::game_profile_request("options = {}"), None);
-    }
 
 }
 

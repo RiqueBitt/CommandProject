@@ -639,5 +639,13 @@
  "Trapaças e perfis no submenu Extras": "Cheats and profiles in the Extras submenu",
  "Ligar ou desligar as trapaças da partida grande e escolher o perfil de mods: o launcher troca para ele na próxima vez que você clicar em Jogar.": "Turn big match cheats on or off and pick the mods profile: the launcher switches to it the next time you click Play.",
  "Notícias com o resumo do launcher": "News with the launcher summary",
- "Sem um texto seu, o painel de notícias mostra a versão do launcher, quantos mods estão ligados e o perfil.": "Without your own text, the news panel shows the launcher version, how many mods are on and the profile."
+ "Sem um texto seu, o painel de notícias mostra a versão do launcher, quantos mods estão ligados e o perfil.": "Without your own text, the news panel shows the launcher version, how many mods are on and the profile.",
+ "Tela inicial do jogo": "Game start screen",
+ "Tela inicial do jogo: cor, logo e vídeo": "Game start screen: color, logo and video",
+ "O resto fica dentro do jogo: Partida grande na sala de Batalha, modos prontos no submenu Batalha e, no submenu Extras, o painel do launcher (perfil, mods, cor, memória e prioridade). O que você muda lá vale na próxima vez que clicar em Jogar.": "Everything else is inside the game: Big match in the Battle lobby, ready-made modes in the Battle submenu and, in the Extras submenu, the launcher panel (profile, mods, color, memory and priority). What you change there applies the next time you click Play.",
+ "O launcher vira editor, o resto vai para o jogo": "The launcher becomes an editor, the rest goes into the game",
+ "O launcher dentro do jogo": "The launcher inside the game",
+ "No submenu Extras da tela inicial, um painel com o perfil de mods, ligar e desligar cada mod, a cor da tela inicial, a memória e a prioridade do jogo. O que você escolhe lá o launcher aplica na próxima vez que você clica em Jogar.": "In the start screen's Extras submenu, a panel with the mods profile, turning each mod on and off, the start screen color, the game memory and priority. What you pick there the launcher applies the next time you click Play.",
+ "Launcher focado em criar": "Launcher focused on creating",
+ "A barra lateral fica com Início (Jogar), Mapas, Modelos, Mods, Forja e Sistema. A tela inicial do jogo (logo, vídeo e cor) foi para Sistema; Partida grande, Arquivos, Ícones, Recursos e Rede saíram da barra (o que dá, agora fica no jogo).": "The sidebar keeps Home (Play), Maps, Models, Mods, Forge and System. The game start screen (logo, video and color) moved to System; Big match, Files, Icons, Features and Network left the bar (what's possible now lives in the game)."
 }

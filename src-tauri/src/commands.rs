@@ -588,6 +588,12 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
     .ok();
     let (plan, applied, restore, memory_mb, priority, no_throttle, log_path) = with_ws(&state.ws, move |ws| {
         let mut log_path: Option<std::path::PathBuf> = None;
+        // o que foi pedido no painel do launcher dentro do jogo (Extras): perfil, mods, cor, memória
+        match ws.take_game_requests() {
+            Ok(done) if !done.is_empty() => eprintln!("pedidos do jogo aplicados: {}", done.join(", ")),
+            Ok(_) => {}
+            Err(e) => eprintln!("pedidos do jogo não lidos: {e}"),
+        }
         if let Err(e) = ws.ensure_large_address() {
             eprintln!("modo 4 GB não reaplicado: {e}");
         }
@@ -633,12 +639,6 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             None => {
                 px.restore()?;
             }
-        }
-        // perfil de mods escolhido de dentro do jogo (Extras → Perfil) na última vez
-        match ws.take_game_profile_request() {
-            Ok(Some(name)) => eprintln!("perfil trocado pelo jogo: {name}"),
-            Ok(None) => {}
-            Err(e) => eprintln!("pedido de perfil do jogo não lido: {e}"),
         }
         // jogo em português quando o launcher está em português (Brasil); em inglês, o jogo original
         if let Err(e) = apply_game_language(ws) {

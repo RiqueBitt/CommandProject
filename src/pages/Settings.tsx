@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import StartScreenCard from "../components/StartScreenCard";
 import { Field, Icon, Notice, Switch, TaskProgress } from "../components/ui";
 import { api, openUrl, pickFile } from "../lib/api";
 import { community } from "../lib/community";
@@ -16,6 +17,7 @@ const ORIGIN: Record<FileStatus["origin"], string> = {
 
 const SECTIONS = [
   { id: "jogo", label: "Jogo", icon: "sports_esports" },
+  { id: "telainicial", label: "Tela inicial do jogo", icon: "space_dashboard" },
   { id: "local", label: "Modo local e cópias", icon: "cloud_off" },
   { id: "visual", label: "Visual", icon: "palette" },
   { id: "diagnostico", label: "Diagnóstico", icon: "monitor_heart" },
@@ -160,6 +162,12 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
+          </section>
+
+          <section id="sec-telainicial" className="col">
+            <h2>{t("Tela inicial do jogo")}</h2>
+            <p className="muted small">{t("O resto fica dentro do jogo: Partida grande na sala de Batalha, modos prontos no submenu Batalha e, no submenu Extras, o painel do launcher (perfil, mods, cor, memória e prioridade). O que você muda lá vale na próxima vez que clicar em Jogar.")}</p>
+            <StartScreenCard />
           </section>
 
           <section id="sec-local" className="col">

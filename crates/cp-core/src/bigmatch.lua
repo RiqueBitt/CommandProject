@@ -249,6 +249,34 @@ function CPBigMatchMode(mapName, players, teams)
     CPBigMatchQuick(mapName, players, teams, CPBMGet('ai'), CPBMGet('faction'), CPBMGet('victory'), CPBMGet('units'))
 end
 
+-- pedidos para o launcher feitos dentro do jogo (Extras -> painel do launcher): perfil, mods,
+-- cor da tela inicial, memória e prioridade. Ficam no perfil do jogo (Game.prefs) com um número
+-- que sobe a cada mudança; o launcher aplica na próxima vez que você clica em Jogar.
+local function CPLauncherSave(change)
+    pcall(function()
+        local Prefs = import('/lua/user/prefs.lua')
+        local req = Prefs.GetFromCurrentProfile('CPLauncher')
+        if type(req) ~= 'table' then req = {} end
+        change(req)
+        req.seq = (tonumber(req.seq) or 0) + 1
+        Prefs.SetToCurrentProfile('CPLauncher', req)
+        if SavePreferences then SavePreferences() end
+    end)
+end
+
+function CPLauncherSet(key, value)
+    CPLauncherSave(function(req) req[key] = value end)
+    LOG('*CommandProject launcher request: ' .. tostring(key) .. ' = ' .. tostring(value))
+end
+
+function CPLauncherMod(id, on)
+    CPLauncherSave(function(req)
+        if type(req.mods) ~= 'table' then req.mods = {} end
+        req.mods[id] = on and true or false
+    end)
+    LOG('*CommandProject launcher request: mod ' .. tostring(id) .. ' = ' .. tostring(on))
+end
+
 -- perfil de mods para a próxima vez que o jogo abrir pelo launcher (ele lê no Game.prefs)
 function CPNextProfile(id)
     pcall(function()

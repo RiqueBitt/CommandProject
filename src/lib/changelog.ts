@@ -6,6 +6,14 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.46.0",
+    title: "O launcher vira editor, o resto vai para o jogo",
+    items: [
+      { icon: "tune", title: "O launcher dentro do jogo", text: "No submenu Extras da tela inicial, um painel com o perfil de mods, ligar e desligar cada mod, a cor da tela inicial, a memória e a prioridade do jogo. O que você escolhe lá o launcher aplica na próxima vez que você clica em Jogar.", page: "settings" },
+      { icon: "edit", title: "Launcher focado em criar", text: "A barra lateral fica com Início (Jogar), Mapas, Modelos, Mods, Forja e Sistema. A tela inicial do jogo (logo, vídeo e cor) foi para Sistema; Partida grande, Arquivos, Ícones, Recursos e Rede saíram da barra (o que dá, agora fica no jogo).", page: "settings" },
+    ],
+  },
+  {
     version: "0.45.0",
     title: "Mais do launcher dentro do jogo",
     items: [

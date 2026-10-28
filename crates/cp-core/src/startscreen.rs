@@ -268,7 +268,7 @@ pub fn prepare_logo(data: &[u8]) -> Result<Rgba> {
 /// Monta o `.scd` da tela inicial em `dest`. `scene` é a cena de origem (a do jogo ou a de outro
 /// mod), `edit` o que os mods da Forja pedem. Devolve os avisos da montagem.
 pub fn build(scene: &[u8], edit: &MenuEdit, settings: &Settings, stock: &[PathBuf], data_dir: &Path, dest: &Path) -> Result<(PathBuf, Vec<String>)> {
-    build_all(scene, &[], edit, settings, stock, data_dir, dest, None)
+    build_all(scene, &[], edit, settings, stock, data_dir, dest, &GameExtras::default())
 }
 
 /// Logo padrão da tela inicial nova (o do CommandProject, já sem o fundo preto).
@@ -279,6 +279,15 @@ const LOBBY_SCENE: &str = "/ui/scenes/frontend_skirmish/pc_frontend_skirmish.win
 
 /// O painel da Partida grande na sala de escaramuça: os mapas da lista e os textos.
 pub type Panel<'a> = (&'a [crate::bigmatch_menu::MenuMap], &'a crate::bigmatch_menu::Texts);
+
+/// O que mais do launcher entra no jogo: a Partida grande na sala de batalha e o painel do
+/// launcher no submenu Extras.
+#[derive(Default)]
+pub struct GameExtras<'a> {
+    pub lobby: Option<Panel<'a>>,
+    pub launcher: Option<&'a crate::gamepanel::LauncherPanel>,
+    pub pt: bool,
+}
 
 /// Opções do tema dos outros menus (as texturas do jogo pintadas na cor da tela inicial).
 pub fn theme_options(accent: &str) -> crate::menu_theme::ThemeOptions {
@@ -308,10 +317,11 @@ pub fn build_all(
     stock: &[PathBuf],
     data_dir: &Path,
     dest: &Path,
-    panel: Option<Panel>,
+    extras: &GameExtras,
 ) -> Result<(PathBuf, Vec<String>)> {
+    let panel = extras.lobby;
     let accent = crate::menu_theme::parse_hex(&settings.accent).unwrap_or([43, 140, 255]);
-    let look = Look::Commander(Commander { news_title: settings.news_title.clone(), news_text: settings.news_text.clone(), panel: false });
+    let look = Look::Commander(Commander { news_title: settings.news_title.clone(), news_text: settings.news_text.clone(), panel: extras.launcher.is_some() });
     let logo = if settings.custom_logo {
         let p = Settings::logo_path(data_dir);
         let data = std::fs::read(&p).map_err(|e| Error::io(&p, e))?;
@@ -325,6 +335,9 @@ pub fn build_all(
         built.scene = mainmenu::set_logo(&built.scene, &format!("{}logo_custom.dds", mainmenu::TEX), l.width, l.height)?;
     }
 
+    if let Some(lp) = extras.launcher {
+        built.scene = crate::gamepanel::add_launcher_panel(&built.scene, lp, extras.pt)?;
+    }
     let mut b = crate::scd::ScdBuilder::create(dest)?;
     b.add_bytes(mainmenu::SCENE_PATH.trim_start_matches('/'), &built.scene)?;
     let mut files = textures(accent)?;
@@ -472,15 +485,21 @@ fn real_build_when_available() {
     let code = |c: &str| Some(format!("local m = import('/lua/SinglePlayerLaunch.lua') {c}"));
     edit.buttons.push(mainmenu::NewButton { key: "cp:modo16".into(), label: "GUERRA 8 CONTRA 8".into(), place: mainmenu::Place::Skirmish, native: None, lua: false, code: code("if m.CPBigMatchMode then m.CPBigMatchMode('/maps/SC2_MEUMAP/SC2_MEUMAP_scenario.lua', 16, 2) end") });
     edit.buttons.push(mainmenu::NewButton { key: "cp:trapacas_on".into(), label: "TRAPAÇAS: LIGAR".into(), place: mainmenu::Place::Extras, native: None, lua: false, code: code("if m.CPBMSet then m.CPBMSet('cheats', true) end") });
-    edit.buttons.push(mainmenu::NewButton { key: "cp:perfil_teste".into(), label: "PERFIL: TESTE".into(), place: mainmenu::Place::Extras, native: None, lua: false, code: code("if m.CPNextProfile then m.CPNextProfile('teste') end") });
     let maps = vec![
         crate::bigmatch_menu::MenuMap { path: "/maps/SC2_MEUMAP/SC2_MEUMAP_scenario.lua".into(), name: "Meu mapa".into(), bases: 32, size: 1024 },
         crate::bigmatch_menu::MenuMap { path: "/maps/SC2_32PLAY/SC2_32PLAY_scenario.lua".into(), name: "32 players".into(), bases: 32, size: 4096 },
         crate::bigmatch_menu::MenuMap { path: "/maps/SC2_PROF20/SC2_PROF20_scenario.lua".into(), name: "Perfil".into(), bases: 32, size: 2048 },
         crate::bigmatch_menu::MenuMap { path: "/maps/sc2_mp_203/sc2_mp_203_scenario.lua".into(), name: "Teste 4".into(), bases: 4, size: 1024 },
     ];
-    let panel = Some((maps.as_slice(), &crate::bigmatch_menu::PT));
-    let (scd, warnings) = build_all(&std::fs::read(scene).unwrap(), &others, &edit, &settings, &stock, &out.join("data"), &out.join(ARCHIVE), panel).unwrap();
+    let lp = crate::gamepanel::LauncherPanel {
+        profiles: vec![("mods".into(), "Mods".into(), true), ("teste".into(), "Teste".into(), false)],
+        mods: vec![("cp-ia-esperta".into(), "IA esperta".into(), true), ("texturas-hd".into(), "Texturas HD".into(), true), ("cp-trapacas-menu".into(), "Trapaças".into(), false)],
+        accent: "#2b8cff".into(),
+        memory_mb: Some(4096),
+        priority: "normal".into(),
+    };
+    let extras = GameExtras { lobby: Some((maps.as_slice(), &crate::bigmatch_menu::PT)), launcher: Some(&lp), pt: true };
+    let (scd, warnings) = build_all(&std::fs::read(scene).unwrap(), &others, &edit, &settings, &stock, &out.join("data"), &out.join(ARCHIVE), &extras).unwrap();
     assert!(warnings.is_empty(), "{warnings:?}");
     eprintln!("{}", scd.display());
 }
