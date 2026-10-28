@@ -18,6 +18,7 @@ const ORIGIN: Record<FileStatus["origin"], string> = {
 const SECTIONS = [
   { id: "jogo", label: "Jogo", icon: "sports_esports" },
   { id: "telainicial", label: "Tela inicial do jogo", icon: "space_dashboard" },
+  { id: "ferramentas", label: "Mais ferramentas", icon: "apps" },
   { id: "local", label: "Modo local e cópias", icon: "cloud_off" },
   { id: "visual", label: "Visual", icon: "palette" },
   { id: "diagnostico", label: "Diagnóstico", icon: "monitor_heart" },
@@ -35,7 +36,7 @@ export default function SettingsPage() {
   const info = useStore((s) => s.info);
   const appUpdate = useStore((s) => s.appUpdate);
   const busyCheck = useStore((s) => s.busy.checkupdate);
-  const { run, refresh } = useStore.getState();
+  const { run, refresh, go } = useStore.getState();
   const [s, setS] = useState<Settings | null>(saved);
   const [url, setUrl] = useState("");
   const [files, setFiles] = useState<FileStatus[] | null>(null);
@@ -168,6 +169,19 @@ export default function SettingsPage() {
             <h2>{t("Tela inicial do jogo")}</h2>
             <p className="muted small">{t("O resto fica dentro do jogo: Partida grande na sala de Batalha, modos prontos no submenu Batalha e, no submenu Extras, o painel do launcher (perfil, mods, cor, memória e prioridade). O que você muda lá vale na próxima vez que clicar em Jogar.")}</p>
             <StartScreenCard />
+          </section>
+
+          <section id="sec-ferramentas" className="col">
+            <h2>{t("Mais ferramentas")}</h2>
+            <p className="muted small">{t("Nada foi removido: o que saiu da barra lateral continua aqui.")}</p>
+            <div className="card pad row wrap" style={{ gap: 8 }}>
+              <button className="btn" onClick={() => go("bigmatch")}><Icon name="groups" size={18} /> {t("Partida grande")}</button>
+              <button className="btn" onClick={() => go("features")}><Icon name="verified" size={18} /> {t("Recursos")}</button>
+              <button className="btn" onClick={() => go("performance")}><Icon name="speed" size={18} /> {t("Desempenho")}</button>
+              <button className="btn" onClick={() => go("files")}><Icon name="folder_open" size={18} /> {t("Arquivos")}</button>
+              <button className="btn" onClick={() => go("icons")}><Icon name="photo_camera" size={18} /> {t("Ícones")}</button>
+              <button className="btn" onClick={() => go("multiplayer")}><Icon name="hub" size={18} /> {t("Rede")}</button>
+            </div>
           </section>
 
           <section id="sec-local" className="col">

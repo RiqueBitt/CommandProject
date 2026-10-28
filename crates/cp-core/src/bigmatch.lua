@@ -212,6 +212,8 @@ function CPBigMatchQuick(mapName, players, teams, ai, faction, victory, unitCap)
         end
     end
     LOG('*CommandProject big match (in game): ' .. n .. ' players, ' .. teams .. ' teams, ' .. ai .. ', faction ' .. faction .. ', ' .. victory .. ', cap ' .. unitCap .. ' on ' .. tostring(mapName))
+    -- para o "Jogar de novo" da tela de resultado
+    CPBMSet('last', { mapName, n, teams, ai, faction, victory, unitCap })
     LaunchSinglePlayerSession(CPBigMatchSession(mapName, spec))
 end
 
@@ -242,6 +244,16 @@ function CPBigMatchFromMenu(defaultMap)
     local map = CPBMGet('map')
     if not map or not import('/lua/ui/maputil.lua').LoadScenario(map) then map = defaultMap end
     CPBigMatchQuick(map, CPBMGet('players'), CPBMGet('teams'), CPBMGet('ai'), CPBMGet('faction'), CPBMGet('victory'), CPBMGet('units'))
+end
+
+-- "Jogar de novo" (tela de resultado): a última partida grande com as mesmas escolhas
+function CPBigMatchAgain()
+    local l = CPBMGet('last')
+    if type(l) ~= 'table' or not l[1] then
+        LOG('*CommandProject: nenhuma partida grande para repetir')
+        return
+    end
+    CPBigMatchQuick(l[1], l[2], l[3], l[4], l[5], l[6], l[7])
 end
 
 -- modos prontos do submenu Batalha: jogadores e times fixos, o resto das escolhas guardadas

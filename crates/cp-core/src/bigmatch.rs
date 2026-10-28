@@ -632,10 +632,7 @@ pub fn minimap_png(mods: &[PathBuf], stock: &[PathBuf], scenario: &str, max: u32
     let (dir, file) = key.rsplit_once('/').ok_or_else(|| Error::Other(format!("cenário inválido: {scenario}")))?;
     let id = file.strip_suffix("_scenario.lua").ok_or_else(|| Error::Other(format!("cenário inválido: {scenario}")))?;
     let names = [format!("{dir}/{id}.minimap.win.dds"), format!("{dir}/{id}.minimap.dds")];
-    let from_mods = mods.iter().find_map(|a| {
-        let mut scd = crate::scd::Scd::open(a).ok()?;
-        names.iter().find_map(|n| scd.read(n).ok())
-    });
+    let from_mods = mods.iter().find_map(|a| names.iter().find_map(|n| crate::scd::read_indexed(a, n)));
     let data = match from_mods {
         Some(d) => d,
         None => read_game_file(stock, &names[1])?,

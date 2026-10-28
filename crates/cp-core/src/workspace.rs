@@ -454,6 +454,10 @@ impl Workspace {
     /// os novos (o número da última mudança atendida fica nas configurações) — perfil, mods do
     /// perfil, cor da tela inicial, memória e prioridade. Devolve o que mudou.
     pub fn take_game_requests(&mut self) -> Result<Vec<String>> {
+        // o aviso nas notícias ("aplicado do jogo") vale para uma abertura do jogo
+        if self.settings.ui_prefs.remove("gameRequestDone").is_some() {
+            self.save_settings()?;
+        }
         let Some(path) = crate::perf::prefs_path() else { return Ok(vec![]) };
         let Ok(bytes) = std::fs::read(&path) else { return Ok(vec![]) };
         let Some(req) = crate::gamepanel::parse_requests(&String::from_utf8_lossy(&bytes)) else { return Ok(vec![]) };
@@ -498,6 +502,9 @@ impl Workspace {
             }
         }
         self.settings.ui_prefs.insert("gameRequestSeq".into(), serde_json::Value::from(req.seq));
+        if !done.is_empty() {
+            self.settings.ui_prefs.insert("gameRequestDone".into(), serde_json::Value::from(done.join(", ")));
+        }
         self.save_settings()?;
         Ok(done)
     }
@@ -513,10 +520,12 @@ impl Workspace {
             let mods = active.mods.iter().filter(|m| m.enabled && !m.id.starts_with("cp-tela") && m.id != crate::forja::LOADER_ID).count();
             let name: String = active.name.chars().take(18).collect();
             let pt = crate::gamelang::PT_LANGS.contains(&self.settings.ui_prefs.get("lang").and_then(|v| v.as_str()).unwrap_or("en"));
-            settings.news_text = if pt {
-                format!("Versão {} · {mods} mods ligados · perfil {name}", env!("CARGO_PKG_VERSION"))
-            } else {
-                format!("Version {} · {mods} mods on · profile {name}", env!("CARGO_PKG_VERSION"))
+            let done = self.settings.ui_prefs.get("gameRequestDone").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            settings.news_text = match (pt, done.is_empty()) {
+                (true, false) => format!("Aplicado do jogo: {}", done.chars().take(60).collect::<String>()),
+                (false, false) => format!("Applied from the game: {}", done.chars().take(60).collect::<String>()),
+                (true, true) => format!("Versão {} · {mods} mods ligados · perfil {name}", env!("CARGO_PKG_VERSION")),
+                (false, true) => format!("Version {} · {mods} mods on · profile {name}", env!("CARGO_PKG_VERSION")),
             };
         }
         let plan = self.forja_plan()?;
@@ -606,8 +615,15 @@ impl Workspace {
                 )
                 .collect();
             let texts = if pt { &crate::bigmatch_menu::PT } else { &crate::bigmatch_menu::EN };
+            // a imagem de cada mapa da lista da sala (dos mods de mapa ligados ou do jogo)
+            let lobby_thumbs = panel_maps
+                .iter()
+                .take(crate::bigmatch_menu::LOBBY_MAPS)
+                .map(|m| crate::bigmatch::minimap_png(&mod_paths, &stock, &m.path, 256).ok())
+                .collect();
             let extras = ss::GameExtras {
                 lobby: (!panel_maps.is_empty()).then_some((panel_maps.as_slice(), texts)),
+                lobby_thumbs,
                 launcher: launcher_panel.as_ref(),
                 pt,
             };

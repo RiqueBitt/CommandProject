@@ -276,6 +276,8 @@ const DEFAULT_LOGO: &[u8] = include_bytes!("menu_style/logo_default.png");
 
 /// A sala de escaramuça do jogo ("Criar jogo"), onde entra o painel da Partida grande.
 const LOBBY_SCENE: &str = "/ui/scenes/frontend_skirmish/pc_frontend_skirmish.win.bdf";
+/// A tela de resultado das partidas, onde entra o "Jogar de novo".
+const SUMMARY_SCENE: &str = "/ui/scenes/frontend_summary_mp/pc_frontend_summary_mp.win.bdf";
 
 /// O painel da Partida grande na sala de escaramuça: os mapas da lista e os textos.
 pub type Panel<'a> = (&'a [crate::bigmatch_menu::MenuMap], &'a crate::bigmatch_menu::Texts);
@@ -285,6 +287,8 @@ pub type Panel<'a> = (&'a [crate::bigmatch_menu::MenuMap], &'a crate::bigmatch_m
 #[derive(Default)]
 pub struct GameExtras<'a> {
     pub lobby: Option<Panel<'a>>,
+    /// a imagem de cima (PNG) de cada mapa da lista da sala, na mesma ordem
+    pub lobby_thumbs: Vec<Option<Vec<u8>>>,
     pub launcher: Option<&'a crate::gamepanel::LauncherPanel>,
     pub pt: bool,
 }
@@ -350,6 +354,17 @@ pub fn build_all(
     for (path, data) in &files {
         b.add_bytes(path, data)?;
     }
+    // miniaturas dos mapas da sala (o botão de cada mapa é a imagem dele)
+    let mut thumbs = Vec::new();
+    for (i, png) in extras.lobby_thumbs.iter().enumerate().take(crate::bigmatch_menu::LOBBY_MAPS) {
+        let made = png.as_ref().and_then(|p| map_tiles(p, accent).ok());
+        if let Some(tiles) = &made {
+            for (state, dds) in tiles {
+                b.add_bytes(crate::bigmatch_menu::tile_texture(i, state).trim_start_matches('/'), dds)?;
+            }
+        }
+        thumbs.push(made.is_some());
+    }
     // os outros menus: cenas no visual novo e as texturas do jogo na cor escolhida
     for (path, data) in others {
         if path == mainmenu::SPLASH_LUA {
@@ -368,7 +383,8 @@ pub fn build_all(
         }
         // a sala de escaramuça do jogo ganha o painel da Partida grande
         let restyled = mainmenu::restyle_frontend(data).and_then(|new| match panel {
-            Some((maps, texts)) if path == LOBBY_SCENE => crate::bigmatch_menu::add_lobby_panel(&new, maps, texts),
+            Some((maps, texts)) if path == LOBBY_SCENE => crate::bigmatch_menu::add_lobby_panel_with(&new, maps, texts, &thumbs),
+            Some(_) if path == SUMMARY_SCENE => crate::bigmatch_menu::add_again_button(&new, if extras.pt { "JOGAR DE NOVO" } else { "PLAY AGAIN" }),
             _ => Ok(new),
         });
         match restyled {
@@ -378,7 +394,7 @@ pub fn build_all(
     }
     if !others.is_empty() {
         let own: std::collections::HashSet<String> = files.iter().map(|(p, _)| p.to_ascii_lowercase()).collect();
-        for (name, data) in crate::menu_theme::themed_textures(stock, &theme_options(&settings.accent))? {
+        for (name, data) in themed_cached(stock, &settings.accent, data_dir)? {
             if !own.contains(&name.to_ascii_lowercase().replace('\\', "/")) {
                 b.add_bytes(&name, &data)?;
             }
@@ -393,6 +409,87 @@ pub fn build_all(
         }
     }
     Ok((b.finish()?, built.warnings))
+}
+
+/// Os três estados do botão de um mapa da sala a partir da imagem de cima dele: escuro (parado),
+/// claro (mouse em cima) e claro com a borda na cor de destaque (escolhido); embaixo, uma faixa
+/// escura para o nome.
+fn map_tiles(png: &[u8], accent: [u8; 3]) -> Result<Vec<(&'static str, Vec<u8>)>> {
+    let img = image::load_from_memory(png).map_err(|e| Error::Format(format!("miniatura do mapa: {e}")))?.to_rgba8();
+    let side = 128u32;
+    let small = image::imageops::resize(&img, side, side, image::imageops::FilterType::Triangle);
+    let mut out = Vec::new();
+    for (state, light, border) in [("u", 0.55f32, 0u32), ("o", 0.9, 2), ("at", 1.0, 5)] {
+        let mut px = small.clone().into_raw();
+        for y in 0..side {
+            // faixa escura embaixo, para o nome
+            let shade = if y > side * 3 / 4 { 0.45 + 0.55 * (1.0 - (y - side * 3 / 4) as f32 / (side / 4) as f32) } else { 1.0 };
+            for x in 0..side {
+                let i = ((y * side + x) * 4) as usize;
+                let edge = x < border || y < border || x >= side - border || y >= side - border;
+                for c in 0..3 {
+                    px[i + c] = if edge { accent[c] } else { (px[i + c] as f32 * light * shade).min(255.0) as u8 };
+                }
+                px[i + 3] = 255;
+            }
+        }
+        out.push((state, to_dds(&Rgba { width: side, height: side, pixels: px })?));
+    }
+    Ok(out)
+}
+
+/// As texturas do jogo pintadas na cor da tela inicial, guardadas em `cache/start-screen` (a
+/// pintura de centenas de texturas é a parte mais demorada de montar a tela inicial; só é refeita
+/// quando a cor, o estilo ou os arquivos do jogo mudam).
+fn themed_cached(stock: &[PathBuf], accent: &str, data_dir: &Path) -> Result<Vec<(String, Vec<u8>)>> {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(STYLE_VERSION);
+    h.update(accent.to_ascii_lowercase());
+    for p in stock {
+        let m = std::fs::metadata(p).ok();
+        h.update(format!("{}:{}:{:?}", p.display(), m.as_ref().map(|m| m.len()).unwrap_or(0), m.and_then(|m| m.modified().ok())));
+    }
+    let key = hex::encode(h.finalize())[..16].to_string();
+    let dir = data_dir.join("cache").join("start-screen");
+    let path = dir.join(format!("tema-{key}.scd"));
+    if let Ok(mut scd) = crate::scd::Scd::open(&path) {
+        if let Ok(entries) = scd.entries() {
+            let mut out = Vec::with_capacity(entries.len());
+            let mut ok = true;
+            for (i, e) in entries.iter().enumerate() {
+                match scd.read_at(i) {
+                    Ok(d) => out.push((e.name.clone(), d)),
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            if ok {
+                return Ok(out);
+            }
+        }
+    }
+    let files = crate::menu_theme::themed_textures(stock, &theme_options(accent))?;
+    // os temas antigos saem (uma cor por vez basta)
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().to_string();
+            if n.starts_with("tema-") && n.ends_with(".scd") {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    if std::fs::create_dir_all(&dir).is_ok() {
+        if let Ok(mut b) = crate::scd::ScdBuilder::create(&path) {
+            let ok = files.iter().all(|(n, d)| b.add_bytes(n, d).is_ok());
+            if !ok || b.finish().is_err() {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    Ok(files)
 }
 
 /// Versão do mod montado: muda com o visual, as opções, os mods da Forja e os arquivos escolhidos.
@@ -498,7 +595,7 @@ fn real_build_when_available() {
         memory_mb: Some(4096),
         priority: "normal".into(),
     };
-    let extras = GameExtras { lobby: Some((maps.as_slice(), &crate::bigmatch_menu::PT)), launcher: Some(&lp), pt: true };
+    let extras = GameExtras { lobby: Some((maps.as_slice(), &crate::bigmatch_menu::PT)), lobby_thumbs: vec![], launcher: Some(&lp), pt: true };
     let (scd, warnings) = build_all(&std::fs::read(scene).unwrap(), &others, &edit, &settings, &stock, &out.join("data"), &out.join(ARCHIVE), &extras).unwrap();
     assert!(warnings.is_empty(), "{warnings:?}");
     eprintln!("{}", scd.display());

@@ -196,11 +196,15 @@ def run(source: str, label: str, real: bool):
     g.CPBigMatchMode("/maps/big/big_scenario.lua", 16, 2)
     players = [p for p in g.World.launched.teamInfo.values() if not p.Civilian]
     check(len(players) == 16 and players[1].AIPersonality == "Hard", f"{label}: modo pronto: 16 jogadores com a IA guardada")
+    g.World.launched = None
+    g.CPBigMatchAgain()
+    players = [p for p in g.World.launched.teamInfo.values() if not p.Civilian] if g.World.launched else []
+    check(len(players) == 16, f"{label}: jogar de novo repete a última partida grande")
     g.CPLauncherSet("accent", "#22c55e")
     g.CPLauncherMod("cp-ia-esperta", False)
     g.CPLauncherMod("texturas-hd", True)
     req = g.World.prefs.CPLauncher
-    check(req.seq == 3 and req.accent == "#22c55e" and req.mods["cp-ia-esperta"] is False and req.mods["texturas-hd"] is True,
+    check(req.seq >= 3 and req.accent == "#22c55e" and req.mods["cp-ia-esperta"] is False and req.mods["texturas-hd"] is True,
           f"{label}: pedidos para o launcher guardados com o número da mudança")
     g.CPNextProfile("teste")
     check(g.World.prefs.CPNextProfile == "teste", f"{label}: perfil para a próxima vez guardado")

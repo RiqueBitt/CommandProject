@@ -6,6 +6,18 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.47.0",
+    title: "Grande atualização de otimização",
+    items: [
+      { icon: "bolt", title: "Otimização: o jogo abre e roda mais leve", text: "O launcher guarda a tela inicial já montada e só refaz quando algo muda, guarda o índice dos arquivos grandes e anota quanto tempo cada passo do Jogar levou (logs/aplicar-tempos.log). O ReShade passa a compilar os efeitos no modo desempenho e não carrega os desligados.", page: "settings" },
+      { icon: "speed", title: "Gráficos leves para partidas grandes", text: "Nova opção em Opções → Vídeo: Gráficos leves (Desligado, Leve, Forte). Reduz o detalhe dos modelos de longe e as marcas no terreno, para partidas com muitos jogadores rodarem melhor.", page: "settings" },
+      { icon: "image", title: "Miniaturas dos mapas na sala", text: "Os mapas do painel de Partida grande na sala de Batalha aparecem com a miniatura de cada um.", page: "settings" },
+      { icon: "replay", title: "Jogar de novo", text: "Na tela de resultado, um botão Jogar de novo começa a mesma partida grande outra vez, com as mesmas escolhas.", page: "settings" },
+      { icon: "check_circle", title: "Aviso do que foi aplicado", text: "Quando você muda o perfil, os mods ou a cor pelo painel do jogo, as notícias da tela inicial mostram o que o launcher aplicou.", page: "settings" },
+      { icon: "build", title: "Mais ferramentas em Sistema", text: "Partida grande, Recursos, Desempenho, Arquivos, Ícones e Rede continuam no launcher, agora juntos em Sistema → Mais ferramentas. E o botão Fechar o jogo travado aparece sempre no Início.", page: "settings" },
+    ],
+  },
+  {
     version: "0.46.0",
     title: "O launcher vira editor, o resto vai para o jogo",
     items: [

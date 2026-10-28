@@ -897,15 +897,20 @@ fn more_options(s: &mut Scene) -> Result<()> {
     }
     // vídeo: o céu depois das três linhas; os botões descem
     let gv = find(s, "g_video")?;
-    if find(s, "video_6_btn").is_err() {
-        let title = OPTIONS_LUA_CONTROLS.iter().find(|c| c.1 == "video_6_value").map(|c| c.2).unwrap_or("Sky");
+    for (n, fallback) in [(6, "Sky"), (7, "Lite graphics")] {
+        let name = format!("video_{n}_btn");
+        if find(s, &name).is_ok() {
+            continue;
+        }
+        let control = format!("video_{n}_value");
+        let title = OPTIONS_LUA_CONTROLS.iter().find(|c| c.1 == control).map(|c| c.2).unwrap_or(fallback);
         // linha de valor do vídeo: copia a da interface e troca o prefixo
         let src = find(s, "interface_11_btn")?;
-        let btn = s.clone_element(src, "video_6_btn")?;
+        let btn = s.clone_element(src, &name)?;
         let mut kids = Vec::new();
         for c in s.children(src)? {
             let part = s.by_id(c)?.name.rsplit('_').next().unwrap_or("x").to_string();
-            let id = s.clone_element(c, &format!("video_6_{part}"))?;
+            let id = s.clone_element(c, &format!("video_{n}_{part}"))?;
             if part == "label" {
                 s.set_text(id, title)?;
             }
@@ -916,7 +921,7 @@ fn more_options(s: &mut Scene) -> Result<()> {
         vk.push(btn);
         s.set_children(gv, &vk)?;
     }
-    for (n, y) in [("video_1_btn", top), ("video_2_btn", top + row_h), ("video_3_btn", top + 2 * row_h), ("video_6_btn", top + 3 * row_h), ("video_5_btn", top + 4 * row_h + 18), ("video_4_btn", top + 4 * row_h + 70)] {
+    for (n, y) in [("video_1_btn", top), ("video_2_btn", top + row_h), ("video_3_btn", top + 2 * row_h), ("video_6_btn", top + 3 * row_h), ("video_7_btn", top + 4 * row_h), ("video_5_btn", top + 5 * row_h + 18), ("video_4_btn", top + 5 * row_h + 70)] {
         if let Ok(id) = find(s, n) {
             put(s, id, y)?;
         }
@@ -992,6 +997,7 @@ pub const OPTIONS_LUA_CONTROLS: &[(u32, &str, &str)] = &[
     (12, "interface_12_value", "<LOC OPTIONS_0076>Economy Warnings"),
     (13, "interface_13_value", "<LOC OPTIONS_0210>Show Lifebars of Attached Units"),
     (6, "video_6_value", "<LOC OPTIONS_0168>Render Sky"),
+    (7, "video_7_value", "<LOC CP_LITE>Lite graphics (big matches)"),
 ];
 
 /// Liga as opções escondidas às linhas novas da tela de opções (`ui_control`). `None` se o
@@ -1010,8 +1016,43 @@ pub fn patch_options_lua(text: &str) -> Option<String> {
         let insert = format!("{nl}{indent}ui_control = '{control}',");
         out.insert_str(at + pat.len(), &insert);
     }
+    // opção nova: gráficos mais leves (menos detalhe nas unidades longe e sem marcas de explosão no
+    // chão), para as partidas grandes rodarem melhor; vale desde a abertura do jogo
+    if !out.contains(LITE_MARK) {
+        out.push_str(LITE_OPTION);
+    }
     Some(out)
 }
+
+const LITE_MARK: &str = "-- CommandProject: gráficos leves";
+const LITE_OPTION: &str = r#"
+
+-- CommandProject: gráficos leves (opção de vídeo; vale desde a abertura do jogo)
+local function CPApplyLite(v)
+    v = tonumber(v) or 0
+    local lod = 0
+    if v >= 2 then lod = 2 elseif v >= 1 then lod = 1 end
+    pcall(ConExecute, 'ren_LODReduction ' .. lod)
+    pcall(ConExecute, 'ren_TerrainDynamicDecals ' .. ((v >= 2) and 'false' or 'true'))
+end
+if options and options.video and options.video.items then
+    table.insert(options.video.items, {
+        title = "<LOC CP_LITE>Lite graphics (big matches)",
+        key = 'cp_lite',
+        type = 'toggle',
+        default = 0,
+        ui_control = 'video_7_value',
+        set = function(key, value, startup) CPApplyLite(value) end,
+        custom = {
+            states = {
+                { text = "<LOC _Off>Off", key = 0 },
+                { text = "<LOC CP_LITE_1>Light", key = 1 },
+                { text = "<LOC CP_LITE_2>Strong", key = 2 },
+            },
+        },
+    })
+end
+"#;
 
 /// Troca o logo da tela "Comandante" por outra textura (`w`×`h` em pixels), na mesma largura e
 /// com a altura da proporção dela (centrado na faixa do logo).

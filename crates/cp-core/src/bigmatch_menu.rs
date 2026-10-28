@@ -105,11 +105,11 @@ const UNIT_CAPS: [u32; 3] = [250, 500, 1000];
 const LX0: i32 = -620;
 const LX1: i32 = -224;
 const LY0: i32 = -72;
-const LY1: i32 = 606;
+const LY1: i32 = 688;
 const LIN0: i32 = LX0 + 16;
 const LIN1: i32 = LX1 - 16;
 /// Mapas na lista da sala.
-const LOBBY_MAPS: usize = 3;
+pub const LOBBY_MAPS: usize = 8;
 /// Jogadores (as partidas de até 8 são as da própria sala).
 const LOBBY_PLAYERS: [u32; 6] = [10, 12, 16, 20, 24, 32];
 
@@ -132,6 +132,17 @@ pub fn start_code(first_map: &str) -> String {
 /// `frontend_skirmish` já no visual novo): à esquerda da sala, dentro da janela dela (que fica mais
 /// larga). Sem mapas, devolve a cena como está.
 pub fn add_lobby_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<u8>> {
+    add_lobby_panel_with(scene, maps, t, &[])
+}
+
+/// Textura da miniatura do mapa `i` da lista da sala (estado `u`, `o` ou `at`).
+pub fn tile_texture(i: usize, state: &str) -> String {
+    format!("{TEX}map{i}_{state}.dds")
+}
+
+/// Como [`add_lobby_panel`]; `thumbs[i]` diz se o mapa `i` tem miniatura ([`tile_texture`]): com
+/// ela, o botão do mapa é a própria imagem do mapa.
+pub fn add_lobby_panel_with(scene: &[u8], maps: &[MenuMap], t: &Texts, thumbs: &[bool]) -> Result<Vec<u8>> {
     let maps: Vec<&MenuMap> = maps.iter().filter(|m| safe(&m.path) && m.path.starts_with("/maps/")).take(LOBBY_MAPS).collect();
     let Some(first) = maps.first() else { return Ok(scene.to_vec()) };
     let mut s = Scene::parse(scene)?;
@@ -155,7 +166,7 @@ pub fn add_lobby_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<
     // a janela da sala fica mais larga e o painel entra nela
     if let Ok(bg) = find(&s, "main_bg") {
         if let Some(r) = s.rect(bg)? {
-            s.set_rect(bg, Rect::new(LX0 - 16, r.x1, r.y0, r.y1))?;
+            s.set_rect(bg, Rect::new(LX0 - 16, r.x1, r.y0, r.y1.max(LY1 + 14)))?;
         }
     }
     // fundo do painel e o filete embaixo do título
@@ -189,7 +200,7 @@ pub fn add_lobby_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<
     // o primeiro grupo de botões de opção sai de um grupo comum; os outros, dele
     let mut radio_t: Option<u32> = None;
     let mut g = 0;
-    let mut group = |s: &mut Scene, panel: &mut Vec<u32>, items: Vec<(String, String, Rect)>| -> Result<()> {
+    let mut group = |s: &mut Scene, panel: &mut Vec<u32>, items: Vec<(String, String, Rect)>, tiles: Option<&[bool]>| -> Result<()> {
         g += 1;
         let gid = match radio_t {
             Some(r) => s.clone_element(r, &format!("cp_lb_group{g}"))?,
@@ -206,9 +217,11 @@ pub fn add_lobby_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<
         let mut bound = Rect::new(i32::MAX, i32::MIN, i32::MAX, i32::MIN);
         for (i, (label, code, r)) in items.into_iter().enumerate() {
             let b = s.clone_element(button_t, &format!("cp_lb_g{g}_b{i}"))?;
+            let tile = tiles.map(|t| t.get(i).copied().unwrap_or(false)).unwrap_or(false);
             for (off, state) in [(112, "u"), (116, "o"), (120, "w"), (124, "at"), (128, "at"), (132, "at"), (136, "at"), (140, "at")] {
                 if s.str_field(b, off).is_ok() {
-                    s.set_str_field(b, off, &tex(&format!("opt_{state}")))?;
+                    let name = if tile { tile_texture(i, if state == "w" { "o" } else { state }) } else { tex(&format!("opt_{state}")) };
+                    s.set_str_field(b, off, &name)?;
                 }
             }
             s.set_rect(b, r)?;
@@ -219,9 +232,15 @@ pub fn add_lobby_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<
             let l = s.clone_element(text_t, &format!("cp_lb_g{g}_b{i}_label"))?;
             s.set_events(l, &[])?;
             s.set_text(l, &label)?;
-            s.set_str_field(l, 108, "pc_title_font_2")?;
             s.set_u32(l, 128, 1)?; // no meio
-            s.set_rect(l, Rect::new(r.x0 + 4, r.x1 - 4, r.y0 + 3, r.y1 - 3))?;
+            if tiles.is_some() {
+                // nome embaixo da miniatura
+                s.set_str_field(l, 108, "pc_body_font_narrow_1")?;
+                s.set_rect(l, Rect::new(r.x0 + 2, r.x1 - 2, r.y1 - 22, r.y1 - 2))?;
+            } else {
+                s.set_str_field(l, 108, "pc_title_font_2")?;
+                s.set_rect(l, Rect::new(r.x0 + 4, r.x1 - 4, r.y0 + 3, r.y1 - 3))?;
+            }
             show(s, l)?;
             s.set_u32(l, ORDER, order + 1)?;
             s.set_children(b, &[l])?;
@@ -253,7 +272,7 @@ pub fn add_lobby_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<
         let rects = grid(items.len(), cols, *y + 24, bh);
         let rows = (items.len() as i32 + cols - 1) / cols;
         let list = items.into_iter().zip(rects).map(|((l, c), r)| (l, c, r)).collect();
-        group(s, panel, list)?;
+        group(s, panel, list, None)?;
         *y += 24 + rows * (bh + 4) + 6;
         Ok(())
     };
@@ -264,14 +283,22 @@ pub fn add_lobby_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<
     section(&mut s, &mut panel, t.faction, t.faction_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("faction", i.to_string()))).collect(), 4, &mut y)?;
     section(&mut s, &mut panel, t.victory, t.victory_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("victory", format!("'{}'", VICTORY_KEYS[i])))).collect(), 3, &mut y)?;
     section(&mut s, &mut panel, t.units, UNIT_CAPS.iter().map(|u| (u.to_string(), set("units", u.to_string()))).collect(), 3, &mut y)?;
-    let map_items = maps
+    // mapas: miniaturas em 2 linhas de 4 (o nome embaixo de cada uma)
+    text(&mut s, &mut panel, t.map, "pc_title_font_2", Rect::new(LIN0, LIN1, y, y + 24))?;
+    let tile = (LIN1 - LIN0 - 6 * 3) / 4;
+    let items = maps
         .iter()
-        .map(|m| {
-            let name: String = m.name.chars().filter(|c| !c.is_control()).take(28).collect();
-            (format!("[{}] {}", m.bases, name.to_uppercase()), set("map", format!("'{}'", m.path)))
+        .enumerate()
+        .map(|(i, m)| {
+            let name: String = m.name.chars().filter(|c| !c.is_control()).take(12).collect();
+            let (c, r) = (i as i32 % 4, i as i32 / 4);
+            let x = LIN0 + (tile + 6) * c;
+            let yy = y + 24 + (tile + 4) * r;
+            (format!("{} · {}", m.bases, name.to_uppercase()), set("map", format!("'{}'", m.path)), Rect::new(x, x + tile, yy, yy + tile))
         })
         .collect();
-    section(&mut s, &mut panel, t.map, map_items, 1, &mut y)?;
+    let has: Vec<bool> = (0..maps.len()).map(|i| thumbs.get(i).copied().unwrap_or(false)).collect();
+    group(&mut s, &mut panel, items, Some(&has))?;
 
     // iniciar: o botão grande da sala (com o texto e a seta dele)
     let start = s.clone_element(launch_t, "cp_lb_start")?;
@@ -293,6 +320,41 @@ pub fn add_lobby_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<
     let mut kids = s.children(host)?;
     kids.extend(panel);
     s.set_children(host, &kids)?;
+    Ok(s.to_bytes())
+}
+
+/// A tela de resultado das partidas (`frontend_summary_mp`) ganha "Jogar de novo": repete a última
+/// partida grande com as mesmas escolhas (`CPBigMatchAgain`). Sem o botão "Sair" na cena, fica como
+/// está.
+pub fn add_again_button(scene: &[u8], label: &str) -> Result<Vec<u8>> {
+    let mut s = Scene::parse(scene)?;
+    let (Ok(quit), Ok(top)) = (s.by_name("btn_quit").map(|e| e.id), s.by_name("g_btm").map(|e| e.id)) else { return Ok(scene.to_vec()) };
+    let Some(r) = s.rect(quit)? else { return Ok(scene.to_vec()) };
+    let sounds: Vec<Event> = s.events(quit)?.into_iter().filter(|e| e.name == "PlaySound").collect();
+    let b = s.clone_element(quit, "cp_btn_again")?;
+    let mut evs = sounds;
+    evs.push(Event::new(event::SELECT, "ConsoleExecute", "UI_Lua local m = import('/lua/SinglePlayerLaunch.lua') if m.CPBigMatchAgain then m.CPBigMatchAgain() end"));
+    s.set_events(b, &evs)?;
+    // em cima do Sair
+    let h = r.y1 - r.y0;
+    let rr = Rect::new(r.x0, r.x1, r.y0 - h - 8, r.y0 - 8);
+    s.set_rect(b, rr)?;
+    let mut kids = Vec::new();
+    for c in s.children(quit)? {
+        let e = s.by_id(c)?;
+        let id = s.clone_element(c, &format!("cp_again_{}", e.name))?;
+        if e.kind == kind::TEXT {
+            s.set_text(id, label)?;
+        }
+        if let Some(cr) = s.rect(id)? {
+            s.set_rect(id, cr.shifted(0, rr.y0 - r.y0))?;
+        }
+        kids.push(id);
+    }
+    s.set_children(b, &kids)?;
+    let mut t = s.children(top)?;
+    t.push(b);
+    s.set_children(top, &t)?;
     Ok(s.to_bytes())
 }
 

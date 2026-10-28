@@ -647,5 +647,21 @@
  "O launcher dentro do jogo": "The launcher inside the game",
  "No submenu Extras da tela inicial, um painel com o perfil de mods, ligar e desligar cada mod, a cor da tela inicial, a memória e a prioridade do jogo. O que você escolhe lá o launcher aplica na próxima vez que você clica em Jogar.": "In the start screen's Extras submenu, a panel with the mods profile, turning each mod on and off, the start screen color, the game memory and priority. What you pick there the launcher applies the next time you click Play.",
  "Launcher focado em criar": "Launcher focused on creating",
- "A barra lateral fica com Início (Jogar), Mapas, Modelos, Mods, Forja e Sistema. A tela inicial do jogo (logo, vídeo e cor) foi para Sistema; Partida grande, Arquivos, Ícones, Recursos e Rede saíram da barra (o que dá, agora fica no jogo).": "The sidebar keeps Home (Play), Maps, Models, Mods, Forge and System. The game start screen (logo, video and color) moved to System; Big match, Files, Icons, Features and Network left the bar (what's possible now lives in the game)."
+ "A barra lateral fica com Início (Jogar), Mapas, Modelos, Mods, Forja e Sistema. A tela inicial do jogo (logo, vídeo e cor) foi para Sistema; Partida grande, Arquivos, Ícones, Recursos e Rede saíram da barra (o que dá, agora fica no jogo).": "The sidebar keeps Home (Play), Maps, Models, Mods, Forge and System. The game start screen (logo, video and color) moved to System; Big match, Files, Icons, Features and Network left the bar (what's possible now lives in the game).",
+ "Mais ferramentas": "More tools",
+ "Nada foi removido: o que saiu da barra lateral continua aqui.": "Nothing was removed: what left the sidebar is still here.",
+ "Mais ferramentas: Partida grande, Recursos, Desempenho, Arquivos, Ícones, Rede": "More tools: Big match, Features, Performance, Files, Icons, Network",
+  "Grande atualização de otimização": "Big optimization update",
+  "Otimização: o jogo abre e roda mais leve": "Optimization: the game opens and runs lighter",
+  "Gráficos leves para partidas grandes": "Lite graphics for big matches",
+  "Miniaturas dos mapas na sala": "Map thumbnails in the lobby",
+  "Jogar de novo": "Play again",
+  "Aviso do que foi aplicado": "Notice of what was applied",
+  "Mais ferramentas em Sistema": "More tools in System",
+  "O launcher guarda a tela inicial já montada e só refaz quando algo muda, guarda o índice dos arquivos grandes e anota quanto tempo cada passo do Jogar levou (logs/aplicar-tempos.log). O ReShade passa a compilar os efeitos no modo desempenho e não carrega os desligados.": "The launcher keeps the start screen already built and only rebuilds it when something changes, caches the index of the large files and logs how long each step of Play took (logs/aplicar-tempos.log). ReShade now compiles effects in performance mode and skips the disabled ones.",
+  "Nova opção em Opções → Vídeo: Gráficos leves (Desligado, Leve, Forte). Reduz o detalhe dos modelos de longe e as marcas no terreno, para partidas com muitos jogadores rodarem melhor.": "New option in Options → Video: Lite graphics (Off, Light, Strong). Lowers the detail of distant models and terrain decals so matches with many players run better.",
+  "Os mapas do painel de Partida grande na sala de Batalha aparecem com a miniatura de cada um.": "The maps in the Big match panel of the Battle lobby show each map's thumbnail.",
+  "Na tela de resultado, um botão Jogar de novo começa a mesma partida grande outra vez, com as mesmas escolhas.": "On the results screen, a Play again button starts the same big match again, with the same choices.",
+  "Quando você muda o perfil, os mods ou a cor pelo painel do jogo, as notícias da tela inicial mostram o que o launcher aplicou.": "When you change the profile, mods or color from the in-game panel, the start screen news shows what the launcher applied.",
+  "Partida grande, Recursos, Desempenho, Arquivos, Ícones e Rede continuam no launcher, agora juntos em Sistema → Mais ferramentas. E o botão Fechar o jogo travado aparece sempre no Início.": "Big match, Features, Performance, Files, Icons and Network are still in the launcher, now together in System → More tools. And the Close stuck game button always shows on Home."
 }

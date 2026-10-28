@@ -368,6 +368,20 @@ fn quiet(ini: &str) -> String {
             out = ini_set(&out, "OVERLAY", key, "0");
         }
     }
+    // desempenho: os efeitos compilam com os valores fixos dos presets (mais rápidos no jogo) e os
+    // desligados nem são carregados
+    for key in ["PerformanceMode", "SkipLoadingDisabledEffects"] {
+        if ini_get(&out, "GENERAL", key).is_none_or(|v| v.trim() != "1") {
+            out = ini_set(&out, "GENERAL", key, "1");
+        }
+    }
+    // um caminho "\**\**" não existe para o ReShade (só gera aviso no log a cada abertura)
+    if let Some(paths) = ini_get(&out, "GENERAL", "EffectSearchPaths") {
+        let kept: Vec<&str> = paths.split(',').map(str::trim).filter(|p| !p.is_empty() && !p.ends_with("\\**\\**")).collect();
+        if !kept.is_empty() && kept.len() != paths.split(',').count() {
+            out = ini_set(&out, "GENERAL", "EffectSearchPaths", &kept.join(","));
+        }
+    }
     out
 }
 

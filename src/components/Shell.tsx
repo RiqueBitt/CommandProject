@@ -226,6 +226,7 @@ interface Cmd { id: string; label: string; icon: string; hint?: string; run: () 
 const SETTINGS_SECTIONS: [string, string, string][] = [
   ["jogo", "Jogo: pasta, modo de abrir, memória e prioridade", "sports_esports"],
   ["telainicial", "Tela inicial do jogo: cor, logo e vídeo", "space_dashboard"],
+  ["ferramentas", "Mais ferramentas: Partida grande, Recursos, Desempenho, Arquivos, Ícones, Rede", "apps"],
   ["local", "Modo local e cópias de segurança", "cloud_off"],
   ["visual", "Visual: tema, facção, idioma e animações", "palette"],
   ["diagnostico", "Diagnóstico", "monitor_heart"],
