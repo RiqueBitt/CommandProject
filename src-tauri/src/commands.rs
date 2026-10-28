@@ -634,6 +634,12 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
                 px.restore()?;
             }
         }
+        // perfil de mods escolhido de dentro do jogo (Extras → Perfil) na última vez
+        match ws.take_game_profile_request() {
+            Ok(Some(name)) => eprintln!("perfil trocado pelo jogo: {name}"),
+            Ok(None) => {}
+            Err(e) => eprintln!("pedido de perfil do jogo não lido: {e}"),
+        }
         // jogo em português quando o launcher está em português (Brasil); em inglês, o jogo original
         if let Err(e) = apply_game_language(ws) {
             eprintln!("tradução do jogo não aplicada: {e}");

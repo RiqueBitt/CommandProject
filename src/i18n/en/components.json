@@ -630,5 +630,14 @@
  "O jogo abre mais rápido": "The game opens faster",
  "Sem os vídeos de abertura (logos e aviso legal): o jogo vai direto para a tela inicial. O launcher também guarda o índice dos arquivos grandes (texturas HD, mapas) e não lê tudo de novo a cada Jogar.": "No intro movies (logos and legal notice): the game goes straight to the start screen. The launcher also keeps the index of the big files (HD textures, maps) instead of reading everything again on every Play.",
  "Escaramuça agora é Batalha": "Skirmish is now Battle",
- "No jogo em português, o menu e tudo que dizia \"Escaramuça\" agora diz \"Batalha\" (botão da tela inicial, sala, conquistas e dicas).": "In the Portuguese game, the menu and everything that said \"Escaramuça\" now says \"Batalha\" (start screen button, lobby, achievements and tips)."
+ "No jogo em português, o menu e tudo que dizia \"Escaramuça\" agora diz \"Batalha\" (botão da tela inicial, sala, conquistas e dicas).": "In the Portuguese game, the menu and everything that said \"Escaramuça\" now says \"Batalha\" (start screen button, lobby, achievements and tips).",
+ "Mais do launcher dentro do jogo": "More of the launcher inside the game",
+ "Partida grande completa na sala de batalha": "Full big match in the battle lobby",
+ "O painel da sala ganhou sua facção, tipo de vitória e limite de unidades. As escolhas ficam guardadas no seu perfil do jogo e valem na próxima partida.": "The lobby panel got your faction, victory type and unit cap. Your choices are kept in your game profile and apply to the next match.",
+ "Modos prontos no submenu Batalha": "Ready-made modes in the Battle submenu",
+ "Guerra 8 contra 8, Todos contra todos (12) e Guerra total (32), cada um no menor mapa que cabe, com a IA e as opções que você escolheu.": "War 8 vs 8, Free for all (12) and Total war (32), each on the smallest map that fits, with the AI and options you picked.",
+ "Trapaças e perfis no submenu Extras": "Cheats and profiles in the Extras submenu",
+ "Ligar ou desligar as trapaças da partida grande e escolher o perfil de mods: o launcher troca para ele na próxima vez que você clicar em Jogar.": "Turn big match cheats on or off and pick the mods profile: the launcher switches to it the next time you click Play.",
+ "Notícias com o resumo do launcher": "News with the launcher summary",
+ "Sem um texto seu, o painel de notícias mostra a versão do launcher, quantos mods estão ligados e o perfil.": "Without your own text, the news panel shows the launcher version, how many mods are on and the profile."
 }

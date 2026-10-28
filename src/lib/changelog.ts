@@ -6,6 +6,16 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.45.0",
+    title: "Mais do launcher dentro do jogo",
+    items: [
+      { icon: "tune", title: "Partida grande completa na sala de batalha", text: "O painel da sala ganhou sua facção, tipo de vitória e limite de unidades. As escolhas ficam guardadas no seu perfil do jogo e valem na próxima partida.", page: "features" },
+      { icon: "sports_esports", title: "Modos prontos no submenu Batalha", text: "Guerra 8 contra 8, Todos contra todos (12) e Guerra total (32), cada um no menor mapa que cabe, com a IA e as opções que você escolheu.", page: "features" },
+      { icon: "folder", title: "Trapaças e perfis no submenu Extras", text: "Ligar ou desligar as trapaças da partida grande e escolher o perfil de mods: o launcher troca para ele na próxima vez que você clicar em Jogar.", page: "features" },
+      { icon: "newspaper", title: "Notícias com o resumo do launcher", text: "Sem um texto seu, o painel de notícias mostra a versão do launcher, quantos mods estão ligados e o perfil.", page: "features" },
+    ],
+  },
+  {
     version: "0.44.1",
     title: "Escaramuça agora é Batalha",
     items: [

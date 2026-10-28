@@ -469,6 +469,10 @@ fn real_build_when_available() {
     }
     let mut edit = MenuEdit::default();
     edit.buttons.push(mainmenu::NewButton { key: "cp:atalho0".into(), label: "MEGA: 4 CONTRA 4".into(), place: mainmenu::Place::Skirmish, native: None, lua: false, code: Some("LOG('atalho')".into()) });
+    let code = |c: &str| Some(format!("local m = import('/lua/SinglePlayerLaunch.lua') {c}"));
+    edit.buttons.push(mainmenu::NewButton { key: "cp:modo16".into(), label: "GUERRA 8 CONTRA 8".into(), place: mainmenu::Place::Skirmish, native: None, lua: false, code: code("if m.CPBigMatchMode then m.CPBigMatchMode('/maps/SC2_MEUMAP/SC2_MEUMAP_scenario.lua', 16, 2) end") });
+    edit.buttons.push(mainmenu::NewButton { key: "cp:trapacas_on".into(), label: "TRAPAÇAS: LIGAR".into(), place: mainmenu::Place::Extras, native: None, lua: false, code: code("if m.CPBMSet then m.CPBMSet('cheats', true) end") });
+    edit.buttons.push(mainmenu::NewButton { key: "cp:perfil_teste".into(), label: "PERFIL: TESTE".into(), place: mainmenu::Place::Extras, native: None, lua: false, code: code("if m.CPNextProfile then m.CPNextProfile('teste') end") });
     let maps = vec![
         crate::bigmatch_menu::MenuMap { path: "/maps/SC2_MEUMAP/SC2_MEUMAP_scenario.lua".into(), name: "Meu mapa".into(), bases: 32, size: 1024 },
         crate::bigmatch_menu::MenuMap { path: "/maps/SC2_32PLAY/SC2_32PLAY_scenario.lua".into(), name: "32 players".into(), bases: 32, size: 4096 },

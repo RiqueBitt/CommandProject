@@ -41,6 +41,9 @@ pub struct Texts {
     pub ai_labels: [&'static str; 4],
     pub faction_labels: [&'static str; 4],
     pub victory_labels: [&'static str; 3],
+    /// rótulos curtos (botões estreitos do painel da sala)
+    pub short_team_labels: [&'static str; 4],
+    pub short_ai_labels: [&'static str; 4],
     pub start: &'static str,
     pub note: &'static str,
     /// título, explicação e botão do painel na sala do jogo
@@ -59,13 +62,15 @@ pub const PT: Texts = Texts {
     units: "LIMITE DE UNIDADES",
     map: "MAPA",
     team_labels: ["2 TIMES", "3 TIMES", "4 TIMES", "TODOS CONTRA TODOS"],
-    ai_labels: ["FÁCIL", "NORMAL", "DIFÍCIL", "MUITO DIFÍCIL"],
+    ai_labels: ["FÁCIL", "NORMAL", "DIFÍCIL", "EXTREMA"],
     faction_labels: ["ALEATÓRIA", "UEF", "CYBRAN", "ILLUMINATE"],
     victory_labels: ["COMANDANTE", "DESTRUIR TUDO", "SEM FIM"],
+    short_team_labels: ["2", "3", "4", "TODOS"],
+    short_ai_labels: ["FÁCIL", "NORMAL", "DIFÍCIL", "EXTREMA"],
     start: "COMEÇAR",
     note: "Sem escolher: 8 jogadores, 2 times, IA normal e o primeiro mapa.",
     lobby_title: "PARTIDA GRANDE",
-    lobby_sub: "Mais de 8 jogadores contra a IA, nos mapas grandes.",
+    lobby_sub: "Mais de 8 jogadores contra a IA. Suas escolhas ficam guardadas.",
     lobby_start: "INICIAR PARTIDA GRANDE",
 };
 
@@ -82,25 +87,29 @@ pub const EN: Texts = Texts {
     ai_labels: ["EASY", "NORMAL", "HARD", "VERY HARD"],
     faction_labels: ["RANDOM", "UEF", "CYBRAN", "ILLUMINATE"],
     victory_labels: ["COMMANDER", "DESTROY ALL", "ENDLESS"],
+    short_team_labels: ["2", "3", "4", "FFA"],
+    short_ai_labels: ["EASY", "NORMAL", "HARD", "EXTREME"],
     start: "START",
     note: "Without choosing: 8 players, 2 teams, normal AI and the first map.",
     lobby_title: "BIG MATCH",
-    lobby_sub: "More than 8 players against the AI, on the big maps.",
+    lobby_sub: "More than 8 players against the AI. Your choices are kept.",
     lobby_start: "START BIG MATCH",
 };
 
 const AI_KEYS: [&str; 4] = ["Easy", "Normal", "Hard", "Cheat"];
+const VICTORY_KEYS: [&str; 3] = ["demoralization", "domination", "sandbox"];
+const UNIT_CAPS: [u32; 3] = [250, 500, 1000];
 
 // medidas do painel (unidades da cena da sala, 640 × 480: a área 16:9 vai de x −640 a 1280; a
 // janela da sala começa em −209)
 const LX0: i32 = -620;
 const LX1: i32 = -224;
 const LY0: i32 = -72;
-const LY1: i32 = 600;
+const LY1: i32 = 606;
 const LIN0: i32 = LX0 + 16;
 const LIN1: i32 = LX1 - 16;
 /// Mapas na lista da sala.
-const LOBBY_MAPS: usize = 4;
+const LOBBY_MAPS: usize = 3;
 /// Jogadores (as partidas de até 8 são as da própria sala).
 const LOBBY_PLAYERS: [u32; 6] = [10, 12, 16, 20, 24, 32];
 
@@ -108,14 +117,14 @@ fn find(s: &Scene, name: &str) -> Result<u32> {
     s.by_name(name).map(|e| e.id).map_err(|_| Error::Other(format!("a tela inicial do jogo é diferente do esperado (sem {name})")))
 }
 
-fn safe(t: &str) -> bool {
+pub(crate) fn safe(t: &str) -> bool {
     !t.is_empty() && t.chars().all(|c| c.is_ascii_graphic() && !matches!(c, '\'' | '"' | '\\'))
 }
 
 /// Código do botão "Começar".
 pub fn start_code(first_map: &str) -> String {
     format!(
-        "local m = import('/lua/SinglePlayerLaunch.lua') if m.CPBigMatchQuick then m.CPBigMatchQuick(CPBM_map or '{first_map}', CPBM_players or 8, CPBM_teams or 2, CPBM_ai or 'Normal', CPBM_faction or 0, CPBM_victory or 'demoralization', CPBM_units or 1000) else LOG('CommandProject: mod da Partida grande ausente') end"
+        "local m = import('/lua/SinglePlayerLaunch.lua') if m.CPBigMatchFromMenu then m.CPBigMatchFromMenu('{first_map}') else LOG('CommandProject: mod da Partida grande ausente') end"
     )
 }
 
@@ -237,25 +246,29 @@ pub fn add_lobby_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<
             })
             .collect()
     };
-    let bh = 34;
+    let bh = 32;
     let mut y = LY0 + 74;
     let mut section = |s: &mut Scene, panel: &mut Vec<u32>, title: &str, items: Vec<(String, String)>, cols: i32, y: &mut i32| -> Result<()> {
-        text(s, panel, title, "pc_title_font_2", Rect::new(LIN0, LIN1, *y, *y + 26))?;
-        let rects = grid(items.len(), cols, *y + 28, bh);
+        text(s, panel, title, "pc_title_font_2", Rect::new(LIN0, LIN1, *y, *y + 24))?;
+        let rects = grid(items.len(), cols, *y + 24, bh);
         let rows = (items.len() as i32 + cols - 1) / cols;
         let list = items.into_iter().zip(rects).map(|((l, c), r)| (l, c, r)).collect();
         group(s, panel, list)?;
-        *y += 28 + rows * (bh + 4) + 8;
+        *y += 24 + rows * (bh + 4) + 6;
         Ok(())
     };
-    section(&mut s, &mut panel, t.players, LOBBY_PLAYERS.iter().map(|p| (p.to_string(), format!("CPBM_players = {p}"))).collect(), 3, &mut y)?;
-    section(&mut s, &mut panel, t.teams, t.team_labels.iter().enumerate().map(|(i, l)| (l.to_string(), format!("CPBM_teams = {}", [2, 3, 4, 0][i]))).collect(), 2, &mut y)?;
-    section(&mut s, &mut panel, t.ai, t.ai_labels.iter().enumerate().map(|(i, l)| (l.to_string(), format!("CPBM_ai = '{}'", AI_KEYS[i]))).collect(), 2, &mut y)?;
+    let set = |k: &str, v: String| format!("import('/lua/SinglePlayerLaunch.lua').CPBMSet('{k}', {v})");
+    section(&mut s, &mut panel, t.players, LOBBY_PLAYERS.iter().map(|p| (p.to_string(), set("players", p.to_string()))).collect(), 6, &mut y)?;
+    section(&mut s, &mut panel, t.teams, t.short_team_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("teams", [2, 3, 4, 0][i].to_string()))).collect(), 4, &mut y)?;
+    section(&mut s, &mut panel, t.ai, t.short_ai_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("ai", format!("'{}'", AI_KEYS[i])))).collect(), 4, &mut y)?;
+    section(&mut s, &mut panel, t.faction, t.faction_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("faction", i.to_string()))).collect(), 4, &mut y)?;
+    section(&mut s, &mut panel, t.victory, t.victory_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("victory", format!("'{}'", VICTORY_KEYS[i])))).collect(), 3, &mut y)?;
+    section(&mut s, &mut panel, t.units, UNIT_CAPS.iter().map(|u| (u.to_string(), set("units", u.to_string()))).collect(), 3, &mut y)?;
     let map_items = maps
         .iter()
         .map(|m| {
             let name: String = m.name.chars().filter(|c| !c.is_control()).take(28).collect();
-            (format!("[{}] {}", m.bases, name.to_uppercase()), format!("CPBM_map = '{}'", m.path))
+            (format!("[{}] {}", m.bases, name.to_uppercase()), set("map", format!("'{}'", m.path)))
         })
         .collect();
     section(&mut s, &mut panel, t.map, map_items, 1, &mut y)?;
@@ -333,7 +346,9 @@ mod tests {
         assert_eq!(s.by_name("cp_lb_group2").unwrap().kind, kind::RADIO_GROUP);
         assert_eq!(s.children(g.id).unwrap().len(), 6);
         let start = s.by_name("cp_lb_start").unwrap().id;
-        assert!(s.events(start).unwrap().iter().any(|e| e.param.contains("CPBigMatchQuick(CPBM_map or '/maps/CP_32/CP_32_scenario.lua'")));
+        assert!(s.events(start).unwrap().iter().any(|e| e.param.contains("CPBigMatchFromMenu('/maps/CP_32/CP_32_scenario.lua')")));
+        let b = s.by_name("cp_lb_g1_b0").unwrap().id;
+        assert!(s.events(b).unwrap().iter().any(|e| e.param.contains("CPBMSet('players', 10)")));
         assert!(s.events(start).unwrap().iter().all(|e| e.name != "SkirmishLaunch"));
         assert_eq!(add_lobby_panel(&lobby, &[], &PT).unwrap(), lobby);
         if let Ok(dest) = std::env::var("CP_TEST_LOBBY_OUT") {
@@ -356,6 +371,6 @@ mod tests {
         let picked = pick_maps(&[mk("/maps/a", 2), mk("/maps/b", 16), mk("/maps/c", 8)]);
         assert_eq!(picked.iter().map(|m| m.bases).collect::<Vec<_>>(), [16, 8, 2]);
         assert!(!safe("/maps/x'y"));
-        assert!(start_code("/maps/a").contains("CPBM_players or 8"));
+        assert!(start_code("/maps/a").contains("CPBigMatchFromMenu('/maps/a')"));
     }
 }

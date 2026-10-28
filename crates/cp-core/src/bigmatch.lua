@@ -197,7 +197,7 @@ function CPBigMatchQuick(mapName, players, teams, ai, faction, victory, unitCap)
     if victory ~= 'demoralization' and victory ~= 'domination' and victory ~= 'sandbox' then victory = 'demoralization' end
     unitCap = tonumber(unitCap) or 1000
     if unitCap < 50 or unitCap > 2000 then unitCap = 1000 end
-    local spec = 'Victory=' .. victory .. ';UnitCap=' .. unitCap .. ';FogOfWar=explored;GameSpeed=normal;NoRushOption=Off;PreBuiltUnits=Off;PrebuiltUnits=Off;CivilianAlliance=enemy;CheatsEnabled=false;DoNotShareUnitCap=true'
+    local spec = 'Victory=' .. victory .. ';UnitCap=' .. unitCap .. ';FogOfWar=explored;GameSpeed=normal;NoRushOption=Off;PreBuiltUnits=Off;PrebuiltUnits=Off;CivilianAlliance=enemy;CheatsEnabled=' .. tostring(CPBMGet('cheats') == true) .. ';DoNotShareUnitCap=true'
     for i = 1, bases do
         if i <= n then
             local team = 1
@@ -213,6 +213,50 @@ function CPBigMatchQuick(mapName, players, teams, ai, faction, victory, unitCap)
     end
     LOG('*CommandProject big match (in game): ' .. n .. ' players, ' .. teams .. ' teams, ' .. ai .. ', faction ' .. faction .. ', ' .. victory .. ', cap ' .. unitCap .. ' on ' .. tostring(mapName))
     LaunchSinglePlayerSession(CPBigMatchSession(mapName, spec))
+end
+
+-- escolhas da Partida grande feitas dentro do jogo (sala de batalha, submenus): guardadas no
+-- perfil do jogo, valem para as próximas partidas
+local CPBM_DEFAULT = { players = 8, teams = 2, ai = 'Normal', faction = 0, victory = 'demoralization', units = 1000, cheats = false }
+
+function CPBMGet(key)
+    local ok, saved = pcall(function() return import('/lua/user/prefs.lua').GetFromCurrentProfile('CPBigMatch') end)
+    if ok and type(saved) == 'table' and saved[key] ~= nil then return saved[key] end
+    return CPBM_DEFAULT[key]
+end
+
+function CPBMSet(key, value)
+    pcall(function()
+        local Prefs = import('/lua/user/prefs.lua')
+        local saved = Prefs.GetFromCurrentProfile('CPBigMatch')
+        if type(saved) ~= 'table' then saved = {} end
+        saved[key] = value
+        Prefs.SetToCurrentProfile('CPBigMatch', saved)
+        if SavePreferences then SavePreferences() end
+    end)
+    LOG('*CommandProject big match option: ' .. tostring(key) .. ' = ' .. tostring(value))
+end
+
+-- "Iniciar partida grande": as escolhas guardadas; o mapa guardado, se ainda existir
+function CPBigMatchFromMenu(defaultMap)
+    local map = CPBMGet('map')
+    if not map or not import('/lua/ui/maputil.lua').LoadScenario(map) then map = defaultMap end
+    CPBigMatchQuick(map, CPBMGet('players'), CPBMGet('teams'), CPBMGet('ai'), CPBMGet('faction'), CPBMGet('victory'), CPBMGet('units'))
+end
+
+-- modos prontos do submenu Batalha: jogadores e times fixos, o resto das escolhas guardadas
+function CPBigMatchMode(mapName, players, teams)
+    CPBigMatchQuick(mapName, players, teams, CPBMGet('ai'), CPBMGet('faction'), CPBMGet('victory'), CPBMGet('units'))
+end
+
+-- perfil de mods para a próxima vez que o jogo abrir pelo launcher (ele lê no Game.prefs)
+function CPNextProfile(id)
+    pcall(function()
+        local Prefs = import('/lua/user/prefs.lua')
+        Prefs.SetToCurrentProfile('CPNextProfile', id)
+        if SavePreferences then SavePreferences() end
+    end)
+    LOG('*CommandProject next profile: ' .. tostring(id))
 end
 
 -- called first thing by StartCommandLineSession: true when the big match took over

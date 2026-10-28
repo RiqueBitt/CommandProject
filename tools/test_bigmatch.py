@@ -177,6 +177,28 @@ def run(source: str, label: str, real: bool):
     players = [p for p in g.World.launched.teamInfo.values() if not p.Civilian]
     check(len(players) == 24 and all(p.Team == 1 for p in players) and players[1].AIPersonality == "Normal",
           f"{label}: tela no jogo: limitado às 24 bases, todos contra todos, IA normal sem escolha válida")
+    # escolhas guardadas no perfil do jogo (sala de batalha): valem no "Iniciar partida grande"
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.execute(HARNESS)
+    lua.execute(moho_to_lua(source))
+    g = lua.globals()
+    g.CPBMSet("players", 6)
+    g.CPBMSet("teams", 3)
+    g.CPBMSet("ai", "Hard")
+    g.CPBMSet("cheats", True)
+    g.CPBMSet("map", "/maps/nao_existe/x_scenario.lua")
+    g.CPBigMatchFromMenu("/maps/big/big_scenario.lua")
+    info = g.World.launched
+    players = [p for p in info.teamInfo.values() if not p.Civilian] if info else []
+    check(len(players) == 6 and sorted({p.Team for p in players}) == [2, 3, 4] and players[1].AIPersonality == "Hard",
+          f"{label}: escolhas guardadas: 6 jogadores, 3 times, IA difícil (mapa guardado que sumiu: o padrão)")
+    check(g.CPBMGet("units") == 1000 and g.CPBMGet("faction") == 0, f"{label}: escolhas guardadas: o que não foi escolhido fica no padrão")
+    g.CPBigMatchMode("/maps/big/big_scenario.lua", 16, 2)
+    players = [p for p in g.World.launched.teamInfo.values() if not p.Civilian]
+    check(len(players) == 16 and players[1].AIPersonality == "Hard", f"{label}: modo pronto: 16 jogadores com a IA guardada")
+    g.CPNextProfile("teste")
+    check(g.World.prefs.CPNextProfile == "teste", f"{label}: perfil para a próxima vez guardado")
+
     # facção, vitória e limite de unidades escolhidos no jogo
     lua = LuaRuntime(unpack_returned_tuples=True)
     lua.execute(HARNESS)
