@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 pub const MOD_ID: &str = "cp-tela-inicial";
 pub const ARCHIVE: &str = "zz_cp_tela_inicial.scd";
 /// Muda quando o visual muda (o launcher remonta).
-pub const STYLE_VERSION: &str = "1.0.0";
+pub const STYLE_VERSION: &str = "1.1.0";
 pub const SETTINGS_FILE: &str = "start-screen.json";
 /// Pasta (nos dados do launcher) com o logo e o vídeo do jogador.
 pub const USER_DIR: &str = "start-screen";
@@ -169,7 +169,8 @@ macro_rules! art {
 /// Os desenhos do launcher (nome → PNG).
 const ART: &[(&str, &[u8])] = art![
     "btn_u", "btn_o", "btn_at", "btn_w", "sub_u", "sub_o", "sub_at", "sub_w", "icon_campaign", "icon_skirmish", "icon_multiplayer",
-    "icon_options", "icon_extras", "icon_quit", "icon_mod", "shade", "tint", "panel", "gamertag", "avatar_frame", "topbar",
+    "icon_options", "icon_extras", "icon_quit", "icon_mod", "shade", "tint", "panel", "gamertag", "avatar_frame", "topbar", "opt_u",
+    "opt_o", "opt_at", "opt_w", "p9_tl", "p9_t", "p9_tr", "p9_l", "p9_c", "p9_r", "p9_bl", "p9_b", "p9_br", "p3_l", "p3_c", "p3_r",
 ];
 
 fn to_dds(img: &Rgba) -> Result<Vec<u8>> {
@@ -267,8 +268,14 @@ pub fn prepare_logo(data: &[u8]) -> Result<Rgba> {
 /// Monta o `.scd` da tela inicial em `dest`. `scene` é a cena de origem (a do jogo ou a de outro
 /// mod), `edit` o que os mods da Forja pedem. Devolve os avisos da montagem.
 pub fn build(scene: &[u8], edit: &MenuEdit, settings: &Settings, stock: &[PathBuf], data_dir: &Path, dest: &Path) -> Result<(PathBuf, Vec<String>)> {
-    build_all(scene, &[], edit, settings, stock, data_dir, dest)
+    build_all(scene, &[], edit, settings, stock, data_dir, dest, None)
 }
+
+/// Logo padrão da tela inicial nova (o do CommandProject, já sem o fundo preto).
+const DEFAULT_LOGO: &[u8] = include_bytes!("menu_style/logo_default.png");
+
+/// O painel da Partida grande no submenu da Escaramuça: os mapas da lista e os textos.
+pub type Panel<'a> = (&'a [crate::bigmatch_menu::MenuMap], &'a crate::bigmatch_menu::Texts);
 
 /// Opções do tema dos outros menus (as texturas do jogo pintadas na cor da tela inicial).
 pub fn theme_options(accent: &str) -> crate::menu_theme::ThemeOptions {
@@ -287,6 +294,7 @@ pub fn theme_options(accent: &str) -> crate::menu_theme::ThemeOptions {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Como [`build`], com os outros menus do jogo (caminho, cena de origem) no mesmo visual e as
 /// texturas deles pintadas na cor escolhida.
 pub fn build_all(
@@ -297,19 +305,24 @@ pub fn build_all(
     stock: &[PathBuf],
     data_dir: &Path,
     dest: &Path,
+    panel: Option<Panel>,
 ) -> Result<(PathBuf, Vec<String>)> {
     let accent = crate::menu_theme::parse_hex(&settings.accent).unwrap_or([43, 140, 255]);
     let look = Look::Commander(Commander { news_title: settings.news_title.clone(), news_text: settings.news_text.clone() });
     let logo = if settings.custom_logo {
         let p = Settings::logo_path(data_dir);
         let data = std::fs::read(&p).map_err(|e| Error::io(&p, e))?;
-        Some(prepare_logo(&data)?)
+        prepare_logo(&data)?
     } else {
-        None
+        dds::from_png(DEFAULT_LOGO)?
     };
+    let logo = Some(logo);
     let mut built = mainmenu::build_with(scene, edit, &look)?;
     if let Some(l) = &logo {
         built.scene = mainmenu::set_logo(&built.scene, &format!("{}logo_custom.dds", mainmenu::TEX), l.width, l.height)?;
+    }
+    if let Some((maps, texts)) = panel {
+        built.scene = crate::bigmatch_menu::add_panel(&built.scene, maps, texts)?;
     }
     let mut b = crate::scd::ScdBuilder::create(dest)?;
     b.add_bytes(mainmenu::SCENE_PATH.trim_start_matches('/'), &built.scene)?;
@@ -325,10 +338,6 @@ pub fn build_all(
     }
     // os outros menus: cenas no visual novo e as texturas do jogo na cor escolhida
     for (path, data) in others {
-        if path == crate::bigmatch_menu::SCENE_PATH {
-            b.add_bytes(path.trim_start_matches('/'), data)?;
-            continue;
-        }
         match mainmenu::restyle_frontend(data) {
             Ok(new) => b.add_bytes(path.trim_start_matches('/'), &new)?,
             Err(e) => built.warnings.push(format!("{}: {e}", path.rsplit('/').next().unwrap_or(path))),
@@ -436,7 +445,14 @@ fn real_build_when_available() {
     }
     let mut edit = MenuEdit::default();
     edit.buttons.push(mainmenu::NewButton { key: "cp:atalho0".into(), label: "MEGA: 4 CONTRA 4".into(), place: mainmenu::Place::Skirmish, native: None, lua: false, code: Some("LOG('atalho')".into()) });
-    let (scd, warnings) = build_all(&std::fs::read(scene).unwrap(), &others, &edit, &settings, &stock, &out.join("data"), &out.join(ARCHIVE)).unwrap();
+    let maps = vec![
+        crate::bigmatch_menu::MenuMap { path: "/maps/CP_32/CP_32_scenario.lua".into(), name: "32 players".into(), bases: 32, size: 4096 },
+        crate::bigmatch_menu::MenuMap { path: "/maps/CP_MEUMAPA/CP_MEUMAPA_scenario.lua".into(), name: "Meu mapa".into(), bases: 32, size: 1024 },
+        crate::bigmatch_menu::MenuMap { path: "/maps/SC2_MP_308/SC2_MP_308_scenario.lua".into(), name: "Iskellian Coast (4v4)".into(), bases: 8, size: 2048 },
+        crate::bigmatch_menu::MenuMap { path: "/maps/sc2_mp_203/sc2_mp_203_scenario.lua".into(), name: "Teste 4".into(), bases: 4, size: 1024 },
+    ];
+    let panel = Some((maps.as_slice(), &crate::bigmatch_menu::PT));
+    let (scd, warnings) = build_all(&std::fs::read(scene).unwrap(), &others, &edit, &settings, &stock, &out.join("data"), &out.join(ARCHIVE), panel).unwrap();
     assert!(warnings.is_empty(), "{warnings:?}");
     eprintln!("{}", scd.display());
 }

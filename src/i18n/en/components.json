@@ -608,5 +608,13 @@
  "Logo em cima, botões grandes com ícone e borda neon, submenus ao lado, caixa do jogador e notícias. Os outros menus (criar partida, opções, multijogador, campanha) ganham o mesmo visual e a mesma cor, e os botões dos mods da Forja entram junto. Só muda a aparência: o jogo e o multijogador continuam iguais.": "Logo on top, large buttons with icons and a neon border, submenus at the side, player box and news. The other menus (create game, options, multiplayer, campaign) get the same look and color, and Forja mod buttons come along. Only the looks change: the game and multiplayer stay the same.",
  "Partida grande dentro do jogo": "Big match inside the game",
  "Partida grande no menu do jogo": "Big match in the game menu",
- "Com a Tela inicial nova ligada, Escaramuça → Partida grande (até 32) abre uma tela no próprio jogo: escolha jogadores (até 32), times, a IA e o mapa (os maiores, os seus também) e clique em Começar.": "With the New start screen on, Skirmish → Big match (up to 32) opens a screen in the game itself: pick players (up to 32), teams, the AI and the map (the biggest ones, yours too) and click Start."
+ "Com a Tela inicial nova ligada, Escaramuça → Partida grande (até 32) abre uma tela no próprio jogo: escolha jogadores (até 32), times, a IA e o mapa (os maiores, os seus também) e clique em Começar.": "With the New start screen on, Skirmish → Big match (up to 32) opens a screen in the game itself: pick players (up to 32), teams, the AI and the map (the biggest ones, yours too) and click Start.",
+ "Logo padrão": "Default logo",
+ "Partida grande no menu do jogo, menus novos": "Big match in the game menu, new menus",
+ "Partida grande direto na Escaramuça": "Big match right in Skirmish",
+ "Na tela inicial nova, ao abrir a Escaramuça aparece um painel ao lado: jogadores (até 32), times, a IA e o mapa (os maiores, os seus também). Escolha e clique em Começar. Testado no jogo.": "On the new start screen, opening Skirmish shows a panel beside it: players (up to 32), teams, the AI and the map (the biggest ones, yours too). Pick and click Start. Tested in the game.",
+ "Outros menus no estilo da tela inicial": "Other menus in the start screen style",
+ "Criar jogo, campanha, opções e multijogador ganham os botões, painéis e abas com borda neon da tela inicial, e a faixa de cima vai de uma borda à outra.": "Create game, campaign, options and multiplayer get the start screen's neon-bordered buttons, panels and tabs, and the top bar spans edge to edge.",
+ "Logo novo e ícones brancos": "New logo and white icons",
+ "O logo do CommandProject vem como padrão (dá para trocar pelo seu) e os ícones dos botões aparecem brancos (antes ficavam por baixo do fundo do botão).": "The CommandProject logo is the default (you can swap in yours) and the button icons show white (they used to sit under the button background)."
 }

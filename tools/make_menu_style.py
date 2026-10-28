@@ -111,7 +111,7 @@ def button(name, w, h, state):
     return done(img, w * 2, h * 2, name)
 
 
-def icon(name, draw_fn, size=48):
+def icon(name, draw_fn, size=64):
     img = canvas(size, size)
     d = ImageDraw.Draw(img)
     draw_fn(d, size * SS)
@@ -125,8 +125,8 @@ def icon(name, draw_fn, size=48):
     return done(out, size * 2, size * 2, name)
 
 
-ICON = (226, 229, 234, 255)
-ICON_D = (150, 155, 165, 255)
+ICON = (255, 255, 255, 255)
+ICON_D = (205, 210, 220, 255)
 
 
 def star(d, s):
@@ -371,7 +371,87 @@ def sub_button(name, w, h, state):
     return done(img, w * 2, h * 2, name)
 
 
+def opt_button(name, w, h, state):
+    """botões de escolha (Partida grande e listas dos outros menus): caixa com cantos cortados, sem seta"""
+    W, H = w * SS, h * SS
+    pad = 5 * SS
+    img = Image.new("RGBA", (W + 2 * pad, H + 2 * pad), (0, 0, 0, 0))
+    c = 6 * SS
+    shape = [(x + pad, y + pad) for x, y in [(c, 0), (W - 1, 0), (W - 1, H - c), (W - c, H - 1), (0, H - 1), (0, c)]]
+    hot = state in ("o", "at")
+    mask = Image.new("L", img.size, 0)
+    ImageDraw.Draw(mask).polygon(shape, fill=255)
+    grad = Image.new("RGBA", img.size)
+    gd = ImageDraw.Draw(grad)
+    for y in range(img.size[1]):
+        t = y / img.size[1]
+        if state == "at":
+            col = (int(170 - 90 * t), int(24 - 8 * t), int(28 - 8 * t), 235)
+        elif state == "o":
+            col = (int(90 - 50 * t), int(16 - 4 * t), int(20 - 4 * t), 230)
+        elif state == "w":
+            col = (100, 14, 16, 240)
+        else:
+            col = (int(26 - 12 * t), int(28 - 12 * t), int(34 - 13 * t), 210)
+        gd.line([(0, y), (img.size[0], y)], fill=col)
+    fill = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    fill.paste(grad, (0, 0), mask)
+    img.alpha_composite(fill)
+    line = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(line)
+    border = RED_HI if hot else (150, 26, 30)
+    ld.line(shape + [shape[0]], fill=border + (255 if hot else 210,), width=(2 if hot else 1) * SS + SS // 2, joint="curve")
+    if state == "at":
+        ld.rectangle([pad, pad + H - 4 * SS, pad + W, pad + H], fill=RED_HI + (255,))
+    img.alpha_composite(glow(line, 2.2 if hot else 1.0, 1.3 if hot else 0.7))
+    img = img.crop((pad, pad, pad + W, pad + H))
+    return done(img, w * 2, h * 2, name)
+
+
+def frame9():
+    """painel dos outros menus em 9 pedaços (cantos, bordas e meio): fundo escuro e borda neon"""
+    s = 16  # tamanho de cada pedaço (o painel inteiro tem 3 × 3; no jogo, 32 px cada)
+    full = canvas(s * 3, s * 3)
+    W = s * 3 * SS
+    c = 7 * SS
+    shape = [(c, 0), (W - 1, 0), (W - 1, W - c), (W - c, W - 1), (0, W - 1), (0, c)]
+    d = ImageDraw.Draw(full)
+    d.polygon(shape, fill=(10, 11, 15, 222))
+    line = canvas(s * 3, s * 3)
+    ImageDraw.Draw(line).line(shape + [shape[0]], fill=RED + (255,), width=2 * SS)
+    ImageDraw.Draw(line).line([(c, SS), (W // 3, SS)], fill=RED_HI + (255,), width=3 * SS)
+    full.alpha_composite(glow(line, 1.2, 1.3))
+    full = full.resize((s * 3 * 2, s * 3 * 2), Image.LANCZOS)
+    p = s * 2
+    names = [["tl", "t", "tr"], ["l", "c", "r"], ["bl", "b", "br"]]
+    for j in range(3):
+        for i in range(3):
+            full.crop((i * p, j * p, (i + 1) * p, (j + 1) * p)).save(os.path.join(OUT, f"p9_{names[j][i]}.png"), optimize=True)
+
+
+def frame3():
+    """faixa dos outros menus em 3 pedaços (esquerda, meio, direita)"""
+    w, h = 16, 32
+    img = canvas(w * 3, h)
+    W, H = w * 3 * SS, h * SS
+    c = 5 * SS
+    shape = [(c, 0), (W - 1, 0), (W - 1, H - c), (W - c, H - 1), (0, H - 1), (0, c)]
+    ImageDraw.Draw(img).polygon(shape, fill=(12, 13, 18, 215))
+    line = canvas(w * 3, h)
+    ld = ImageDraw.Draw(line)
+    ld.line(shape + [shape[0]], fill=RED + (255,), width=2 * SS)
+    ld.rectangle([0, 4 * SS, 3 * SS, H - 4 * SS], fill=RED_HI + (255,))
+    img.alpha_composite(glow(line, 1.0, 1.1))
+    img = img.resize((w * 3 * 2, h * 2), Image.LANCZOS)
+    for i, n in enumerate(["l", "c", "r"]):
+        img.crop((i * w * 2, 0, (i + 1) * w * 2, h * 2)).save(os.path.join(OUT, f"p3_{n}.png"), optimize=True)
+
+
 if __name__ == "__main__":
+    for st in ("u", "o", "at", "w"):
+        opt_button(f"opt_{st}", 200, 48, st)
+    frame9()
+    frame3()
     for st in ("u", "o", "at", "w"):
         button(f"btn_{st}", 377, 52, st)
     for n, fn in [("icon_campaign", star), ("icon_skirmish", swords), ("icon_multiplayer", globe), ("icon_options", gear),

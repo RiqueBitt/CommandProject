@@ -385,30 +385,20 @@ impl Workspace {
                 Err(e) => warnings.push(e.to_string()),
             }
         }
-        // a Partida grande dentro do jogo (tela própria, aberta pelo submenu da Escaramuça)
-        let mut bigmatch_scene = None;
-        if settings.enabled {
-            let pt = crate::gamelang::PT_LANGS.contains(&self.settings.ui_prefs.get("lang").and_then(|v| v.as_str()).unwrap_or("en"));
-            let maps = crate::bigmatch_menu::pick_maps(&self.match_maps()?);
-            let stock = self.stock_sources()?;
-            match crate::mapassets::read_game_file(&stock, crate::mainmenu::SCENE_PATH)
-                .and_then(|base| crate::bigmatch_menu::build(&base, &maps, if pt { &crate::bigmatch_menu::PT } else { &crate::bigmatch_menu::EN }))
-            {
-                Ok(scene) => {
-                    bigmatch_scene = Some(scene);
-                    edit.buttons.insert(0, crate::mainmenu::NewButton {
-                        key: "cp:partida_grande".into(),
-                        label: if pt { "PARTIDA GRANDE (ATÉ 32)".into() } else { "BIG MATCH (UP TO 32)".into() },
-                        place: crate::mainmenu::Place::Skirmish,
-                        native: None,
-                        lua: false,
-                        code: Some(format!("UILoadScene('{}')", crate::bigmatch_menu::SCENE)),
-                    });
+        // a Partida grande dentro do jogo (painel ao lado do submenu da Escaramuça)
+        let pt = crate::gamelang::PT_LANGS.contains(&self.settings.ui_prefs.get("lang").and_then(|v| v.as_str()).unwrap_or("en"));
+        let panel_maps = if settings.enabled {
+            match self.match_maps() {
+                Ok(all) => crate::bigmatch_menu::pick_maps(&all),
+                Err(e) => {
+                    warnings.push(format!("Partida grande no jogo: {e}"));
+                    Vec::new()
                 }
-                Err(e) => warnings.push(format!("Partida grande no jogo: {e}")),
             }
-        }
-        if !settings.shortcuts.is_empty() || bigmatch_scene.is_some() {
+        } else {
+            Vec::new()
+        };
+        if !settings.shortcuts.is_empty() || !panel_maps.is_empty() {
             // o código que monta a partida grande precisa estar no jogo
             if let Err(e) = self.ensure_bigmatch_mod() {
                 warnings.push(format!("atalhos de partida grande sem o mod da Partida grande: {e}"));
@@ -432,9 +422,9 @@ impl Workspace {
             use sha2::{Digest, Sha256};
             version.push('.');
             version.push_str(&hex::encode(Sha256::digest(&scene))[..8]);
-            if let Some(bm) = &bigmatch_scene {
+            if !panel_maps.is_empty() {
                 // a lista de mapas da Partida grande no jogo muda com os mapas ligados
-                version.push_str(&hex::encode(Sha256::digest(bm))[..6]);
+                version.push_str(&hex::encode(Sha256::digest(format!("{pt}{panel_maps:?}")))[..6]);
             }
         }
         if self.mods()?.iter().any(|m| m.manifest.id == ss::MOD_ID && m.manifest.version == version) {
@@ -454,12 +444,9 @@ impl Workspace {
                 .iter()
                 .filter_map(|p| crate::forja::effective_bytes(&stock, &mod_paths, p).map(|d| (p.to_string(), d)))
                 .collect();
-            let mut others = others;
-            if let Some(bm) = bigmatch_scene {
-                // a cena nova vai como está (já no visual novo)
-                others.push((crate::bigmatch_menu::SCENE_PATH.to_string(), bm));
-            }
-            let (archive, w) = ss::build_all(&scene, &others, &edit, &settings, &stock, &self.data_dir, &dest)?;
+            let texts = if pt { &crate::bigmatch_menu::PT } else { &crate::bigmatch_menu::EN };
+            let panel = (!panel_maps.is_empty()).then_some((panel_maps.as_slice(), texts));
+            let (archive, w) = ss::build_all(&scene, &others, &edit, &settings, &stock, &self.data_dir, &dest, panel)?;
             warnings.extend(w);
             archive
         } else {

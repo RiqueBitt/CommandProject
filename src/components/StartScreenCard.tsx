@@ -26,7 +26,7 @@ function Preview({ s, logo }: { s: StartScreenSettings; logo: string | null }) {
   return (
     <div className="ss-preview" style={{ ["--ss" as string]: s.accent }} role="img" aria-label={t("Prévia da tela inicial nova")}>
       <div className="ss-tint" />
-      {logo && s.customLogo ? <img className="ss-logo img" src={logo} alt="" /> : <div className="ss-logo">SUPREME<br /><b>COMMANDER 2</b></div>}
+      {logo && s.customLogo ? <img className="ss-logo img" src={logo} alt="" /> : <div className="ss-logo">SUPREME<br /><b>COMMANDER 3</b></div>}
       <div className="ss-tag"><span className="ss-av" />{t("Você")}</div>
       <div className="ss-col">
         {BUTTONS.map(([label, icon], i) => (
@@ -114,7 +114,7 @@ export default function StartScreenCard() {
             <b className="small">{t("Logo")}</b>
             <div className="row wrap" style={{ gap: 8 }}>
               <button className="btn sm" disabled={!!busy.sslogo} onClick={() => void chooseLogo()}><Icon name="image" size={16} /> {v.logo ? t("Trocar imagem") : t("Usar uma imagem")}</button>
-              {v.logo && <button className="btn sm text" onClick={async () => after(await run("sslogo", () => api.startScreenLogo(null)))}><Icon name="undo" size={16} /> {t("Logo do jogo")}</button>}
+              {v.logo && <button className="btn sm text" onClick={async () => after(await run("sslogo", () => api.startScreenLogo(null)))}><Icon name="undo" size={16} /> {t("Logo padrão")}</button>}
             </div>
             <span className="faint small">{t("PNG ou JPG com fundo preto ou transparente: o fundo some e o brilho fica.")}</span>
           </div>

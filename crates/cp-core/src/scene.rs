@@ -25,6 +25,20 @@ use std::io::{Read, Write};
 
 /// Ponteiro nulo.
 pub const NONE: u32 = u32::MAX;
+
+/// Onde ficam as texturas no registro de cada tipo (os campos que apontam para um `.dds`).
+pub fn texture_slots(k: u32) -> Option<Vec<usize>> {
+    let range = |a: usize, b: usize| Some((a..=b).step_by(4).collect());
+    match k {
+        kind::BITMAP => range(112, 112),
+        kind::RADIO_BUTTON => range(112, 140),
+        kind::BUTTON => range(112, 124),
+        kind::THREE_SLICE => range(112, 120),
+        kind::NINE_SLICE => range(112, 144),
+        15 => range(112, 140),
+        _ => None,
+    }
+}
 /// Tamanho do registro de cada tipo de elemento (os tipos sem tamanho conhecido não aparecem nas
 /// cenas do menu; uma cena que os use não pode ser editada).
 const SIZES: [Option<usize>; 16] = [
@@ -55,6 +69,10 @@ pub mod kind {
     pub const RADIO_BUTTON: u32 = 4;
     pub const TEXT: u32 = 5;
     pub const BUTTON: u32 = 6;
+    /// faixa de 3 pedaços (esquerda, meio, direita)
+    pub const THREE_SLICE: u32 = 12;
+    /// painel de 9 pedaços (cantos, bordas e meio)
+    pub const NINE_SLICE: u32 = 13;
 }
 /// Tipos de evento.
 pub mod event {
@@ -424,6 +442,12 @@ impl Scene {
         let p = self.add_str(text);
         self.set_ptr(rec + off, p);
         Ok(())
+    }
+
+    /// Lê um campo numérico do registro.
+    pub fn u32_field(&self, id: u32, off: usize) -> Result<u32> {
+        let rec = self.by_id(id)?.rec;
+        self.u32_at(rec + off)
     }
 
     /// Um campo numérico do registro.

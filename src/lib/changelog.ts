@@ -6,6 +6,15 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.42.0",
+    title: "Partida grande no menu do jogo, menus novos",
+    items: [
+      { icon: "groups", title: "Partida grande direto na Escaramuça", text: "Na tela inicial nova, ao abrir a Escaramuça aparece um painel ao lado: jogadores (até 32), times, a IA e o mapa (os maiores, os seus também). Escolha e clique em Começar. Testado no jogo.", page: "features" },
+      { icon: "palette", title: "Outros menus no estilo da tela inicial", text: "Criar jogo, campanha, opções e multijogador ganham os botões, painéis e abas com borda neon da tela inicial, e a faixa de cima vai de uma borda à outra.", page: "features" },
+      { icon: "image", title: "Logo novo e ícones brancos", text: "O logo do CommandProject vem como padrão (dá para trocar pelo seu) e os ícones dos botões aparecem brancos (antes ficavam por baixo do fundo do botão).", page: "features" },
+    ],
+  },
+  {
     version: "0.41.0",
     title: "Partida grande dentro do jogo",
     items: [

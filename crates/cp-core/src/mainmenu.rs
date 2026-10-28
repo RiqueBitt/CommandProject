@@ -164,6 +164,9 @@ pub struct Commander {
     pub news_text: String,
 }
 
+/// Campo com a ordem de desenho do elemento (quem tem o número maior fica por cima).
+pub const ORDER: usize = 104;
+
 /// Pasta das texturas da tela "Comandante" (arquivos novos: o jogo acha sem mexer no índice).
 pub const TEX: &str = "/textures/ui/common/pc/frontend/cp/";
 const BLANK: &str = "/textures/ui/common/pc/frontend/blank.dds";
@@ -568,6 +571,10 @@ fn commander(s: &mut Scene, c: &Commander, column: &[(u32, Option<&str>)]) -> Re
         let r = s.rect(id)?.ok_or_else(|| Error::Other("botão sem posição".into()))?;
         let icon = s.clone_element(avatar, &format!("cp_icon_{id}"))?;
         s.set_str_field(icon, 112, &tex(icon_for(key)))?;
+        // ordem de desenho: depois do botão (com a do avatar, o fundo do botão ficava por cima e o
+        // ícone parecia cinza)
+        let order = s.u32_field(id, ORDER)?;
+        s.set_u32(icon, ORDER, order + 1)?;
         s.set_rect(icon, Rect::new(r.x0 + 26, r.x0 + 78, r.y0 + 11, r.y0 + 63))?;
         let mut kids = vec![icon];
         kids.extend(s.children(id)?);
@@ -661,9 +668,63 @@ pub const FRONTEND_SCENES: &[&str] = &[
     "/ui/scenes/frontend_manager/pc_frontend_manager.win.bdf",
 ];
 
+/// Textura nova (da "Comandante") para uma textura dos outros menus do jogo, pelo tipo do
+/// elemento: botões e abas viram as caixas de escolha com borda neon, as faixas de 3 pedaços e os
+/// painéis de 9 pedaços viram os painéis escuros com borda neon. O resto fica (e é pintado na cor
+/// escolhida pelo tema).
+pub fn restyle_texture(kind: u32, path: &str) -> Option<String> {
+    let p = path.to_ascii_lowercase().replace('\\', "/");
+    let file = p.rsplit('/').next()?.strip_suffix(".dds")?;
+    let dir = p.trim_end_matches(&format!("{file}.dds"));
+    let tex = |n: &str| Some(format!("{TEX}{n}.dds"));
+    let state = |f: &str| -> &'static str {
+        match f.rsplit('_').next() {
+            Some("o") => "o",
+            Some("w") => "w",
+            Some("at") => "at",
+            _ => "u",
+        }
+    };
+    let common = dir.ends_with("/frontend/common/");
+    match kind {
+        // botões comuns (Voltar, Começar, Enviar, ...) e as barras das opções ao passar o mouse
+        // os grandes (Voltar, Iniciar) ficam como os da tela inicial; os outros, caixas de escolha
+        kind::BUTTON if common && file.starts_with("button07") => tex(&format!("btn_{}", state(file))),
+        kind::BUTTON if common && file.starts_with("button") => tex(&format!("opt_{}", state(file))),
+        kind::BUTTON if dir.ends_with("/frontend/options/") && (file == "bar_o" || file == "bar_w") => tex(&format!("opt_{}", state(file))),
+        // abas e botões de escolha
+        kind::RADIO_BUTTON if dir.ends_with("/frontend/options/") && file.starts_with("btn_") => tex(&format!("opt_{}", state(file))),
+        kind::RADIO_BUTTON if dir.ends_with("/frontend/browser/") && file.starts_with("tab_") => tex(if file == "tab_d" { "opt_at" } else { "opt_u" }),
+        // faixas de 3 pedaços
+        kind::THREE_SLICE => {
+            let part = file.rsplit('_').next()?;
+            let known = ["left_bg", "newbg", "newbg_lrg", "dialog_bg01", "64h_bluebar", "bluebg", "32h_bar"];
+            if ["l", "c", "r"].contains(&part) && known.iter().any(|k| file == format!("{k}_{part}")) {
+                tex(&format!("p3_{part}"))
+            } else {
+                None
+            }
+        }
+        // painéis de 9 pedaços (listas, janelas, fundo das opções)
+        kind::NINE_SLICE => {
+            let f = file.trim_end_matches("_short");
+            let part = if f == "blackbg" { "c" } else { f.rsplit('_').next()? };
+            let base = f.trim_end_matches(&format!("_{part}"));
+            let known = ["blackbg", "dropdown_01", "scrollwindow", "bg"];
+            if ["tl", "t", "tr", "l", "c", "r", "bl", "b", "br"].contains(&part) && known.contains(&base) {
+                tex(&format!("p9_{part}"))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Um menu do jogo no visual "Comandante": a faixa azul vira o tom escuro por cima do vídeo (preso
-/// às bordas da tela, qualquer que seja o tamanho da cena), as linhas soltas somem e a faixa de
-/// cima fica escura. O resto (botões, painéis, listas) muda pelas texturas do tema.
+/// às bordas da tela, qualquer que seja o tamanho da cena), as linhas soltas somem, a faixa de
+/// cima fica escura e botões, abas, faixas e painéis ganham as texturas da tela inicial
+/// ([`restyle_texture`]).
 pub fn restyle_frontend(scene: &[u8]) -> Result<Vec<u8>> {
     let mut s = Scene::parse(scene)?;
     let tex = |n: &str| format!("{TEX}{n}.dds");
@@ -671,9 +732,9 @@ pub fn restyle_frontend(scene: &[u8]) -> Result<Vec<u8>> {
     let has = |s: &Scene, n: &str| s.by_name(n).ok().map(|e| e.id);
     let black = has(&s, "black_overlay");
     let blue = has(&s, "blue_overlay");
+    let all = s.elements()?;
     // um elemento da raiz cobrindo a tela (os de dentro de grupos ficam como estão)
     let root_ids: BTreeSet<u32> = {
-        let all = s.elements()?;
         let mut kids = BTreeSet::new();
         for e in &all {
             kids.extend(s.children(e.id)?);
@@ -695,6 +756,27 @@ pub fn restyle_frontend(scene: &[u8]) -> Result<Vec<u8>> {
     }
     if let Some(id) = has(&s, "top_blue_grad") {
         s.set_str_field(id, 112, &tex("topbar"))?;
+    }
+    // a faixa de cima e as linhas vão de uma borda à outra da tela (no 4:3 delas, viravam a borda de
+    // uma caixa no meio da tela)
+    let (w, _) = s.size();
+    let (left, right) = (w as i32 / 2 - 960, w as i32 / 2 + 960);
+    for n in ["top_blue_grad", "topline", "btmline"] {
+        if let Some(id) = has(&s, n) {
+            if let Some(r) = s.rect(id)? {
+                s.set_rect(id, Rect::new(left, right, r.y0, r.y1))?;
+            }
+        }
+    }
+    // texturas dos botões, abas, faixas e painéis
+    for e in &all {
+        let Some(slots) = crate::scene::texture_slots(e.kind) else { continue };
+        for off in slots {
+            let Ok(old) = s.str_field(e.id, off) else { continue };
+            if let Some(new) = restyle_texture(e.kind, &old) {
+                s.set_str_field(e.id, off, &new)?;
+            }
+        }
     }
     Ok(s.to_bytes())
 }
@@ -816,6 +898,21 @@ mod tests {
         assert_eq!(s.rect(new).unwrap().unwrap().y0, tut.y0 + STEP);
         assert!(s.events(new).unwrap().iter().any(|e| e.name == "ConsoleExecute" && e.param == "UI_Lua LOG('oi')"));
         let _ = NONE;
+    }
+
+    #[test]
+    fn other_menus_get_the_new_textures() {
+        let f = "/textures/ui/common/pc/frontend/";
+        assert_eq!(restyle_texture(kind::BUTTON, &format!("{f}common/button07_o.dds")), Some(format!("{TEX}btn_o.dds")));
+        assert_eq!(restyle_texture(kind::BUTTON, &format!("{f}common/button09_d.dds")), Some(format!("{TEX}opt_u.dds")));
+        assert_eq!(restyle_texture(kind::RADIO_BUTTON, &format!("{f}options/btn_at.dds")), Some(format!("{TEX}opt_at.dds")));
+        assert_eq!(restyle_texture(kind::THREE_SLICE, &format!("{f}skirmish/left_bg_c.dds")), Some(format!("{TEX}p3_c.dds")));
+        assert_eq!(restyle_texture(kind::NINE_SLICE, &format!("{f}options/bg_tl_short.dds")), Some(format!("{TEX}p9_tl.dds")));
+        assert_eq!(restyle_texture(kind::NINE_SLICE, &format!("{f}common/scrollwindow_br.dds")), Some(format!("{TEX}p9_br.dds")));
+        assert_eq!(restyle_texture(kind::NINE_SLICE, &format!("{f}blackbg.dds")), Some(format!("{TEX}p9_c.dds")));
+        // setas, ícones e o resto ficam
+        assert_eq!(restyle_texture(kind::BUTTON, &format!("{f}common/arr_01_dn_u.dds")), None);
+        assert_eq!(restyle_texture(kind::BITMAP, &format!("{f}blackbg.dds")), None);
     }
 
     #[test]
