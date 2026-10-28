@@ -65,7 +65,8 @@ categories = setmetatable({}, { __index = function(_, k) return cat({ tag = k })
 function EntityCategoryContains(c, u) return has(c, u.tags) end
 
 -- mapa
-ScenarioInfo = { size = { 512, 512 }, Options = { CPMode = mode, CPScore = '120', CPWaves = '4', CPPrep = '30', CPEvery = '40', CPRing = '60' } }
+ScenarioInfo = { name = 'Mapa Teste', size = { 512, 512 }, Options = { CPMode = mode, CPScore = os.getenv('CPSCORE') or '120', CPWaves = '4', CPPrep = '30', CPEvery = '40', CPRing = '60', CPHold = '60', CPMove = '100', CPMut = os.getenv('CPMUT'), CPEvents = os.getenv('CPEVENTS'), CPEventFirst = '30', CPEventEvery = '60' } }
+if mode == 'none' then ScenarioInfo.Options.CPMode = nil end
 function GetTerrainHeight() return 10 end
 function GetSurfaceHeight(x, z) if x < 40 and z < 40 then return 12 end return 10 end
 function VDist2(a, b, c, d) return math.sqrt((a - c) ^ 2 + (b - d) ^ 2) end
@@ -83,7 +84,8 @@ local function tagsFor(bp)
     return t
 end
 local function newUnit(bp, army, x, z)
-    local u = { bp = bp, army = army, x = x, z = z, hp = 100, max = 100, dead = false, tags = tagsFor(bp), idle = true }
+    nextId = (nextId or 0) + 1
+    local u = { id = nextId, bp = bp, army = army, x = x, z = z, hp = 100, max = 100, dead = false, tags = tagsFor(bp), idle = true }
     function u:IsDead() return self.dead end
     function u:Kill() self.dead = true end
     function u:Destroy() self.dead = true end
@@ -94,6 +96,10 @@ local function newUnit(bp, army, x, z)
     function u:GetHealth() return self.hp end
     function u:GetMaxHealth() return self.max end
     function u:AdjustHealth(_, d) self.hp = self.hp + d end
+    function u:SetMaxHealth(v) self.max = v end
+    function u:SetHealth(_, v) self.hp = v end
+    function u:SetCustomName(n) self.name = n end
+    function u:GetEntityId() return self.id end
     table.insert(units, u)
     return u
 end
@@ -113,6 +119,9 @@ end
 local moves = 0
 function IssueAggressiveMove(list, pos) moves = moves + 1; for _, u in ipairs(list) do u.idle = false; u.goal = pos end end
 function SetIgnoreArmyUnitCap() end
+restricted = 0
+function AddBuildRestriction() restricted = restricted + 1 end
+function SetUIBuildRestrictions() end
 
 -- exércitos
 ArmyBrains = {}
@@ -132,7 +141,12 @@ for i = 1, nplayers do
     end
     function b:GiveResource(k, v) self.res[k] = self.res[k] + v end
     function b:GetFactionIndex() return 1 + (self.index % 3) end
-    function b:GetArmyStat(k) return { Value = self.kills } end
+    function b:GetArmyStat(k)
+        if k:match('Produced_Mass') then return { Value = now * 3 * self.index } end
+        if k:match('Produced_Energy') then return { Value = now * 30 } end
+        return { Value = self.kills }
+    end
+    function b:GetEconomyIncome(k) return k == 'MASS' and 0.3 * self.index or 3 end
     function b:GetListOfUnits(c)
         local out = {}
         for _, u in ipairs(units) do if u.army == self.index and not u.dead and has(c, u.tags) then table.insert(out, u) end end
@@ -147,7 +161,7 @@ function GetFocusArmy() return 1 end
 
 local arrows, viz = 0, 0
 function import(path)
-    if path:lower():match('objectivearrow') then return { ObjectiveArrow = function() arrows = arrows + 1 return {} end } end
+    if path:lower():match('objectivearrow') then return { ObjectiveArrow = function() arrows = arrows + 1 return { Destroy = function() arrows = arrows - 1 end } end } end
     if path:lower():match('vizmarker') then return { VizMarker = function() viz = viz + 1 return {} end } end
     error('import ' .. path)
 end
@@ -189,9 +203,18 @@ while now < maxTime do
         for _, u in ipairs(units) do if u.army ~= 1 and not u.dead and not u.tags.COMMAND then k = k + 1; if k % 2 == 0 then u.dead = true end end end
         if now > 200 then for _, u in ipairs(units) do if u.army ~= 1 and not u.tags.COMMAND then u.dead = true end end end
     end
+    if Sync.CPBoard and now % 50 == 0 then
+        local l = {}
+        for _, x in ipairs(Sync.CPBoard.lines) do table.insert(l, x[1]) end
+        table.insert(printed, string.format('[%5.0fs PLACAR   ] %s | %s', now, Sync.CPBoard.title, table.concat(l, ' | ')))
+    end
+    if Sync.CPSound then sounds = (sounds or 0) + #Sync.CPSound end
     if Sync.CPRecord then break end
+    Sync.CPBoard = nil
+    Sync.CPSound = nil
 end
 for _, l in ipairs(printed) do print(l) end
-print(string.format('fim: t=%d criados=%d ordens=%d setas=%d visao=%d', now, created, moves, arrows, viz))
+print(string.format('fim: t=%d criados=%d ordens=%d setas=%d visao=%d sons=%d restricoes=%d', now, created, moves, arrows, viz, sounds or 0, restricted))
 for _, b in ipairs(ArmyBrains) do print(b.Name, 'time', b.team, 'derrotado', tostring(b:IsDefeated()), 'massa', b.res.MASS, 'energia', b.res.ENERGY, 'pesquisa', b.res.RESEARCH) end
-if Sync.CPRecord then local r = Sync.CPRecord print('recorde', r.mode, tostring(r.won), r.seconds, r.waves, r.score) end
+if Sync.CPRecord then local r = Sync.CPRecord print('recorde', r.mode, tostring(r.won), r.seconds, r.waves, r.score, r.map, r.players) end
+for _, u in ipairs(units) do if u.max ~= 100 then print('vida', u.bp, u.max, u.name or '') break end end

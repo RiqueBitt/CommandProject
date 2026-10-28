@@ -6,6 +6,17 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.49.0",
+    title: "Mais minigames, mutadores e desafios",
+    items: [
+      { icon: "sports_esports", title: "5 modos novos", text: "Rei da Colina (uma colina que muda de lugar), Escolta (proteja o VIP do seu time), Corrida de Recursos (primeiro a produzir a meta de massa), Sobrevivência Infinita (ondas até a base cair, com chefe a cada 5) e Caça ao Tesouro (caixas com prêmios pelo mapa).", page: "home" },
+      { icon: "tune", title: "Mutadores e eventos", text: "Só aéreo, vida em dobro, renda em dobro e comandantes resistentes, em qualquer partida. Eventos aleatórios: chuva de meteoros numa área marcada, reforço para quem está atrás, pesquisa e suprimentos. Na sala do jogo, a seção EXTRAS tem combinações prontas (Eventos, Caos, Só aéreo, Tanques).", page: "home" },
+      { icon: "leaderboard", title: "Placar fixo, sons e defesa mais esperta", text: "O placar dos minigames fica fixo no canto da tela, e pontos tomados e ondas tocam sons do próprio jogo. A Defesa tem chefe na onda final (e a cada 5) e a dificuldade acompanha o seu desempenho: limpou rápido, a próxima onda cresce; está sofrendo, chegam mais suprimentos.", page: "home" },
+      { icon: "workspace_premium", title: "Desafio da semana, conquistas, histórico e torneio", text: "No Início, o quadro Minigames ganhou abas: o desafio da semana (mesmo modo, mutadores e mapa para todos), 16 conquistas, o histórico das últimas partidas com gráfico, e uma chave de torneio entre amigos.", page: "home" },
+      { icon: "map", title: "Prévia dos pontos de controle", text: "Na Partida grande, a prévia do mapa mostra onde ficam os pontos de controle e a colina antes de jogar.", page: "home" },
+    ],
+  },
+  {
     version: "0.48.0",
     title: "Minigames: 5 modos novos",
     items: [

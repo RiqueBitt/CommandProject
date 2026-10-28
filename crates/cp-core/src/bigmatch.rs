@@ -20,7 +20,7 @@ const ENTRY: &str = "function StartCommandLineSession(mapName, isPerfTest)\n";
 const HOOK: &str = "\tif CPBigMatchStart and CPBigMatchStart(mapName) then return end -- CommandProject big match\n";
 
 /// Versão do código do mod: quando muda, o launcher monta o mod de novo.
-pub const MOD_VERSION: &str = "1.14.0";
+pub const MOD_VERSION: &str = "1.15.0";
 /// Cores de exército na partida grande: as 10 do jogo e mais 14 (o mod acrescenta só com `/cpmatch`).
 pub const COLORS: i32 = 32;
 /// Mapas com mais de 8 bases são gravados com este tipo: o lobby do jogo (8 posições, que trava com
@@ -125,6 +125,14 @@ pub struct MatchOptions {
     pub start_res: u32,
     /// pontos de controle (0 = o padrão do modo)
     pub mode_points: u32,
+    /// Rei da Colina: segundos segurando a colina para vencer (0 = 180)
+    pub mode_hold: u32,
+    /// mutadores (de [`MUTATORS`]), valem em qualquer partida
+    pub mutators: Vec<String>,
+    /// eventos aleatórios (meteoros, reforço, pesquisa, suprimentos)
+    pub events: bool,
+    /// desafio da semana (número da semana; 0 = não é desafio)
+    pub week: u32,
 }
 
 /// Restrições de unidades do lobby do jogo (`/lua/ui/lobby/restrictedUnitsData.lua`), na ordem da tela.
@@ -157,6 +165,10 @@ impl Default for MatchOptions {
             arena_count: 0,
             start_res: 100,
             mode_points: 0,
+            mode_hold: 0,
+            mutators: Vec::new(),
+            events: false,
+            week: 0,
         }
     }
 }
@@ -297,9 +309,10 @@ pub fn encode(m: &BigMatch) -> Result<String> {
         out.push_str(&format!(";CPMode={mode}"));
         // só as opções do modo escolhido
         let extra = [
-            ("CPScore", o.mode_score.min(100_000), mode == "domination"),
+            ("CPScore", o.mode_score.min(1_000_000), matches!(mode, "domination" | "race" | "treasure")),
+            ("CPHold", o.mode_hold.min(1800), mode == "koth"),
             ("CPWaves", o.mode_waves.min(60), mode == "defense"),
-            ("CPPrep", o.mode_prep.min(1200), mode == "defense"),
+            ("CPPrep", o.mode_prep.min(1200), matches!(mode, "defense" | "survival")),
             ("CPArenaCount", o.arena_count.min(5), mode == "arena"),
             ("CPPoints", o.mode_points.min(7), matches!(mode, "domination" | "total" | "supreme")),
         ];
@@ -311,6 +324,23 @@ pub fn encode(m: &BigMatch) -> Result<String> {
         if o.start_res != 100 {
             out.push_str(&format!(";CPStartRes={}", o.start_res.min(1000)));
         }
+        if o.week > 0 {
+            out.push_str(&format!(";CPWeek={}", o.week));
+        }
+    }
+    // mutadores e eventos valem também numa partida normal
+    let mut muts: Vec<&str> = Vec::new();
+    for m in &o.mutators {
+        let k = pick(m, MUTATORS, "mutador")?;
+        if !muts.contains(&k) {
+            muts.push(k);
+        }
+    }
+    if !muts.is_empty() {
+        out.push_str(&format!(";CPMut={}", muts.join(",")));
+    }
+    if o.events {
+        out.push_str(";CPEvents=1");
     }
     for s in &m.slots {
         // no jogo o time 1 é "sozinho" e os times de verdade começam no 2
@@ -515,13 +545,15 @@ const MINIGAMES: &str = include_str!("minigames.lua");
 const MINIGAMES_FILE: &str = "lua/sim/CPMinigames.lua";
 const VICTORY_FILE: &str = "lua/sim/victory.lua";
 const VICTORY_ENTRY: &str = "function CheckVictory(scenarioInfo)\n";
-const VICTORY_HOOK: &str = "    -- CommandProject minigames\n    if scenarioInfo.Options and scenarioInfo.Options.CPMode and scenarioInfo.Options.CPMode ~= '' then\n        local ok, err = pcall(function() import('/lua/sim/CPMinigames.lua').Start(scenarioInfo) end)\n        if not ok then WARN('*CommandProject minigame: ' .. tostring(err)) end\n    end\n";
+const VICTORY_HOOK: &str = "    -- CommandProject minigames\n    local cpo = scenarioInfo.Options or {}\n    if (cpo.CPMode and cpo.CPMode ~= '') or (cpo.CPMut and cpo.CPMut ~= '') or cpo.CPEvents == '1' then\n        local ok, err = pcall(function() import('/lua/sim/CPMinigames.lua').Start(scenarioInfo) end)\n        if not ok then WARN('*CommandProject minigame: ' .. tostring(err)) end\n    end\n";
 const USERSYNC_FILE: &str = "lua/UserSync.lua";
 const USERSYNC_ENTRY: &str = "function OnSync()\n";
-const USERSYNC_HOOK: &str = "    if Sync.CPRecord then CPMinigameRecord(Sync.CPRecord) end -- CommandProject minigames\n";
+const USERSYNC_HOOK: &str = "    if Sync.CPRecord then CPMinigameRecord(Sync.CPRecord) end -- CommandProject minigames\n    if Sync.CPBoard then CPMinigameBoard(Sync.CPBoard) end\n    if Sync.CPSound then CPMinigameSounds(Sync.CPSound) end\n";
 const USERSYNC_CODE: &str = include_str!("minigames_records.lua");
 /// Modos dos minigames (`CPMode`).
-pub const MODES: &[&str] = &["total", "arena", "defense", "domination", "supreme"];
+pub const MODES: &[&str] = &["total", "arena", "defense", "domination", "supreme", "survival", "koth", "vip", "race", "treasure"];
+/// Mutadores (`CPMut`): só aéreo, vida em dobro, renda em dobro, comandantes resistentes.
+pub const MUTATORS: &[&str] = &["air", "hp", "res", "cdr"];
 
 fn insert_after(text: &str, entry: &str, hook: &str, mark: &str, what: &str) -> Result<String> {
     if text.contains(mark) {
@@ -935,6 +967,13 @@ mod tests {
         let e = encode(&m).unwrap();
         assert!(e.starts_with("Victory=demoralization;"), "{e}");
         assert!(e.contains(";CPMode=domination;CPScore=800;CPStartRes=200|"), "{e}");
+        m.options.mutators = vec!["hp".into(), "air".into(), "hp".into()];
+        m.options.events = true;
+        let e = encode(&m).unwrap();
+        assert!(e.contains(";CPMut=hp,air;CPEvents=1|"), "{e}");
+        m.options.mutators = vec!["voar".into()];
+        assert!(encode(&m).is_err());
+        m.options.mutators.clear();
         m.options.mode = "xadrez".into();
         assert!(encode(&m).is_err());
         m.options.mode = String::new();

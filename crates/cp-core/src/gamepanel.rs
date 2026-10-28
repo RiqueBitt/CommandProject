@@ -316,8 +316,26 @@ fn field(block: &str, key: &str) -> Option<String> {
                 let rest = block[off..].trim_start();
                 if let Some(rest) = rest.strip_prefix('=') {
                     let rest = rest.trim_start();
+                    // texto entre aspas: até a aspa que fecha (vírgulas dentro valem)
+                    if let Some(q) = rest.chars().next().filter(|c| *c == '\'' || *c == '"') {
+                        let mut out = String::new();
+                        let mut esc = false;
+                        for c in rest[1..].chars() {
+                            if esc {
+                                out.push(c);
+                                esc = false;
+                            } else if c == '\\' {
+                                esc = true;
+                            } else if c == q {
+                                return Some(out);
+                            } else {
+                                out.push(c);
+                            }
+                        }
+                        return Some(out);
+                    }
                     let end = rest.find([',', '\n', '}']).unwrap_or(rest.len());
-                    return Some(rest[..end].trim().trim_matches(|c| c == '\'' || c == '"').to_string());
+                    return Some(rest[..end].trim().to_string());
                 }
             }
         }
@@ -374,6 +392,16 @@ pub fn mode_name(mode: &str, pt: bool) -> &'static str {
         ("domination", false) => "Strategic Domination",
         ("supreme", true) => "Projeto Supremo",
         ("supreme", false) => "Supreme Project",
+        ("survival", true) => "Sobrevivência Infinita",
+        ("survival", false) => "Endless Survival",
+        ("koth", true) => "Rei da Colina",
+        ("koth", false) => "King of the Hill",
+        ("vip", true) => "Escolta",
+        ("vip", false) => "Escort",
+        ("race", true) => "Corrida de Recursos",
+        ("race", false) => "Resource Race",
+        ("treasure", true) => "Caça ao Tesouro",
+        ("treasure", false) => "Treasure Hunt",
         _ => "",
     }
 }
@@ -397,9 +425,94 @@ pub fn parse_records(prefs: &str) -> Vec<MinigameRecord> {
         .collect()
 }
 
+/// Uma partida de minigame do histórico (`CPHistory` no `Game.prefs`, as últimas 40).
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MinigameMatch {
+    pub seq: u32,
+    pub mode: String,
+    pub won: bool,
+    pub seconds: u32,
+    pub waves: u32,
+    pub score: u32,
+    pub map: String,
+    /// mutadores, separados por vírgula
+    pub mutators: String,
+    /// desafio da semana (0 = não)
+    pub week: u32,
+    pub events: bool,
+    pub players: u32,
+    /// quando o launcher viu a partida pela primeira vez (segundos desde 1970)
+    pub date: Option<i64>,
+}
+
+/// Os blocos `{ ... }` do primeiro nível de uma lista Lua.
+fn items(list: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+    for (i, c) in list.char_indices() {
+        match c {
+            '{' => {
+                if depth == 0 {
+                    start = i + 1;
+                }
+                depth += 1;
+            }
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    out.push(&list[start..i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// O histórico dos minigames no `Game.prefs`, do mais antigo ao mais novo.
+pub fn parse_history(prefs: &str) -> Vec<MinigameMatch> {
+    let Some(b) = block(prefs, "CPHistory") else { return vec![] };
+    let num = |b: &str, k: &str| field(b, k).and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite() && *v >= 0.0).map(|v| v as u32).unwrap_or(0);
+    let text = |b: &str, k: &str| field(b, k).map(|v| v.chars().filter(|c| !c.is_control()).take(80).collect::<String>()).unwrap_or_default();
+    items(b)
+        .into_iter()
+        .filter_map(|e| {
+            let mode = text(e, "mode");
+            if !crate::bigmatch::MODES.contains(&mode.as_str()) {
+                return None;
+            }
+            Some(MinigameMatch {
+                seq: num(e, "seq"),
+                mode,
+                won: field(e, "won").as_deref() == Some("true"),
+                seconds: num(e, "seconds"),
+                waves: num(e, "waves"),
+                score: num(e, "score"),
+                map: text(e, "map"),
+                mutators: text(e, "mut"),
+                week: num(e, "week"),
+                events: field(e, "events").as_deref() == Some("true"),
+                players: num(e, "players"),
+                date: None,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_minigame_history() {
+        let prefs = "CPHistory = {\n    {\n        events = true,\n        map = 'Seton\\'s',\n        mode = 'survival',\n        mut = 'hp,res',\n        players = 4,\n        score = 0,\n        seconds = 900,\n        seq = 3,\n        waves = 12,\n        week = 0,\n        won = false,\n    },\n    {\n        mode = 'xadrez',\n        seq = 4,\n    },\n    {\n        mode = 'koth',\n        seq = 5,\n        won = true,\n        score = 180,\n    },\n},\n";
+        let h = parse_history(prefs);
+        assert_eq!(h.len(), 2);
+        assert_eq!((h[0].mode.as_str(), h[0].waves, h[0].seq, h[0].events, h[0].mutators.as_str()), ("survival", 12, 3, true, "hp,res"));
+        assert!(h[1].won && h[1].score == 180);
+    }
 
     #[test]
     fn reads_the_minigame_records() {

@@ -336,7 +336,7 @@ export interface MatchOptions {
   /** som do clima dentro do jogo (sons de ambiente do próprio jogo) */
   weatherSound: boolean;
   /** minigame (CPMode): "" = partida normal */
-  mode?: "" | "total" | "arena" | "defense" | "domination" | "supreme";
+  mode?: "" | "total" | "arena" | "defense" | "domination" | "supreme" | "survival" | "koth" | "vip" | "race" | "treasure";
   /** Dominação: pontos para vencer (0 = 500) */
   modeScore?: number;
   /** Defesa: ondas (0 = 15) e segundos para preparar (0 = 180) */
@@ -348,6 +348,14 @@ export interface MatchOptions {
   startRes?: number;
   /** pontos de controle (0 = o padrão do modo) */
   modePoints?: number;
+  /** Rei da Colina: segundos na colina para vencer (0 = 180) */
+  modeHold?: number;
+  /** mutadores (air, hp, res, cdr) */
+  mutators?: string[];
+  /** eventos aleatórios */
+  events?: boolean;
+  /** desafio da semana (número da semana; 0 = não é desafio) */
+  week?: number;
 }
 export interface BigMatch { map: string; /** lado do mapa (confere o limite de jogadores) */ size?: number; slots: MatchSlot[]; options: MatchOptions; /** partida com amigos pela rede */ net?: MatchNet }
 /** Papel numa partida com amigos: o anfitrião abre a porta, quem entra conecta no endereço do convite. */

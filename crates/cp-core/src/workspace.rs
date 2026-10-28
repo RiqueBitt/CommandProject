@@ -410,9 +410,10 @@ impl Workspace {
             });
         }
         // minigames prontos (os outros ficam na seção MODO da sala de Batalha)
-        let games: [(&str, &str, &str, usize, u32); 2] = [
+        let games: [(&str, &str, &str, usize, u32); 3] = [
             ("defense", "ÚLTIMA LINHA DE DEFESA", "LAST LINE OF DEFENSE", 4, 2),
             ("arena", "ARENA DOS EXPERIMENTAIS", "EXPERIMENTAL ARENA", 4, 0),
+            ("survival", "SOBREVIVÊNCIA INFINITA", "ENDLESS SURVIVAL", 4, 2),
         ];
         for (mode, pt_label, en_label, players, teams) in games {
             if 2 + used(edit, Place::Skirmish) >= MAX_SUBMENU {
@@ -536,6 +537,34 @@ impl Workspace {
             .and_then(|p| std::fs::read(p).ok())
             .map(|b| crate::gamepanel::parse_records(&String::from_utf8_lossy(&b)))
             .unwrap_or_default()
+    }
+
+    /// Histórico dos minigames (o mais novo primeiro), com a data em que o launcher viu cada partida
+    /// pela primeira vez (o jogo não grava a data).
+    pub fn minigame_history(&self) -> Vec<crate::gamepanel::MinigameMatch> {
+        let Some(mut list) = crate::perf::prefs_path()
+            .and_then(|p| std::fs::read(p).ok())
+            .map(|b| crate::gamepanel::parse_history(&String::from_utf8_lossy(&b)))
+        else {
+            return vec![];
+        };
+        let path = self.data_dir.join("minigames-history.json");
+        let mut dates: std::collections::BTreeMap<u32, i64> =
+            std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let now = chrono::Utc::now().timestamp();
+        let mut changed = false;
+        for m in &mut list {
+            let d = *dates.entry(m.seq).or_insert_with(|| {
+                changed = true;
+                now
+            });
+            m.date = Some(d);
+        }
+        if changed {
+            let _ = std::fs::write(&path, serde_json::to_vec(&dates).unwrap_or_default());
+        }
+        list.reverse();
+        list
     }
 
     pub fn prepare_start_screen(&mut self) -> Result<Vec<String>> {

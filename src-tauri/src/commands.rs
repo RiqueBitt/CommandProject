@@ -128,6 +128,12 @@ pub async fn minigame_records() -> R<Vec<cp_core::gamepanel::MinigameRecord>> {
     Ok(tauri::async_runtime::spawn_blocking(cp_core::workspace::Workspace::minigame_records).await.unwrap_or_default())
 }
 
+/// Histórico dos minigames (o mais novo primeiro).
+#[tauri::command]
+pub async fn minigame_history(state: State<'_, AppState>) -> R<Vec<cp_core::gamepanel::MinigameMatch>> {
+    with_ws(&state.ws, |ws| Ok(ws.minigame_history())).await
+}
+
 #[tauri::command]
 pub async fn recover(state: State<'_, AppState>) -> R<Option<String>> {
     with_ws(&state.ws, |ws| ws.recover()).await

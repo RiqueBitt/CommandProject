@@ -52,7 +52,10 @@ pub struct Texts {
     pub lobby_start: &'static str,
     /// seção MODO: as 3 vitórias da partida normal e os 5 minigames
     pub mode: &'static str,
-    pub mode_labels: [&'static str; 8],
+    pub mode_labels: [&'static str; 13],
+    /// seção EXTRAS: combinações de mutadores e eventos
+    pub extras: &'static str,
+    pub extras_labels: [&'static str; 5],
 }
 
 pub const PT: Texts = Texts {
@@ -76,7 +79,9 @@ pub const PT: Texts = Texts {
     lobby_sub: "Mais de 8 jogadores contra a IA. Suas escolhas ficam guardadas.",
     lobby_start: "INICIAR PARTIDA GRANDE",
     mode: "MODO (VITÓRIA OU MINIGAME)",
-    mode_labels: ["NORMAL", "TUDO", "SEM FIM", "GUERRA", "ARENA", "DEFESA", "DOMÍNIO", "SUPREMO"],
+    mode_labels: ["NORMAL", "TUDO", "SEM FIM", "GUERRA", "ARENA", "DEFESA", "DOMÍNIO", "SUPREMO", "INFINITO", "COLINA", "ESCOLTA", "CORRIDA", "TESOURO"],
+    extras: "EXTRAS (MUTADORES E EVENTOS)",
+    extras_labels: ["NENHUM", "EVENTOS", "CAOS", "SÓ AÉREO", "TANQUES"],
 };
 
 pub const EN: Texts = Texts {
@@ -100,12 +105,14 @@ pub const EN: Texts = Texts {
     lobby_sub: "More than 8 players against the AI. Your choices are kept.",
     lobby_start: "START BIG MATCH",
     mode: "MODE (VICTORY OR MINIGAME)",
-    mode_labels: ["NORMAL", "ALL", "ENDLESS", "WAR", "ARENA", "DEFENSE", "CONTROL", "SUPREME"],
+    mode_labels: ["NORMAL", "ALL", "ENDLESS", "WAR", "ARENA", "DEFENSE", "CONTROL", "SUPREME", "SURVIVE", "HILL", "ESCORT", "RACE", "TREASURE"],
+    extras: "EXTRAS (MUTATORS AND EVENTS)",
+    extras_labels: ["NONE", "EVENTS", "CHAOS", "AIR ONLY", "TANKS"],
 };
 
 const AI_KEYS: [&str; 4] = ["Easy", "Normal", "Hard", "Cheat"];
 /// Botões da seção MODO: (minigame, vitória). Os 3 primeiros são a partida normal.
-const MODE_KEYS: [(&str, &str); 8] = [
+const MODE_KEYS: [(&str, &str); 13] = [
     ("", "demoralization"),
     ("", "domination"),
     ("", "sandbox"),
@@ -114,7 +121,14 @@ const MODE_KEYS: [(&str, &str); 8] = [
     ("defense", ""),
     ("domination", ""),
     ("supreme", ""),
+    ("survival", ""),
+    ("koth", ""),
+    ("vip", ""),
+    ("race", ""),
+    ("treasure", ""),
 ];
+/// Botões da seção EXTRAS: (mutadores, eventos).
+const EXTRAS_KEYS: [(&str, bool); 5] = [("", false), ("", true), ("hp,res,cdr", true), ("air", false), ("hp,cdr", false)];
 const UNIT_CAPS: [u32; 3] = [250, 500, 1000];
 
 // medidas do painel (unidades da cena da sala, 640 × 480: a área 16:9 vai de x −640 a 1280; a
@@ -122,11 +136,11 @@ const UNIT_CAPS: [u32; 3] = [250, 500, 1000];
 const LX0: i32 = -620;
 const LX1: i32 = -224;
 const LY0: i32 = -72;
-const LY1: i32 = 688;
+const LY1: i32 = 752;
 const LIN0: i32 = LX0 + 16;
 const LIN1: i32 = LX1 - 16;
 /// Mapas na lista da sala.
-pub const LOBBY_MAPS: usize = 8;
+pub const LOBBY_MAPS: usize = 10;
 /// Jogadores (as partidas de até 8 são as da própria sala).
 const LOBBY_PLAYERS: [u32; 6] = [10, 12, 16, 20, 24, 32];
 
@@ -217,7 +231,7 @@ pub fn add_lobby_panel_with(scene: &[u8], maps: &[MenuMap], t: &Texts, thumbs: &
     // o primeiro grupo de botões de opção sai de um grupo comum; os outros, dele
     let mut radio_t: Option<u32> = None;
     let mut g = 0;
-    let mut group = |s: &mut Scene, panel: &mut Vec<u32>, items: Vec<(String, String, Rect)>, tiles: Option<&[bool]>| -> Result<()> {
+    let mut group = |s: &mut Scene, panel: &mut Vec<u32>, items: Vec<(String, String, Rect)>, tiles: Option<&[bool]>, font: &str| -> Result<()> {
         g += 1;
         let gid = match radio_t {
             Some(r) => s.clone_element(r, &format!("cp_lb_group{g}"))?,
@@ -255,7 +269,7 @@ pub fn add_lobby_panel_with(scene: &[u8], maps: &[MenuMap], t: &Texts, thumbs: &
                 s.set_str_field(l, 108, "pc_body_font_narrow_1")?;
                 s.set_rect(l, Rect::new(r.x0 + 2, r.x1 - 2, r.y1 - 22, r.y1 - 2))?;
             } else {
-                s.set_str_field(l, 108, "pc_title_font_2")?;
+                s.set_str_field(l, 108, font)?;
                 s.set_rect(l, Rect::new(r.x0 + 4, r.x1 - 4, r.y0 + 3, r.y1 - 3))?;
             }
             show(s, l)?;
@@ -289,7 +303,8 @@ pub fn add_lobby_panel_with(scene: &[u8], maps: &[MenuMap], t: &Texts, thumbs: &
         let rects = grid(items.len(), cols, *y + 24, bh);
         let rows = (items.len() as i32 + cols - 1) / cols;
         let list = items.into_iter().zip(rects).map(|((l, c), r)| (l, c, r)).collect();
-        group(s, panel, list, None)?;
+        // botões estreitos (5 por linha): letra mais fina
+        group(s, panel, list, None, if cols >= 5 { "pc_body_font_narrow_2" } else { "pc_title_font_2" })?;
         *y += 24 + rows * (bh + 4) + 6;
         Ok(())
     };
@@ -299,24 +314,26 @@ pub fn add_lobby_panel_with(scene: &[u8], maps: &[MenuMap], t: &Texts, thumbs: &
     section(&mut s, &mut panel, t.ai, t.short_ai_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("ai", format!("'{}'", AI_KEYS[i])))).collect(), 4, &mut y)?;
     section(&mut s, &mut panel, t.faction, t.faction_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("faction", i.to_string()))).collect(), 4, &mut y)?;
     let mode = |m: &str, v: &str| format!("import('/lua/SinglePlayerLaunch.lua').CPBMSetMode('{m}', '{v}')");
-    section(&mut s, &mut panel, t.mode, t.mode_labels.iter().zip(MODE_KEYS).map(|(l, (m, v))| (l.to_string(), mode(m, v))).collect(), 4, &mut y)?;
+    section(&mut s, &mut panel, t.mode, t.mode_labels.iter().zip(MODE_KEYS).map(|(l, (m, v))| (l.to_string(), mode(m, v))).collect(), 5, &mut y)?;
+    let extras = |m: &str, e: bool| format!("import('/lua/SinglePlayerLaunch.lua').CPBMSetExtras('{m}', {e})");
+    section(&mut s, &mut panel, t.extras, t.extras_labels.iter().zip(EXTRAS_KEYS).map(|(l, (m, e))| (l.to_string(), extras(m, e))).collect(), 5, &mut y)?;
     section(&mut s, &mut panel, t.units, UNIT_CAPS.iter().map(|u| (u.to_string(), set("units", u.to_string()))).collect(), 3, &mut y)?;
     // mapas: miniaturas em 2 linhas de 4 (o nome embaixo de cada uma)
     text(&mut s, &mut panel, t.map, "pc_title_font_2", Rect::new(LIN0, LIN1, y, y + 24))?;
-    let tile = (LIN1 - LIN0 - 6 * 3) / 4;
+    let tile = (LIN1 - LIN0 - 6 * 4) / 5;
     let items = maps
         .iter()
         .enumerate()
         .map(|(i, m)| {
-            let name: String = m.name.chars().filter(|c| !c.is_control()).take(12).collect();
-            let (c, r) = (i as i32 % 4, i as i32 / 4);
+            let name: String = m.name.chars().filter(|c| !c.is_control()).take(10).collect();
+            let (c, r) = (i as i32 % 5, i as i32 / 5);
             let x = LIN0 + (tile + 6) * c;
             let yy = y + 24 + (tile + 4) * r;
             (format!("{} · {}", m.bases, name.to_uppercase()), set("map", format!("'{}'", m.path)), Rect::new(x, x + tile, yy, yy + tile))
         })
         .collect();
     let has: Vec<bool> = (0..maps.len()).map(|i| thumbs.get(i).copied().unwrap_or(false)).collect();
-    group(&mut s, &mut panel, items, Some(&has))?;
+    group(&mut s, &mut panel, items, Some(&has), "pc_body_font_narrow_1")?;
 
     // iniciar: o botão grande da sala (com o texto e a seta dele)
     let start = s.clone_element(launch_t, "cp_lb_start")?;
@@ -419,6 +436,18 @@ mod tests {
             MenuMap { path: "/maps/CP_32/CP_32_scenario.lua".into(), name: "Meu mapa 32".into(), bases: 32, size: 2048 },
             MenuMap { path: "/maps/SC2_MP_308/SC2_MP_308_scenario.lua".into(), name: "Seton's Clutch".into(), bases: 8, size: 1024 },
         ];
+        // com 10 mapas (2 linhas de miniaturas) tudo ainda cabe acima do botão
+        let mut many = maps.clone();
+        for i in 0..8 {
+            many.push(MenuMap { path: format!("/maps/M{i}/M{i}_scenario.lua"), name: format!("Mapa {i}"), bases: 10, size: 1024 });
+        }
+        let full = Scene::parse(&add_lobby_panel(&lobby, &many, &PT).unwrap()).unwrap();
+        let top = full.rect(full.by_name("cp_lb_start").unwrap().id).unwrap().unwrap().y0;
+        for e in full.elements().unwrap().iter().filter(|e| e.name.starts_with("cp_lb_g")) {
+            if let Ok(Some(r)) = full.rect(e.id) {
+                assert!(r.y1 <= top, "{} passa do botão: {} > {top}", e.name, r.y1);
+            }
+        }
         let out = add_lobby_panel(&lobby, &maps, &PT).unwrap();
         let s = Scene::parse(&out).unwrap();
         let g = s.by_name("cp_lb_group1").unwrap();
@@ -432,6 +461,8 @@ mod tests {
         assert!(s.events(start).unwrap().iter().all(|e| e.name != "SkirmishLaunch"));
         // MODO: 8 botões, o da Arena chama o minigame
         let arena = s.by_name("cp_lb_g5_b4").unwrap().id;
+        let chaos = s.by_name("cp_lb_g6_b2").unwrap().id;
+        assert!(s.events(chaos).unwrap().iter().any(|e| e.param.contains("CPBMSetExtras('hp,res,cdr', true)")));
         assert!(s.events(arena).unwrap().iter().any(|e| e.param.contains("CPBMSetMode('arena', '')")), "{:?}", s.events(arena).unwrap());
         // tudo cabe acima do botão de iniciar
         let start_top = s.rect(start).unwrap().unwrap().y0;

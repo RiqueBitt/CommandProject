@@ -2,7 +2,7 @@
 // todos...). O lobby do jogo só tem 8 vagas; aqui cada base vira você, uma IA ou fica vazia, e o
 // launcher abre o jogo direto na partida.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MINIGAMES, minigame } from "../lib/minigames";
+import { MINIGAMES, MUTATORS, minigame, modePoints, previewPoints, weeklyChallenge, type Mutator } from "../lib/minigames";
 import CrashNotice from "../components/CrashNotice";
 import MatchInvite from "../components/MatchInvite";
 import { Empty, Field, Icon, Notice, Switch, TaskProgress } from "../components/ui";
@@ -64,8 +64,9 @@ const DEFAULT_OPTIONS: MatchOptions = {
   victory: "demoralization", unitCap: 500, fog: "explored", speed: "normal", noRush: 0, prebuilt: false, civilians: "enemy",
   restrictions: [], cheats: false, shareUnitCap: false, spawn: "fixed",
   weather: "", weatherAmount: 1, weatherSound: true,
-  mode: "", modeScore: 0, modeWaves: 0, modePrep: 0, arenaCount: 0, startRes: 100, modePoints: 0,
+  mode: "", modeScore: 0, modeWaves: 0, modePrep: 0, arenaCount: 0, startRes: 100, modePoints: 0, modeHold: 0, mutators: [], events: false, week: 0,
 };
+const fmtSecs = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 /** Climas da partida (mod Climas, montado para o mapa escolhido). */
 const WEATHERS: { key: MatchOptions["weather"]; label: string; icon: string; hint: string }[] = [
   { key: "", label: "Limpo", icon: "wb_sunny", hint: "O mapa como ele é." },
@@ -254,6 +255,30 @@ export default function BigMatch() {
     await start({ ...spec, slots: placed }, options.spawn !== "fixed" ? t("Abrindo o jogo: {what} em {map} (posições sorteadas).", { what: sum.text, map: map.name }) : t("Abrindo o jogo: {what} em {map}.", { what: sum.text, map: map.name }));
   };
 
+  // desafio da semana (Início → Minigames): mapa sorteado pela semana e as regras do desafio
+  useEffect(() => {
+    if (!maps?.length) return;
+    let ch: { week: number } | null = null;
+    try { ch = JSON.parse(localStorage.getItem("cp-challenge") ?? "null"); localStorage.removeItem("cp-challenge"); } catch { ch = null; }
+    if (!ch?.week) return;
+    const c = weeklyChallenge(ch.week);
+    const pool = maps.filter((m) => m.armies.length >= 4 && (m.size[0] || 1024) <= 1024).sort((a, b) => a.path.localeCompare(b.path));
+    if (pool.length) setPath(pool[c.seed % pool.length].path);
+    setOptions((o) => ({ ...o, mode: c.mode, mutators: c.mutators, events: c.events, week: c.week, modeScore: 0 }));
+  }, [maps]);
+
+  // pontos de controle do minigame (a mesma conta do jogo)
+  const cpoints = useMemo(() => {
+    const n = modePoints(options.mode, options.modePoints);
+    if (!map || !n || map.starts.length !== map.armies.length) return [] as [number, number][];
+    const teamOf = map.starts.map((_, i) => {
+      const s = slots[i];
+      if (!s || s.kind === "empty") return -1;
+      return s.team === 0 ? 1000 + i : s.team;
+    });
+    return previewPoints([map.size[0] || 1024, map.size[1] || 1024], map.starts as [number, number][], teamOf, n);
+  }, [map, slots, options.mode, options.modePoints]);
+
   // prévia das bases: o terreno do mapa (minimapa do jogo), posição de cada base, cor e você marcado
   const preview = map && map.starts.length === map.armies.length ? (() => {
     const [w, h] = [map.size[0] || 1024, map.size[1] || 1024];
@@ -271,6 +296,13 @@ export default function BigMatch() {
           </g>
         )}
         <rect x={0} y={0} width={w} height={h} rx={rx} className="bm-frame" />
+        {cpoints.map((p, i) => (
+          <g key={"cp" + i} className="bm-cpoint">
+            <title>{options.mode === "koth" ? t("Colina (posição aproximada; ela muda de lugar durante a partida)") : t("Ponto de controle {l} (posição aproximada)", { l: "ABCDEFG"[i] })}</title>
+            <rect x={p[0] - w * 0.022} y={p[1] - w * 0.022} width={w * 0.044} height={w * 0.044} transform={`rotate(45 ${p[0]} ${p[1]})`} className="bm-cpoint-shape" />
+            <text x={p[0]} y={p[1] + w * 0.012} textAnchor="middle" fontSize={w * 0.032} className="bm-cpoint-label">{options.mode === "koth" ? "♛" : "ABCDEFG"[i]}</text>
+          </g>
+        ))}
         {map.starts.map((p, i) => {
           const s = slots[i];
           if (!s) return null;
@@ -403,12 +435,12 @@ export default function BigMatch() {
               </section>
 
               <section className="card pad">
-                <div className="card-title"><Icon name="emoji_events" /><h3>{t("Minigame")}</h3></div>
+                <div className="card-title"><Icon name="emoji_events" /><h3>{t("Minigame")}</h3>{!!options.week && <span className="chip ok">{t("Desafio da semana {n}", { n: options.week })}</span>}</div>
                 <div className="bm-weather" role="radiogroup" aria-label={t("Minigame da partida")}>
                   {MINIGAMES.map((g) => (
                     <button key={g.key || "normal"} type="button" role="radio" aria-checked={(options.mode ?? "") === g.key}
                       className={`bm-weather-tile ${(options.mode ?? "") === g.key ? "on" : ""}`}
-                      onClick={() => setOpt({ mode: g.key })} title={t(g.hint)}>
+                      onClick={() => setOpt({ mode: g.key, modeScore: 0, week: 0 })} title={t(g.hint)}>
                       <Icon name={g.icon} size={26} />
                       <span className="name">{t(g.name)}</span>
                       <span className="hint">{t(g.hint)}</span>
@@ -425,6 +457,35 @@ export default function BigMatch() {
                         <output>{options.modeScore || 500}</output>
                       </label>
                     )}
+                    {options.mode === "race" && (
+                      <label className="range">
+                        <span>{t("Meta de massa produzida")}</span>
+                        <input type="range" min={5000} max={200000} step={5000} value={options.modeScore || 20000} onChange={(e) => setOpt({ modeScore: Number(e.target.value) })} />
+                        <output>{(options.modeScore || 20000).toLocaleString()}</output>
+                      </label>
+                    )}
+                    {options.mode === "treasure" && (
+                      <label className="range">
+                        <span>{t("Caixas para vencer")}</span>
+                        <input type="range" min={3} max={30} step={1} value={options.modeScore || 7} onChange={(e) => setOpt({ modeScore: Number(e.target.value) })} />
+                        <output>{options.modeScore || 7}</output>
+                      </label>
+                    )}
+                    {options.mode === "koth" && (
+                      <label className="range">
+                        <span>{t("Tempo na colina para vencer")}</span>
+                        <input type="range" min={60} max={600} step={30} value={options.modeHold || 180} onChange={(e) => setOpt({ modeHold: Number(e.target.value) })} />
+                        <output>{fmtSecs(options.modeHold || 180)}</output>
+                      </label>
+                    )}
+                    {options.mode === "survival" && (
+                      <label className="range">
+                        <span>{t("Tempo para preparar a base")}</span>
+                        <input type="range" min={60} max={600} step={30} value={options.modePrep || 180} onChange={(e) => setOpt({ modePrep: Number(e.target.value) })} />
+                        <output>{t("{n} s", { n: options.modePrep || 180 })}</output>
+                      </label>
+                    )}
+                    {cpoints.length > 0 && <span className="muted small">{t("Os losangos na prévia do mapa mostram onde os pontos devem ficar (o jogo evita água e pode ajustar um pouco).")}</span>}
                     {options.mode === "defense" && (
                       <>
                         <label className="range">
@@ -460,12 +521,35 @@ export default function BigMatch() {
                         <output>{options.startRes ?? 100}%</output>
                       </label>
                     )}
-                    {options.mode === "defense" && sum.players > 0 && (
+                    {(options.mode === "defense" || options.mode === "survival") && sum.players > 0 && (
                       <span className="muted small">{t("Você e os aliados defendem; os inimigos são os que atacam com as ondas. Use pelo menos dois times.")}</span>
                     )}
                     <span className="muted small">{t("Mensagens na tela explicam o objetivo, avisam das ondas, dos pontos tomados e do placar. O resultado vira recorde no Início do launcher. Numa partida com amigos, todos precisam do launcher atualizado.")}</span>
                   </div>
                 )}
+              </section>
+
+              <section className="card pad">
+                <div className="card-title"><Icon name="tune" /><h3>{t("Mutadores e eventos")}</h3></div>
+                <p className="muted small" style={{ marginBottom: 10 }}>{t("Valem com qualquer minigame e também na partida normal.")}</p>
+                <div className="bm-weather" role="group" aria-label={t("Mutadores")}>
+                  {MUTATORS.map((m) => {
+                    const on = (options.mutators ?? []).includes(m.key);
+                    return (
+                      <button key={m.key} type="button" aria-pressed={on} className={`bm-weather-tile ${on ? "on" : ""}`} title={t(m.hint)}
+                        onClick={() => setOpt({ week: 0, mutators: on ? (options.mutators ?? []).filter((x) => x !== m.key) : [...(options.mutators ?? []), m.key as Mutator] })}>
+                        <Icon name={m.icon} size={24} />
+                        <span className="name">{t(m.name)}</span>
+                        <span className="hint">{t(m.hint)}</span>
+                      </button>
+                    );
+                  })}
+                  <button type="button" aria-pressed={!!options.events} className={`bm-weather-tile ${options.events ? "on" : ""}`} onClick={() => setOpt({ events: !options.events, week: 0 })}>
+                    <Icon name="crisis_alert" size={24} />
+                    <span className="name">{t("Eventos aleatórios")}</span>
+                    <span className="hint">{t("A cada 4 a 6 minutos: chuva de meteoros numa área marcada, reforço para quem está atrás, pesquisa ou suprimentos para todos.")}</span>
+                  </button>
+                </div>
               </section>
 
               <section className="card pad">

@@ -28,6 +28,8 @@ local Points = {}
 local Over = false
 local Recorded = false
 local Stats = { waves = 0, score = 0 }
+-- one more line under the scoreboard (time left, waves, events)
+local Extra = nil
 
 local LETTERS = { 'A', 'B', 'C', 'D', 'E', 'F', 'G' }
 
@@ -59,6 +61,12 @@ end
 
 local function Say(text, color, size, duration, where)
     PrintText(text, size or 20, color or 'fff2b33d', duration or 6, where or 'centertop')
+end
+
+-- interface sounds of the game (played on the user side, see minigames_records.lua)
+local function Sound(cue)
+    if not Sync.CPSound then Sync.CPSound = {} end
+    table.insert(Sync.CPSound, cue)
 end
 
 local function Pick(list)
@@ -152,7 +160,11 @@ end
 local function Record(won)
     if Recorded then return end
     Recorded = true
-    Sync.CPRecord = { mode = Mode, won = won, seconds = math.floor(GetGameTimeSeconds()), waves = Stats.waves, score = Stats.score }
+    Sync.CPRecord = {
+        mode = Mode, won = won, seconds = math.floor(GetGameTimeSeconds()), waves = Stats.waves, score = Stats.score,
+        map = tostring(ScenarioInfo.name or ''), mut = tostring(Opts.CPMut or ''), week = tonumber(Opts.CPWeek or '') or 0,
+        events = Opts.CPEvents == '1', players = table.getn(Players),
+    }
     LOG('*CommandProject minigame result: ' .. Mode .. ' won=' .. tostring(won) .. ' time=' .. math.floor(GetGameTimeSeconds()) .. ' waves=' .. Stats.waves .. ' score=' .. Stats.score)
 end
 
@@ -260,30 +272,41 @@ local function PickPoints(count)
     return out
 end
 
-local function MakePoints(count)
+local function Arrow(x, z, size)
+    local arrow = nil
+    pcall(function()
+        arrow = import('/lua/sim/objectiveArrow.lua').ObjectiveArrow({
+            position = { x, GetSurfaceHeight(x, z) + 8, z },
+            orientation = { 0, 6.28, 0 },
+            Size = size or 5,
+            IgnoreVizRules = true,
+        })
+    end)
+    return arrow
+end
+
+local function Vision(brain, x, z, radius)
+    pcall(function()
+        import('/lua/sim/VizMarker.lua').VizMarker({ X = x, Z = z, Radius = radius, LifeTime = 0, Army = brain:GetArmyIndex(), Omni = false, Radar = false, WaterVision = false })
+    end)
+end
+
+local function MakePointsAt(spots)
     local w, h = MapSize()
     local radius = math.max(12, math.min(w, h) / 40)
-    for i, pos in PickPoints(count) do
+    for i, pos in spots do
         local x, z = pos[1], pos[2]
         local point = { x = x, z = z, r = radius, name = LETTERS[i] or tostring(i), owner = nil, taking = nil, progress = 0 }
         -- the objective arrow of the campaign, visible to everyone
-        pcall(function()
-            local spec = {
-                position = { x, GetSurfaceHeight(x, z) + 8, z },
-                orientation = { 0, 6.28, 0 },
-                Size = 5,
-                IgnoreVizRules = true,
-            }
-            point.arrow = import('/lua/sim/objectiveArrow.lua').ObjectiveArrow(spec)
-        end)
+        point.arrow = Arrow(x, z, 5)
         -- everybody sees who is standing on it
-        for _, brain in Players do
-            pcall(function()
-                import('/lua/sim/VizMarker.lua').VizMarker({ X = x, Z = z, Radius = radius + 6, LifeTime = 0, Army = brain:GetArmyIndex(), Omni = false, Radar = false, WaterVision = false })
-            end)
-        end
+        for _, brain in Players do Vision(brain, x, z, radius + 6) end
         table.insert(Points, point)
     end
+end
+
+local function MakePoints(count)
+    MakePointsAt(PickPoints(count))
 end
 
 local function TeamsOn(point)
@@ -322,6 +345,7 @@ local function UpdatePoints()
                     p.taking = nil
                     p.progress = 0
                     Say(LOCF('<LOC CP_MG_TAKEN>Point %s taken by %s', p.name, TeamName(t)), TeamColor(t), 18, 5, 'centertop')
+                    Sound('UI_MFD_checklist')
                 end
             end
         elseif table.getn(on) == 0 then
@@ -355,15 +379,18 @@ local function Board(title, showScore)
         return a.id < b.id
     end)
     local mine = MyTeam()
-    local line = title
+    -- the fixed scoreboard at the top right (drawn by the user side)
+    local lines = {}
     for i, t in list do
-        if i <= 5 or t == mine then
-            line = line .. '   ' .. TeamName(t) .. ': '
-            if showScore ~= false then line = line .. math.floor(t.score) .. ' ' end
-            line = line .. '[' .. PointsHeld(t) .. ']'
+        if i <= 6 or t == mine then
+            local line = TeamName(t) .. ':'
+            if showScore ~= false then line = line .. ' ' .. math.floor(t.score) end
+            if table.getn(Points) > 0 then line = line .. '  [' .. PointsHeld(t) .. '/' .. table.getn(Points) .. ']' end
+            table.insert(lines, { line, TeamColor(t) })
         end
     end
-    Say(line, 'ffe6eef5', 14, 14, 'righttop')
+    if Extra then table.insert(lines, { Extra, 'ffb8c7d6' }) end
+    Sync.CPBoard = { title = title, lines = lines }
 end
 
 -- the AI does not know about the points: now and then a few idle land units go to the nearest
@@ -452,7 +479,7 @@ local function Domination()
                 if n > 0 then GiveAll(t, 5 * n, 25 * n, 0) end
             end
         end
-        if math.mod(tick, 15) == 0 then Board(LOCF('<LOC CP_MG_DOM_BOARD>Domination (%d)', target)) end
+        if math.mod(tick, 2) == 0 then Board(LOCF('<LOC CP_MG_DOM_BOARD>Domination (%d)', target)) end
         if math.mod(tick, 40) == 0 then AIToPoints() end
         local mine = MyTeam()
         if mine then Stats.score = math.floor(mine.score) end
@@ -481,8 +508,10 @@ local function TotalWar()
             for _, t in Teams do
                 local n = PointsHeld(t)
                 if n > 0 then GiveAll(t, 0, 0, n) end
-                t.score = PointsHeld(t)
             end
+        end
+        if math.mod(tick, 3) == 0 then
+            for _, t in Teams do t.score = PointsHeld(t) end
             Board(LOC('<LOC CP_MG_TOTAL_BOARD>Points held'), false)
         end
         if math.mod(tick, 45) == 0 then AIToPoints() end
@@ -540,15 +569,28 @@ local function Supreme()
             local me = GetFocusArmy()
             if me and total[me] then Stats.score = total[me] end
         end
-        if math.mod(tick, 30) == 0 then Board(LOC('<LOC CP_MG_SUP_BOARD>Research earned')) end
+        if math.mod(tick, 5) == 0 then Board(LOC('<LOC CP_MG_SUP_BOARD>Research earned')) end
         if math.mod(tick, 45) == 0 then AIToPoints() end
     end
 end
 
--- Ultima Linha de Defesa
-local function Defense()
+-- the boss of a wave: an experimental with three times the health and a name
+local function Boss(unit)
+    pcall(function()
+        unit:SetMaxHealth(unit:GetMaxHealth() * 3)
+        unit:SetHealth(unit, unit:GetMaxHealth())
+        unit:SetCustomName(LOC('<LOC CP_MG_BOSS>BOSS'))
+    end)
+    pcall(function()
+        import('/lua/sim/objectiveArrow.lua').ObjectiveArrow({ AttachTo = unit, Size = 2 })
+    end)
+end
+
+-- Ultima Linha de Defesa (endless = Sobrevivencia Infinita: waves until the base falls)
+local function Defense(endless)
     local prep = N('CPPrep', 180, 20, 1200)
     local waves = N('CPWaves', 15, 3, 60)
+    if endless then waves = 100000 end
     local every = N('CPEvery', 75, 30, 600)
     -- the defenders: the team with the most humans (the first one on a tie)
     local defenders, best = nil, -1
@@ -574,10 +616,27 @@ local function Defense()
         Say(LOC('<LOC CP_MG_DEF_NOENEMY>Last Line of Defense needs an enemy team'), 'ffff6a5a', 18, 10, 'center')
         return
     end
-    Intro(LOC('<LOC CP_MG_DEF_TITLE>LAST LINE OF DEFENSE'),
-        LOCF('<LOC CP_MG_DEF_GOAL>You have %d seconds to build your defenses. Then come %d waves, bigger each time (experimentals every 5).', prep, waves),
-        LOC('<LOC CP_MG_DEF_WIN>Survive every wave with your commander alive.'))
-    GiveAll(defenders, math.floor(500 * N('CPStartRes', 100, 0, 1000) / 100), math.floor(2500 * N('CPStartRes', 100, 0, 1000) / 100), 0)
+    if endless then
+        Intro(LOC('<LOC CP_MG_SURV_TITLE>ENDLESS SURVIVAL'),
+            LOCF('<LOC CP_MG_SURV_GOAL>You have %d seconds to build. Then the waves never stop: every 5 a boss.', prep),
+            LOC('<LOC CP_MG_SURV_WIN>How many waves can you hold? Your record is kept.'))
+    else
+        Intro(LOC('<LOC CP_MG_DEF_TITLE>LAST LINE OF DEFENSE'),
+            LOCF('<LOC CP_MG_DEF_GOAL>You have %d seconds to build your defenses. Then come %d waves, bigger each time (experimentals every 5).', prep, waves),
+            LOC('<LOC CP_MG_DEF_WIN>Survive every wave with your commander alive.'))
+    end
+    local res = N('CPStartRes', 100, 0, 1000) / 100
+    GiveAll(defenders, math.floor(500 * res), math.floor(2500 * res), 0)
+    local function Show(k)
+        if endless then
+            Extra = LOCF('<LOC CP_MG_SURV_EXTRA>Waves held: %d', Stats.waves)
+        else
+            Extra = LOCF('<LOC CP_MG_DEF_EXTRA>Wave %d of %d', k, waves)
+        end
+        for _, t in Teams do t.score = 0 end
+        defenders.score = Stats.waves
+        Board(endless and LOC('<LOC CP_MG_SURV_TITLE>ENDLESS SURVIVAL') or LOC('<LOC CP_MG_DEF_TITLE>LAST LINE OF DEFENSE'), false)
+    end
     local left = prep
     while left > 0 and not Over do
         local step = 1
@@ -586,12 +645,16 @@ local function Defense()
         left = left - step
         if left == 60 or left == 10 then
             Say(LOCF('<LOC CP_MG_DEF_SOON>First wave in %d seconds', left), 'ffffd27a', 20, 5, 'centertop')
+            Sound('UI_Announcement_Open')
         end
     end
     local defenderCount = 0
     for _, b in defenders.brains do
         if Alive(b) then defenderCount = defenderCount + 1 end
     end
+    -- the difficulty follows how the defense is going: cleared fast = bigger waves; struggling =
+    -- smaller ones and more supplies
+    local pressure = 1
     local last = {}
     for k = 1, waves do
         if Over then return end
@@ -605,8 +668,15 @@ local function Defense()
         end
         if table.getn(spawners) == 0 or table.getn(targets) == 0 then break end
         local big = math.mod(k, 5) == 0 or k == waves
-        Say(LOCF('<LOC CP_MG_DEF_WAVE>Wave %d of %d is coming!', k, waves), 'ffff6a5a', big and 26 or 22, 6, 'centertop')
-        local total = math.min(160, math.floor((4 + 3 * k) * (0.6 + 0.4 * math.max(1, defenderCount))))
+        Show(k)
+        if endless then
+            Say(LOCF('<LOC CP_MG_SURV_WAVE>Wave %d!', k), 'ffff6a5a', 26, 6, 'centertop')
+        else
+            Say(LOCF('<LOC CP_MG_DEF_WAVE>Wave %d of %d is coming!', k, waves), 'ffff6a5a', big and 26 or 22, 6, 'centertop')
+        end
+        if big then Say(LOC('<LOC CP_MG_DEF_BOSS>A boss is coming with this wave!'), 'ffff6a5a', 20, 6, 'centertop') end
+        Sound('UI_Announcement_Open')
+        local total = math.min(200, math.floor((4 + 3 * k) * (0.6 + 0.4 * math.max(1, defenderCount)) * pressure))
         local each = math.ceil(total / table.getn(spawners))
         last = {}
         for si, spawner in spawners do
@@ -622,7 +692,10 @@ local function Defense()
             end
             if big and (si == 1 or k == waves) then
                 local unit = Spawn(spawner, Pick(EXPERIMENTALS[f]), x + Random(-8, 8), z + Random(-8, 8))
-                if unit then table.insert(group, unit) end
+                if unit then
+                    Boss(unit)
+                    table.insert(group, unit)
+                end
             end
             local target = targets[Random(1, table.getn(targets))]
             local tx, tz = StartPos(target)
@@ -632,10 +705,35 @@ local function Defense()
             for _, u in group do table.insert(last, u) end
         end
         if k < waves then
-            WaitSeconds(every)
+            -- the wave time, with the scoreboard updated
+            local cleared = nil
+            for t = 1, every do
+                WaitSeconds(1)
+                if Over then return end
+                if not cleared then
+                    local alive = 0
+                    for _, u in last do
+                        if not u:IsDead() then alive = alive + 1 end
+                    end
+                    if alive == 0 then cleared = t end
+                end
+                if math.mod(t, 5) == 0 then Show(k) end
+            end
+            local alive = 0
+            for _, u in last do
+                if not u:IsDead() then alive = alive + 1 end
+            end
             Stats.waves = k
+            local supplies = 1
+            if cleared and cleared < every / 2 then
+                pressure = math.min(3, pressure * 1.15)
+            elseif alive > table.getn(last) / 2 then
+                pressure = math.max(0.5, pressure * 0.85)
+                supplies = 1.5
+                Say(LOC('<LOC CP_MG_DEF_HELP>Tough fight: extra supplies sent'), 'ffffd27a', 16, 5, 'centertop')
+            end
             -- repairs and reinforcements between the waves
-            GiveAll(defenders, 40 * k, 200 * k, 0)
+            GiveAll(defenders, math.floor(40 * k * supplies), math.floor(200 * k * supplies), 0)
             Say(LOCF('<LOC CP_MG_DEF_HELD>Wave %d held! Supplies arrived', k), 'ff7cff7c', 18, 5, 'centertop')
         end
     end
@@ -651,6 +749,10 @@ local function Defense()
     end
     Stats.waves = waves
     Win(defenders, LOC('<LOC CP_MG_DEF_DONE>Every wave held: the base is safe!'))
+end
+
+local function Survival()
+    Defense(true)
 end
 
 -- Arena dos Experimentais
@@ -740,20 +842,449 @@ local function Arena()
     end
 end
 
+-- Rei da Colina: one hill, held without a break for CPHold seconds; it moves every CPMove seconds
+local function KingOfTheHill()
+    local hold = N('CPHold', 180, 30, 1800)
+    local move = N('CPMove', 240, 0, 3600)
+    local spots = PickPoints(5)
+    MakePointsAt({ spots[1] })
+    local hill = Points[1]
+    Intro(LOC('<LOC CP_MG_KOTH_TITLE>KING OF THE HILL'),
+        LOC('<LOC CP_MG_KOTH_GOAL>One hill (the arrow). Stand alone on it for 5 seconds to take it.'),
+        LOCF('<LOC CP_MG_KOTH_WIN>Hold it for %d seconds in a row to win. The hill moves from time to time.', hold))
+    local held, tick, spot = 0, 0, 1
+    local owner = nil
+    while not Over do
+        WaitSeconds(1)
+        tick = tick + 1
+        UpdatePoints()
+        if hill.owner ~= owner then
+            owner = hill.owner
+            held = 0
+        end
+        -- contested: the clock stops
+        local on = TeamsOn(hill)
+        if owner and table.getn(on) == 1 and on[1] == owner then held = held + 1 end
+        if owner and table.getn(on) == 0 then held = held + 1 end
+        for _, t in Teams do
+            if t == owner and held > t.score then t.score = held end
+        end
+        if owner then
+            Extra = LOCF('<LOC CP_MG_KOTH_EXTRA>%s holds the hill: %d s left', TeamName(owner), math.max(0, hold - held))
+            if held == hold - 30 then Say(LOCF('<LOC CP_MG_KOTH_NEAR>%s: 30 seconds to win!', TeamName(owner)), TeamColor(owner), 20, 5, 'centertop') Sound('UI_Announcement_Open') end
+            if held >= hold then
+                local mine = MyTeam()
+                if mine then Stats.score = math.floor(mine.score) end
+                Win(owner)
+                break
+            end
+        else
+            Extra = LOC('<LOC CP_MG_KOTH_FREE>The hill is free')
+        end
+        if move > 0 and math.mod(tick, move) == 0 and table.getn(spots) > 1 then
+            spot = math.mod(spot, table.getn(spots)) + 1
+            hill.x, hill.z = spots[spot][1], spots[spot][2]
+            hill.owner, hill.taking, hill.progress = nil, nil, 0
+            if hill.arrow then pcall(function() hill.arrow:Destroy() end) end
+            hill.arrow = Arrow(hill.x, hill.z, 5)
+            for _, brain in Players do Vision(brain, hill.x, hill.z, hill.r + 6) end
+            Say(LOC('<LOC CP_MG_KOTH_MOVED>The hill moved! Follow the arrow'), 'ffffd27a', 22, 6, 'centertop')
+            Sound('UI_Announcement_Open')
+        end
+        if math.mod(tick, 2) == 0 then Board(LOC('<LOC CP_MG_KOTH_BOARD>Longest hold (s)')) end
+        if math.mod(tick, 30) == 0 then AIToPoints() end
+        local mine = MyTeam()
+        if mine then Stats.score = math.floor(mine.score) end
+    end
+end
+
+-- Escolta (VIP): each team protects a tough engineer; losing it loses the match
+local ENGINEERS = { 'uul0002', 'ucl0002', 'uil0002' }
+local function Escort()
+    Intro(LOC('<LOC CP_MG_VIP_TITLE>ESCORT'),
+        LOC('<LOC CP_MG_VIP_GOAL>Each team has a VIP (an engineer with an arrow, 5 times tougher). Keep yours alive.'),
+        LOC('<LOC CP_MG_VIP_WIN>A team whose VIP dies is out. Hunt the enemy VIPs!'))
+    local vips = {}
+    for _, t in Teams do
+        local brain = t.brains[1]
+        local f = brain:GetFactionIndex()
+        if f < 1 or f > 3 then f = 1 end
+        local x, z = StartPos(brain)
+        local unit = Spawn(brain, ENGINEERS[f], x + 6, z + 6)
+        if unit then
+            pcall(function()
+                unit:SetMaxHealth(unit:GetMaxHealth() * 5)
+                unit:SetHealth(unit, unit:GetMaxHealth())
+                unit:SetCustomName('VIP')
+            end)
+            pcall(function() import('/lua/sim/objectiveArrow.lua').ObjectiveArrow({ AttachTo = unit, Size = 2 }) end)
+            vips[t.id] = unit
+        end
+    end
+    local tick = 0
+    local lost = {}
+    while not Over do
+        WaitSeconds(1)
+        tick = tick + 1
+        local alive = {}
+        for _, t in Teams do
+            local u = vips[t.id]
+            if u and not lost[t.id] then
+                if u:IsDead() then
+                    lost[t.id] = true
+                    Say(LOCF('<LOC CP_MG_VIP_LOST>The VIP of %s fell!', TeamName(t)), TeamColor(t), 22, 6, 'centertop')
+                    Sound('UI_Announcement_Open')
+                    for _, b in t.brains do
+                        if Alive(b) then KillBrain(b) end
+                    end
+                else
+                    table.insert(alive, t)
+                    t.score = math.floor(100 * u:GetHealth() / u:GetMaxHealth())
+                end
+            end
+        end
+        if table.getn(alive) == 1 then
+            Win(alive[1])
+            break
+        end
+        if math.mod(tick, 2) == 0 then Board(LOC('<LOC CP_MG_VIP_BOARD>VIP health (%)')) end
+        -- the AI goes after the nearest enemy VIP
+        if math.mod(tick, 30) == 0 then
+            for _, brain in Players do
+                if brain.BrainType == 'AI' and Alive(brain) then
+                    local team = TeamOf[brain:GetArmyIndex()]
+                    local x, z = StartPos(brain)
+                    local target, bestd = nil, nil
+                    for id, u in vips do
+                        if id ~= team.id and not u:IsDead() then
+                            local p = u:GetPosition()
+                            local d = VDist2(x, z, p[1], p[3])
+                            if not bestd or d < bestd then
+                                bestd = d
+                                target = p
+                            end
+                        end
+                    end
+                    if target then
+                        local group = {}
+                        for _, unit in brain:GetListOfUnits(categories.MOBILE - categories.ENGINEER - categories.COMMAND, false) do
+                            if not unit:IsDead() and unit:IsIdleState() then
+                                table.insert(group, unit)
+                                if table.getn(group) >= 8 then break end
+                            end
+                        end
+                        if table.getn(group) > 0 then IssueAggressiveMove(group, { target[1], target[2], target[3] }) end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Corrida de Recursos: the first team to produce CPScore mass wins
+local function Race()
+    local target = N('CPScore', 20000, 1000, 1000000)
+    Intro(LOC('<LOC CP_MG_RACE_TITLE>RESOURCE RACE'),
+        LOCF('<LOC CP_MG_RACE_GOAL>Build up your economy: the first team to produce %d mass wins.', target),
+        LOC('<LOC CP_MG_RACE_WIN>Attacking slows the others down... and destroying a commander still counts.'))
+    local warned = {}
+    local tick = 0
+    while not Over do
+        WaitSeconds(1)
+        tick = tick + 1
+        for _, t in Teams do
+            local sum = 0
+            for _, b in t.brains do
+                sum = sum + (b:GetArmyStat('Economy_TotalProduced_Mass', 0).Value or 0)
+            end
+            t.score = sum
+            for _, mark in { 0.5, 0.8, 0.9 } do
+                local key = t.id .. ':' .. mark
+                if sum / target >= mark and not warned[key] then
+                    warned[key] = true
+                    Say(LOCF('<LOC CP_MG_RACE_NEAR>%s has %d%% of the mass', TeamName(t), math.floor(mark * 100)), TeamColor(t), 18, 6, 'centertop')
+                end
+            end
+            if sum >= target then
+                local mine = MyTeam()
+                if mine then Stats.score = math.floor(mine.score) end
+                Win(t)
+                break
+            end
+        end
+        local mine = MyTeam()
+        if mine then Stats.score = math.floor(mine.score) end
+        if math.mod(tick, 2) == 0 then Board(LOCF('<LOC CP_MG_RACE_BOARD>Mass produced (goal %d)', target)) end
+    end
+end
+
+-- Caca ao Tesouro: crates appear around the map; the first team to collect CPScore of them wins
+local function Treasure()
+    local target = N('CPScore', 7, 1, 100)
+    local every = N('CPEvery', 60, 15, 600)
+    Intro(LOC('<LOC CP_MG_TREASURE_TITLE>TREASURE HUNT'),
+        LOCF('<LOC CP_MG_TREASURE_GOAL>Crates (the arrows) appear around the map every %d seconds, with a prize inside.', every),
+        LOCF('<LOC CP_MG_TREASURE_WIN>Reach a crate first. The first team to collect %d wins.', target))
+    local w, h = MapSize()
+    local crates = {}
+    local tick = 0
+    while not Over do
+        WaitSeconds(1)
+        tick = tick + 1
+        if math.mod(tick, every) == 5 and table.getn(crates) < 4 then
+            for tries = 1, 20 do
+                local x, z = Random(40, math.floor(w) - 40), Random(40, math.floor(h) - 40)
+                if not IsWater(x, z) then
+                    table.insert(crates, { x = x, z = z, r = 10, arrow = Arrow(x, z, 4) })
+                    for _, brain in Players do Vision(brain, x, z, 16) end
+                    Say(LOC('<LOC CP_MG_TREASURE_NEW>A new crate appeared! Follow the arrow'), 'ffffd27a', 20, 5, 'centertop')
+                    Sound('UI_Announcement_Open')
+                    break
+                end
+            end
+        end
+        for i = table.getn(crates), 1, -1 do
+            local c = crates[i]
+            local on = TeamsOn(c)
+            if table.getn(on) == 1 then
+                local t = on[1]
+                t.score = t.score + 1
+                table.remove(crates, i)
+                if c.arrow then pcall(function() c.arrow:Destroy() end) end
+                -- the prize
+                local prize = Random(1, 4)
+                if prize == 1 then
+                    GiveAll(t, 800, 4000, 0)
+                    Say(LOCF('<LOC CP_MG_TREASURE_RES>%s found mass and energy!', TeamName(t)), TeamColor(t), 18, 5, 'centertop')
+                elseif prize == 2 then
+                    GiveAll(t, 0, 0, 10)
+                    Say(LOCF('<LOC CP_MG_TREASURE_RP>%s found research!', TeamName(t)), TeamColor(t), 18, 5, 'centertop')
+                elseif prize == 3 then
+                    local b = t.brains[1]
+                    local f = b:GetFactionIndex()
+                    if f < 1 or f > 3 then f = 1 end
+                    Spawn(b, Pick(EXPERIMENTALS[f]), c.x, c.z)
+                    Say(LOCF('<LOC CP_MG_TREASURE_EXP>%s found an experimental!', TeamName(t)), TeamColor(t), 20, 6, 'centertop')
+                else
+                    GiveAll(t, 300, 1500, 4)
+                    Say(LOCF('<LOC CP_MG_TREASURE_MIX>%s found supplies!', TeamName(t)), TeamColor(t), 18, 5, 'centertop')
+                end
+                Sound('UI_MFD_checklist')
+                if t.score >= target then
+                    local mine = MyTeam()
+                    if mine then Stats.score = math.floor(mine.score) end
+                    Win(t)
+                end
+            end
+        end
+        local mine = MyTeam()
+        if mine then Stats.score = math.floor(mine.score) end
+        Extra = LOCF('<LOC CP_MG_TREASURE_EXTRA>Crates on the map: %d', table.getn(crates))
+        if math.mod(tick, 2) == 0 then Board(LOCF('<LOC CP_MG_TREASURE_BOARD>Crates (goal %d)', target)) end
+        -- the AI goes for the crates too
+        if math.mod(tick, 20) == 0 and table.getn(crates) > 0 then
+            for _, brain in Players do
+                if brain.BrainType == 'AI' and Alive(brain) then
+                    local x, z = StartPos(brain)
+                    local c, bestd = nil, nil
+                    for _, cc in crates do
+                        local d = VDist2(x, z, cc.x, cc.z)
+                        if not bestd or d < bestd then bestd = d c = cc end
+                    end
+                    local group = {}
+                    for _, unit in brain:GetListOfUnits(categories.MOBILE - categories.ENGINEER - categories.COMMAND - categories.EXPERIMENTAL, false) do
+                        if not unit:IsDead() and unit:IsIdleState() then
+                            table.insert(group, unit)
+                            if table.getn(group) >= 4 then break end
+                        end
+                    end
+                    if c and table.getn(group) > 0 then IssueAggressiveMove(group, { c.x, GetSurfaceHeight(c.x, c.z), c.z }) end
+                end
+            end
+        end
+    end
+end
+
+------------------------------------------------------------------------------------ mutators and events
+
+-- CPMut = list of: air (only air units and engineers are built), hp (units with double health),
+-- res (double income), cdr (commanders 3 times tougher)
+local function HasMut(key)
+    local m = ',' .. tostring(Opts.CPMut or '') .. ','
+    return string.find(m, ',' .. key .. ',', 1, true) ~= nil
+end
+
+local function Mutators()
+    local names = {}
+    if HasMut('air') then
+        table.insert(names, LOC('<LOC CP_MG_MUT_AIR>Air only'))
+        local cats = (categories.LAND + categories.NAVAL) * categories.MOBILE - categories.ENGINEER - categories.COMMAND
+        for _, brain in Players do
+            pcall(AddBuildRestriction, brain:GetArmyIndex(), cats)
+            pcall(SetUIBuildRestrictions, brain:GetArmyIndex(), cats)
+        end
+    end
+    if HasMut('hp') then table.insert(names, LOC('<LOC CP_MG_MUT_HP>Double health')) end
+    if HasMut('res') then table.insert(names, LOC('<LOC CP_MG_MUT_RES>Double income')) end
+    if HasMut('cdr') then table.insert(names, LOC('<LOC CP_MG_MUT_CDR>Tough commanders')) end
+    if table.getn(names) == 0 then return end
+    Say(LOC('<LOC CP_MG_MUT_ON>Mutators:') .. ' ' .. table.concat(names, ' · '), 'ffd7b8ff', 18, 10, 'center')
+    -- double income: what the economy makes, given again. The income reading is calibrated in the
+    -- first 20 s against the total produced (so what we give is never counted twice)
+    local scale = {}
+    if HasMut('res') then
+        ForkThread(function()
+            local m0, e0, mi, ei = {}, {}, {}, {}
+            for _, brain in Players do
+                local i = brain:GetArmyIndex()
+                m0[i] = brain:GetArmyStat('Economy_TotalProduced_Mass', 0).Value or 0
+                e0[i] = brain:GetArmyStat('Economy_TotalProduced_Energy', 0).Value or 0
+                mi[i], ei[i] = 0, 0
+            end
+            for t = 1, 20 do
+                WaitSeconds(1)
+                for _, brain in Players do
+                    local i = brain:GetArmyIndex()
+                    mi[i] = mi[i] + (brain:GetEconomyIncome('MASS') or 0)
+                    ei[i] = ei[i] + (brain:GetEconomyIncome('ENERGY') or 0)
+                end
+            end
+            for _, brain in Players do
+                local i = brain:GetArmyIndex()
+                local dm = (brain:GetArmyStat('Economy_TotalProduced_Mass', 0).Value or 0) - m0[i]
+                local de = (brain:GetArmyStat('Economy_TotalProduced_Energy', 0).Value or 0) - e0[i]
+                -- seconds of income per reading (10 when the reading is per tick); 10 when unknown
+                local k = 10
+                if mi[i] > 0 and dm > 0 then k = dm / mi[i] elseif ei[i] > 0 and de > 0 then k = de / ei[i] end
+                scale[i] = math.max(0.5, math.min(20, k))
+            end
+        end)
+    end
+    -- units get their boost once, when they show up
+    local done = {}
+    while not Over do
+        for _, brain in Players do
+            if Alive(brain) then
+                if HasMut('hp') or HasMut('cdr') then
+                    for _, unit in brain:GetListOfUnits(categories.ALLUNITS, false) do
+                        local id = unit:GetEntityId()
+                        if not done[id] and not unit:IsDead() and unit:GetFractionComplete() >= 1 then
+                            done[id] = true
+                            local k = 1
+                            if HasMut('hp') then k = k * 2 end
+                            if HasMut('cdr') and EntityCategoryContains(categories.COMMAND, unit) then k = k * 3 end
+                            if k > 1 then
+                                pcall(function()
+                                    local frac = unit:GetHealth() / unit:GetMaxHealth()
+                                    unit:SetMaxHealth(unit:GetMaxHealth() * k)
+                                    unit:SetHealth(unit, unit:GetMaxHealth() * frac)
+                                end)
+                            end
+                        end
+                    end
+                end
+                local k = scale[brain:GetArmyIndex()]
+                if k then
+                    -- 2 seconds of income
+                    brain:GiveResource('MASS', (brain:GetEconomyIncome('MASS') or 0) * k * 2)
+                    brain:GiveResource('ENERGY', (brain:GetEconomyIncome('ENERGY') or 0) * k * 2)
+                end
+            end
+        end
+        WaitSeconds(2)
+    end
+end
+
+-- random events every few minutes (CPEvents=1)
+local function Events()
+    local w, h = MapSize()
+    WaitSeconds(N('CPEventFirst', 240, 30, 3600))
+    while not Over do
+        local kind = Random(1, 4)
+        if kind == 1 then
+            -- meteor shower on a marked area
+            local x, z = Random(60, math.floor(w) - 60), Random(60, math.floor(h) - 60)
+            local r = math.max(25, math.min(w, h) / 16)
+            local arrow = Arrow(x, z, 6)
+            for _, brain in Players do Vision(brain, x, z, r + 10) end
+            Say(LOC('<LOC CP_MG_EV_METEOR>Meteor shower in 15 seconds at the arrow: get out of there!'), 'ffff6a5a', 22, 8, 'centertop')
+            Sound('UI_Announcement_Open')
+            WaitSeconds(15)
+            for hit = 1, 8 do
+                local units = GetUnitsInRect(Rect(x - r, z - r, x + r, z + r)) or {}
+                for _, unit in units do
+                    if not unit:IsDead() then
+                        local p = unit:GetPosition()
+                        if VDist2(p[1], p[3], x, z) <= r then
+                            local hurt = unit:GetMaxHealth() * 0.06
+                            if unit:GetHealth() <= hurt then unit:Kill() else unit:AdjustHealth(unit, -hurt) end
+                        end
+                    end
+                end
+                WaitSeconds(1)
+            end
+            if arrow then pcall(function() arrow:Destroy() end) end
+        elseif kind == 2 then
+            -- reinforcement for the team that is behind
+            local weakest, low = nil, nil
+            for _, t in Teams do
+                local n = 0
+                for _, b in t.brains do
+                    if Alive(b) then n = n + table.getn(b:GetListOfUnits(categories.MOBILE, false)) end
+                end
+                if n > 0 and (not low or n < low) then
+                    low = n
+                    weakest = t
+                end
+            end
+            if weakest then
+                local b = nil
+                for _, bb in weakest.brains do
+                    if Alive(bb) then b = bb break end
+                end
+                if b then
+                    local f = b:GetFactionIndex()
+                    if f < 1 or f > 3 then f = 1 end
+                    local x, z = StartPos(b)
+                    Spawn(b, Pick(EXPERIMENTALS[f]), x + Random(-10, 10), z + Random(-10, 10))
+                    Say(LOCF('<LOC CP_MG_EV_HELP>Reinforcement: an experimental joins %s!', TeamName(weakest)), TeamColor(weakest), 20, 6, 'centertop')
+                    Sound('UI_Announcement_Open')
+                end
+            end
+        elseif kind == 3 then
+            Say(LOC('<LOC CP_MG_EV_RESEARCH>Research breakthrough: research points for everyone!'), 'ff8fd3ff', 20, 6, 'centertop')
+            for _, t in Teams do GiveAll(t, 0, 0, 6) end
+            Sound('UI_MFD_checklist')
+        else
+            Say(LOC('<LOC CP_MG_EV_SUPPLY>Supply drop: mass and energy for everyone!'), 'ff7cff7c', 20, 6, 'centertop')
+            for _, t in Teams do GiveAll(t, 400, 2000, 0) end
+            Sound('UI_MFD_checklist')
+        end
+        WaitSeconds(N('CPEventEvery', 300, 60, 3600) + Random(-60, 60))
+    end
+end
+
 ------------------------------------------------------------------------------------ start
 
-local MODES = { domination = Domination, total = TotalWar, supreme = Supreme, defense = Defense, arena = Arena }
+local MODES = {
+    domination = Domination, total = TotalWar, supreme = Supreme, defense = function() Defense(false) end, arena = Arena,
+    survival = Survival, koth = KingOfTheHill, vip = Escort, race = Race, treasure = Treasure,
+}
 
 function Start(scenarioInfo)
     Opts = scenarioInfo.Options or {}
     Mode = tostring(Opts.CPMode or '')
     local run = MODES[Mode]
-    if not run then
+    if not run and Mode ~= '' then
         WARN('*CommandProject minigame: unknown mode ' .. Mode)
         return
     end
     BuildTeams()
-    LOG('*CommandProject minigame: ' .. Mode .. ' with ' .. table.getn(Players) .. ' players in ' .. table.getn(Teams) .. ' teams')
+    LOG('*CommandProject minigame: ' .. Mode .. ' with ' .. table.getn(Players) .. ' players in ' .. table.getn(Teams) .. ' teams, mutators ' .. tostring(Opts.CPMut or '') .. ', events ' .. tostring(Opts.CPEvents or ''))
+    -- mutators and events also work in a normal match
+    if Opts.CPMut and Opts.CPMut ~= '' then ForkThread(Mutators) end
+    if Opts.CPEvents == '1' then ForkThread(Events) end
+    if not run then return end
     ForkThread(WatchResult)
     -- (no pcall around it: a thread cannot wait inside a pcall in this Lua)
     ForkThread(function()

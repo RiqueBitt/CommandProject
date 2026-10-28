@@ -199,15 +199,20 @@ function CPBigMatchQuick(mapName, players, teams, ai, faction, victory, unitCap)
     if unitCap < 50 or unitCap > 2000 then unitCap = 1000 end
     -- minigame (CPMinigames.lua no mod): guardado na sala ou nos atalhos do submenu Batalha
     local mode = CPBMGet('mode') or ''
-    if mode ~= 'total' and mode ~= 'arena' and mode ~= 'defense' and mode ~= 'domination' and mode ~= 'supreme' then mode = '' end
+    local known = { total = true, arena = true, defense = true, domination = true, supreme = true, survival = true, koth = true, vip = true, race = true, treasure = true }
+    if not known[mode] then mode = '' end
     if mode == 'arena' then
         victory = 'eradication'
     elseif mode ~= '' and victory == 'sandbox' then
         victory = 'demoralization'
     end
-    if mode == 'defense' and teams < 2 then teams = 2 end
+    if (mode == 'defense' or mode == 'survival') and teams < 2 then teams = 2 end
     local spec = 'Victory=' .. victory .. ';UnitCap=' .. unitCap .. ';FogOfWar=explored;GameSpeed=normal;NoRushOption=Off;PreBuiltUnits=Off;PrebuiltUnits=Off;CivilianAlliance=enemy;CheatsEnabled=' .. tostring(CPBMGet('cheats') == true) .. ';DoNotShareUnitCap=true'
     if mode ~= '' then spec = spec .. ';CPMode=' .. mode end
+    -- mutadores e eventos (EXTRAS na sala)
+    local mut = tostring(CPBMGet('mut') or '')
+    if string.find(mut, '^[a-z,]*$') and mut ~= '' then spec = spec .. ';CPMut=' .. mut end
+    if CPBMGet('events') == true then spec = spec .. ';CPEvents=1' end
     for i = 1, bases do
         if i <= n then
             local team = 1
@@ -229,7 +234,7 @@ end
 
 -- escolhas da Partida grande feitas dentro do jogo (sala de batalha, submenus): guardadas no
 -- perfil do jogo, valem para as próximas partidas
-local CPBM_DEFAULT = { players = 8, teams = 2, ai = 'Normal', faction = 0, victory = 'demoralization', units = 1000, cheats = false, mode = '' }
+local CPBM_DEFAULT = { players = 8, teams = 2, ai = 'Normal', faction = 0, victory = 'demoralization', units = 1000, cheats = false, mode = '', mut = '', events = false }
 
 function CPBMGet(key)
     local ok, saved = pcall(function() return import('/lua/user/prefs.lua').GetFromCurrentProfile('CPBigMatch') end)
@@ -253,6 +258,12 @@ end
 function CPBMSetMode(mode, victory)
     CPBMSet('mode', mode or '')
     if victory and victory ~= '' then CPBMSet('victory', victory) end
+end
+
+-- EXTRAS na sala: combinações prontas de mutadores e eventos
+function CPBMSetExtras(mut, events)
+    CPBMSet('mut', mut or '')
+    CPBMSet('events', events and true or false)
 end
 
 -- atalhos dos minigames no submenu Batalha: o modo vale só para esta partida
