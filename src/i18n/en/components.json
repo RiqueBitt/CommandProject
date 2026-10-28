@@ -595,11 +595,11 @@
  "Mods com texturas e cenas da interface não brigam mais pelo índice do jogo (o jogo fechava ao abrir com três desses ligados).": "Mods with textures and interface scenes no longer fight over the game's index (the game closed at startup with three of them on).",
  "Perfil aplicado antes de jogar": "Profile applied before playing",
  "Com \"mods só pelo launcher\", o perfil é aplicado sempre antes de abrir o jogo.": "With \"mods only through the launcher\", the profile is always applied before the game opens.",
- "Atalhos de partida grande (submenu Escaramuça)": "Big match shortcuts (Skirmish submenu)",
+ "Atalhos de partida grande (submenu Batalha)": "Big match shortcuts (Skirmish submenu)",
  "Monte uma partida na tela Partida grande e use \"Pôr na tela inicial do jogo\".": "Set up a match on the Big match screen and use \"Put on the game's start screen\".",
  "Tirar": "Remove",
  "Partida grande na tela inicial": "Big match on the start screen",
- "Na tela Partida grande, \"Pôr na tela inicial do jogo\" vira um botão no submenu Escaramuça que começa aquela partida direto do jogo.": "On the Big match screen, \"Put on the game's start screen\" becomes a button in the Skirmish submenu that starts that match straight from the game.",
+ "Na tela Partida grande, \"Pôr na tela inicial do jogo\" vira um botão no submenu Batalha que começa aquela partida direto do jogo.": "On the Big match screen, \"Put on the game's start screen\" becomes a button in the Skirmish submenu that starts that match straight from the game.",
  "Todos os menus no estilo novo": "Every menu in the new style",
  "Menus remasterizados": "Remastered menus",
  "Criar partida, opções, multijogador, campanha e resumos ganham o visual da Tela inicial nova: tom escuro por cima do vídeo, faixa de cima escura e botões, painéis e listas na cor que você escolher.": "Create game, options, multiplayer, campaign and summaries get the New start screen look: a dark tint over the video, a dark top bar and buttons, panels and lists in the color you choose.",
@@ -628,5 +628,7 @@
  "Partida grande dentro do Criar jogo do jogo": "Big match inside the game's Create game",
  "A Partida grande agora fica na própria sala de escaramuça (Escaramuça → Criar jogo), num painel à esquerda da mesma janela: 10 a 32 jogadores, times, dificuldade da IA e os mapas grandes, com o botão Iniciar partida grande. As partidas de até 8 continuam pela sala como sempre.": "The big match now lives in the game's own skirmish lobby (Skirmish → Create game), in a panel on the left of the same window: 10 to 32 players, teams, AI difficulty and the big maps, with a Start big match button. Games of up to 8 still go through the lobby as always.",
  "O jogo abre mais rápido": "The game opens faster",
- "Sem os vídeos de abertura (logos e aviso legal): o jogo vai direto para a tela inicial. O launcher também guarda o índice dos arquivos grandes (texturas HD, mapas) e não lê tudo de novo a cada Jogar.": "No intro movies (logos and legal notice): the game goes straight to the start screen. The launcher also keeps the index of the big files (HD textures, maps) instead of reading everything again on every Play."
+ "Sem os vídeos de abertura (logos e aviso legal): o jogo vai direto para a tela inicial. O launcher também guarda o índice dos arquivos grandes (texturas HD, mapas) e não lê tudo de novo a cada Jogar.": "No intro movies (logos and legal notice): the game goes straight to the start screen. The launcher also keeps the index of the big files (HD textures, maps) instead of reading everything again on every Play.",
+ "Escaramuça agora é Batalha": "Skirmish is now Battle",
+ "No jogo em português, o menu e tudo que dizia \"Escaramuça\" agora diz \"Batalha\" (botão da tela inicial, sala, conquistas e dicas).": "In the Portuguese game, the menu and everything that said \"Escaramuça\" now says \"Batalha\" (start screen button, lobby, achievements and tips)."
 }

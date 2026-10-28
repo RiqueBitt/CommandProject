@@ -19,7 +19,7 @@ const COLORS = [
 ];
 
 const BUTTONS: [string, string][] = [
-  ["CAMPANHA", "star"], ["ESCARAMUÇA", "gps_fixed"], ["MULTIJOGADOR", "public"], ["OPÇÕES", "settings"], ["EXTRAS", "folder"], ["SAIR", "power_settings_new"],
+  ["CAMPANHA", "star"], ["BATALHA", "gps_fixed"], ["MULTIJOGADOR", "public"], ["OPÇÕES", "settings"], ["EXTRAS", "folder"], ["SAIR", "power_settings_new"],
 ];
 
 function Preview({ s, logo }: { s: StartScreenSettings; logo: string | null }) {
@@ -131,7 +131,7 @@ export default function StartScreenCard() {
             <TaskProgress task="ffmpeg" />
           </div>
           <div className="col" style={{ gap: 6 }}>
-            <b className="small">{t("Atalhos de partida grande (submenu Escaramuça)")}</b>
+            <b className="small">{t("Atalhos de partida grande (submenu Batalha)")}</b>
             {draft.shortcuts.length === 0 && <span className="faint small">{t("Monte uma partida na tela Partida grande e use \"Pôr na tela inicial do jogo\".")}</span>}
             {draft.shortcuts.map((sc, i) => (
               <div key={i} className="row" style={{ gap: 8 }}>

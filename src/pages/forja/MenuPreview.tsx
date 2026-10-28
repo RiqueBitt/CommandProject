@@ -9,7 +9,7 @@ import { Icon } from "../../components/ui";
 
 const MAIN = [
   ["campaign", "CAMPANHA"],
-  ["skirmish", "ESCARAMUÇA"],
+  ["skirmish", "BATALHA"],
   ["multiplayer", "MULTIJOGADOR"],
   ["options", "OPÇÕES"],
   ["extras", "EXTRAS"],
@@ -22,7 +22,7 @@ const MAX_EXTRAS = 7;
 /** Ações do jogo que um botão pode chamar (mainmenu::NATIVE). */
 export const NATIVE_LABEL: Record<string, string> = {
   campaign: "Menu da campanha", continue: "Continuar o último jogo salvo", tutorial: "Tutorial", loadCampaign: "Carregar campanha salva",
-  skirmish: "Escaramuça", loadSkirmish: "Carregar escaramuça salva", lan: "Partida em rede local (LAN)", hostGame: "Hospedar partida",
+  skirmish: "Batalha", loadSkirmish: "Carregar batalha salva", lan: "Partida em rede local (LAN)", hostGame: "Hospedar partida",
   publicGame: "Entrar em partida", privateGame: "Partida privada", quickMatch: "Partida rápida", leaderboards: "Classificação",
   chat: "Chat da Steam", options: "Opções", replays: "Replays", credits: "Créditos", exit: "Sair do jogo",
 };

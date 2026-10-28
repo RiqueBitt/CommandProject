@@ -6,6 +6,13 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.44.1",
+    title: "Escaramuça agora é Batalha",
+    items: [
+      { icon: "translate", title: "Escaramuça agora é Batalha", text: "No jogo em português, o menu e tudo que dizia \"Escaramuça\" agora diz \"Batalha\" (botão da tela inicial, sala, conquistas e dicas).", page: "features" },
+    ],
+  },
+  {
     version: "0.44.0",
     title: "Partida grande na sala do jogo, abertura rápida",
     items: [
