@@ -7,7 +7,7 @@ import { Toasts } from "./components/ui";
 import { api, onEvent } from "./lib/api";
 import { errorText, useStore } from "./lib/store";
 import { useTabs } from "./lib/tabs";
-import type { GameCrash } from "./lib/types";
+import type { GameCrash, GameLaunch } from "./lib/types";
 import { useGameArt } from "./lib/gameArt";
 import Home from "./pages/Home";
 
@@ -107,6 +107,21 @@ export default function App() {
         useStore.setState({ crash: c });
         toast("error", c.log ? t("O jogo fechou no meio da partida grande. Veja na tela da partida o que o log do jogo diz.") : t("O jogo fechou com erro. Veja na tela inicial o que pode ter causado."));
       }),
+      // pedido feito dentro do jogo (painel da Partida grande, Multijogador): o jogo fechou e o
+      // launcher continua daqui
+      onEvent<GameLaunch>("cp://game-relaunch", (g) => {
+        const st = useStore.getState();
+        if (g.action === "match" && g.spec) {
+          const spec = g.spec;
+          st.toast("info", t("O jogo pediu a partida grande em {map} com clima: montando o clima e abrindo o jogo direto na partida…", { map: g.mapName }));
+          void st.run("launch", () => api.launchBigMatch(spec), t("Jogo aberto direto na partida.")).then(() => st.refresh());
+        } else {
+          useStore.setState({ pendingRoom: { spec: g.spec, join: g.action === "join" } });
+          st.go("bigmatch");
+          st.toast("info", g.action === "join" ? t("Cole o convite do seu amigo para entrar na sala dele.") : t("Sala com amigos: confira a partida escolhida no jogo e clique em Abrir sala e criar convite."));
+        }
+      }),
+      onEvent<string>("cp://game-relaunch-failed", (e) => toast("error", t("O jogo pediu para continuar no launcher, mas não deu: {error}", { error: tr(e) }))),
       onEvent<number>("cp://memory-limited", (mb) => toast("ok", t("Memória do jogo limitada a {size} GB.", { size: (mb / 1024).toLocaleString(locale()) }))),
       onEvent<string>("cp://priority-set", (p) => toast("ok", t("Prioridade do jogo: {level}.", { level: p === "high" ? t("alta") : t("acima do normal") }))),
       onEvent<string>("cp://priority-failed", (e) => toast("error", t("Não deu para mudar a prioridade do jogo: {error}", { error: tr(e) }))),

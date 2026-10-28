@@ -20,7 +20,7 @@ const ENTRY: &str = "function StartCommandLineSession(mapName, isPerfTest)\n";
 const HOOK: &str = "\tif CPBigMatchStart and CPBigMatchStart(mapName) then return end -- CommandProject big match\n";
 
 /// Versão do código do mod: quando muda, o launcher monta o mod de novo.
-pub const MOD_VERSION: &str = "1.16.0";
+pub const MOD_VERSION: &str = "1.18.0";
 /// Cores de exército na partida grande: as 10 do jogo e mais 14 (o mod acrescenta só com `/cpmatch`).
 pub const COLORS: i32 = 32;
 /// Mapas com mais de 8 bases são gravados com este tipo: o lobby do jogo (8 posições, que trava com
@@ -215,6 +215,62 @@ fn pick<'a>(value: &'a str, allowed: &[&'a str], what: &str) -> Result<&'a str> 
 
 fn color(c: i32) -> String {
     if c < 0 { String::new() } else { c.min(COLORS - 1).to_string() }
+}
+
+/// A partida pedida no painel da Partida grande dentro do jogo (ver
+/// [`crate::gamepanel::LaunchRequest`]), do mesmo jeito que o jogo monta (`CPBigMatchQuick`): você na
+/// primeira base, os outros nas seguintes, os times em blocos vizinhos na ordem das bases, até o
+/// limite do mapa e da memória do jogo. `room` = as outras vagas são para amigos (viram IA se
+/// ninguém entrar).
+pub fn from_game_request(req: &crate::gamepanel::LaunchRequest, map: &MatchMap, room: bool) -> BigMatch {
+    let bases = map.armies.len();
+    let size = map.size[0].max(1024);
+    let n = (req.players as usize).clamp(2, MAX_ARMIES).min(bases).min(max_players_for(size)).max(2.min(bases));
+    let mut teams = req.teams as usize;
+    if teams > n {
+        teams = n;
+    }
+    let mode = if MODES.contains(&req.mode.as_str()) { req.mode.clone() } else { String::new() };
+    if (mode == "defense" || mode == "survival") && teams < 2 {
+        teams = 2;
+    }
+    let ai = if AI_LEVELS.contains(&req.ai.as_str()) { req.ai.clone() } else { "Normal".to_string() };
+    let mut victory = match req.victory.as_str() {
+        v @ ("demoralization" | "domination" | "sandbox") => v.to_string(),
+        _ => "demoralization".to_string(),
+    };
+    if mode == "arena" {
+        victory = "eradication".into();
+    } else if !mode.is_empty() && victory == "sandbox" {
+        victory = "demoralization".into();
+    }
+    let slots = (0..bases)
+        .map(|i| {
+            if i >= n {
+                return Slot { kind: SlotKind::Empty, ..Default::default() };
+            }
+            let team = if teams >= 2 { (i * teams / n) as u32 + 1 } else { 0 };
+            let kind = if i == 0 {
+                SlotKind::You
+            } else if room {
+                SlotKind::Guest
+            } else {
+                SlotKind::Ai
+            };
+            let faction = if i == 0 { req.faction.min(3) } else { 0 };
+            Slot { kind, team, faction, ai: ai.clone(), color: i as i32 % 32 }
+        })
+        .collect();
+    let options = MatchOptions {
+        victory,
+        unit_cap: if (50..=2000).contains(&req.units) { req.units } else { 1000 },
+        weather: if crate::weather::Kind::parse(&req.weather).is_some() { req.weather.clone() } else { String::new() },
+        mode,
+        mutators: req.mutators.split(',').filter(|m| MUTATORS.contains(m)).map(String::from).collect(),
+        events: req.events,
+        ..Default::default()
+    };
+    BigMatch { map: map.path.clone(), slots, options, size: map.size[0], net: None }
 }
 
 /// Clima escolhido (`None` = limpo).
@@ -546,9 +602,11 @@ const MINIGAMES_FILE: &str = "lua/sim/CPMinigames.lua";
 const VICTORY_FILE: &str = "lua/sim/victory.lua";
 const VICTORY_ENTRY: &str = "function CheckVictory(scenarioInfo)\n";
 const VICTORY_HOOK: &str = "    -- CommandProject minigames\n    local cpo = scenarioInfo.Options or {}\n    if (cpo.CPMode and cpo.CPMode ~= '') or (cpo.CPMut and cpo.CPMut ~= '') or cpo.CPEvents == '1' then\n        local ok, err = pcall(function() import('/lua/sim/CPMinigames.lua').Start(scenarioInfo) end)\n        if not ok then WARN('*CommandProject minigame: ' .. tostring(err)) end\n    end\n";
-const USERSYNC_FILE: &str = "lua/UserSync.lua";
-const USERSYNC_ENTRY: &str = "function OnSync()\n";
-const USERSYNC_HOOK: &str = "    if Sync.CPRecord then CPMinigameRecord(Sync.CPRecord) end -- CommandProject minigames\n    if Sync.CPBoard then CPMinigameBoard(Sync.CPBoard) end\n    if Sync.CPSound then CPMinigameSounds(Sync.CPSound) end\n";
+/// O lado da interface dos minigames vai no `textdisplay.lua` (mensagens na tela), que nenhum outro
+/// mod troca: o `UserSync.lua` é trocado pelas Trapaças, que montam depois deste mod.
+const USERSYNC_FILE: &str = "lua/ui/game/textdisplay.lua";
+const USERSYNC_ENTRY: &str = "function PrintToScreen(textData)\n";
+const USERSYNC_HOOK: &str = "    if type(textData) == 'table' and textData.cp then return CPMinigameUser(textData) end -- CommandProject minigames\n";
 const USERSYNC_CODE: &str = include_str!("minigames_records.lua");
 /// Modos dos minigames (`CPMode`).
 pub const MODES: &[&str] = &["total", "arena", "defense", "domination", "supreme", "survival", "koth", "vip", "race", "treasure"];
@@ -568,9 +626,9 @@ pub fn patch_victory(text: &str) -> Result<String> {
     insert_after(text, VICTORY_ENTRY, VICTORY_HOOK, "CommandProject minigames", "victory.lua")
 }
 
-/// `UserSync.lua` que guarda o resultado dos minigames no perfil do jogo (`CPRecords`).
+/// `textdisplay.lua` que recebe os minigames: recorde no perfil do jogo (`CPRecords`), placar e sons.
 pub fn patch_usersync(text: &str) -> Result<String> {
-    let mut out = insert_after(text, USERSYNC_ENTRY, USERSYNC_HOOK, "CommandProject minigames", "UserSync.lua")?;
+    let mut out = insert_after(text, USERSYNC_ENTRY, USERSYNC_HOOK, "CommandProject minigames", "textdisplay.lua")?;
     if !out.ends_with('\n') {
         out.push('\n');
     }
@@ -606,7 +664,7 @@ pub fn build(sources: &[PathBuf], dest: &Path) -> Result<PathBuf> {
 
 // ---------------------------------------------------------------- mapas
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchMap {
     /// cenário (`/maps/X/X_scenario.lua`)
@@ -783,6 +841,40 @@ pub fn minimap_png(mods: &[PathBuf], stock: &[PathBuf], scenario: &str, max: u32
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn game_request_becomes_a_match() {
+        let prefs = "profiles = {\n  {\n    CPLaunchRequest = {\n      seq = 3,\n      action = 'match',\n      map = '/maps/big/big_scenario.lua',\n      players = 12,\n      teams = 3,\n      ai = 'Hard',\n      faction = 2,\n      victory = 'sandbox',\n      units = 500,\n      mode = 'koth',\n      mut = 'hp,res,xx',\n      events = true,\n      weather = 'blizzard',\n      join = ''\n    },\n  },\n}";
+        let req = crate::gamepanel::parse_launch_request(prefs).unwrap();
+        assert_eq!((req.seq, req.action.as_str(), req.players, req.teams), (3, "match", 12, 3));
+        assert_eq!((req.weather.as_str(), req.mode.as_str(), req.events), ("blizzard", "koth", true));
+        let map = MatchMap { path: "/maps/big/big_scenario.lua".into(), armies: (1..=16).map(|i| format!("ARMY_{i}")).collect(), size: [2048, 2048], ..Default::default() };
+        let m = from_game_request(&req, &map, false);
+        assert_eq!(m.slots.len(), 16);
+        assert_eq!(m.slots[0].kind, SlotKind::You);
+        assert_eq!(m.slots[0].faction, 2);
+        assert!(m.slots[1..12].iter().all(|s| s.kind == SlotKind::Ai && s.ai == "Hard"));
+        assert!(m.slots[12..].iter().all(|s| s.kind == SlotKind::Empty));
+        // 3 times em blocos de 4
+        assert_eq!(m.slots.iter().take(12).map(|s| s.team).collect::<Vec<_>>(), vec![1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]);
+        // minigame com "sem fim" vira comandante; mutador desconhecido sai
+        assert_eq!(m.options.victory, "demoralization");
+        assert_eq!(m.options.mutators, vec!["hp".to_string(), "res".to_string()]);
+        assert_eq!(m.options.weather, "blizzard");
+        assert!(launch_args(&m).is_ok());
+        // sala com amigos: as outras vagas são de amigos
+        let r = from_game_request(&req, &map, true);
+        assert!(r.slots[1..12].iter().all(|s| s.kind == SlotKind::Guest));
+        // mapa 4096: a memória do jogo limita a 16
+        let huge = MatchMap { size: [4096, 4096], armies: (1..=32).map(|i| format!("ARMY_{i}")).collect(), ..map.clone() };
+        let mut big = req.clone();
+        big.players = 32;
+        assert_eq!(from_game_request(&big, &huge, false).slots.iter().filter(|s| s.kind != SlotKind::Empty).count(), 16);
+        // ação desconhecida ou sem pedido: nada
+        assert!(crate::gamepanel::parse_launch_request("CPLaunchRequest = { seq = 1, action = 'formatar' }").is_none());
+        assert!(crate::gamepanel::parse_launch_request("options = {}").is_none());
+    }
+
     use super::*;
 
     const SCEN: &str = "version = 3\nScenarioInfo = {\n    devname = 'MP_306: 3 Player FFA LAND',\n    name = '<LOC SC2_MAPNAME_0050>[3] Shiva Prime (FFA)',\n    type = 'skirmish',\n    size = {1024, 1024},\n    StartPositions = {\n    \t\t\t['ARMY_1'] = { 379.5, 267.18, 642.5 },\n                ['ARMY_2'] = { 440.5, 274.522, 341.5 },\n                ['ARMY_3'] = { 680.5, 274.514, 578.5 },\n    },\n    Configurations = {\n        ['standard'] = {\n            teams = {\n                { name = 'FFA', armies = {'ARMY_1','ARMY_2','ARMY_3',} },\n            },\n            customprops = {\n                ['ExtraArmies'] = STRING( 'ARMY_EXTRA' ),\n            },\n        },\n    }}\n";
@@ -987,8 +1079,8 @@ mod tests {
         assert!(v.contains("import('/lua/sim/CPMinigames.lua').Start(scenarioInfo)"));
         assert!(patch_victory(&v).is_err());
         assert!(patch_victory("x = 1").is_err());
-        let u = patch_usersync("Sync = {}\nfunction OnSync()\n    a()\nend\n").unwrap();
-        assert!(u.contains("function OnSync()\n    if Sync.CPRecord then CPMinigameRecord(Sync.CPRecord) end"));
+        let u = patch_usersync("local x = 1\nfunction PrintToScreen(textData)\n    a()\nend\n").unwrap();
+        assert!(u.contains("function PrintToScreen(textData)\n    if type(textData) == 'table' and textData.cp then return CPMinigameUser(textData) end"));
         assert!(u.contains("function CPMinigameRecord(r)"));
         // o código dos minigames é todo ASCII ou UTF-8 válido e tem a entrada
         assert!(MINIGAMES.contains("function Start(scenarioInfo)"));
@@ -1022,5 +1114,25 @@ mod tests {
         maps_in(&sources, "Jogo", &mut maps);
         assert!(maps.len() >= 10, "{}", maps.len());
         assert!(maps.iter().all(|m| m.path.starts_with("/maps/") && !m.armies.is_empty()));
+    }
+}
+
+#[cfg(test)]
+mod hot {
+    /// Com `CP_PREFS` (um Game.prefs do jogo com um pedido feito no painel): o pedido é lido.
+    #[test]
+    fn real_prefs_request() {
+        let Ok(p) = std::env::var("CP_PREFS") else { return };
+        let r = crate::gamepanel::parse_launch_request(&String::from_utf8_lossy(&std::fs::read(p).unwrap())).unwrap();
+        eprintln!("{r:?}");
+        assert_eq!(r.action, "match");
+    }
+
+    /// Com `CP_GAMEDATA` e `CP_HOT_BIG`: monta o mod da Partida grande para testar no jogo.
+    #[test]
+    fn hot_bigmatch_mod() {
+        let (Ok(dir), Ok(out)) = (std::env::var("CP_GAMEDATA"), std::env::var("CP_HOT_BIG")) else { return };
+        let sources = vec![std::path::PathBuf::from(dir).join("uncompiled_lua.scd")];
+        super::build(&sources, std::path::Path::new(&out)).unwrap();
     }
 }

@@ -173,6 +173,10 @@ export default function BigMatch() {
   const [teamCount, setTeamCount] = useState(2);
   const [splitBy, setSplitBy] = useState<"side" | "order">("side");
   const [colorMode, setColorMode] = useState<ColorMode>(() => { try { return (localStorage.getItem("cp-bigmatch-colors2") as ColorMode) || "player"; } catch { return "player"; } });
+  // sala com amigos pedida dentro do jogo: a partida escolhida lá e a sala aberta aqui
+  const pendingRoom = useStore((s) => s.pendingRoom);
+  const pendingSpec = useRef<MatchSpec | null>(null);
+  const [inviteFocus, setInviteFocus] = useState<{ tab: "host" | "join"; at: number } | null>(null);
 
   useEffect(() => {
     // a lista demora (lê os mapas de todos os .scd): a última fica guardada enquanto o launcher está aberto
@@ -190,6 +194,12 @@ export default function BigMatch() {
   useEffect(() => {
     if (!maps?.length) return;
     if (!map) { setPath(maps[0].path); return; }
+    const fromGame = pendingSpec.current;
+    if (fromGame && fromGame.map === map.path && fromGame.slots.length === map.armies.length) {
+      pendingSpec.current = null;
+      setSlots(fromGame.slots);
+      return;
+    }
     const saved = readSlots(map.path);
     // vagas guardadas de versões antigas não têm cor: automática
     // vagas guardadas com mais jogadores do que o mapa aguenta (de antes do limite): começa de novo
@@ -197,6 +207,22 @@ export default function BigMatch() {
     setSlots(saved && fits && saved.length === map.armies.length ? saved.map((x) => ({ ...x, color: typeof x.color === "number" ? x.color : -1 })) : defaultSlots(map));
     try { localStorage.setItem("cp-bigmatch-map", map.path); } catch { /* ok */ }
   }, [maps, map]);
+  useEffect(() => {
+    if (!pendingRoom || !maps?.length) return;
+    useStore.setState({ pendingRoom: null });
+    const spec = pendingRoom.spec;
+    if (spec && maps.some((m) => m.path === spec.map)) {
+      pendingSpec.current = spec;
+      setOptions((o) => ({ ...o, ...spec.options }));
+      if (map?.path === spec.map && spec.slots.length === map.armies.length) {
+        pendingSpec.current = null;
+        setSlots(spec.slots);
+      } else {
+        setPath(spec.map);
+      }
+    }
+    setInviteFocus({ tab: pendingRoom.join ? "join" : "host", at: Date.now() });
+  }, [pendingRoom, maps, map]);
   useEffect(() => { if (map && slots.length === map.armies.length) save("cp-bigmatch:" + map.path, slots); }, [map, slots]);
   useEffect(() => { save("cp-bigmatch-options", options); }, [options]);
   useEffect(() => { try { localStorage.setItem("cp-bigmatch-colors2", colorMode); } catch { /* ok */ } }, [colorMode]);
@@ -663,7 +689,7 @@ export default function BigMatch() {
                   {t("Este mapa tem {bases} bases, mas num mapa de {size} o jogo aguenta até {max} jogadores: ele é um programa de 32 bits e cada exército guarda dados do mapa inteiro. Escolha quais bases jogam; as outras ficam vazias.", { bases: map.armies.length, size: map.size[0], max: limit })}
                 </Notice>
               ) : sum.players > 8 && <Notice kind="info">{t("O jogo foi feito para até 8 jogadores. Com mais, a partida fica mais pesada (cada IA pensa sozinha): se o jogo fechar ao carregar, o launcher mostra aqui o que o log do jogo disse.")}</Notice>}
-              <MatchInvite spec={spec} maps={maps ?? []} busy={busy} running={!!running} launch={start}
+              <MatchInvite spec={spec} maps={maps ?? []} busy={busy} running={!!running} launch={start} focus={inviteFocus}
                 markGuests={() => setSlots((l) => {
                   const mine = l.find((s) => s.kind === "you");
                   return l.map((s) => (s.kind === "ai" && mine && mine.team > 0 && s.team === mine.team ? { ...s, kind: "guest" } : s));

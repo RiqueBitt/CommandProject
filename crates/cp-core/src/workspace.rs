@@ -32,6 +32,19 @@ pub struct UnitModel {
     pub mask: Option<String>,
 }
 
+/// O que fazer depois que o jogo fecha por um pedido feito dentro dele (ver
+/// [`Workspace::take_launch_request`]).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameLaunch {
+    /// `match`, `room` ou `join`
+    pub action: String,
+    pub spec: Option<crate::bigmatch::BigMatch>,
+    /// `join`: `group` = a sala do último amigo que convidou
+    pub join: String,
+    pub map_name: String,
+}
+
 pub struct Workspace {
     pub data_dir: PathBuf,
     pub resources_dir: Option<PathBuf>,
@@ -409,12 +422,13 @@ impl Workspace {
                 code: lua(format!("if m.CPBigMatchMode then m.CPBigMatchMode('{}', {players}, {teams}) end", map.path)),
             });
         }
-        // sala com amigos dentro do jogo (Multijogador): abrir, entrar digitando o endereço e, depois
-        // de um convite do launcher, entrar direto na sala de quem convidou
+        // sala com amigos (Multijogador): o jogo fecha e a sala abre no launcher (lista de quem está,
+        // IAs nas vagas livres, convite, IP/LAN), que depois abre o jogo de todos juntos; depois de
+        // um convite, entrar direto na sala de quem convidou
         if let Some(first) = maps.iter().find(|m| crate::bigmatch_menu::safe(&m.path)) {
             let mut room: Vec<(String, String, String)> = vec![
-                ("cp:sala_abrir".into(), if pt { "SALA COM AMIGOS: ABRIR" } else { "ROOM WITH FRIENDS: OPEN" }.into(), format!("if m.CPNetHostFromMenu then m.CPNetHostFromMenu('{}') end", first.path)),
-                ("cp:sala_entrar".into(), if pt { "SALA COM AMIGOS: ENTRAR" } else { "ROOM WITH FRIENDS: JOIN" }.into(), "if m.CPNetJoinFromMenu then m.CPNetJoinFromMenu('') end".into()),
+                ("cp:sala_abrir".into(), if pt { "SALA COM AMIGOS: CRIAR" } else { "ROOM WITH FRIENDS: CREATE" }.into(), format!("if m.CPRoomFromMenu then m.CPRoomFromMenu('{}') end", first.path)),
+                ("cp:sala_entrar".into(), if pt { "SALA COM AMIGOS: ENTRAR" } else { "ROOM WITH FRIENDS: JOIN" }.into(), "if m.CPRoomJoinFromMenu then m.CPRoomJoinFromMenu('') end".into()),
             ];
             let group = self.settings.ui_prefs.get("groupHost");
             let host_name: String = group.and_then(|g| g.get("name")).and_then(|v| v.as_str()).unwrap_or("").chars().filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '_' || *c == '-').take(16).collect();
@@ -422,7 +436,7 @@ impl Workspace {
             let address_ok = !address.is_empty() && address.len() < 64 && address.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-' | '[' | ']'));
             if address_ok {
                 let who = if host_name.trim().is_empty() { if pt { "AMIGO" } else { "FRIEND" }.to_string() } else { host_name.trim().to_uppercase() };
-                room.insert(0, ("cp:sala_grupo".into(), if pt { format!("ENTRAR NA SALA DE {who}") } else { format!("JOIN {who}'S ROOM") }, format!("if m.CPNetJoinDirect then m.CPNetJoinDirect('{address}') end")));
+                room.insert(0, ("cp:sala_grupo".into(), if pt { format!("ENTRAR NA SALA DE {who}") } else { format!("JOIN {who}'S ROOM") }, "if m.CPRoomJoinFromMenu then m.CPRoomJoinFromMenu('group') end".to_string()));
             }
             for (key, label, code) in room {
                 if 3 + used(edit, Place::Multiplayer) >= MAX_SUBMENU {
@@ -495,6 +509,44 @@ impl Workspace {
     /// Pedidos feitos no painel do launcher dentro do jogo (`CPLauncher` no `Game.prefs`): aplica
     /// os novos (o número da última mudança atendida fica nas configurações) — perfil, mods do
     /// perfil, cor da tela inicial, memória e prioridade. Devolve o que mudou.
+    /// O pedido de continuação feito no jogo (`CPLaunchRequest`), uma vez só: a partida grande com
+    /// clima pronta para abrir, a sala com amigos com as escolhas do jogo ou a tela de entrar numa
+    /// sala. Lido quando o jogo fecha; os pedidos de antes desta abertura já foram marcados como
+    /// vistos ([`Workspace::skip_launch_request`]).
+    pub fn take_launch_request(&mut self) -> Result<Option<GameLaunch>> {
+        let Some(path) = crate::perf::prefs_path() else { return Ok(None) };
+        let Ok(bytes) = std::fs::read(&path) else { return Ok(None) };
+        let Some(req) = crate::gamepanel::parse_launch_request(&String::from_utf8_lossy(&bytes)) else { return Ok(None) };
+        if self.settings.ui_prefs.get("launchRequestSeq").and_then(|v| v.as_u64()) == Some(req.seq) {
+            return Ok(None);
+        }
+        self.settings.ui_prefs.insert("launchRequestSeq".into(), req.seq.into());
+        self.save_settings()?;
+        if req.action == "join" {
+            return Ok(Some(GameLaunch { action: req.action, spec: None, join: req.join, map_name: String::new() }));
+        }
+        let maps = self.match_maps()?;
+        let map = maps
+            .iter()
+            .find(|m| m.path.eq_ignore_ascii_case(&req.map))
+            .ok_or_else(|| Error::Other(format!("o mapa escolhido no jogo não foi encontrado nos mods ligados: {}", req.map)))?;
+        let spec = crate::bigmatch::from_game_request(&req, map, req.action == "room");
+        Ok(Some(GameLaunch { action: req.action, spec: Some(spec), join: String::new(), map_name: map.name.clone() }))
+    }
+
+    /// Marca o pedido que está no `Game.prefs` como visto (ao abrir o jogo): só os feitos nesta
+    /// abertura valem quando ele fechar.
+    pub fn skip_launch_request(&mut self) -> Result<()> {
+        let Some(path) = crate::perf::prefs_path() else { return Ok(()) };
+        let Ok(bytes) = std::fs::read(&path) else { return Ok(()) };
+        let Some(req) = crate::gamepanel::parse_launch_request(&String::from_utf8_lossy(&bytes)) else { return Ok(()) };
+        if self.settings.ui_prefs.get("launchRequestSeq").and_then(|v| v.as_u64()) != Some(req.seq) {
+            self.settings.ui_prefs.insert("launchRequestSeq".into(), req.seq.into());
+            self.save_settings()?;
+        }
+        Ok(())
+    }
+
     pub fn take_game_requests(&mut self) -> Result<Vec<String>> {
         // o aviso nas notícias ("aplicado do jogo") vale para uma abertura do jogo
         if self.settings.ui_prefs.remove("gameRequestDone").is_some() {
@@ -712,15 +764,30 @@ impl Workspace {
                         .filter_map(|p| crate::forja::effective_text(&stock, &mod_paths, p).map(|t| (p.to_string(), t.into_bytes()))),
                 )
                 .collect();
-            let texts = if pt { &crate::bigmatch_menu::PT } else { &crate::bigmatch_menu::EN };
-            // a imagem de cada mapa da lista da sala (dos mods de mapa ligados ou do jogo)
-            let lobby_thumbs = panel_maps
+            // a imagem de cima de cada mapa do painel da Partida grande (o minimapa do jogo ou do mod)
+            let lobby_thumbs: Vec<Option<Vec<u8>>> = {
+                use rayon::prelude::*;
+                panel_maps
+                    .par_iter()
+                    .take(crate::bigmatch_menu::MENU_MAPS)
+                    .map(|m| crate::bigmatch::minimap_png(&mod_paths, &stock, &m.path, 128).ok())
+                    .collect()
+            };
+            // mods ligados com texturas da interface (as Texturas HD): o tema pinta as versões deles
+            let mut theme_sources: Vec<PathBuf> = mod_paths
                 .iter()
-                .take(crate::bigmatch_menu::LOBBY_MAPS)
-                .map(|m| crate::bigmatch::minimap_png(&mod_paths, &stock, &m.path, 256).ok())
+                .filter(|p| {
+                    let name = p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+                    name != ss::ARCHIVE && name != ss::OLD_ARCHIVE
+                })
+                .filter(|p| crate::scd::index(p).map(|idx| idx.keys().any(|k| k.starts_with("/textures/ui/common/pc/"))).unwrap_or(false))
+                .cloned()
                 .collect();
+            theme_sources.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()));
             let extras = ss::GameExtras {
-                lobby: (!panel_maps.is_empty()).then_some((panel_maps.as_slice(), texts)),
+                theme_sources,
+                // o painel da Partida grande (na tela inicial, ao lado do submenu Batalha)
+                lobby: (!panel_maps.is_empty()).then_some((panel_maps.as_slice(), if pt { &crate::bigmatch_menu::PT } else { &crate::bigmatch_menu::EN })),
                 lobby_thumbs,
                 launcher: launcher_panel.as_ref(),
                 pt,

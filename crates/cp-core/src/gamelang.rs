@@ -17,7 +17,7 @@ use crate::error::{Error, Result};
 /// Id do mod na biblioteca.
 pub const MOD_ID: &str = "cp-jogo-ptbr";
 /// Versão da tradução: o launcher remonta o mod quando ela muda.
-pub const MOD_VERSION: &str = "1.0.6";
+pub const MOD_VERSION: &str = "1.0.7";
 /// Nome do arquivo do mod.
 pub const ARCHIVE: &str = "zz_cp_jogo_ptbr.scd";
 /// Idiomas do launcher que deixam o jogo em português.

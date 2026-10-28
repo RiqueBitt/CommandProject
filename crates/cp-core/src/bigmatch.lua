@@ -174,6 +174,16 @@ function CPBigMatchSession(mapName, spec)
     return sessionInfo
 end
 
+-- climas do mod Climas (o launcher monta para o mapa e o clima da partida)
+local CPBM_WEATHERS = { rain = true, storm = true, blizzard = true, fog = true, sandstorm = true }
+
+-- o clima já montado nesta abertura do jogo (o launcher põe /lua/cpweatherinfo.lua no mod Climas)
+local function CPWeatherMounted(map, kind)
+    local ok, info = pcall(import, '/lua/cpweatherinfo.lua')
+    if not ok or type(info) ~= 'table' or not info.kind then return false end
+    return info.kind == kind and string.lower(tostring(info.map or '')) == string.lower(tostring(map or ''))
+end
+
 -- the big match screen inside the game (scene cp_bigmatch, made by the launcher): players in all,
 -- number of teams (0 = everyone for himself), AI difficulty and the map. You take the first base,
 -- the AIs the next ones; the bases of a team are side by side in the map's order. Capped by the
@@ -214,6 +224,8 @@ function CPBigMatchQuick(mapName, players, teams, ai, faction, victory, unitCap,
     local mut = tostring(CPBMGet('mut') or '')
     if string.find(mut, '^[a-z,]*$') and mut ~= '' then spec = spec .. ';CPMut=' .. mut end
     if CPBMGet('events') == true then spec = spec .. ';CPEvents=1' end
+    local weather = tostring(CPBMGet('weather') or '')
+    if CPBM_WEATHERS[weather] and CPWeatherMounted(mapName, weather) then spec = spec .. ';CPWeather=' .. weather end
     for i = 1, bases do
         if i <= n then
             local team = 1
@@ -245,7 +257,7 @@ end
 
 -- escolhas da Partida grande feitas dentro do jogo (sala de batalha, submenus): guardadas no
 -- perfil do jogo, valem para as próximas partidas
-local CPBM_DEFAULT = { players = 8, teams = 2, ai = 'Normal', faction = 0, victory = 'demoralization', units = 1000, cheats = false, mode = '', mut = '', events = false }
+local CPBM_DEFAULT = { players = 8, teams = 2, ai = 'Normal', faction = 0, victory = 'demoralization', units = 1000, cheats = false, mode = '', mut = '', events = false, weather = '' }
 
 function CPBMGet(key)
     local ok, saved = pcall(function() return import('/lua/user/prefs.lua').GetFromCurrentProfile('CPBigMatch') end)
@@ -285,11 +297,62 @@ function CPBigMatchMinigame(mapName, players, teams, mode)
     CPBMSet('mode', before or '')
 end
 
--- "Iniciar partida grande": as escolhas guardadas; o mapa guardado, se ainda existir
+-- pedido para o launcher: o jogo grava no perfil (Game.prefs, que ele salva ao fechar) e fecha; o
+-- launcher lê quando o jogo fecha e continua de lá: monta o clima e abre o jogo direto na partida
+-- ('match'), abre a sala com amigos com estas escolhas ('room') ou a tela de entrar numa sala
+-- ('join'). O número sobe a cada pedido: o launcher atende cada um uma vez só.
+function CPLaunchRequest(action, map, extra)
+    local ok, err = pcall(function()
+        local Prefs = import('/lua/user/prefs.lua')
+        local old = Prefs.GetFromCurrentProfile('CPLaunchRequest')
+        local seq = ((type(old) == 'table' and tonumber(old.seq)) or 0) + 1
+        local req = {
+            seq = seq, action = action, map = tostring(map or ''),
+            players = tonumber(CPBMGet('players')) or 8, teams = tonumber(CPBMGet('teams')) or 2,
+            ai = tostring(CPBMGet('ai') or 'Normal'), faction = tonumber(CPBMGet('faction')) or 0,
+            victory = tostring(CPBMGet('victory') or 'demoralization'), units = tonumber(CPBMGet('units')) or 1000,
+            mode = tostring(CPBMGet('mode') or ''), mut = tostring(CPBMGet('mut') or ''),
+            events = CPBMGet('events') == true, weather = tostring(CPBMGet('weather') or ''),
+        }
+        for k, v in extra or {} do req[k] = v end
+        Prefs.SetToCurrentProfile('CPLaunchRequest', req)
+        SavePreferences()
+    end)
+    if not ok then
+        WARN('*CommandProject launcher request failed: ' .. tostring(err))
+        return false
+    end
+    LOG('*CommandProject launcher request: ' .. tostring(action) .. ' (the game closes, the launcher goes on)')
+    ExitApplication()
+    return true
+end
+
+-- "Iniciar partida grande": as escolhas guardadas; o mapa guardado, se ainda existir. Com clima, o
+-- launcher precisa montar o clima para o mapa: se o desta abertura já é o mesmo, começa aqui; senão
+-- o jogo fecha e o launcher abre de novo direto na partida
 function CPBigMatchFromMenu(defaultMap)
     local map = CPBMGet('map')
     if not map or not import('/lua/ui/maputil.lua').LoadScenario(map) then map = defaultMap end
+    local weather = tostring(CPBMGet('weather') or '')
+    if CPBM_WEATHERS[weather] and not CPWeatherMounted(map, weather) then
+        if CPLaunchRequest('match', map) then return end
+    end
     CPBigMatchQuick(map, CPBMGet('players'), CPBMGet('teams'), CPBMGet('ai'), CPBMGet('faction'), CPBMGet('victory'), CPBMGet('units'))
+end
+
+-- "Sala com amigos" (painel da Batalha e Multijogador): a sala do launcher, com as escolhas daqui
+-- (lista de quem está, IAs nas vagas livres, convite, IP/LAN). A interface feita em Lua não aparece
+-- nos menus do jogo, então a sala fica no launcher, que depois abre o jogo de todos juntos.
+function CPRoomFromMenu(defaultMap)
+    local map = CPBMGet('map')
+    if not map or not import('/lua/ui/maputil.lua').LoadScenario(map) then map = defaultMap end
+    CPLaunchRequest('room', map)
+end
+
+-- "Entrar numa sala" (Multijogador): a tela de entrar com o convite no launcher ('group' = a sala do
+-- último amigo que convidou)
+function CPRoomJoinFromMenu(which)
+    CPLaunchRequest('join', CPBMGet('map') or '', { join = tostring(which or '') })
 end
 
 -- "Jogar de novo" (tela de resultado): a última partida grande com as mesmas escolhas
@@ -906,4 +969,285 @@ function CPNetJoinDirect(address)
     CPNet.fromMenu = true
     local ok, err = pcall(CPNetOpen, { host = false, address = address })
     if not ok then WARN('*CommandProject room: ' .. tostring(err)) end
+end
+
+---------------------------------------------------------------------------- big match screen
+-- Battle -> "PARTIDA GRANDE": the whole big match setup on one screen made in Lua (the game's
+-- lobby only runs its own commands, so buttons placed in it cannot start anything). Choices are
+-- kept in the game profile (CPBMSet) like before; the maps come straight from the game's files.
+local CPBMUI = { panel = false, maps = false, accent = 'FF2B8CFF', page = 0 }
+
+local function CPHexColor(hex)
+    hex = tostring(hex or '')
+    if string.sub(hex, 1, 1) == '#' then hex = string.sub(hex, 2) end
+    if string.len(hex) == 6 then return 'FF' .. string.upper(hex) end
+    return 'FF2B8CFF'
+end
+
+local function CPBigMaps()
+    if CPBMUI.maps then return CPBMUI.maps end
+    local out = {}
+    local MapUtil = import('/lua/ui/maputil.lua')
+    local ok, files = pcall(DiskFindFiles, '/maps', '*_scenario.lua')
+    if ok and files then
+        for _, f in files do
+            local okl, scen = pcall(MapUtil.LoadScenario, f)
+            if okl and scen and scen.Configurations and scen.Configurations.standard and scen.Configurations.standard.teams then
+                local armies = scen.Configurations.standard.teams[1].armies
+                if armies and table.getn(armies) >= 2 and (scen.type == 'skirmish' or scen.type == 'cp_bigmatch') then
+                    table.insert(out, { path = f, name = LOC(scen.name or f), bases = table.getn(armies), size = (scen.size and scen.size[1]) or 0 })
+                end
+            end
+        end
+    end
+    table.sort(out, function(a, b)
+        if a.bases ~= b.bases then return a.bases > b.bases end
+        return tostring(a.name) < tostring(b.name)
+    end)
+    CPBMUI.maps = out
+    return out
+end
+
+local function CPUIButton(parent, items, label, x, y, w, h, on, onClick, size)
+    local UIUtil = import('/lua/ui/uiutil.lua')
+    local LayoutHelpers = import('/lua/maui/layouthelpers.lua')
+    local Bitmap = import('/lua/maui/bitmap.lua').Bitmap
+    local accent = CPBMUI.accent
+    -- borda (na cor) e o miolo por cima
+    local border = Bitmap(parent)
+    border:SetSolidColor(on and accent or 'FF2A3A4C')
+    border.Width:Set(w)
+    border.Height:Set(h)
+    LayoutHelpers.AtLeftTopIn(border, parent, x, y)
+    border.Depth:Set(parent.Depth() + 2)
+    local fill = Bitmap(border)
+    local idle = on and ('C0' .. string.sub(accent, 3)) or 'FF121A24'
+    fill:SetSolidColor(idle)
+    fill.Width:Set(w - 2)
+    fill.Height:Set(h - 2)
+    LayoutHelpers.AtLeftTopIn(fill, border, 1, 1)
+    fill.Depth:Set(border.Depth() + 1)
+    fill:DisableHitTest()
+    local t = UIUtil.CreateText(border, label, size or 15, UIUtil.bodyFont)
+    t:DisableHitTest()
+    t:SetColor('FFFFFFFF')
+    t:SetDropShadow(true)
+    t.Depth:Set(fill.Depth() + 1)
+    LayoutHelpers.AtCenterIn(t, border)
+    border.HandleEvent = function(self, event)
+        if event.Type == 'MouseEnter' then
+            fill:SetSolidColor(on and accent or ('60' .. string.sub(accent, 3)))
+            self:SetSolidColor(accent)
+        elseif event.Type == 'MouseExit' then
+            fill:SetSolidColor(idle)
+            self:SetSolidColor(on and accent or 'FF2A3A4C')
+        elseif event.Type == 'ButtonPress' then
+            pcall(function() PlaySound(Sound({ Bank = 'Interface', Cue = 'UI_Opt_Mini_Button_Click' })) end)
+            onClick()
+        end
+        return true
+    end
+    table.insert(items, border)
+    table.insert(items, fill)
+    table.insert(items, t)
+    return border
+end
+
+local CPBM_MODES = {
+    { '', 'demoralization', '<LOC CP_BM_NORMAL>NORMAL' }, { '', 'domination', '<LOC CP_BM_ALL>DESTROY ALL' }, { '', 'sandbox', '<LOC CP_BM_ENDLESS>ENDLESS' },
+    { 'domination', '', '<LOC CP_MG_DOM_TITLE>STRATEGIC DOMINATION' }, { 'koth', '', '<LOC CP_MG_KOTH_TITLE>KING OF THE HILL' },
+    { 'arena', '', '<LOC CP_MG_ARENA_TITLE>EXPERIMENTAL ARENA' }, { 'defense', '', '<LOC CP_MG_DEF_TITLE>LAST LINE OF DEFENSE' },
+    { 'survival', '', '<LOC CP_MG_SURV_TITLE>ENDLESS SURVIVAL' }, { 'vip', '', '<LOC CP_MG_VIP_TITLE>ESCORT' },
+    { 'race', '', '<LOC CP_MG_RACE_TITLE>RESOURCE RACE' }, { 'treasure', '', '<LOC CP_MG_TREASURE_TITLE>TREASURE HUNT' },
+    { 'total', '', '<LOC CP_MG_TOTAL_TITLE>TOTAL WAR' }, { 'supreme', '', '<LOC CP_MG_SUP_TITLE>SUPREME PROJECT' },
+}
+local CPBM_EXTRAS = {
+    { '', false, '<LOC CP_BM_NONE>NONE' }, { '', true, '<LOC CP_BM_EVENTS>EVENTS' }, { 'hp,res,cdr', true, '<LOC CP_BM_CHAOS>CHAOS' },
+    { 'air', false, '<LOC CP_MG_MUT_AIR>Air only' }, { 'hp,cdr', false, '<LOC CP_BM_TANKS>TANKS' },
+}
+
+function CPBigMatchScreenClose()
+    if CPBMUI.panel then pcall(function() CPBMUI.panel:Destroy() end) end
+    CPBMUI.panel = false
+end
+
+function CPBigMatchScreenDraw()
+    local ok, err = pcall(function()
+        local UIUtil = import('/lua/ui/uiutil.lua')
+        local LayoutHelpers = import('/lua/maui/layouthelpers.lua')
+        local Bitmap = import('/lua/maui/bitmap.lua').Bitmap
+        local frame = GetFrame(0)
+        if not CPBMUI.panel then
+            local p = Bitmap(frame)
+            p:SetSolidColor('F00A1017')
+            p.Depth:Set(frame:GetTopmostDepth() + 100)
+            LayoutHelpers.FillParent(p, frame)
+            p.items = {}
+            p.HandleEvent = function(self, event)
+                if event.Type == 'KeyDown' and (event.KeyCode == 27 or event.RawKeyCode == 27) then
+                    CPBigMatchScreenClose()
+                elseif event.Type == 'KeyDown' and (event.KeyCode == 13 or event.RawKeyCode == 13) then
+                    CPBigMatchScreenStart()
+                end
+                return true
+            end
+            CPBMUI.panel = p
+        end
+        local p = CPBMUI.panel
+        for _, c in p.items do pcall(function() c:Destroy() end) end
+        p.items = {}
+        local items = p.items
+        local W, H = frame.Width(), frame.Height()
+        local s = math.min(W / 1920, H / 1080)
+        if s <= 0 then s = 1 end
+        local function X(v) return math.floor(v * s) end
+        local function text(t, size, color, x, y)
+            local c = UIUtil.CreateText(p, t, math.max(10, X(size)), UIUtil.bodyFont)
+            c:DisableHitTest()
+            c:SetColor(color)
+            c:SetDropShadow(true)
+            c.Depth:Set(p.Depth() + 2)
+            LayoutHelpers.AtLeftTopIn(c, p, X(x), X(y))
+            table.insert(items, c)
+        end
+        local function bar(x, y, w, h, color)
+            local b = Bitmap(p)
+            b:SetSolidColor(color)
+            b.Width:Set(X(w))
+            b.Height:Set(math.max(1, X(h)))
+            LayoutHelpers.AtLeftTopIn(b, p, X(x), X(y))
+            b.Depth:Set(p.Depth() + 1)
+            b:DisableHitTest()
+            table.insert(items, b)
+        end
+        local function button(label, x, y, w, h, on, fn, size)
+            CPUIButton(p, items, label, X(x), X(y), X(w), X(h), on, fn, math.max(10, X(size or 15)))
+        end
+        -- cabeçalho
+        bar(0, 0, 1920, 110, 'C0101A26')
+        bar(0, 110, 1920, 2, CPBMUI.accent)
+        text(LOC('<LOC CP_BM_TITLE>BIG MATCH'), 40, 'FFFFFFFF', 80, 30)
+        text(LOC('<LOC CP_BM_SUB>More than 8 players, minigames and mutators. Your choices are kept.'), 17, 'FFB8C7D6', 82, 78)
+        -- coluna das opções
+        local x0, y = 80, 140
+        local function section(title, list, cols, w)
+            text(title, 16, 'FF8FA3B8', x0, y)
+            y = y + 26
+            local gap = 8
+            for i, it in list do
+                local c = math.mod(i - 1, cols)
+                local r = math.floor((i - 1) / cols)
+                button(it[1], x0 + c * (w + gap), y + r * 44, w, 38, it[2], it[3], 15)
+            end
+            y = y + math.ceil(table.getn(list) / cols) * 44 + 14
+        end
+        local players = CPBMGet('players')
+        local list = {}
+        for _, n0 in { 10, 12, 16, 20, 24, 32 } do
+            local n = n0
+            table.insert(list, { tostring(n), players == n, function() CPBMSet('players', n) CPBigMatchScreenDraw() end })
+        end
+        section(LOC('<LOC CP_BM_PLAYERS>PLAYERS'), list, 6, 120)
+        local teams = CPBMGet('teams')
+        list = {}
+        for _, it in { { 2, '<LOC CP_BM_T2>2 TEAMS' }, { 3, '<LOC CP_BM_T3>3 TEAMS' }, { 4, '<LOC CP_BM_T4>4 TEAMS' }, { 0, '<LOC CP_BM_FFA>FREE FOR ALL' } } do
+            local v = it[1]
+            table.insert(list, { LOC(it[2]), teams == v, function() CPBMSet('teams', v) CPBigMatchScreenDraw() end })
+        end
+        section(LOC('<LOC CP_BM_TEAMS>TEAMS'), list, 4, 184)
+        local ai = CPBMGet('ai')
+        list = {}
+        for _, it in { { 'Easy', '<LOC CP_BM_EASY>EASY' }, { 'Normal', '<LOC CP_BM_NORMALAI>NORMAL' }, { 'Hard', '<LOC CP_BM_HARD>HARD' }, { 'Cheat', '<LOC CP_BM_CHEAT>EXTREME' } } do
+            local v = it[1]
+            table.insert(list, { LOC(it[2]), ai == v, function() CPBMSet('ai', v) CPBigMatchScreenDraw() end })
+        end
+        section(LOC('<LOC CP_BM_AI>AI DIFFICULTY'), list, 4, 184)
+        local faction = CPBMGet('faction')
+        list = {}
+        for i, nm in { '<LOC CP_NET_RANDOM>Random', 'UEF', 'Cybran', 'Illuminate' } do
+            local v = i - 1
+            table.insert(list, { LOC(nm), faction == v, function() CPBMSet('faction', v) CPBigMatchScreenDraw() end })
+        end
+        section(LOC('<LOC CP_BM_FACTION>YOUR FACTION'), list, 4, 184)
+        local mode, victory = CPBMGet('mode') or '', CPBMGet('victory')
+        list = {}
+        for _, it in CPBM_MODES do
+            local m, v = it[1], it[2]
+            local on = (m ~= '' and mode == m) or (m == '' and mode == '' and victory == v)
+            table.insert(list, { LOC(it[3]), on, function() CPBMSetMode(m, v) CPBigMatchScreenDraw() end })
+        end
+        section(LOC('<LOC CP_BM_MODE>MODE (VICTORY OR MINIGAME)'), list, 3, 248)
+        local mut, ev = CPBMGet('mut') or '', CPBMGet('events') == true
+        list = {}
+        for _, it in CPBM_EXTRAS do
+            local m, e = it[1], it[2]
+            table.insert(list, { LOC(it[3]), mut == m and ev == e, function() CPBMSetExtras(m, e) CPBigMatchScreenDraw() end })
+        end
+        section(LOC('<LOC CP_BM_EXTRAS>EXTRAS (MUTATORS AND EVENTS)'), list, 5, 145)
+        local units = CPBMGet('units')
+        list = {}
+        for _, n0 in { 250, 500, 1000, 1500 } do
+            local n = n0
+            table.insert(list, { tostring(n), units == n, function() CPBMSet('units', n) CPBigMatchScreenDraw() end })
+        end
+        section(LOC('<LOC CP_BM_UNITS>UNIT CAP'), list, 4, 184)
+        -- coluna dos mapas
+        local mx = 900
+        local maps = CPBigMaps()
+        local chosen = CPBMGet('map')
+        local found = false
+        for _, m in maps do
+            if m.path == chosen then found = true end
+        end
+        if not found and maps[1] then chosen = maps[1].path end
+        text(LOC('<LOC CP_BM_MAP>MAP'), 16, 'FF8FA3B8', mx, 140)
+        local per = 14
+        local pages = math.max(1, math.ceil(table.getn(maps) / per))
+        if CPBMUI.page >= pages then CPBMUI.page = 0 end
+        local first = CPBMUI.page * per
+        for i = 1, per do
+            local m = maps[first + i]
+            if not m then break end
+            local label = m.bases .. '   ' .. tostring(m.name)
+            if m.size and m.size > 0 then label = label .. '   (' .. m.size .. ')' end
+            local path = m.path
+            button(label, mx, 166 + (i - 1) * 46, 620, 40, path == chosen, function() CPBMSet('map', path) CPBigMatchScreenDraw() end, 15)
+        end
+        if pages > 1 then
+            local py = 166 + per * 46 + 6
+            button('<', mx, py, 60, 36, false, function() CPBMUI.page = math.mod(CPBMUI.page - 1 + pages, pages) CPBigMatchScreenDraw() end)
+            text((CPBMUI.page + 1) .. ' / ' .. pages, 16, 'FFB8C7D6', mx + 80, py + 8)
+            button('>', mx + 150, py, 60, 36, false, function() CPBMUI.page = math.mod(CPBMUI.page + 1, pages) CPBigMatchScreenDraw() end)
+        end
+        if table.getn(maps) == 0 then text(LOC('<LOC CP_BM_NOMAPS>No maps found.'), 16, 'FFFF6A5A', mx, 170) end
+        -- rodapé
+        bar(0, 960, 1920, 2, CPBMUI.accent)
+        bar(0, 962, 1920, 118, 'C0101A26')
+        button(LOC('<LOC CP_BM_BACK>BACK (ESC)'), 80, 990, 260, 56, false, function() CPBigMatchScreenClose() end, 18)
+        button(LOC('<LOC CP_BM_FRIENDS>ROOM WITH FRIENDS'), 1080, 990, 320, 56, false, function()
+            local map = chosen
+            CPBigMatchScreenClose()
+            CPNetHostFromMenu(map)
+        end, 18)
+        button(LOC('<LOC CP_BM_START>START (ENTER)'), 1420, 990, 420, 56, true, function() CPBigMatchScreenStart() end, 20)
+        CPBMUI.chosen = chosen
+        p:AcquireKeyboardFocus(false)
+    end)
+    if not ok then WARN('*CommandProject big match screen: ' .. tostring(err)) end
+end
+
+function CPBigMatchScreenStart()
+    local map = CPBMUI.chosen
+    if not map then return end
+    CPBMSet('map', map)
+    CPBigMatchScreenClose()
+    local ok, err = pcall(CPBigMatchFromMenu, map)
+    if not ok then WARN('*CommandProject big match screen: ' .. tostring(err)) end
+end
+
+-- Battle -> "PARTIDA GRANDE" (accent = the start screen color, '#rrggbb')
+function CPBigMatchScreen(accent)
+    CPBMUI.accent = CPHexColor(accent)
+    CPBMUI.maps = false
+    CPBigMatchScreenDraw()
 end

@@ -521,5 +521,10 @@
  "este convite não vale mais: peça um novo para quem convidou": "this invite is no longer valid: ask the host for a new one",
  "não deu para falar com a sala de {h}: ela pode ter fechado, ou vocês não estão na mesma rede/VPN (ou a porta não está aberta no roteador dele)": "couldn't reach {h}'s room: it may have closed, or you're not on the same network/VPN (or the port isn't open on their router)",
  "não deu para abrir a sala na porta {port}: {e}. Feche outro programa que use a porta ou escolha outra": "couldn't open the room on port {port}: {e}. Close any other program using the port or choose another",
- "{n}: nome de arquivo inválido": "{n}: invalid file name"
+ "{n}: nome de arquivo inválido": "{n}: invalid file name",
+ "O jogo pediu a partida grande em {map} com clima: montando o clima e abrindo o jogo direto na partida…": "The game asked for the big match on {map} with weather: building the weather and opening the game straight into the match…",
+ "Jogo aberto direto na partida.": "Game opened straight into the match.",
+ "Cole o convite do seu amigo para entrar na sala dele.": "Paste your friend's invite to join their room.",
+ "Sala com amigos: confira a partida escolhida no jogo e clique em Abrir sala e criar convite.": "Room with friends: check the match chosen in the game and click Open room and create invite.",
+ "O jogo pediu para continuar no launcher, mas não deu: {error}": "The game asked to continue in the launcher, but it failed: {error}"
 }

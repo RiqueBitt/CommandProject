@@ -18,9 +18,13 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub const MOD_ID: &str = "cp-tela-inicial";
-pub const ARCHIVE: &str = "zz_cp_tela_inicial.scd";
+/// Depois das Texturas HD (`zz_cp_texturas_hd.scd`), que trazem as texturas da interface em HD: as
+/// pintadas aqui (menus e HUD das partidas) valem por cima delas. Antes da Forja e do Climas.
+pub const ARCHIVE: &str = "zz_cp_zzy_tela_inicial.scd";
+/// O nome de antes (até a 0.50): as Texturas HD ficavam por cima da HUD nova.
+pub const OLD_ARCHIVE: &str = "zz_cp_tela_inicial.scd";
 /// Muda quando o visual muda (o launcher remonta).
-pub const STYLE_VERSION: &str = "1.5.0";
+pub const STYLE_VERSION: &str = "1.7.0";
 pub const SETTINGS_FILE: &str = "start-screen.json";
 /// Pasta (nos dados do launcher) com o logo e o vídeo do jogador.
 pub const USER_DIR: &str = "start-screen";
@@ -278,7 +282,6 @@ pub fn build(scene: &[u8], edit: &MenuEdit, settings: &Settings, stock: &[PathBu
 const DEFAULT_LOGO: &[u8] = include_bytes!("menu_style/logo_default.png");
 
 /// A sala de escaramuça do jogo ("Criar jogo"), onde entra o painel da Partida grande.
-const LOBBY_SCENE: &str = "/ui/scenes/frontend_skirmish/pc_frontend_skirmish.win.bdf";
 /// A tela de resultado das partidas, onde entra o "Jogar de novo".
 const SUMMARY_SCENE: &str = "/ui/scenes/frontend_summary_mp/pc_frontend_summary_mp.win.bdf";
 
@@ -290,10 +293,13 @@ pub type Panel<'a> = (&'a [crate::bigmatch_menu::MenuMap], &'a crate::bigmatch_m
 #[derive(Default)]
 pub struct GameExtras<'a> {
     pub lobby: Option<Panel<'a>>,
-    /// a imagem de cima (PNG) de cada mapa da lista da sala, na mesma ordem
+    /// a imagem de cima (PNG) de cada mapa do painel da Partida grande, na mesma ordem
     pub lobby_thumbs: Vec<Option<Vec<u8>>>,
     pub launcher: Option<&'a crate::gamepanel::LauncherPanel>,
     pub pt: bool,
+    /// mods ligados com texturas da interface (as Texturas HD), na ordem em que o jogo monta: o
+    /// tema pinta as versões deles (a HUD nova sai das texturas em HD)
+    pub theme_sources: Vec<PathBuf>,
 }
 
 /// Opções do tema dos outros menus (as texturas do jogo pintadas na cor da tela inicial).
@@ -346,6 +352,21 @@ pub fn build_all(
     if let Some(lp) = extras.launcher {
         built.scene = crate::gamepanel::add_launcher_panel(&built.scene, lp, extras.pt)?;
     }
+    // miniaturas dos mapas do painel (o botão de cada mapa é a imagem dele)
+    let tiles: Vec<Option<MapTiles>> = {
+        use rayon::prelude::*;
+        extras
+            .lobby_thumbs
+            .par_iter()
+            .take(crate::bigmatch_menu::MENU_MAPS)
+            .map(|png| png.as_ref().and_then(|p| map_tiles(p, accent).ok()))
+            .collect()
+    };
+    let thumbs: Vec<bool> = tiles.iter().map(|t| t.is_some()).collect();
+    // a Partida grande: painel ao lado do submenu Batalha da tela inicial
+    if let Some((maps, texts)) = panel {
+        built.scene = crate::bigmatch_menu::add_menu_panel_with(&built.scene, maps, texts, &thumbs)?;
+    }
     let mut b = crate::scd::ScdBuilder::create(dest)?;
     b.add_bytes(mainmenu::SCENE_PATH.trim_start_matches('/'), &built.scene)?;
     let mut files = textures(accent)?;
@@ -358,16 +379,10 @@ pub fn build_all(
     for (path, data) in &files {
         b.add_bytes(path, data)?;
     }
-    // miniaturas dos mapas da sala (o botão de cada mapa é a imagem dele)
-    let mut thumbs = Vec::new();
-    for (i, png) in extras.lobby_thumbs.iter().enumerate().take(crate::bigmatch_menu::LOBBY_MAPS) {
-        let made = png.as_ref().and_then(|p| map_tiles(p, accent).ok());
-        if let Some(tiles) = &made {
-            for (state, dds) in tiles {
-                b.add_bytes(crate::bigmatch_menu::tile_texture(i, state).trim_start_matches('/'), dds)?;
-            }
+    for (i, made) in tiles.iter().enumerate() {
+        for (state, dds) in made.iter().flatten() {
+            b.add_bytes(crate::bigmatch_menu::tile_texture(i, state).trim_start_matches('/'), dds)?;
         }
-        thumbs.push(made.is_some());
     }
     // os outros menus: cenas no visual novo e as texturas do jogo na cor escolhida
     for (path, data) in others {
@@ -387,7 +402,6 @@ pub fn build_all(
         }
         // a sala de escaramuça do jogo ganha o painel da Partida grande
         let restyled = mainmenu::restyle_frontend(data).and_then(|new| match panel {
-            Some((maps, texts)) if path == LOBBY_SCENE => crate::bigmatch_menu::add_lobby_panel_with(&new, maps, texts, &thumbs),
             Some(_) if path == SUMMARY_SCENE => crate::bigmatch_menu::add_again_button(&new, if extras.pt { "JOGAR DE NOVO" } else { "PLAY AGAIN" }),
             _ => Ok(new),
         });
@@ -398,7 +412,8 @@ pub fn build_all(
     }
     if !others.is_empty() {
         let own: std::collections::HashSet<String> = files.iter().map(|(p, _)| p.to_ascii_lowercase()).collect();
-        for (name, data) in themed_cached(stock, &settings.accent, settings.hud, data_dir)? {
+        let sources: Vec<PathBuf> = stock.iter().chain(extras.theme_sources.iter()).cloned().collect();
+        for (name, data) in themed_cached(&sources, &settings.accent, settings.hud, data_dir)? {
             if !own.contains(&name.to_ascii_lowercase().replace('\\', "/")) {
                 b.add_bytes(&name, &data)?;
             }
@@ -418,21 +433,31 @@ pub fn build_all(
 /// Os três estados do botão de um mapa da sala a partir da imagem de cima dele: escuro (parado),
 /// claro (mouse em cima) e claro com a borda na cor de destaque (escolhido); embaixo, uma faixa
 /// escura para o nome.
-fn map_tiles(png: &[u8], accent: [u8; 3]) -> Result<Vec<(&'static str, Vec<u8>)>> {
+/// Os estados (`u`, `o`, `at`) da miniatura de um mapa, cada um em DDS.
+pub(crate) type MapTiles = Vec<(&'static str, Vec<u8>)>;
+
+pub(crate) fn map_tiles(png: &[u8], accent: [u8; 3]) -> Result<MapTiles> {
     let img = image::load_from_memory(png).map_err(|e| Error::Format(format!("miniatura do mapa: {e}")))?.to_rgba8();
-    let side = 128u32;
+    let side = 96u32;
     let small = image::imageops::resize(&img, side, side, image::imageops::FilterType::Triangle);
     let mut out = Vec::new();
-    for (state, light, border) in [("u", 0.55f32, 0u32), ("o", 0.9, 2), ("at", 1.0, 5)] {
+    for (state, light, border) in [("u", 0.62f32, 1u32), ("o", 0.95, 2), ("at", 1.0, 4)] {
         let mut px = small.clone().into_raw();
         for y in 0..side {
-            // faixa escura embaixo, para o nome
-            let shade = if y > side * 3 / 4 { 0.45 + 0.55 * (1.0 - (y - side * 3 / 4) as f32 / (side / 4) as f32) } else { 1.0 };
+            // faixa escura embaixo (o nome) e no canto de cima (as bases)
+            let band = side * 30 / 100;
+            let shade_y = if y >= side - band { 0.35 + 0.65 * ((side - 1 - y) as f32 / band as f32) } else { 1.0 };
             for x in 0..side {
                 let i = ((y * side + x) * 4) as usize;
+                let corner = if x < side * 45 / 100 && y < side / 4 { 0.55 + 0.45 * (x as f32 / (side as f32 * 0.45)).max(y as f32 / (side as f32 / 4.0)) } else { 1.0 };
                 let edge = x < border || y < border || x >= side - border || y >= side - border;
                 for c in 0..3 {
-                    px[i + c] = if edge { accent[c] } else { (px[i + c] as f32 * light * shade).min(255.0) as u8 };
+                    // borda: fina e apagada parada, na cor de destaque com o mouse e acesa quando escolhido
+                    px[i + c] = if edge {
+                        if state == "u" { (accent[c] as f32 * 0.45) as u8 } else { accent[c] }
+                    } else {
+                        (px[i + c] as f32 * light * shade_y * corner).min(255.0) as u8
+                    };
                 }
                 px[i + 3] = 255;
             }
@@ -600,7 +625,7 @@ fn real_build_when_available() {
         memory_mb: Some(4096),
         priority: "normal".into(),
     };
-    let extras = GameExtras { lobby: Some((maps.as_slice(), &crate::bigmatch_menu::PT)), lobby_thumbs: vec![], launcher: Some(&lp), pt: true };
+    let extras = GameExtras { lobby: Some((maps.as_slice(), &crate::bigmatch_menu::PT)), lobby_thumbs: vec![], launcher: Some(&lp), pt: true, theme_sources: vec![] };
     let (scd, warnings) = build_all(&std::fs::read(scene).unwrap(), &others, &edit, &settings, &stock, &out.join("data"), &out.join(ARCHIVE), &extras).unwrap();
     assert!(warnings.is_empty(), "{warnings:?}");
     eprintln!("{}", scd.display());

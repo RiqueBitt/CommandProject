@@ -6,6 +6,16 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.51.0",
+    title: "Partida grande no jogo com clima e todos os mapas",
+    items: [
+      { icon: "palette", title: "HUD e menu da partida com o estilo novo de verdade", text: "A HUD nova e o menu da partida (Continuar, Opções, Fim de jogo) não apareciam com as Texturas HD ligadas: elas eram montadas depois e cobriam tudo com as originais. Agora a tela inicial é montada por último e pinta as versões em HD.", page: "bigmatch" },
+      { icon: "view_module", title: "Painel da Partida grande renovado", text: "Criar partidas grandes voltou a funcionar: o painel saiu da sala de Criar jogo (onde os botões não respondiam) e fica ao lado do submenu Batalha, com os mapas em miniatura com nome e bases (até 36, os maiores primeiro), as escolhas em duas colunas e a seção CLIMA. O que está escolhido fica aceso, e o botão de começar fica num grupo separado para nada começar sem você clicar.", page: "bigmatch" },
+      { icon: "cloud", title: "Clima escolhido dentro do jogo", text: "Chuva, tempestade, neve, neblina ou areia direto no painel. Como o clima é montado para o mapa, o jogo fecha e o launcher abre de novo direto na partida com o clima (cerca de 1 minuto). Se o mesmo clima e mapa já estiverem montados, começa na hora.", page: "bigmatch" },
+      { icon: "groups", title: "Sala com amigos que funciona", text: "O botão Sala com amigos (no painel e em Multijogador) agora abre a sala do launcher com as escolhas do jogo: lista de quem está, IAs nas vagas livres, convite e IP/LAN, e o jogo de todos abre junto. Entrar numa sala abre a tela de colar o convite.", page: "bigmatch" },
+    ],
+  },
+  {
     version: "0.50.0",
     title: "HUD nova, cores no jogo e sala com amigos",
     items: [

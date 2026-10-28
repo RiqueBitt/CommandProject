@@ -14,7 +14,7 @@ use crate::mainmenu::{ORDER, TEX};
 use crate::scene::{event, kind, Anchors, Event, Rect, Scene};
 
 /// Mapas na lista, no máximo.
-pub const MAX_MAPS: usize = 8;
+pub const MAX_MAPS: usize = 36;
 /// Campo "visível" de um registro (1 = aparece sozinho; 0 = só quando o grupo dele é mostrado).
 pub const VISIBLE: usize = 32;
 
@@ -56,6 +56,11 @@ pub struct Texts {
     /// seção EXTRAS: combinações de mutadores e eventos
     pub extras: &'static str,
     pub extras_labels: [&'static str; 5],
+    /// botão da sala com amigos
+    pub friends: &'static str,
+    /// seção CLIMA (na ordem de [`WEATHER_KEYS`])
+    pub weather: &'static str,
+    pub weather_labels: [&'static str; 6],
 }
 
 pub const PT: Texts = Texts {
@@ -76,12 +81,15 @@ pub const PT: Texts = Texts {
     start: "COMEÇAR",
     note: "Sem escolher: 8 jogadores, 2 times, IA normal e o primeiro mapa.",
     lobby_title: "PARTIDA GRANDE",
-    lobby_sub: "Mais de 8 jogadores contra a IA. Suas escolhas ficam guardadas.",
+    lobby_sub: "Mais de 8 jogadores, minigames, clima e todos os mapas. Suas escolhas ficam guardadas.",
     lobby_start: "INICIAR PARTIDA GRANDE",
     mode: "MODO (VITÓRIA OU MINIGAME)",
     mode_labels: ["NORMAL", "TUDO", "SEM FIM", "GUERRA", "ARENA", "DEFESA", "DOMÍNIO", "SUPREMO", "INFINITO", "COLINA", "ESCOLTA", "CORRIDA", "TESOURO"],
     extras: "EXTRAS (MUTADORES E EVENTOS)",
     extras_labels: ["NENHUM", "EVENTOS", "CAOS", "SÓ AÉREO", "TANQUES"],
+    friends: "SALA COM AMIGOS",
+    weather: "CLIMA",
+    weather_labels: ["LIMPO", "CHUVA", "TEMPESTADE", "NEVE", "NEBLINA", "AREIA"],
 };
 
 pub const EN: Texts = Texts {
@@ -102,12 +110,15 @@ pub const EN: Texts = Texts {
     start: "START",
     note: "Without choosing: 8 players, 2 teams, normal AI and the first map.",
     lobby_title: "BIG MATCH",
-    lobby_sub: "More than 8 players against the AI. Your choices are kept.",
+    lobby_sub: "More than 8 players, minigames, weather and every map. Your choices are kept.",
     lobby_start: "START BIG MATCH",
     mode: "MODE (VICTORY OR MINIGAME)",
     mode_labels: ["NORMAL", "ALL", "ENDLESS", "WAR", "ARENA", "DEFENSE", "CONTROL", "SUPREME", "SURVIVE", "HILL", "ESCORT", "RACE", "TREASURE"],
     extras: "EXTRAS (MUTATORS AND EVENTS)",
     extras_labels: ["NONE", "EVENTS", "CHAOS", "AIR ONLY", "TANKS"],
+    friends: "ROOM WITH FRIENDS",
+    weather: "WEATHER",
+    weather_labels: ["CLEAR", "RAIN", "STORM", "SNOW", "FOG", "SANDSTORM"],
 };
 
 const AI_KEYS: [&str; 4] = ["Easy", "Normal", "Hard", "Cheat"];
@@ -186,13 +197,18 @@ pub fn add_lobby_panel_with(scene: &[u8], maps: &[MenuMap], t: &Texts, thumbs: &
     let launch_t = find(&s, "btn_launch")?;
     let launch_label_t = find(&s, "label_launch")?;
     let sounds: Vec<Event> = s.events(launch_t)?.into_iter().filter(|e| e.name == "PlaySound").collect();
-    let order = s.u32_field(text_t, ORDER)?;
+    // a ordem de desenho é um número único por elemento: os do painel vêm depois de todos os da
+    // cena, cada um com o seu (fundo, títulos, e cada botão antes do texto dele)
+    let top = s.elements()?.iter().filter_map(|e| s.u32_field(e.id, ORDER).ok()).filter(|o| *o < 100_000).max().unwrap_or(0);
+    let next = std::cell::Cell::new(top + 1);
     let mut panel: Vec<u32> = Vec::new();
-    // sem o grupo de opções da cena por baixo: sem eventos, sem âncoras, visível
     let show = |s: &mut Scene, id: u32| -> Result<()> {
         s.set_u32(id, VISIBLE, 1)?;
-        s.set_u32(id, ORDER, order)
+        s.set_u32(id, ORDER, next.get())?;
+        next.set(next.get() + 1);
+        Ok(())
     };
+
 
     // a janela da sala fica mais larga e o painel entra nela
     if let Ok(bg) = find(&s, "main_bg") {
@@ -273,7 +289,6 @@ pub fn add_lobby_panel_with(scene: &[u8], maps: &[MenuMap], t: &Texts, thumbs: &
                 s.set_rect(l, Rect::new(r.x0 + 4, r.x1 - 4, r.y0 + 3, r.y1 - 3))?;
             }
             show(s, l)?;
-            s.set_u32(l, ORDER, order + 1)?;
             s.set_children(b, &[l])?;
             kids.push(b);
             bound = Rect::new(bound.x0.min(r.x0), bound.x1.max(r.x1), bound.y0.min(r.y0), bound.y1.max(r.y1));
@@ -304,7 +319,8 @@ pub fn add_lobby_panel_with(scene: &[u8], maps: &[MenuMap], t: &Texts, thumbs: &
         let rows = (items.len() as i32 + cols - 1) / cols;
         let list = items.into_iter().zip(rects).map(|((l, c), r)| (l, c, r)).collect();
         // botões estreitos (5 por linha): letra mais fina
-        group(s, panel, list, None, if cols >= 5 { "pc_body_font_narrow_2" } else { "pc_title_font_2" })?;
+        // a fonte de título é mais alta que o botão (o jogo não desenha texto que não cabe)
+        group(s, panel, list, None, "pc_body_font_narrow_2")?;
         *y += 24 + rows * (bh + 4) + 6;
         Ok(())
     };
@@ -325,7 +341,10 @@ pub fn add_lobby_panel_with(scene: &[u8], maps: &[MenuMap], t: &Texts, thumbs: &
         .iter()
         .enumerate()
         .map(|(i, m)| {
-            let name: String = m.name.chars().filter(|c| !c.is_control()).take(10).collect();
+            // sem o "[32]" do começo do nome (as bases já aparecem antes)
+            let clean = m.name.trim();
+            let clean = if clean.starts_with('[') { clean.split_once(']').map(|(_, r)| r.trim()).unwrap_or(clean) } else { clean };
+            let name: String = clean.chars().filter(|c| !c.is_control()).take(8).collect();
             let (c, r) = (i as i32 % 5, i as i32 / 5);
             let x = LIN0 + (tile + 6) * c;
             let yy = y + 24 + (tile + 4) * r;
@@ -348,13 +367,18 @@ pub fn add_lobby_panel_with(scene: &[u8], maps: &[MenuMap], t: &Texts, thumbs: &
     s.set_u32(label, 128, 1)?;
     s.set_rect(label, Rect::new(r.x0 + 10, r.x1 - 30, r.y0 + 6, r.y1 - 6))?;
     show(&mut s, label)?;
-    s.set_u32(label, ORDER, order + 1)?;
     s.set_children(start, &[label])?;
     panel.push(start);
 
-    let mut kids = s.children(host)?;
-    kids.extend(panel);
-    s.set_children(host, &kids)?;
+    // o painel num grupo próprio no primeiro nível da cena (como as barras de cima e de baixo):
+    // dentro do grupo da sala ele ficaria fora da área dela e o jogo não entregaria os cliques
+    let root = s.clone_element(group_t, "cp_lb_root")?;
+    s.set_events(root, &[])?;
+    s.set_anchors(root, Anchors::default())?;
+    s.set_rect(root, Rect::new(LX0, LX1, LY0, LY1))?;
+    s.set_children(root, &panel)?;
+    s.set_u32(root, VISIBLE, 1)?;
+    let _ = host;
     Ok(s.to_bytes())
 }
 
@@ -428,6 +452,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn short_map_names() {
+        assert_eq!(short_name("[32] Meu Mapa"), "MEU MAPA");
+        assert_eq!(short_name("Seton's Clutch"), "SETONS");
+        assert_eq!(short_name("Supercalifragilistic"), "SUPERCA.");
+        assert_eq!(short_name("Open Palms"), "OPEN");
+        assert_eq!(short_name("Powderhorn"), "POWDERH.");
+    }
+
+    #[test]
     fn panel_goes_into_the_game_lobby() {
         // a sala de escaramuça do jogo (CP_TEST_LOBBY)
         let Ok(path) = std::env::var("CP_TEST_LOBBY") else { return };
@@ -495,3 +528,372 @@ mod tests {
         assert!(start_code("/maps/a").contains("CPBigMatchFromMenu('/maps/a')"));
     }
 }
+
+#[cfg(test)]
+mod refix {
+    use super::*;
+
+    /// Com `CP_FIX_IN`/`CP_FIX_OUT`: corrige uma sala montada pelas versões antigas (ordem de
+    /// desenho única para o painel e o grupo da sala cobrindo o painel), para testar no jogo.
+    #[test]
+    fn refix_old_lobby() {
+        let (Ok(i), Ok(o)) = (std::env::var("CP_FIX_IN"), std::env::var("CP_FIX_OUT")) else { return };
+        let mut s = Scene::parse(&std::fs::read(i).unwrap()).unwrap();
+        let ours: Vec<u32> = s.elements().unwrap().iter().filter(|e| e.name.starts_with("cp_lb_")).map(|e| e.id).collect();
+        let top = s.elements().unwrap().iter().filter(|e| !e.name.starts_with("cp_lb_")).filter_map(|e| s.u32_field(e.id, ORDER).ok()).filter(|o| *o < 100_000).max().unwrap();
+        // na ordem em que foram criados: fundo, filete, títulos, grupo, botão, texto do botão...
+        let mut ids = ours.clone();
+        ids.sort();
+        for (k, id) in ids.iter().enumerate() {
+            s.set_u32(*id, ORDER, top + 1 + k as u32).unwrap();
+        }
+        // tira o painel do grupo da sala e põe num grupo próprio no primeiro nível
+        let host = s.by_name("g_main").unwrap().id;
+        let kids = s.children(host).unwrap();
+        let (mine, theirs): (Vec<u32>, Vec<u32>) = kids.into_iter().partition(|k| ours.contains(k));
+        s.set_children(host, &theirs).unwrap();
+        // CP_FIX_STRIP: sem painel (a sala como a do jogo, com o fundo do tamanho original)
+        if let Ok(stock) = std::env::var("CP_FIX_STRIP") {
+            let st = Scene::parse(&std::fs::read(stock).unwrap()).unwrap();
+            let r = st.rect(st.by_name("main_bg").unwrap().id).unwrap().unwrap();
+            let bg = s.by_name("main_bg").unwrap().id;
+            s.set_rect(bg, r).unwrap();
+            for id in &ours {
+                s.set_u32(*id, VISIBLE, 0).unwrap();
+            }
+            std::fs::write(o, s.to_bytes()).unwrap();
+            return;
+        }
+        let root = s.clone_element(s.by_name("g_options").unwrap().id, "cp_lb_root").unwrap();
+        s.set_events(root, &[]).unwrap();
+        s.set_anchors(root, Anchors::default()).unwrap();
+        s.set_rect(root, Rect::new(LX0, LX1, LY0, LY1)).unwrap();
+        s.set_children(root, &mine).unwrap();
+        s.set_u32(root, VISIBLE, 1).unwrap();
+        // a fonte dos botões: a estreita (a de título não cabe e some)
+        for e in s.elements().unwrap() {
+            if e.name.starts_with("cp_lb_g") && e.name.ends_with("_label") && s.str_field(e.id, 108).map(|f| f == "pc_title_font_2").unwrap_or(false) {
+                s.set_str_field(e.id, 108, "pc_body_font_narrow_2").unwrap();
+            }
+        }
+        std::fs::write(o, s.to_bytes()).unwrap();
+    }
+}
+
+// ---------------------------------------------------------------- painel na tela inicial
+//
+// A sala de Batalha do jogo só roda os comandos dela (`Skirmish…`) e a interface feita em Lua fica
+// por baixo das telas do jogo: o painel da Partida grande mora na tela inicial, dentro do grupo do
+// submenu Batalha (como na 0.42, que funcionou), à direita dele e embaixo das notícias. Os elementos
+// ficam escondidos e aparecem junto com o submenu.
+
+// medidas na tela inicial (as do submenu: x 173–593; a área visível vai de x −448 a 1472 e de
+// y −156 a 924; as notícias ficam em cima, até y 252)
+const MX0: i32 = 600;
+const MX1: i32 = 1460;
+const MY0: i32 = 262;
+const MY1: i32 = 912;
+/// Mapas na grade do painel da tela inicial (6 × 6 miniaturas).
+pub const MENU_MAPS: usize = 36;
+const TILE: i32 = 64;
+const TILE_GAP: i32 = 6;
+const TILE_COLS: i32 = 6;
+/// Botões da seção CLIMA (chaves do mod Climas; vazio = limpo).
+pub const WEATHER_KEYS: [&str; 6] = ["", "rain", "storm", "blizzard", "fog", "sandstorm"];
+
+/// Nome curto do mapa para caber embaixo da miniatura (sem o "[32]" do começo, em maiúsculas).
+fn short_name(name: &str) -> String {
+    let clean = name.trim();
+    let clean = if clean.starts_with('[') { clean.split_once(']').map(|(_, r)| r.trim()).unwrap_or(clean) } else { clean };
+    let up: String = clean.chars().filter(|c| !c.is_control() && *c != '\'' && *c != '"').collect::<String>().to_uppercase();
+    // a fonte estreita do jogo: cabem 8 letras na largura da miniatura
+    let max = 8;
+    if up.chars().count() <= max {
+        return up;
+    }
+    // corta numa palavra inteira quando dá
+    let words: Vec<&str> = up.split_whitespace().collect();
+    let mut out = String::new();
+    for w in words {
+        let next = if out.is_empty() { w.to_string() } else { format!("{out} {w}") };
+        if next.chars().count() > max {
+            break;
+        }
+        out = next;
+    }
+    if out.chars().count() < 4 {
+        out = up.chars().take(max - 1).collect::<String>() + ".";
+    }
+    out
+}
+
+/// Como os botões do painel são desenhados.
+#[derive(Clone, Copy, PartialEq)]
+enum Style {
+    /// botão de opção pequeno
+    Opt,
+    /// o botão grande de começar
+    Big,
+    /// miniatura do mapa `i` (com imagem quando `thumb`), com as bases em cima
+    Tile { i: usize, bases: usize, thumb: bool },
+}
+
+/// Põe o painel da Partida grande na tela inicial (`scene`, já no visual novo).
+pub fn add_menu_panel(scene: &[u8], maps: &[MenuMap], t: &Texts) -> Result<Vec<u8>> {
+    add_menu_panel_with(scene, maps, t, &[])
+}
+
+/// Como [`add_menu_panel`]; `thumbs[i]` diz se o mapa `i` tem miniatura ([`tile_texture`]).
+///
+/// O painel fica dentro do grupo do submenu Batalha (o jogo só mostra os submenus dele: um grupo
+/// ou um botão principal novos não aparecem), à direita do submenu e embaixo das notícias:
+/// as escolhas à esquerda (cada seção é um grupo de botões de opção, o escolhido fica aceso), os
+/// mapas em miniatura à direita e, embaixo deles, a sala com amigos e o botão de começar (num grupo
+/// comum: nada ali é escolhido sozinho).
+pub fn add_menu_panel_with(scene: &[u8], maps: &[MenuMap], t: &Texts, thumbs: &[bool]) -> Result<Vec<u8>> {
+    let maps: Vec<&MenuMap> = maps.iter().filter(|m| safe(&m.path) && m.path.starts_with("/maps/")).take(MENU_MAPS).collect();
+    let Some(first) = maps.first() else { return Ok(scene.to_vec()) };
+    let mut s = Scene::parse(scene)?;
+    let tex = |n: &str| format!("{TEX}{n}.dds");
+    let host = find(&s, "g_skirmish_options")?;
+    let group_t = find(&s, "rg_menu_group")?;
+    let button_t = find(&s, "rb_creategame")?;
+    let label_t = s
+        .children(button_t)?
+        .into_iter()
+        .find(|c| s.by_id(*c).map(|e| e.kind == kind::TEXT).unwrap_or(false))
+        .ok_or_else(|| Error::Other("botão modelo sem texto".into()))?;
+    let bitmap_t = find(&s, "avatar")?;
+    let sounds: Vec<Event> = s.events(button_t)?.into_iter().filter(|e| e.name == "PlaySound").collect();
+    // ordem de desenho: depois de tudo da cena, um número para cada elemento
+    let top = s.elements()?.iter().filter_map(|e| s.u32_field(e.id, ORDER).ok()).filter(|o| *o < 100_000).max().unwrap_or(0);
+    let next = std::cell::Cell::new(top + 1);
+    let hide = |s: &mut Scene, id: u32| -> Result<()> {
+        s.set_u32(id, VISIBLE, 0)?;
+        s.set_u32(id, ORDER, next.get())?;
+        next.set(next.get() + 1);
+        Ok(())
+    };
+    let mut panel: Vec<u32> = Vec::new();
+
+    // fundo e moldura (as peças do painel dos outros menus)
+    let bg = s.clone_element(bitmap_t, "cp_bm_bg")?;
+    s.set_str_field(bg, 112, &tex("p9_c"))?;
+    s.set_rect(bg, Rect::new(MX0, MX1, MY0, MY1))?;
+    hide(&mut s, bg)?;
+    panel.push(bg);
+    let edge = 32;
+    for (n, r) in [
+        ("tl", Rect::new(MX0, MX0 + edge, MY0, MY0 + edge)),
+        ("t", Rect::new(MX0 + edge, MX1 - edge, MY0, MY0 + edge)),
+        ("tr", Rect::new(MX1 - edge, MX1, MY0, MY0 + edge)),
+        ("l", Rect::new(MX0, MX0 + edge, MY0 + edge, MY1 - edge)),
+        ("r", Rect::new(MX1 - edge, MX1, MY0 + edge, MY1 - edge)),
+        ("bl", Rect::new(MX0, MX0 + edge, MY1 - edge, MY1)),
+        ("b", Rect::new(MX0 + edge, MX1 - edge, MY1 - edge, MY1)),
+        ("br", Rect::new(MX1 - edge, MX1, MY1 - edge, MY1)),
+    ] {
+        let id = s.clone_element(bitmap_t, &format!("cp_bm_frame_{n}"))?;
+        s.set_str_field(id, 112, &tex(&format!("p9_{n}")))?;
+        s.set_rect(id, r)?;
+        hide(&mut s, id)?;
+        panel.push(id);
+    }
+    let line = s.clone_element(bitmap_t, "cp_bm_line")?;
+    s.set_str_field(line, 112, &tex("line"))?;
+    s.set_rect(line, Rect::new(MX0 + 20, MX1 - 20, MY0 + 80, MY0 + 83))?;
+    hide(&mut s, line)?;
+    panel.push(line);
+
+    let mut n = 0;
+    let mut text = |s: &mut Scene, panel: &mut Vec<u32>, txt: &str, font: &str, r: Rect| -> Result<u32> {
+        n += 1;
+        let id = s.clone_element(label_t, &format!("cp_bm_text{n}"))?;
+        s.set_events(id, &[])?;
+        s.set_text(id, txt)?;
+        s.set_str_field(id, 108, font)?;
+        s.set_u32(id, 128, 0)?;
+        s.set_rect(id, r)?;
+        hide(s, id)?;
+        panel.push(id);
+        Ok(id)
+    };
+    // a fonte de título só aparece em retângulos altos (40 ou mais)
+    text(&mut s, &mut panel, t.lobby_title, "pc_title_font_4", Rect::new(MX0 + 22, MX1 - 22, MY0 + 8, MY0 + 54))?;
+    text(&mut s, &mut panel, t.lobby_sub, "pc_body_font_narrow_2", Rect::new(MX0 + 24, MX1 - 22, MY0 + 52, MY0 + 78))?;
+
+    // um grupo de botões (cada um com o código dele); `plain` = grupo comum (nada fica aceso)
+    let mut g = 0;
+    let mut group = |s: &mut Scene, panel: &mut Vec<u32>, items: Vec<(String, String, Rect, Style)>, plain: bool| -> Result<()> {
+        g += 1;
+        let gid = s.clone_element(if plain { host } else { group_t }, &format!("cp_bm_group{g}"))?;
+        s.set_events(gid, &[])?;
+        s.set_children(gid, &[])?;
+        s.set_anchors(gid, Anchors::default())?;
+        hide(s, gid)?;
+        let mut kids = Vec::new();
+        let mut bound = Rect::new(i32::MAX, i32::MIN, i32::MAX, i32::MIN);
+        for (i, (label, code, r, style)) in items.into_iter().enumerate() {
+            let b = s.clone_element(button_t, &format!("cp_bm_g{g}_b{i}"))?;
+            for (off, state) in [(112, "u"), (116, "o"), (120, "w"), (124, "at"), (128, "at"), (132, "at")] {
+                if s.str_field(b, off).is_ok() {
+                    let name = match style {
+                        Style::Tile { i, thumb: true, .. } => tile_texture(i, if state == "w" { "o" } else { state }),
+                        Style::Big => tex(&format!("btn_{state}")),
+                        _ => tex(&format!("opt_{state}")),
+                    };
+                    s.set_str_field(b, off, &name)?;
+                }
+            }
+            s.set_rect(b, r)?;
+            hide(s, b)?;
+            let mut evs = sounds.clone();
+            evs.push(Event::new(event::SELECT, "ConsoleExecute", &format!("UI_Lua {code}")));
+            s.set_events(b, &evs)?;
+            let mut labels = Vec::new();
+            let mut add_label = |s: &mut Scene, name: String, txt: &str, font: &str, align: u32, lr: Rect| -> Result<()> {
+                let l = s.clone_element(label_t, &name)?;
+                s.set_events(l, &[])?;
+                s.set_text(l, txt)?;
+                s.set_str_field(l, 108, font)?;
+                s.set_u32(l, 128, align)?;
+                s.set_rect(l, lr)?;
+                hide(s, l)?;
+                labels.push(l);
+                Ok(())
+            };
+            match style {
+                Style::Opt => add_label(s, format!("cp_bm_g{g}_b{i}_label"), &label, "pc_body_font_narrow_2", 1, Rect::new(r.x0 + 3, r.x1 - 3, r.y0 + 2, r.y1 - 2))?,
+                Style::Big => add_label(s, format!("cp_bm_g{g}_b{i}_label"), &label, "pc_title_font_2", 1, Rect::new(r.x0 + 8, r.x1 - 34, r.y0 + 4, r.y1 - 4))?,
+                Style::Tile { bases, .. } => {
+                    // o nome embaixo (na faixa escura da miniatura) e as bases no canto
+                    add_label(s, format!("cp_bm_g{g}_b{i}_label"), &label, "pc_body_font_narrow_2", 1, Rect::new(r.x0 + 1, r.x1 - 1, r.y1 - 25, r.y1 - 1))?;
+                    add_label(s, format!("cp_bm_g{g}_b{i}_bases"), &bases.to_string(), "pc_body_font_narrow_2", 0, Rect::new(r.x0 + 4, r.x0 + 40, r.y0 + 1, r.y0 + 25))?;
+                }
+            }
+            s.set_children(b, &labels)?;
+            kids.push(b);
+            bound = Rect::new(bound.x0.min(r.x0), bound.x1.max(r.x1), bound.y0.min(r.y0), bound.y1.max(r.y1));
+        }
+        s.set_children(gid, &kids)?;
+        s.set_rect(gid, bound)?;
+        panel.push(gid);
+        Ok(())
+    };
+    let set = |k: &str, v: String| format!("import('/lua/SinglePlayerLaunch.lua').CPBMSet('{k}', {v})");
+    let (bh, step, head) = (28, 32, 22);
+    // coluna da esquerda: as escolhas
+    let (lx0, lx1) = (MX0 + 18, MX0 + 410);
+    let mut y = MY0 + 90;
+    let mut section = |s: &mut Scene, panel: &mut Vec<u32>, title: &str, items: Vec<(String, String)>, cols: i32, y: &mut i32| -> Result<()> {
+        text(s, panel, title, "pc_body_font_narrow_2", Rect::new(lx0, lx1, *y - 2, *y + head))?;
+        let gap = 6;
+        let w = (lx1 - lx0 - gap * (cols - 1)) / cols;
+        let rows = (items.len() as i32 + cols - 1) / cols;
+        let list = items
+            .into_iter()
+            .enumerate()
+            .map(|(i, (l, c))| {
+                let (cx, ry) = (i as i32 % cols, i as i32 / cols);
+                let x = lx0 + (w + gap) * cx;
+                let yy = *y + head + step * ry;
+                (l, c, Rect::new(x, x + w, yy, yy + bh), Style::Opt)
+            })
+            .collect();
+        group(s, panel, list, false)?;
+        *y += head + step * (rows - 1) + bh + 6;
+        Ok(())
+    };
+    section(&mut s, &mut panel, t.players, LOBBY_PLAYERS.iter().map(|p| (p.to_string(), set("players", p.to_string()))).collect(), 6, &mut y)?;
+    let team_label = |i: usize| if i == 3 { t.short_team_labels[3] } else { t.team_labels[i] };
+    section(&mut s, &mut panel, t.teams, (0..4).map(|i| (team_label(i).to_string(), set("teams", [2, 3, 4, 0][i].to_string()))).collect(), 4, &mut y)?;
+    section(&mut s, &mut panel, t.ai, t.ai_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("ai", format!("'{}'", AI_KEYS[i])))).collect(), 4, &mut y)?;
+    section(&mut s, &mut panel, t.faction, t.faction_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("faction", i.to_string()))).collect(), 4, &mut y)?;
+    let mode = |m: &str, v: &str| format!("import('/lua/SinglePlayerLaunch.lua').CPBMSetMode('{m}', '{v}')");
+    section(&mut s, &mut panel, t.mode, t.mode_labels.iter().zip(MODE_KEYS).map(|(l, (m, v))| (l.to_string(), mode(m, v))).collect(), 5, &mut y)?;
+    section(&mut s, &mut panel, t.units, UNIT_CAPS.iter().map(|u| (u.to_string(), set("units", u.to_string()))).collect(), 3, &mut y)?;
+    section(&mut s, &mut panel, t.weather, t.weather_labels.iter().zip(WEATHER_KEYS).map(|(l, k)| (l.to_string(), set("weather", format!("'{k}'")))).collect(), 3, &mut y)?;
+    let extras = |m: &str, e: bool| format!("import('/lua/SinglePlayerLaunch.lua').CPBMSetExtras('{m}', {e})");
+    section(&mut s, &mut panel, t.extras, t.extras_labels.iter().zip(EXTRAS_KEYS).map(|(l, (m, e))| (l.to_string(), extras(m, e))).collect(), 5, &mut y)?;
+    // coluna da direita: os mapas em miniatura
+    let (rx0, rx1) = (MX0 + 426, MX1 - 18);
+    let ry = MY0 + 90;
+    text(&mut s, &mut panel, t.map, "pc_body_font_narrow_2", Rect::new(rx0, rx1, ry - 2, ry + head))?;
+    let items = maps
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let (cx, r) = (i as i32 % TILE_COLS, i as i32 / TILE_COLS);
+            let x = rx0 + (TILE + TILE_GAP) * cx;
+            let yy = ry + head + 4 + (TILE + TILE_GAP) * r;
+            let thumb = thumbs.get(i).copied().unwrap_or(false);
+            (short_name(&m.name), set("map", format!("'{}'", m.path)), Rect::new(x, x + TILE, yy, yy + TILE), Style::Tile { i, bases: m.bases, thumb })
+        })
+        .collect();
+    group(&mut s, &mut panel, items, false)?;
+    // sala com amigos e começar, embaixo dos mapas (grupo comum)
+    let friends = format!("local m = import('/lua/SinglePlayerLaunch.lua') if m.CPRoomFromMenu then m.CPRoomFromMenu('{}') end", first.path);
+    let items = vec![
+        (t.friends.to_string(), friends, Rect::new(rx0, rx1, MY1 - 112, MY1 - 76), Style::Opt),
+        (t.lobby_start.to_string(), start_code(&first.path), Rect::new(rx0, rx1, MY1 - 68, MY1 - 16), Style::Big),
+    ];
+    group(&mut s, &mut panel, items, true)?;
+
+    let mut kids = s.children(host)?;
+    kids.extend(panel);
+    s.set_children(host, &kids)?;
+    Ok(s.to_bytes())
+}
+
+#[cfg(test)]
+mod menu_panel_tests {
+    use super::*;
+
+    /// Com `CP_TEST_SCENE` (a tela inicial do jogo): o painel entra escondido no grupo do submenu
+    /// Batalha, cabe na área dele e cada botão roda o código da Partida grande.
+    #[test]
+    fn panel_goes_beside_the_battle_submenu() {
+        let Ok(path) = std::env::var("CP_TEST_SCENE") else { return };
+        let look = crate::mainmenu::Look::Commander(crate::mainmenu::Commander { panel: true, ..Default::default() });
+        let menu = crate::mainmenu::build_with(&std::fs::read(path).unwrap(), &Default::default(), &look).unwrap().scene;
+        let maps: Vec<MenuMap> = (0..40).map(|i| MenuMap { path: format!("/maps/M{i}/M{i}_scenario.lua"), name: format!("[32] Mapa {i}"), bases: 32, size: 2048 }).collect();
+        let thumbs: Vec<bool> = (0..40).map(|i| i % 2 == 0).collect();
+        let out = add_menu_panel_with(&menu, &maps, &PT, &thumbs).unwrap();
+        let s = Scene::parse(&out).unwrap();
+        let host = s.by_name("g_skirmish_options").unwrap().id;
+        let kids = s.children(host).unwrap();
+        assert!(kids.contains(&s.by_name("cp_bm_bg").unwrap().id));
+        let mut orders = std::collections::HashSet::new();
+        for e in s.elements().unwrap().iter().filter(|e| e.name.starts_with("cp_bm_")) {
+            assert_eq!(s.u32_field(e.id, VISIBLE).unwrap(), 0, "{}", e.name);
+            assert!(orders.insert(s.u32_field(e.id, ORDER).unwrap()), "ordem repetida em {}", e.name);
+            if let Ok(Some(r)) = s.rect(e.id) {
+                assert!(r.x0 >= MX0 && r.x1 <= MX1 && r.y0 >= MY0 && r.y1 <= MY1, "{} fora do painel: {r:?}", e.name);
+            }
+        }
+        // os botões rodam o código (e o de começar, a partida)
+        let all: Vec<String> = s.elements().unwrap().iter().filter(|e| e.name.starts_with("cp_bm_g")).flat_map(|e| s.events(e.id).unwrap()).map(|e| e.param).collect();
+        assert!(all.iter().any(|p| p.contains("CPBMSet('players', 16)")));
+        assert!(all.iter().any(|p| p.contains("CPBMSetMode('koth', '')")));
+        assert!(all.iter().any(|p| p.contains("CPBMSetExtras('hp,res,cdr', true)")));
+        assert!(all.iter().any(|p| p.contains("CPBigMatchFromMenu('/maps/M0/M0_scenario.lua')")));
+        assert!(all.iter().any(|p| p.contains("CPRoomFromMenu(")));
+        assert!(all.iter().any(|p| p.contains("CPBMSet('weather', 'blizzard')")));
+        // 36 mapas em miniatura; o "[32]" sai do nome e as bases vão para o canto
+        assert!(s.by_name("cp_bm_g9_b35").is_ok());
+        assert!(s.by_name("cp_bm_g9_b36").is_err());
+        let label = s.by_name("cp_bm_g9_b0_label").unwrap().id;
+        assert_eq!(s.text(label).unwrap(), "MAPA 0");
+        assert_eq!(s.text(s.by_name("cp_bm_g9_b0_bases").unwrap().id).unwrap(), "32");
+        // com miniatura, o botão é a imagem do mapa; sem, o botão comum
+        let tile = s.by_name("cp_bm_g9_b0").unwrap().id;
+        assert_eq!(s.str_field(tile, 112).unwrap(), tile_texture(0, "u"));
+        let plain = s.by_name("cp_bm_g9_b1").unwrap().id;
+        assert!(s.str_field(plain, 112).unwrap().ends_with("opt_u.dds"));
+        // começar e a sala ficam num grupo comum (nada ali é escolhido sozinho)
+        let g10 = s.by_name("cp_bm_group10").unwrap();
+        assert_eq!(g10.kind, kind::GROUP);
+        assert_eq!(s.by_name("cp_bm_group1").unwrap().kind, kind::RADIO_GROUP);
+    }
+}
+

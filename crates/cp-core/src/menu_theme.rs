@@ -290,6 +290,21 @@ pub fn theme_dds(key: &str, data: &[u8], opts: &ThemeOptions) -> Result<Option<V
     Ok(Some(enc))
 }
 
+/// Textura da HUD redesenhada no estilo da tela inicial ([`crate::hud_style`]).
+fn hud_dds(key: &str, data: &[u8], kind: Kind, siblings: &HashSet<String>, opts: &ThemeOptions) -> Result<Option<Vec<u8>>> {
+    let (info, img) = dds::decode(data)?;
+    if info.is_cubemap || info.is_volume || info.width.min(info.height) < 4 {
+        return Ok(None);
+    }
+    let pal = opts.palette();
+    let accent = if is_hover_state(key) { pal.hover } else { pal.accent };
+    let out = crate::hud_style::restyle(&img, key, siblings, accent, kind == Kind::Background);
+    let mips = if info.mip_count <= 1 { 1 } else { 0 };
+    let mut enc = dds::encode(&out, info.format, mips, Quality::Normal)?;
+    keep_original_header(data, &mut enc);
+    Ok(Some(enc))
+}
+
 /// Mesmo formato, tamanho e nº de mips: o arquivo novo leva o cabeçalho original byte a byte
 /// (o jogo grava `pitchOrLinearSize` e as flags de um jeito próprio; nada muda além dos pixels).
 fn keep_original_header(original: &[u8], new: &mut [u8]) {
@@ -421,6 +436,8 @@ pub fn build(
 /// tela inicial nova): (nome dentro do jogo, DDS).
 pub fn themed_textures(sources: &[PathBuf], opts: &ThemeOptions) -> Result<Vec<(String, Vec<u8>)>> {
     let todo: Vec<Entry> = entries(sources, false, opts.hud)?.into_iter().filter(|e| e.key.ends_with(".dds")).collect();
+    // painéis em 9 partes: a HUD olha os irmãos (`_tl`, `_t`...) de cada pedaço
+    let siblings: HashSet<String> = todo.iter().map(|e| crate::hud_style::sibling_key(&e.key)).collect();
     let mut out = Vec::new();
     let mut open: Option<(PathBuf, Scd)> = None;
     for batch in todo.chunks(48) {
@@ -431,7 +448,17 @@ pub fn themed_textures(sources: &[PathBuf], opts: &ThemeOptions) -> Result<Vec<(
             }
             raw.push((e, open.as_mut().expect("aberto").1.read_at(e.index)?));
         }
-        let done: Vec<_> = raw.par_iter().filter_map(|(e, data)| theme_dds(&e.key, data, opts).ok().flatten().map(|b| (e.name.clone(), b))).collect();
+        let done: Vec<_> = raw
+            .par_iter()
+            .filter_map(|(e, data)| {
+                let hud = if opts.hud { hud_kind_of(&e.key).filter(|k| *k != Kind::Keep) } else { None };
+                match hud {
+                    Some(kind) => hud_dds(&e.key, data, kind, &siblings, opts).ok().flatten(),
+                    None => theme_dds(&e.key, data, opts).ok().flatten(),
+                }
+                .map(|b| (e.name.clone(), b))
+            })
+            .collect();
         out.extend(done);
     }
     Ok(out)

@@ -36,6 +36,8 @@ interface Props {
   launch: (spec: BigMatch, label: string) => Promise<void>;
   /** marca as IAs do time do anfitrião como amigos */
   markGuests: () => void;
+  /** pedido vindo do jogo: abre esta aba e rola a tela até a sala */
+  focus?: { tab: "host" | "join"; at: number } | null;
 }
 
 export default function MatchInvite(props: Props) {
@@ -46,9 +48,16 @@ export default function MatchInvite(props: Props) {
   const [hosted, setHosted] = useState<PartyHosted | null>(null);
   const [joined, setJoined] = useState<{ code: string; info: PartyJoined } | null>(null);
   const inRoom = !!hosted || !!joined;
+  const box = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!props.focus) return;
+    if (!inRoom) setTab(props.focus.tab);
+    box.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.focus?.at]);
 
   return (
-    <section className={`card pad bm-invite ${inRoom ? "in-room" : ""}`}>
+    <section ref={box} className={`card pad bm-invite ${inRoom ? "in-room" : ""}`}>
       <div className="card-title">
         <Icon name="group_add" /><h3>{t("Jogar com amigos")}</h3>
         <span className="chip" title={t("Funciona na mesma rede, por VPN (Radmin VPN, ZeroTier, Hamachi) ou com a porta aberta no roteador de quem convida.")}>{t("experimental")}</span>

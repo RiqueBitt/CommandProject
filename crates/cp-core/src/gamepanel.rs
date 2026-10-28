@@ -372,6 +372,53 @@ pub fn parse_requests(prefs: &str) -> Option<GameRequests> {
     Some(r)
 }
 
+/// Pedido feito dentro do jogo para o launcher continuar depois que ele fecha (`CPLaunchRequest` no
+/// `Game.prefs`): abrir a partida grande com clima (`match`), a sala com amigos (`room`) ou a tela
+/// de entrar numa sala (`join`), com as escolhas do painel da Partida grande.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchRequest {
+    pub seq: u64,
+    pub action: String,
+    pub map: String,
+    pub players: u32,
+    pub teams: u32,
+    pub ai: String,
+    pub faction: u32,
+    pub victory: String,
+    pub units: u32,
+    pub mode: String,
+    pub mutators: String,
+    pub events: bool,
+    pub weather: String,
+    /// `join`: `group` = a sala do último amigo que convidou
+    pub join: String,
+}
+
+/// Lê o pedido do `Game.prefs`. `None` sem pedido ou com uma ação desconhecida.
+pub fn parse_launch_request(prefs: &str) -> Option<LaunchRequest> {
+    let b = block(prefs, "CPLaunchRequest")?;
+    let num = |k: &str, d: u32| field(b, k).and_then(|v| v.parse::<f64>().ok()).map(|v| v.max(0.0) as u32).unwrap_or(d);
+    let text = |k: &str| field(b, k).filter(|v| lua_str(v) || v.is_empty()).unwrap_or_default();
+    let r = LaunchRequest {
+        seq: field(b, "seq")?.parse::<f64>().ok()? as u64,
+        action: field(b, "action").filter(|a| matches!(a.as_str(), "match" | "room" | "join"))?,
+        map: field(b, "map").filter(|m| m.starts_with("/maps/") && m.len() < 200 && !m.contains("..")).unwrap_or_default(),
+        players: num("players", 8),
+        teams: num("teams", 2),
+        ai: text("ai"),
+        faction: num("faction", 0),
+        victory: text("victory"),
+        units: num("units", 1000),
+        mode: text("mode"),
+        mutators: field(b, "mut").filter(|m| m.chars().all(|c| c.is_ascii_lowercase() || c == ',')).unwrap_or_default(),
+        events: field(b, "events").as_deref() == Some("true"),
+        weather: text("weather"),
+        join: text("join"),
+    };
+    Some(r)
+}
+
 /// Recorde de um minigame (gravado pelo jogo em `CPRecords` no `Game.prefs`).
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]

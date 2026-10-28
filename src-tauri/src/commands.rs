@@ -570,6 +570,23 @@ fn apply_weather(ws: &mut Workspace, b: &cp_core::bigmatch::BigMatch, app: &AppH
     Ok(())
 }
 
+/// Depois que o jogo fecha: um pedido feito dentro dele (painel da Partida grande, Multijogador)
+/// vira `cp://game-relaunch` para a interface continuar (abrir a partida com o clima montado, a
+/// sala com amigos ou a tela de entrar numa sala).
+async fn check_relaunch(app: &AppHandle) {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    match with_ws(&state.ws, |ws| ws.take_launch_request()).await {
+        Ok(Some(req)) => {
+            let _ = app.emit("cp://game-relaunch", req);
+        }
+        Ok(None) => {}
+        Err(e) => {
+            let _ = app.emit("cp://game-relaunch-failed", e.to_string());
+        }
+    }
+}
+
 /// Começa uma partida grande: monta o mod (uma vez), aplica o perfil e abre o jogo direto com as vagas.
 #[tauri::command]
 pub async fn launch_big_match(app: AppHandle, state: State<'_, AppState>, spec: cp_core::bigmatch::BigMatch) -> R<LaunchResult> {
@@ -605,6 +622,10 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             Ok(done) if !done.is_empty() => eprintln!("pedidos do jogo aplicados: {}", done.join(", ")),
             Ok(_) => {}
             Err(e) => eprintln!("pedidos do jogo não lidos: {e}"),
+        }
+        // pedidos de continuação de antes desta abertura não valem mais
+        if let Err(e) = ws.skip_launch_request() {
+            eprintln!("pedido de continuação do jogo não lido: {e}");
         }
         if let Err(e) = ws.ensure_large_address() {
             eprintln!("modo 4 GB não reaplicado: {e}");
@@ -733,6 +754,10 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
                     } else if let Some(log) = log.filter(|l| !l.finished) {
                         // sem relatório de travamento, mas o jogo não terminou a partida normalmente
                         let _ = app6.emit("cp://game-crashed", crashed(None, Some(log)));
+                    } else if !restore {
+                        // pedido feito no jogo (clima, sala com amigos): o launcher continua daqui
+                        // (com a pasta restaurada ao fechar, quem confere é o vigia da restauração)
+                        check_relaunch(&app6).await;
                     }
                     return;
                 }
@@ -869,6 +894,9 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             })
             .await;
             let _ = app3.emit("cp://game-exited", res.err());
+            if !KILLED_BY_USER.load(std::sync::atomic::Ordering::SeqCst) {
+                check_relaunch(&app3).await;
+            }
         });
     }
     Ok(LaunchResult {

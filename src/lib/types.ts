@@ -357,6 +357,9 @@ export interface MatchOptions {
   /** desafio da semana (número da semana; 0 = não é desafio) */
   week?: number;
 }
+/** Pedido feito dentro do jogo para o launcher continuar quando ele fecha (painel da Partida
+ *  grande, Multijogador): abrir a partida com o clima montado, a sala com amigos ou entrar numa sala. */
+export interface GameLaunch { action: "match" | "room" | "join"; spec: BigMatch | null; join: string; mapName: string }
 export interface BigMatch { map: string; /** lado do mapa (confere o limite de jogadores) */ size?: number; slots: MatchSlot[]; options: MatchOptions; /** partida com amigos pela rede */ net?: MatchNet }
 /** Papel numa partida com amigos: o anfitrião abre a porta, quem entra conecta no endereço do convite. */
 export interface MatchNet { host: boolean; port: number; address: string; name: string }

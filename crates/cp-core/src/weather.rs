@@ -28,7 +28,7 @@ use crate::mapassets::{self, LayerSet};
 
 pub const MOD_ID: &str = "cp-clima";
 /// Muda quando o código ou as texturas mudam (o launcher monta de novo).
-pub const MOD_VERSION: &str = "1.1.0";
+pub const MOD_VERSION: &str = "1.2.0";
 /// Depois de todos os outros mods (inclusive as Texturas HD e o `zz_cp_zz_…`): as texturas do chão
 /// daqui valem.
 pub const ARCHIVE: &str = "zz_cp_zzz_clima.scd";
@@ -1484,11 +1484,23 @@ pub fn build(sources: &[PathBuf], scenario: &str, kind: Kind, amount: f32, dest:
         }
     }
     files.extend(water_textures(sources, kind));
+    // o clima e o mapa desta montagem: o painel da Partida grande no jogo começa direto quando são
+    // os mesmos (senão pede ao launcher para montar de novo)
+    files.push((INFO_FILE.trim_start_matches('/').to_string(), info_lua(kind, scenario).into_bytes()));
     let mut b = crate::scd::ScdBuilder::create(dest)?;
     for (path, data) in &files {
         b.add_bytes(path, data)?;
     }
     b.finish()
+}
+
+/// O arquivo que diz ao jogo qual clima e qual mapa foram montados.
+pub const INFO_FILE: &str = "/lua/cpweatherinfo.lua";
+
+/// Conteúdo de [`INFO_FILE`] (lido no jogo com `import`).
+pub fn info_lua(kind: Kind, scenario: &str) -> String {
+    let map: String = scenario.chars().filter(|c| !matches!(c, '\'' | '\\' | '\n' | '\r')).collect();
+    format!("-- CommandProject: clima montado pelo launcher\nkind = '{}'\nmap = '{}'\n", kind.key(), map)
 }
 
 /// Versão do mod montado para uma partida: muda com o clima, a quantidade, o mapa e os arquivos de

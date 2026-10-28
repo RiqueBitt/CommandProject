@@ -63,10 +63,16 @@ local function Say(text, color, size, duration, where)
     PrintText(text, size or 20, color or 'fff2b33d', duration or 6, where or 'centertop')
 end
 
--- interface sounds of the game (played on the user side, see minigames_records.lua)
+-- to the user side: rides on the game's own on-screen text messages (Sync.PrintText ->
+-- textdisplay.lua, which the mod hooks; see minigames_records.lua), a path no other mod replaces
+local function Send(kind, data)
+    if not Sync.PrintText then Sync.PrintText = {} end
+    table.insert(Sync.PrintText, { cp = kind, data = data, text = '', location = 'center' })
+end
+
+-- interface sounds of the game
 local function Sound(cue)
-    if not Sync.CPSound then Sync.CPSound = {} end
-    table.insert(Sync.CPSound, cue)
+    Send('sound', cue)
 end
 
 local function Pick(list)
@@ -160,11 +166,11 @@ end
 local function Record(won)
     if Recorded then return end
     Recorded = true
-    Sync.CPRecord = {
+    Send('record', {
         mode = Mode, won = won, seconds = math.floor(GetGameTimeSeconds()), waves = Stats.waves, score = Stats.score,
         map = tostring(ScenarioInfo.name or ''), mut = tostring(Opts.CPMut or ''), week = tonumber(Opts.CPWeek or '') or 0,
         events = Opts.CPEvents == '1', players = table.getn(Players),
-    }
+    })
     LOG('*CommandProject minigame result: ' .. Mode .. ' won=' .. tostring(won) .. ' time=' .. math.floor(GetGameTimeSeconds()) .. ' waves=' .. Stats.waves .. ' score=' .. Stats.score)
 end
 
@@ -390,7 +396,7 @@ local function Board(title, showScore)
         end
     end
     if Extra then table.insert(lines, { Extra, 'ffb8c7d6' }) end
-    Sync.CPBoard = { title = title, lines = lines }
+    Send('board', { title = title, lines = lines })
 end
 
 -- the AI does not know about the points: now and then a few idle land units go to the nearest

@@ -203,6 +203,11 @@ while now < maxTime do
         for _, u in ipairs(units) do if u.army ~= 1 and not u.dead and not u.tags.COMMAND then k = k + 1; if k % 2 == 0 then u.dead = true end end end
         if now > 200 then for _, u in ipairs(units) do if u.army ~= 1 and not u.tags.COMMAND then u.dead = true end end end
     end
+    -- o que vai para a interface (pelas mensagens de texto do jogo)
+    for _, m in ipairs(Sync.PrintText or {}) do
+        if m.cp == 'board' then Sync.CPBoard = m.data elseif m.cp == 'record' then Sync.CPRecord = m.data elseif m.cp == 'sound' then Sync.CPSound = Sync.CPSound or {} table.insert(Sync.CPSound, m.data) end
+    end
+    Sync.PrintText = nil
     if Sync.CPBoard and now % 50 == 0 then
         local l = {}
         for _, x in ipairs(Sync.CPBoard.lines) do table.insert(l, x[1]) end

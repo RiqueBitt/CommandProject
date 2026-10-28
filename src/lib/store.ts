@@ -29,6 +29,9 @@ interface State {
   /** O jogo travou na última vez que foi aberto (relatório .mdmp novo na pasta bin, ou o log da
    *  partida grande sem o fim normal). */
   crash: T.GameCrash | null;
+  /** Sala com amigos pedida dentro do jogo: a tela da Partida grande abre com esta partida e a
+   *  sala (ou a aba de entrar com convite). */
+  pendingRoom: { spec: T.BigMatch | null; join: boolean } | null;
   go: (p: Page) => void;
   /** Filtro da biblioteca de projetos (Mapas, Tropas, Modelos) */
   createKind: T.CreationKind | "all";
@@ -66,6 +69,7 @@ export const useStore = create<State>((set, get) => ({
   showNews: false,
   appUpdate: null,
   crash: null,
+  pendingRoom: null,
   createKind: "all",
   goCreate: (createKind) => { set({ createKind }); get().go("create"); },
   studioTab: null,

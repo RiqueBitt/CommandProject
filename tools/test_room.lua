@@ -63,7 +63,7 @@ local modules = {
     ['/lua/common/factions.lua'] = { Factions = { {}, {}, {} } },
     ['/lua/common/gameColors.lua'] = { GameColors = { PlayerColors = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }, FactionColors = { { { icon = 'A' }, { icon = 'B' } }, { { icon = 'C' } }, { { icon = 'D' } } } } },
     ['/lua/system/mods.lua'] = { GetOfficialDLCModForSession = function() return {} end, GetCampaignMods = function() return {} end },
-    ['/lua/ui/maputil.lua'] = { LoadScenario = function(m) return { name = 'Mapa 6', file = m, size = { 512, 512 }, Configurations = { standard = { teams = { { armies = { 'A1', 'A2', 'A3', 'A4', 'A5', 'A6' } } } } } } end, GetExtraArmies = function() return nil end },
+    ['/lua/ui/maputil.lua'] = { LoadScenario = function(m) return { name = 'Mapa 6', type = 'skirmish', file = m, size = { 512, 512 }, Configurations = { standard = { teams = { { armies = { 'A1', 'A2', 'A3', 'A4', 'A5', 'A6' } } } } } } end, GetExtraArmies = function() return nil end },
 }
 -- rede falsa: a do anfitrião e a do convidado se falam direto
 local comms = {}
@@ -134,5 +134,71 @@ CPNet = { comm = false, host = false, info = false, panel = false, lines = {}, s
 CPNetJoinDirect('10.0.0.5:15000')
 assert(prefs.CPNetLast == '10.0.0.5:15000', 'endereço guardado')
 assert(CPNet.hostId and CPNet.myId, 'conectado')
+-- 8) a tela da Partida grande (Batalha -> PARTIDA GRANDE)
+CPNet = { comm = false, host = false, info = false, panel = false, lines = {}, started = false, view = false, myId = false, hostId = false, ai = 'Normal', fromMenu = false }
+function DiskFindFiles() return { '/maps/m6/m6_scenario.lua', '/maps/m7/m7_scenario.lua' } end
+local launched = nil
+function LaunchSinglePlayerSession(info) launched = info end
+drawn = {}
+CPBigMatchScreen('#22c55e')
+local buttons = {}
+for _, c in ipairs(drawn) do if c.HandleEvent then table.insert(buttons, c) end end
+assert(#buttons > 40, 'botões: ' .. #buttons)
+-- clica no botão "16" (jogadores) e no modo Rei da Colina e em COMEÇAR
+local function click(label)
+    for _, c in ipairs(drawn) do
+        if c.text == label and c.parentButton then end
+    end
+end
+-- os textos ficam como filhos: acha o botão pelo texto mais próximo criado depois dele
+local function press(label)
+    for i, c in ipairs(drawn) do
+        if c.text == label then
+            for j = i, 1, -1 do
+                if drawn[j].HandleEvent and not drawn[j].text then drawn[j]:HandleEvent({ Type = 'ButtonPress' }) return true end
+            end
+        end
+    end
+    error('sem botão ' .. label)
+end
+press('16')
+assert(prefs.CPBigMatch.players == 16, 'jogadores 16')
+press('KING OF THE HILL')
+assert(prefs.CPBigMatch.mode == 'koth', 'modo')
+press('CHAOS')
+assert(prefs.CPBigMatch.mut == 'hp,res,cdr' and prefs.CPBigMatch.events == true, 'extras')
+press('START (ENTER)')
+if not launched then for _, l in ipairs(log) do print(l) end end
+assert(launched and launched.scenarioInfo.Options.CPMode == 'koth', 'partida começou com o modo')
+assert(launched.scenarioInfo.Options.CPMut == 'hp,res,cdr' and launched.scenarioInfo.Options.CPEvents == '1', 'mutadores e eventos')
+-- 9) clima: sem o clima montado nesta abertura, o jogo grava o pedido e fecha (o launcher continua)
+local exited = 0
+function ExitApplication() exited = exited + 1 end
+function SavePreferences() end
+launched = nil
+prefs.CPBigMatch = { players = 16, teams = 2, ai = 'Hard', faction = 2, units = 500, mode = 'koth', weather = 'rain', map = '/maps/m6/m6_scenario.lua' }
+CPBigMatchFromMenu('/maps/m7/m7_scenario.lua')
+local req = prefs.CPLaunchRequest
+assert(exited == 1 and not launched, 'fechou para o launcher montar o clima')
+assert(req and req.seq == 1 and req.action == 'match' and req.map == '/maps/m6/m6_scenario.lua', 'pedido gravado')
+assert(req.players == 16 and req.ai == 'Hard' and req.faction == 2 and req.weather == 'rain' and req.mode == 'koth' and req.units == 500, 'escolhas no pedido')
+-- com o mesmo clima já montado (mod Climas desta abertura), começa aqui com o clima
+modules['/lua/cpweatherinfo.lua'] = { kind = 'rain', map = '/MAPS/m6/m6_scenario.lua' }
+CPBigMatchFromMenu('/maps/m7/m7_scenario.lua')
+assert(exited == 1 and launched and launched.scenarioInfo.Options.CPWeather == 'rain', 'começou aqui com o clima')
+-- clima montado para outro mapa: pede de novo (número sobe)
+modules['/lua/cpweatherinfo.lua'] = { kind = 'rain', map = '/maps/outro/outro_scenario.lua' }
+CPBigMatchFromMenu('/maps/m7/m7_scenario.lua')
+assert(exited == 2 and prefs.CPLaunchRequest.seq == 2, 'outro mapa: pede de novo')
+-- sem clima: começa aqui, sem pedido
+prefs.CPBigMatch.weather = ''
+launched = nil
+CPBigMatchFromMenu('/maps/m7/m7_scenario.lua')
+assert(exited == 2 and launched and launched.scenarioInfo.Options.CPWeather == nil, 'sem clima começa aqui')
+-- sala com amigos e entrar: pedidos para o launcher
+CPRoomFromMenu('/maps/m7/m7_scenario.lua')
+assert(exited == 3 and prefs.CPLaunchRequest.action == 'room' and prefs.CPLaunchRequest.seq == 3)
+CPRoomJoinFromMenu('group')
+assert(exited == 4 and prefs.CPLaunchRequest.action == 'join' and prefs.CPLaunchRequest.join == 'group')
 for _, l in ipairs(log) do if l:match('^WARN') then error(l) end end
 print('sala com amigos: tudo certo (' .. table.getn(log) .. ' linhas de log)')

@@ -101,3 +101,16 @@ function CPMinigameSounds(list)
         pcall(function() PlaySound(Sound({ Bank = 'Interface', Cue = cue })) end)
     end
 end
+
+-- the messages of the minigames (from the simulation, see CPMinigames.lua)
+function CPMinigameUser(textData)
+    local kind = textData.cp
+    if kind == 'record' then
+        CPMinigameRecord(textData.data)
+    elseif kind == 'board' then
+        CPMinigameBoard(textData.data)
+    elseif kind == 'sound' then
+        CPMinigameSounds({ textData.data })
+    end
+    return true
+end
