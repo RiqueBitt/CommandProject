@@ -102,6 +102,7 @@ export const api = {
   appInfo: () => call<T.AppInfo>("app_info"),
   recover: () => call<string | null>("recover"),
   dashboard: () => call<T.Dashboard>("dashboard"),
+  minigameRecords: () => call<import("./minigames").MinigameRecord[]>("minigame_records"),
   setGamePath: (path: string | null) => call<T.GameInstall | null>("set_game_path", { path }),
   getSettings: () => call<T.Settings>("get_settings"),
   saveSettings: (settings: T.Settings) => call<T.Settings>("save_settings", { settings }),

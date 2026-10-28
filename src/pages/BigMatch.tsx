@@ -2,6 +2,7 @@
 // todos...). O lobby do jogo só tem 8 vagas; aqui cada base vira você, uma IA ou fica vazia, e o
 // launcher abre o jogo direto na partida.
 import { useEffect, useMemo, useRef, useState } from "react";
+import { MINIGAMES, minigame } from "../lib/minigames";
 import CrashNotice from "../components/CrashNotice";
 import MatchInvite from "../components/MatchInvite";
 import { Empty, Field, Icon, Notice, Switch, TaskProgress } from "../components/ui";
@@ -63,6 +64,7 @@ const DEFAULT_OPTIONS: MatchOptions = {
   victory: "demoralization", unitCap: 500, fog: "explored", speed: "normal", noRush: 0, prebuilt: false, civilians: "enemy",
   restrictions: [], cheats: false, shareUnitCap: false, spawn: "fixed",
   weather: "", weatherAmount: 1, weatherSound: true,
+  mode: "", modeScore: 0, modeWaves: 0, modePrep: 0, arenaCount: 0, startRes: 100, modePoints: 0,
 };
 /** Climas da partida (mod Climas, montado para o mapa escolhido). */
 const WEATHERS: { key: MatchOptions["weather"]; label: string; icon: string; hint: string }[] = [
@@ -401,6 +403,72 @@ export default function BigMatch() {
               </section>
 
               <section className="card pad">
+                <div className="card-title"><Icon name="emoji_events" /><h3>{t("Minigame")}</h3></div>
+                <div className="bm-weather" role="radiogroup" aria-label={t("Minigame da partida")}>
+                  {MINIGAMES.map((g) => (
+                    <button key={g.key || "normal"} type="button" role="radio" aria-checked={(options.mode ?? "") === g.key}
+                      className={`bm-weather-tile ${(options.mode ?? "") === g.key ? "on" : ""}`}
+                      onClick={() => setOpt({ mode: g.key })} title={t(g.hint)}>
+                      <Icon name={g.icon} size={26} />
+                      <span className="name">{t(g.name)}</span>
+                      <span className="hint">{t(g.hint)}</span>
+                    </button>
+                  ))}
+                </div>
+                {options.mode && (
+                  <div className="bm-weather-opts">
+                    <span className="small"><b>{t("Vitória:")}</b> {t(minigame(options.mode).win)}</span>
+                    {options.mode === "domination" && (
+                      <label className="range">
+                        <span>{t("Pontos para vencer")}</span>
+                        <input type="range" min={100} max={3000} step={50} value={options.modeScore || 500} onChange={(e) => setOpt({ modeScore: Number(e.target.value) })} />
+                        <output>{options.modeScore || 500}</output>
+                      </label>
+                    )}
+                    {options.mode === "defense" && (
+                      <>
+                        <label className="range">
+                          <span>{t("Ondas")}</span>
+                          <input type="range" min={3} max={40} step={1} value={options.modeWaves || 15} onChange={(e) => setOpt({ modeWaves: Number(e.target.value) })} />
+                          <output>{options.modeWaves || 15}</output>
+                        </label>
+                        <label className="range">
+                          <span>{t("Tempo para preparar a base")}</span>
+                          <input type="range" min={60} max={600} step={30} value={options.modePrep || 180} onChange={(e) => setOpt({ modePrep: Number(e.target.value) })} />
+                          <output>{t("{n} s", { n: options.modePrep || 180 })}</output>
+                        </label>
+                      </>
+                    )}
+                    {options.mode === "arena" && (
+                      <label className="range">
+                        <span>{t("Experimentais de cada jogador")}</span>
+                        <input type="range" min={1} max={5} step={1} value={options.arenaCount || 1} onChange={(e) => setOpt({ arenaCount: Number(e.target.value) })} />
+                        <output>{options.arenaCount || 1}</output>
+                      </label>
+                    )}
+                    {(options.mode === "domination" || options.mode === "total" || options.mode === "supreme") && (
+                      <label className="range">
+                        <span>{t("Pontos de controle")}</span>
+                        <input type="range" min={1} max={7} step={1} value={options.modePoints || (options.mode === "total" ? 5 : 3)} onChange={(e) => setOpt({ modePoints: Number(e.target.value) })} />
+                        <output>{options.modePoints || (options.mode === "total" ? 5 : 3)}</output>
+                      </label>
+                    )}
+                    {(options.mode === "total" || options.mode === "defense") && (
+                      <label className="range">
+                        <span>{t("Recursos extras no começo")}</span>
+                        <input type="range" min={0} max={300} step={25} value={options.startRes ?? 100} onChange={(e) => setOpt({ startRes: Number(e.target.value) })} />
+                        <output>{options.startRes ?? 100}%</output>
+                      </label>
+                    )}
+                    {options.mode === "defense" && sum.players > 0 && (
+                      <span className="muted small">{t("Você e os aliados defendem; os inimigos são os que atacam com as ondas. Use pelo menos dois times.")}</span>
+                    )}
+                    <span className="muted small">{t("Mensagens na tela explicam o objetivo, avisam das ondas, dos pontos tomados e do placar. O resultado vira recorde no Início do launcher. Numa partida com amigos, todos precisam do launcher atualizado.")}</span>
+                  </div>
+                )}
+              </section>
+
+              <section className="card pad">
                 <div className="card-title"><Icon name="cloud" /><h3>{t("Clima")}</h3></div>
                 <div className="bm-weather" role="radiogroup" aria-label={t("Clima da partida")}>
                   {WEATHERS.map((w) => (
@@ -437,7 +505,7 @@ export default function BigMatch() {
                 <div className="card-title"><Icon name="tune" /><h3>{t("Regras")}</h3></div>
                 <div className="bm-options">
                   <Field label={t("Vitória")}>
-                    <select className="select" value={options.victory} onChange={(e) => setOpt({ victory: e.target.value })}>
+                    <select className="select" value={options.mode === "arena" ? "demoralization" : options.victory} disabled={options.mode === "arena"} title={options.mode ? t("No minigame, a vitória é a do modo (Sem fim vira Destruir o comandante).") : undefined} onChange={(e) => setOpt({ victory: e.target.value })}>
                       <option value="demoralization">{t("Destruir o comandante")}</option><option value="domination">{t("Destruir tudo")}</option><option value="sandbox">{t("Sem fim (sandbox)")}</option>
                     </select>
                   </Field>

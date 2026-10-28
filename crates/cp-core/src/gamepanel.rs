@@ -347,9 +347,69 @@ pub fn parse_requests(prefs: &str) -> Option<GameRequests> {
     Some(r)
 }
 
+/// Recorde de um minigame (gravado pelo jogo em `CPRecords` no `Game.prefs`).
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MinigameRecord {
+    /// `total`, `arena`, `defense`, `domination` ou `supreme`
+    pub mode: String,
+    pub played: u32,
+    pub wins: u32,
+    /// segundos da vitória mais rápida
+    pub fastest: Option<u32>,
+    /// mais ondas seguradas (defesa) ou maior pontuação (os outros)
+    pub best: u32,
+}
+
+/// Nome de um modo dos minigames.
+pub fn mode_name(mode: &str, pt: bool) -> &'static str {
+    match (mode, pt) {
+        ("total", true) => "Guerra Total",
+        ("total", false) => "Total War",
+        ("arena", true) => "Arena dos Experimentais",
+        ("arena", false) => "Experimental Arena",
+        ("defense", true) => "Última Linha de Defesa",
+        ("defense", false) => "Last Line of Defense",
+        ("domination", true) => "Dominação Estratégica",
+        ("domination", false) => "Strategic Domination",
+        ("supreme", true) => "Projeto Supremo",
+        ("supreme", false) => "Supreme Project",
+        _ => "",
+    }
+}
+
+/// Os recordes dos minigames no `Game.prefs`, na ordem de [`crate::bigmatch::MODES`] (só os jogados).
+pub fn parse_records(prefs: &str) -> Vec<MinigameRecord> {
+    let Some(b) = block(prefs, "CPRecords") else { return vec![] };
+    let num = |key: &str| field(b, key).and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite() && *v >= 0.0).map(|v| v as u32);
+    crate::bigmatch::MODES
+        .iter()
+        .filter_map(|m| {
+            let played = num(&format!("{m}_played"))?;
+            Some(MinigameRecord {
+                mode: m.to_string(),
+                played,
+                wins: num(&format!("{m}_wins")).unwrap_or(0),
+                fastest: num(&format!("{m}_fast")),
+                best: num(&format!("{m}_best")).unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_minigame_records() {
+        let prefs = "profile = { profiles = { { CPRecords = {\n    arena_played = 3,\n    arena_wins = 2,\n    arena_fast = 412,\n    defense_best = 9,\n    defense_played = 4,\n}, CPLauncher = { seq = 1 } } } }";
+        let r = parse_records(prefs);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0], MinigameRecord { mode: "arena".into(), played: 3, wins: 2, fastest: Some(412), best: 0 });
+        assert_eq!((r[1].mode.as_str(), r[1].played, r[1].wins, r[1].best), ("defense", 4, 0, 9));
+        assert!(parse_records("x = 1").is_empty());
+    }
 
     #[test]
     fn reads_the_requests_from_the_game_prefs() {

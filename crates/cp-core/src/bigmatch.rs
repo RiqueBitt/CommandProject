@@ -20,7 +20,7 @@ const ENTRY: &str = "function StartCommandLineSession(mapName, isPerfTest)\n";
 const HOOK: &str = "\tif CPBigMatchStart and CPBigMatchStart(mapName) then return end -- CommandProject big match\n";
 
 /// Versão do código do mod: quando muda, o launcher monta o mod de novo.
-pub const MOD_VERSION: &str = "1.13.0";
+pub const MOD_VERSION: &str = "1.14.0";
 /// Cores de exército na partida grande: as 10 do jogo e mais 14 (o mod acrescenta só com `/cpmatch`).
 pub const COLORS: i32 = 32;
 /// Mapas com mais de 8 bases são gravados com este tipo: o lobby do jogo (8 posições, que trava com
@@ -111,6 +111,20 @@ pub struct MatchOptions {
     pub weather_dynamic: bool,
     /// som do clima dentro do jogo (vento e mar do próprio jogo)
     pub weather_sound: bool,
+    /// minigame (um de [`MODES`]); vazio = partida normal
+    pub mode: String,
+    /// Dominação: pontos para vencer (0 = 500)
+    pub mode_score: u32,
+    /// Defesa: ondas (0 = 15)
+    pub mode_waves: u32,
+    /// Defesa: segundos para preparar a base (0 = 180)
+    pub mode_prep: u32,
+    /// Arena: experimentais de cada jogador (0 = 1)
+    pub arena_count: u32,
+    /// Guerra total e Defesa: bônus de recursos no começo, em % (100 = normal)
+    pub start_res: u32,
+    /// pontos de controle (0 = o padrão do modo)
+    pub mode_points: u32,
 }
 
 /// Restrições de unidades do lobby do jogo (`/lua/ui/lobby/restrictedUnitsData.lua`), na ordem da tela.
@@ -136,6 +150,13 @@ impl Default for MatchOptions {
             weather_amount: 1.0,
             weather_dynamic: false,
             weather_sound: true,
+            mode: String::new(),
+            mode_score: 0,
+            mode_waves: 0,
+            mode_prep: 0,
+            arena_count: 0,
+            start_res: 100,
+            mode_points: 0,
         }
     }
 }
@@ -239,9 +260,19 @@ pub fn encode(m: &BigMatch) -> Result<String> {
         restrictions.retain(|r| *r != "ALL_RESEARCH_UNITS");
     }
     let prebuilt = if o.prebuilt { "On" } else { "Off" };
+    // minigames: a Arena acaba quando um jogador fica sem unidades; os outros precisam de um fim
+    let mode = if o.mode.is_empty() { "" } else { pick(&o.mode, MODES, "minigame")? };
+    let victory = match mode {
+        "arena" => "eradication",
+        "" => pick(&o.victory, &["demoralization", "domination", "sandbox"], "tipo de vitória")?,
+        _ => match o.victory.as_str() {
+            "domination" => "domination",
+            _ => "demoralization",
+        },
+    };
     let mut out = format!(
         "Victory={};UnitCap={};FogOfWar={};GameSpeed={};NoRushOption={};PreBuiltUnits={prebuilt};PrebuiltUnits={prebuilt};CivilianAlliance={};CheatsEnabled={};DoNotShareUnitCap={}",
-        pick(&o.victory, &["demoralization", "domination", "sandbox"], "tipo de vitória")?,
+        victory,
         o.unit_cap.clamp(50, 5000),
         pick(&o.fog, &["explored", "unexplored", "none"], "névoa")?,
         pick(&o.speed, &["normal", "fast", "adjustable"], "velocidade")?,
@@ -260,6 +291,25 @@ pub fn encode(m: &BigMatch) -> Result<String> {
         }
         if !o.weather_sound {
             out.push_str(";CPWeatherSound=0");
+        }
+    }
+    if !mode.is_empty() {
+        out.push_str(&format!(";CPMode={mode}"));
+        // só as opções do modo escolhido
+        let extra = [
+            ("CPScore", o.mode_score.min(100_000), mode == "domination"),
+            ("CPWaves", o.mode_waves.min(60), mode == "defense"),
+            ("CPPrep", o.mode_prep.min(1200), mode == "defense"),
+            ("CPArenaCount", o.arena_count.min(5), mode == "arena"),
+            ("CPPoints", o.mode_points.min(7), matches!(mode, "domination" | "total" | "supreme")),
+        ];
+        for (k, v, used) in extra {
+            if used && v > 0 {
+                out.push_str(&format!(";{k}={v}"));
+            }
+        }
+        if o.start_res != 100 {
+            out.push_str(&format!(";CPStartRes={}", o.start_res.min(1000)));
         }
     }
     for s in &m.slots {
@@ -458,6 +508,48 @@ pub fn patch_colors(text: &str) -> Result<String> {
     Ok(out)
 }
 
+// ---------------------------------------------------------------- minigames
+
+/// Os 5 minigames (lado da simulação): ligados pela opção `CPMode` da partida.
+const MINIGAMES: &str = include_str!("minigames.lua");
+const MINIGAMES_FILE: &str = "lua/sim/CPMinigames.lua";
+const VICTORY_FILE: &str = "lua/sim/victory.lua";
+const VICTORY_ENTRY: &str = "function CheckVictory(scenarioInfo)\n";
+const VICTORY_HOOK: &str = "    -- CommandProject minigames\n    if scenarioInfo.Options and scenarioInfo.Options.CPMode and scenarioInfo.Options.CPMode ~= '' then\n        local ok, err = pcall(function() import('/lua/sim/CPMinigames.lua').Start(scenarioInfo) end)\n        if not ok then WARN('*CommandProject minigame: ' .. tostring(err)) end\n    end\n";
+const USERSYNC_FILE: &str = "lua/UserSync.lua";
+const USERSYNC_ENTRY: &str = "function OnSync()\n";
+const USERSYNC_HOOK: &str = "    if Sync.CPRecord then CPMinigameRecord(Sync.CPRecord) end -- CommandProject minigames\n";
+const USERSYNC_CODE: &str = include_str!("minigames_records.lua");
+/// Modos dos minigames (`CPMode`).
+pub const MODES: &[&str] = &["total", "arena", "defense", "domination", "supreme"];
+
+fn insert_after(text: &str, entry: &str, hook: &str, mark: &str, what: &str) -> Result<String> {
+    if text.contains(mark) {
+        return Err(Error::Other(format!("o {what} do jogo já tem os minigames: use o original")));
+    }
+    let at = text.find(entry).ok_or_else(|| Error::Other(format!("o {what} do jogo é diferente do esperado: sem os minigames")))? + entry.len();
+    Ok(format!("{}{hook}{}", &text[..at], &text[at..]))
+}
+
+/// `victory.lua` com o começo dos minigames (só quando a partida tem `CPMode`).
+pub fn patch_victory(text: &str) -> Result<String> {
+    insert_after(text, VICTORY_ENTRY, VICTORY_HOOK, "CommandProject minigames", "victory.lua")
+}
+
+/// `UserSync.lua` que guarda o resultado dos minigames no perfil do jogo (`CPRecords`).
+pub fn patch_usersync(text: &str) -> Result<String> {
+    let mut out = insert_after(text, USERSYNC_ENTRY, USERSYNC_HOOK, "CommandProject minigames", "UserSync.lua")?;
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(USERSYNC_CODE);
+    Ok(out)
+}
+
+fn latin1(text: &str) -> Vec<u8> {
+    text.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect()
+}
+
 /// Monta o `.scd` do mod com os arquivos do jogo do usuário.
 pub fn build(sources: &[PathBuf], dest: &Path) -> Result<PathBuf> {
     let mut b = crate::scd::ScdBuilder::create(dest)?;
@@ -465,8 +557,17 @@ pub fn build(sources: &[PathBuf], dest: &Path) -> Result<PathBuf> {
     b.add_bytes(COLORS_FILE, &colors.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect::<Vec<u8>>())?;
     for f in FILES {
         let text = patch(&game_text(sources, f)?)?;
-        let bytes: Vec<u8> = text.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect();
-        b.add_bytes(f, &bytes)?;
+        b.add_bytes(f, &latin1(&text))?;
+    }
+    // minigames: sem eles (jogo diferente do esperado) a partida grande continua funcionando
+    match (game_text(sources, VICTORY_FILE).and_then(|t| patch_victory(&t)), game_text(sources, USERSYNC_FILE).and_then(|t| patch_usersync(&t))) {
+        (Ok(victory), Ok(usersync)) => {
+            b.add_bytes(VICTORY_FILE, &latin1(&victory))?;
+            b.add_bytes(USERSYNC_FILE, &latin1(&usersync))?;
+            // os textos em UTF-8, como os do jogo
+            b.add_bytes(MINIGAMES_FILE, MINIGAMES.as_bytes())?;
+        }
+        (Err(e), _) | (_, Err(e)) => eprintln!("minigames de fora: {e}"),
     }
     b.finish()
 }
@@ -819,6 +920,44 @@ mod tests {
         assert!(patch("x = 1").is_err());
     }
 
+    #[test]
+    fn minigame_options_are_encoded() {
+        let mut m = BigMatch { map: "/maps/X/X_scenario.lua".into(), slots: vec![slot(SlotKind::You, 1), slot(SlotKind::Ai, 2)], ..Default::default() };
+        m.options.mode = "arena".into();
+        m.options.arena_count = 2;
+        let e = encode(&m).unwrap();
+        assert!(e.starts_with("Victory=eradication;"), "{e}");
+        assert!(e.contains(";CPMode=arena;CPArenaCount=2|"), "{e}");
+        m.options.mode = "domination".into();
+        m.options.victory = "sandbox".into();
+        m.options.mode_score = 800;
+        m.options.start_res = 200;
+        let e = encode(&m).unwrap();
+        assert!(e.starts_with("Victory=demoralization;"), "{e}");
+        assert!(e.contains(";CPMode=domination;CPScore=800;CPStartRes=200|"), "{e}");
+        m.options.mode = "xadrez".into();
+        assert!(encode(&m).is_err());
+        m.options.mode = String::new();
+        assert!(!encode(&m).unwrap().contains("CPMode"));
+    }
+
+    #[test]
+    fn minigames_hooks() {
+        let v = patch_victory("x = 1\nfunction CheckVictory(scenarioInfo)\n    local a = 1\nend\n").unwrap();
+        assert!(v.contains("function CheckVictory(scenarioInfo)\n    -- CommandProject minigames\n"));
+        assert!(v.contains("import('/lua/sim/CPMinigames.lua').Start(scenarioInfo)"));
+        assert!(patch_victory(&v).is_err());
+        assert!(patch_victory("x = 1").is_err());
+        let u = patch_usersync("Sync = {}\nfunction OnSync()\n    a()\nend\n").unwrap();
+        assert!(u.contains("function OnSync()\n    if Sync.CPRecord then CPMinigameRecord(Sync.CPRecord) end"));
+        assert!(u.contains("function CPMinigameRecord(r)"));
+        // o código dos minigames é todo ASCII ou UTF-8 válido e tem a entrada
+        assert!(MINIGAMES.contains("function Start(scenarioInfo)"));
+        for m in MODES {
+            assert!(MINIGAMES.contains(&format!("{m} = ")), "{m}");
+        }
+    }
+
     /// Com `CP_GAMEDATA` (pasta com o uncompiled_lua.scd do jogo): os dois arquivos aceitam o gancho.
     #[test]
     fn real_game_files() {
@@ -832,6 +971,8 @@ mod tests {
                 std::fs::write(p, out.chars().map(|c| c as u8).collect::<Vec<u8>>()).unwrap();
             }
         }
+        patch_victory(&game_text(&sources, VICTORY_FILE).unwrap()).unwrap();
+        patch_usersync(&game_text(&sources, USERSYNC_FILE).unwrap()).unwrap();
         let colors = patch_colors(&game_text(&sources, COLORS_FILE).unwrap()).unwrap();
         if let Some(o) = std::env::var_os("CP_BIG_OUT") {
             let p = PathBuf::from(o).join(COLORS_FILE);

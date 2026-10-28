@@ -6,6 +6,17 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.48.0",
+    title: "Minigames: 5 modos novos",
+    items: [
+      { icon: "flag", title: "Dominação Estratégica", text: "Pontos de controle marcados com setas no mapa: o time que fica sozinho num ponto por 5 segundos toma o ponto, e cada ponto dá 1 ponto por segundo (e um pouco de recursos). Vence quem chega primeiro à pontuação-alvo. A IA também disputa os pontos.", page: "bigmatch" },
+      { icon: "smart_toy", title: "Arena dos Experimentais", text: "Cada jogador começa com 1 a 5 experimentais da sua facção no lugar do comandante. Depois de 3 minutos a zona segura fecha no centro. Vence o último que sobrar.", page: "bigmatch" },
+      { icon: "shield", title: "Última Linha de Defesa", text: "Tempo para montar a base e depois ondas de inimigos cada vez maiores, com experimentais a cada 5 ondas e suprimentos entre elas. Dá para jogar sozinho ou com aliados.", page: "bigmatch" },
+      { icon: "public", title: "Guerra Total e Projeto Supremo", text: "Guerra Total: mais recursos no começo e pontos estratégicos que dão massa, energia e pesquisa. Projeto Supremo: a pesquisa vem das eliminações e dos pontos, com níveis que dão bônus.", page: "bigmatch" },
+      { icon: "emoji_events", title: "Onde escolher e recordes", text: "No jogo: Batalha → Criar jogo, seção MODO (e atalhos da Defesa e da Arena no submenu Batalha). No launcher: Partida grande → Minigame. Mensagens na tela explicam o objetivo e mostram o placar; os resultados viram recordes no Início.", page: "bigmatch" },
+    ],
+  },
+  {
     version: "0.47.0",
     title: "Grande atualização de otimização",
     items: [

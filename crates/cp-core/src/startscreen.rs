@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 pub const MOD_ID: &str = "cp-tela-inicial";
 pub const ARCHIVE: &str = "zz_cp_tela_inicial.scd";
 /// Muda quando o visual muda (o launcher remonta).
-pub const STYLE_VERSION: &str = "1.3.0";
+pub const STYLE_VERSION: &str = "1.4.0";
 pub const SETTINGS_FILE: &str = "start-screen.json";
 /// Pasta (nos dados do launcher) com o logo e o vídeo do jogador.
 pub const USER_DIR: &str = "start-screen";

@@ -197,7 +197,17 @@ function CPBigMatchQuick(mapName, players, teams, ai, faction, victory, unitCap)
     if victory ~= 'demoralization' and victory ~= 'domination' and victory ~= 'sandbox' then victory = 'demoralization' end
     unitCap = tonumber(unitCap) or 1000
     if unitCap < 50 or unitCap > 2000 then unitCap = 1000 end
+    -- minigame (CPMinigames.lua no mod): guardado na sala ou nos atalhos do submenu Batalha
+    local mode = CPBMGet('mode') or ''
+    if mode ~= 'total' and mode ~= 'arena' and mode ~= 'defense' and mode ~= 'domination' and mode ~= 'supreme' then mode = '' end
+    if mode == 'arena' then
+        victory = 'eradication'
+    elseif mode ~= '' and victory == 'sandbox' then
+        victory = 'demoralization'
+    end
+    if mode == 'defense' and teams < 2 then teams = 2 end
     local spec = 'Victory=' .. victory .. ';UnitCap=' .. unitCap .. ';FogOfWar=explored;GameSpeed=normal;NoRushOption=Off;PreBuiltUnits=Off;PrebuiltUnits=Off;CivilianAlliance=enemy;CheatsEnabled=' .. tostring(CPBMGet('cheats') == true) .. ';DoNotShareUnitCap=true'
+    if mode ~= '' then spec = spec .. ';CPMode=' .. mode end
     for i = 1, bases do
         if i <= n then
             local team = 1
@@ -211,15 +221,15 @@ function CPBigMatchQuick(mapName, players, teams, ai, faction, victory, unitCap)
             spec = spec .. '|X'
         end
     end
-    LOG('*CommandProject big match (in game): ' .. n .. ' players, ' .. teams .. ' teams, ' .. ai .. ', faction ' .. faction .. ', ' .. victory .. ', cap ' .. unitCap .. ' on ' .. tostring(mapName))
+    LOG('*CommandProject big match (in game): ' .. n .. ' players, ' .. teams .. ' teams, ' .. ai .. ', faction ' .. faction .. ', ' .. victory .. ', cap ' .. unitCap .. ', mode ' .. mode .. ' on ' .. tostring(mapName))
     -- para o "Jogar de novo" da tela de resultado
-    CPBMSet('last', { mapName, n, teams, ai, faction, victory, unitCap })
+    CPBMSet('last', { mapName, n, teams, ai, faction, victory, unitCap, mode })
     LaunchSinglePlayerSession(CPBigMatchSession(mapName, spec))
 end
 
 -- escolhas da Partida grande feitas dentro do jogo (sala de batalha, submenus): guardadas no
 -- perfil do jogo, valem para as próximas partidas
-local CPBM_DEFAULT = { players = 8, teams = 2, ai = 'Normal', faction = 0, victory = 'demoralization', units = 1000, cheats = false }
+local CPBM_DEFAULT = { players = 8, teams = 2, ai = 'Normal', faction = 0, victory = 'demoralization', units = 1000, cheats = false, mode = '' }
 
 function CPBMGet(key)
     local ok, saved = pcall(function() return import('/lua/user/prefs.lua').GetFromCurrentProfile('CPBigMatch') end)
@@ -239,6 +249,20 @@ function CPBMSet(key, value)
     LOG('*CommandProject big match option: ' .. tostring(key) .. ' = ' .. tostring(value))
 end
 
+-- MODO na sala: partida normal (com o tipo de vitória) ou um dos minigames
+function CPBMSetMode(mode, victory)
+    CPBMSet('mode', mode or '')
+    if victory and victory ~= '' then CPBMSet('victory', victory) end
+end
+
+-- atalhos dos minigames no submenu Batalha: o modo vale só para esta partida
+function CPBigMatchMinigame(mapName, players, teams, mode)
+    local before = CPBMGet('mode')
+    CPBMSet('mode', mode)
+    CPBigMatchQuick(mapName, players, teams, CPBMGet('ai'), CPBMGet('faction'), CPBMGet('victory'), CPBMGet('units'))
+    CPBMSet('mode', before or '')
+end
+
 -- "Iniciar partida grande": as escolhas guardadas; o mapa guardado, se ainda existir
 function CPBigMatchFromMenu(defaultMap)
     local map = CPBMGet('map')
@@ -253,7 +277,10 @@ function CPBigMatchAgain()
         LOG('*CommandProject: nenhuma partida grande para repetir')
         return
     end
+    local before = CPBMGet('mode')
+    CPBMSet('mode', l[8] or '')
     CPBigMatchQuick(l[1], l[2], l[3], l[4], l[5], l[6], l[7])
+    CPBMSet('mode', before or '')
 end
 
 -- modos prontos do submenu Batalha: jogadores e times fixos, o resto das escolhas guardadas

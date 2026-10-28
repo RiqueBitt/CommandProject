@@ -335,6 +335,19 @@ export interface MatchOptions {
   weatherAmount: number;
   /** som do clima dentro do jogo (sons de ambiente do próprio jogo) */
   weatherSound: boolean;
+  /** minigame (CPMode): "" = partida normal */
+  mode?: "" | "total" | "arena" | "defense" | "domination" | "supreme";
+  /** Dominação: pontos para vencer (0 = 500) */
+  modeScore?: number;
+  /** Defesa: ondas (0 = 15) e segundos para preparar (0 = 180) */
+  modeWaves?: number;
+  modePrep?: number;
+  /** Arena: experimentais de cada jogador (0 = 1) */
+  arenaCount?: number;
+  /** bônus de recursos no começo, em % (100 = normal) */
+  startRes?: number;
+  /** pontos de controle (0 = o padrão do modo) */
+  modePoints?: number;
 }
 export interface BigMatch { map: string; /** lado do mapa (confere o limite de jogadores) */ size?: number; slots: MatchSlot[]; options: MatchOptions; /** partida com amigos pela rede */ net?: MatchNet }
 /** Papel numa partida com amigos: o anfitrião abre a porta, quem entra conecta no endereço do convite. */

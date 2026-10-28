@@ -1,6 +1,7 @@
 import { isLauncherMod } from "../lib/features";
 import { useEffect, useRef, useState } from "react";
 import CrashNotice from "../components/CrashNotice";
+import MinigamesCard from "../components/MinigamesCard";
 import { ConflictsModal, InstallLinkModal } from "../components/dialogs";
 import { Empty, Field, Icon, Menu, MenuItem, Modal, ModThumb, Notice, Switch, TaskProgress } from "../components/ui";
 import { api, confirmDialog, openUrl, pickFile } from "../lib/api";
@@ -180,6 +181,7 @@ export default function Home() {
 
           <div className={settings?.showcase ? "home-col" : "grid"}>
             <EnhancementsCard />
+            <MinigamesCard />
             {settings?.showcase && contentCard}
             <section className="card pad">
               <div className="card-title"><Icon name="checklist" style={{ color: "var(--primary)" }} /><h3>{t("Antes de jogar")}</h3></div>

@@ -409,6 +409,25 @@ impl Workspace {
                 code: lua(format!("if m.CPBigMatchMode then m.CPBigMatchMode('{}', {players}, {teams}) end", map.path)),
             });
         }
+        // minigames prontos (os outros ficam na seção MODO da sala de Batalha)
+        let games: [(&str, &str, &str, usize, u32); 2] = [
+            ("defense", "ÚLTIMA LINHA DE DEFESA", "LAST LINE OF DEFENSE", 4, 2),
+            ("arena", "ARENA DOS EXPERIMENTAIS", "EXPERIMENTAL ARENA", 4, 0),
+        ];
+        for (mode, pt_label, en_label, players, teams) in games {
+            if 2 + used(edit, Place::Skirmish) >= MAX_SUBMENU {
+                break;
+            }
+            let Some(map) = maps.iter().filter(|m| m.bases >= players && crate::bigmatch_menu::safe(&m.path)).min_by_key(|m| (m.size, m.bases)) else { continue };
+            edit.buttons.push(NewButton {
+                key: format!("cp:minigame_{mode}"),
+                label: (if pt { pt_label } else { en_label }).into(),
+                place: Place::Skirmish,
+                native: None,
+                lua: false,
+                code: lua(format!("if m.CPBigMatchMinigame then m.CPBigMatchMinigame('{}', {players}, {teams}, '{mode}') end", map.path)),
+            });
+        }
         // Extras: trapaças da partida grande e perfis de mods
         let extras: Vec<(String, String, String)> = vec![
             ("cp:trapacas_on".into(), if pt { "TRAPAÇAS: LIGAR" } else { "CHEATS: ON" }.into(), "if m.CPBMSet then m.CPBMSet('cheats', true) end".into()),
@@ -511,6 +530,14 @@ impl Workspace {
 
     /// Tela inicial: monta o mod `cp-tela-inicial` com o visual novo (se ligado) e os botões dos mods
     /// da Forja, ou o desliga quando não há nada. Só remonta quando algo mudou. Devolve os avisos.
+    /// Recordes dos minigames gravados pelo jogo (`CPRecords` no `Game.prefs`).
+    pub fn minigame_records() -> Vec<crate::gamepanel::MinigameRecord> {
+        crate::perf::prefs_path()
+            .and_then(|p| std::fs::read(p).ok())
+            .map(|b| crate::gamepanel::parse_records(&String::from_utf8_lossy(&b)))
+            .unwrap_or_default()
+    }
+
     pub fn prepare_start_screen(&mut self) -> Result<Vec<String>> {
         use crate::startscreen as ss;
         let mut settings = ss::Settings::load(&self.data_dir);
@@ -527,6 +554,18 @@ impl Workspace {
                 (true, true) => format!("Versão {} · {mods} mods ligados · perfil {name}", env!("CARGO_PKG_VERSION")),
                 (false, true) => format!("Version {} · {mods} mods on · profile {name}", env!("CARGO_PKG_VERSION")),
             };
+            // o melhor recorde dos minigames
+            if done.is_empty() {
+                if let Some(r) = Self::minigame_records().into_iter().max_by_key(|r| (r.wins, r.best)) {
+                    let mode = crate::gamepanel::mode_name(&r.mode, pt);
+                    settings.news_text.push_str(&match (pt, r.mode == "defense") {
+                        (true, true) => format!(" · Recorde: {mode}, {} ondas", r.best),
+                        (false, true) => format!(" · Record: {mode}, {} waves", r.best),
+                        (true, false) => format!(" · {mode}: {} vitórias", r.wins),
+                        (false, false) => format!(" · {mode}: {} wins", r.wins),
+                    });
+                }
+            }
         }
         let plan = self.forja_plan()?;
         let (mut edit, _, problems) = crate::forja::menu_edit(&plan);

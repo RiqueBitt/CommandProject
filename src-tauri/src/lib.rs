@@ -58,6 +58,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            commands::minigame_records,
             commands::ensure_vanilla,
             commands::proxima_status,
             commands::proxima_download,

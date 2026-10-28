@@ -122,6 +122,12 @@ pub async fn app_info(state: State<'_, AppState>) -> R<AppInfo> {
     .await
 }
 
+/// Recordes dos minigames (gravados pelo jogo no perfil dele).
+#[tauri::command]
+pub async fn minigame_records() -> R<Vec<cp_core::gamepanel::MinigameRecord>> {
+    Ok(tauri::async_runtime::spawn_blocking(cp_core::workspace::Workspace::minigame_records).await.unwrap_or_default())
+}
+
 #[tauri::command]
 pub async fn recover(state: State<'_, AppState>) -> R<Option<String>> {
     with_ws(&state.ws, |ws| ws.recover()).await

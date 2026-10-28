@@ -50,6 +50,9 @@ pub struct Texts {
     pub lobby_title: &'static str,
     pub lobby_sub: &'static str,
     pub lobby_start: &'static str,
+    /// seção MODO: as 3 vitórias da partida normal e os 5 minigames
+    pub mode: &'static str,
+    pub mode_labels: [&'static str; 8],
 }
 
 pub const PT: Texts = Texts {
@@ -72,6 +75,8 @@ pub const PT: Texts = Texts {
     lobby_title: "PARTIDA GRANDE",
     lobby_sub: "Mais de 8 jogadores contra a IA. Suas escolhas ficam guardadas.",
     lobby_start: "INICIAR PARTIDA GRANDE",
+    mode: "MODO (VITÓRIA OU MINIGAME)",
+    mode_labels: ["NORMAL", "TUDO", "SEM FIM", "GUERRA", "ARENA", "DEFESA", "DOMÍNIO", "SUPREMO"],
 };
 
 pub const EN: Texts = Texts {
@@ -94,10 +99,22 @@ pub const EN: Texts = Texts {
     lobby_title: "BIG MATCH",
     lobby_sub: "More than 8 players against the AI. Your choices are kept.",
     lobby_start: "START BIG MATCH",
+    mode: "MODE (VICTORY OR MINIGAME)",
+    mode_labels: ["NORMAL", "ALL", "ENDLESS", "WAR", "ARENA", "DEFENSE", "CONTROL", "SUPREME"],
 };
 
 const AI_KEYS: [&str; 4] = ["Easy", "Normal", "Hard", "Cheat"];
-const VICTORY_KEYS: [&str; 3] = ["demoralization", "domination", "sandbox"];
+/// Botões da seção MODO: (minigame, vitória). Os 3 primeiros são a partida normal.
+const MODE_KEYS: [(&str, &str); 8] = [
+    ("", "demoralization"),
+    ("", "domination"),
+    ("", "sandbox"),
+    ("total", ""),
+    ("arena", ""),
+    ("defense", ""),
+    ("domination", ""),
+    ("supreme", ""),
+];
 const UNIT_CAPS: [u32; 3] = [250, 500, 1000];
 
 // medidas do painel (unidades da cena da sala, 640 × 480: a área 16:9 vai de x −640 a 1280; a
@@ -265,7 +282,7 @@ pub fn add_lobby_panel_with(scene: &[u8], maps: &[MenuMap], t: &Texts, thumbs: &
             })
             .collect()
     };
-    let bh = 32;
+    let bh = 28;
     let mut y = LY0 + 74;
     let mut section = |s: &mut Scene, panel: &mut Vec<u32>, title: &str, items: Vec<(String, String)>, cols: i32, y: &mut i32| -> Result<()> {
         text(s, panel, title, "pc_title_font_2", Rect::new(LIN0, LIN1, *y, *y + 24))?;
@@ -281,7 +298,8 @@ pub fn add_lobby_panel_with(scene: &[u8], maps: &[MenuMap], t: &Texts, thumbs: &
     section(&mut s, &mut panel, t.teams, t.short_team_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("teams", [2, 3, 4, 0][i].to_string()))).collect(), 4, &mut y)?;
     section(&mut s, &mut panel, t.ai, t.short_ai_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("ai", format!("'{}'", AI_KEYS[i])))).collect(), 4, &mut y)?;
     section(&mut s, &mut panel, t.faction, t.faction_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("faction", i.to_string()))).collect(), 4, &mut y)?;
-    section(&mut s, &mut panel, t.victory, t.victory_labels.iter().enumerate().map(|(i, l)| (l.to_string(), set("victory", format!("'{}'", VICTORY_KEYS[i])))).collect(), 3, &mut y)?;
+    let mode = |m: &str, v: &str| format!("import('/lua/SinglePlayerLaunch.lua').CPBMSetMode('{m}', '{v}')");
+    section(&mut s, &mut panel, t.mode, t.mode_labels.iter().zip(MODE_KEYS).map(|(l, (m, v))| (l.to_string(), mode(m, v))).collect(), 4, &mut y)?;
     section(&mut s, &mut panel, t.units, UNIT_CAPS.iter().map(|u| (u.to_string(), set("units", u.to_string()))).collect(), 3, &mut y)?;
     // mapas: miniaturas em 2 linhas de 4 (o nome embaixo de cada uma)
     text(&mut s, &mut panel, t.map, "pc_title_font_2", Rect::new(LIN0, LIN1, y, y + 24))?;
@@ -412,6 +430,16 @@ mod tests {
         let b = s.by_name("cp_lb_g1_b0").unwrap().id;
         assert!(s.events(b).unwrap().iter().any(|e| e.param.contains("CPBMSet('players', 10)")));
         assert!(s.events(start).unwrap().iter().all(|e| e.name != "SkirmishLaunch"));
+        // MODO: 8 botões, o da Arena chama o minigame
+        let arena = s.by_name("cp_lb_g5_b4").unwrap().id;
+        assert!(s.events(arena).unwrap().iter().any(|e| e.param.contains("CPBMSetMode('arena', '')")), "{:?}", s.events(arena).unwrap());
+        // tudo cabe acima do botão de iniciar
+        let start_top = s.rect(start).unwrap().unwrap().y0;
+        for e in s.elements().unwrap().iter().filter(|e| e.name.starts_with("cp_lb_g") && !e.name.ends_with("label")) {
+            if let Ok(Some(r)) = s.rect(e.id) {
+                assert!(r.y1 <= start_top, "{} passa do botão: {} > {start_top}", e.name, r.y1);
+            }
+        }
         assert_eq!(add_lobby_panel(&lobby, &[], &PT).unwrap(), lobby);
         if let Ok(dest) = std::env::var("CP_TEST_LOBBY_OUT") {
             std::fs::write(dest, &out).unwrap();
