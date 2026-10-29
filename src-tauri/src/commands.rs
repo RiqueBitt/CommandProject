@@ -1778,7 +1778,7 @@ pub async fn build_ai(state: State<'_, AppState>, opts: cp_core::aimod::AiOption
                 (opts.air, "aviação estratégica"),
                 (opts.micro, "microgestão e pinça"),
                 (opts.counter, "reconhecimento e contra-ataque"),
-                (opts.build, "bairros em volta da base, base com ruas e defesa reativa"),
+                (opts.build, "bairros com função em volta da base (bastiões, oficinas, forja, porto), base com ruas, escudos e defesa reativa"),
                 (opts.team, "IAs aliadas em equipe"),
                 (opts.adaptive, "dificuldade adaptativa"),
                 (opts.learn, "aprende o seu jeito de jogar"),

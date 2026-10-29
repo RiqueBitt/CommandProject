@@ -54,13 +54,16 @@ local PERSONALITY_ORDER = { 'balanced', 'aggressive', 'defensive', 'raider', 'na
 local UNITS = {
     { aaLand = 'uul0105', fighter = 'uua0101', bomber = 'uua0102', arty = 'uul0102', tank = 'uul0101', ship = 'uus0102',
       factory = 'uub0001', tower = 'uub0101', aatower = 'uub0102', shield = 'uub0202',
-      airfactory = 'uub0002', energy = 'uub0702', research = 'uub0801', artillery = 'uub0105', radar = 'uub0301', engineer = 'uul0002' },
+      airfactory = 'uub0002', energy = 'uub0702', research = 'uub0801', artillery = 'uub0105', radar = 'uub0301', engineer = 'uul0002',
+      navalfactory = 'uub0003', expfactory = 'uub0011', transport = 'uua0901' },
     { aaLand = false, fighter = 'uca0104', bomber = 'uca0104', arty = 'ucl0102', tank = 'ucl0103', ship = 'ucs0103',
       factory = 'ucb0001', tower = 'ucb0101', aatower = 'ucb0102', shield = 'ucb0202',
-      airfactory = 'ucb0002', energy = 'ucb0702', research = 'ucb0801', artillery = 'ucb0105', radar = 'ucb0303', engineer = 'ucl0002' },
+      airfactory = 'ucb0002', energy = 'ucb0702', research = 'ucb0801', artillery = 'ucb0105', radar = 'ucb0303', engineer = 'ucl0002',
+      navalfactory = 'ucb0003', expfactory = 'ucb0011', transport = false },
     { aaLand = 'uil0105', fighter = 'uia0104', bomber = 'uia0104', arty = 'uil0104', tank = 'uil0101', ship = false,
       factory = 'uib0001', tower = 'uib0101', aatower = 'uib0102', shield = 'uib0202',
-      airfactory = 'uib0002', energy = 'uib0702', research = 'uib0801', artillery = false, radar = 'uib0301', engineer = 'uil0002' },
+      airfactory = 'uib0002', energy = 'uib0702', research = 'uib0801', artillery = false, radar = 'uib0301', engineer = 'uil0002',
+      navalfactory = false, expfactory = 'uib0011', transport = false },
 }
 
 -- shared by every AI commander in the match (allies coordinate through it)
@@ -98,6 +101,8 @@ local function Categories()
         artillery = Cat('ARTILLERY'),
         engineerAny = Cat('ENGINEER'),
         nuke = Cat('NUKE STRUCTURE'),
+        shield = Cat('SHIELD STRUCTURE'),
+        radar = Cat('RADAR STRUCTURE'),
     }
     return CAT
 end
@@ -363,8 +368,12 @@ local function Snapshot()
                         kind = 'factory'
                     elseif Is(c.artillery, u) or Is(c.indirect, u) then
                         kind = 'artillery'
+                    elseif Is(c.shield, u) then
+                        kind = 'shield'
+                    elseif Is(c.radar, u) then
+                        kind = 'radar'
                     end
-                    table.insert(A.structs, { u = u, pos = pos, kind = kind, defense = p + ap, nuke = Is(c.nuke, u) })
+                    table.insert(A.structs, { u = u, pos = pos, kind = kind, defense = p + ap, aa = ap, nuke = Is(c.nuke, u) })
                 end
             end
             S.armies[idx] = A
@@ -556,7 +565,7 @@ local function NewModel()
     return {
         style = style, raw = raw, prior = false,
         shares = { land = 0, air = 0, naval = 0, arty = 0, exp = 0, defense = 0 },
-        route = {}, hit = {}, expand = {},
+        route = {}, hit = {}, expand = {}, held = {}, lost = {},
         firstAttack = false, expectedAttack = false, attacks = 0, raids = 0, lastAttackAt = -999,
         extractors = 0, experimentals = 0, expPos = false, expPower = 0,
         dominant = 'balanced', games = 0, humans = 0, nukes = false,
@@ -581,7 +590,8 @@ function CPAIReceiveMemory(data)
     for _, k in ipairs(STYLE_KEYS) do M.style[k] = math.max(M.style[k] or 0, prior[k]) end
     M.games = type(data.games) == 'number' and data.games or 0
     if type(data.firstAttack) == 'number' and data.firstAttack > 0 then M.expectedAttack = data.firstAttack end
-    for _, name in { 'route', 'hit', 'expand' } do
+    for _, name in { 'route', 'hit', 'expand', 'held', 'lost' } do
+        M[name] = M[name] or {}
         local src = data[name]
         if type(src) == 'table' then
             local count = 0
@@ -782,6 +792,7 @@ function CPAIModelMemory()
         style = style,
         firstAttack = M.firstAttack and math.floor(M.firstAttack) or false,
         route = Top(M.route, 12), hit = Top(M.hit, 12), expand = Top(M.expand, 12),
+        held = Top(M.held or {}, 12), lost = Top(M.lost or {}, 12),
     }
 end
 
@@ -849,6 +860,9 @@ function Commander.New(brain, home)
         paths = {}, pathStats = {}, pathBroken = {},
         enemies = {}, facesHuman = false,
         failures = 0,
+        journal = {}, -- what the AI did, for the panel (newest first)
+        tally = { attacks = 0, won = 0, retreats = 0, defended = 0, districts = 0, lost = 0, fronts = 0, siege = 0, helped = 0 },
+        lossBy = { air = 0, towers = 0, land = 0 }, -- what has been killing our units (fading)
     }
     if key == 'naval' and faction == 3 then
         -- Illuminate has no navy
@@ -938,6 +952,17 @@ function Commander.Staging(self)
             end
             raw = spot
         end
+    end
+    if not raw then
+        -- a finished bastion facing the enemy: the army gathers in front of its towers
+        local bastion, bd = false, 0
+        for _, dd in (self.districts or {}) do
+            if dd.role == 'bastion' and dd.step > 3 and not dd.island then
+                local de = Dist(dd.pos, enemy)
+                if not bastion or de < bd then bastion, bd = dd, de end
+            end
+        end
+        if bastion then raw = Toward(bastion.pos, enemy, 25) end
     end
     if not raw then
         self.routeKey = false
@@ -1161,10 +1186,24 @@ function Commander.Collect(self)
     for _, sq in self.squads do
         for _, u in ipairs(sq.units) do track[u] = u:GetPosition() end
     end
+    for k, v in self.lossBy do self.lossBy[k] = v * 0.97 end
+    local S = Snapshot()
     for u, pos in self.track do
         if not track[u] and not Alive(u) then
             local key = CellKey(pos)
             self.kills[key] = math.min(20, (self.kills[key] or 0) + 1)
+            -- what killed it: enemy aircraft, towers or ground units around the place
+            local air = 0
+            for _, idx in ipairs(self.enemies) do
+                for _, a in ipairs(S.armies[idx] and S.armies[idx].air or {}) do
+                    if Dist(a.pos, pos) < 45 then air = air + 1 end
+                end
+            end
+            local towers = SumAround(S, self.enemies, 'towers', pos, 40)
+            local ground = SumAround(S, self.enemies, 'ground', pos, 40)
+            if air >= 2 and air * 2 >= ground then self.lossBy.air = self.lossBy.air + 1
+            elseif towers > ground then self.lossBy.towers = self.lossBy.towers + 1
+            else self.lossBy.land = self.lossBy.land + 1 end
         end
     end
     self.track = track
@@ -1268,10 +1307,18 @@ end
 -- the nearest place with our towers (or home) to fall back to
 function Commander.SafeSpot(self, from)
     local best, bestD = self.home, Dist(from, self.home)
+    local homeD = Dist(from, self.home)
     for _, cl in (self.lastClusters or {}) do
         if cl.defense >= 6 then
             local d = Dist(from, cl.pos)
             if d < bestD then best, bestD = cl.pos, d end
+        end
+    end
+    -- a bastion between us and home: fall back behind its towers
+    for _, dd in (self.districts or {}) do
+        if (dd.role == 'bastion' or dd.role == 'workshop') and dd.step > 3 and Dist(dd.pos, self.home) < homeD then
+            local d = Dist(from, dd.pos)
+            if d < bestD then best, bestD = Toward(dd.pos, self.home, 15), d end
         end
     end
     return best
@@ -1282,6 +1329,24 @@ function Commander.AllyThreat(self)
     for _, ally in Commander.Allies(self) do
         if ally.threatPos and (ally.threatPower or 0) > 0 and Dist(ally.threatPos, self.home) < 400 then
             return ally.threatPos, ally.threatPower
+        end
+    end
+    -- a human on our side under attack at home or at an expansion
+    local S = Snapshot()
+    for idx, A in S.armies do
+        if A.human and Allied(self.army, idx) then
+            for _, st in ipairs(A.structs) do
+                if st.kind == 'factory' or st.kind == 'extractor' then
+                    local p = Commander.MobileDanger(self, st.pos, 50)
+                    if p >= 4 and Dist(st.pos, self.home) < 450 then
+                        if Commander.Cooldown(self, 'helpnote', 60) then
+                            self.tally.helped = self.tally.helped + 1
+                            Commander.Note(self, 'indo ajudar o aliado humano atacado')
+                        end
+                        return st.pos, p
+                    end
+                end
+            end
         end
     end
     return false, 0
@@ -1307,7 +1372,9 @@ function Commander.PickTarget(self, squad, power, opts)
     for _, cell in Commander.Targets(self) do
         if not (opts.avoid and Dist(cell.pos, opts.avoid) < 120) then
             local risk = Commander.Danger(self, cell.pos, 45) + (self.kills[CellKey(cell.pos)] or 0) * 1.5
-            if power >= risk * ratio and power > 0 then
+            -- with the human ally's army already there, our share of the fight is smaller
+            local helpers = (self.joinPos and Dist(self.joinPos, cell.pos) < 90) and (self.joinPower or 0) or 0
+            if power + helpers >= risk * ratio and power > 0 then
                 local d = Dist(origin, cell.pos)
                 local score = cell.value * 10 / (1 + risk) / (1 + d / 400)
                 score = score * Commander.AllyTargetBonus(self, cell.pos)
@@ -1315,6 +1382,16 @@ function Commander.PickTarget(self, squad, power, opts)
                     -- the places the human keeps expanding to are worth denying
                     score = score * (1 + math.min(1, (M.expand[CellKey(cell.pos)] or 0) / 10))
                 end
+                -- siege: extractors far from the owner's base cut the economy before the assault
+                if cell.extractors > 0 and squad.name ~= 'drop' then
+                    local far = true
+                    for _, e in Commander.EnemyHomes(self) do
+                        if Dist(e, cell.pos) < 150 then far = false break end
+                    end
+                    if far then score = score * 1.6 end
+                end
+                -- an ally human attacking there: go together
+                if self.joinPos and Dist(self.joinPos, cell.pos) < 90 then score = score * 2.5 end
                 if squad.name == 'raid' then
                     -- raiders only go where little can shoot back
                     if risk > (opts.raidRisk or 1) or cell.extractors == 0 then score = 0 end
@@ -1410,12 +1487,65 @@ function Commander.Escort(self, squad, target)
         if Is(c.experimental, u) then table.insert(exps, u) else table.insert(others, u) end
     end
     if table.getn(exps) == 0 then return false end
+    -- an experimental never goes without anti-air when the enemy has an air force
+    local aa = 0
+    for _, u in ipairs(others) do if Is(c.antiair, u) then aa = aa + 1 end end
+    if aa < 3 and (self.intel.air or 0) > 3 and Commander.Cooldown(self, 'escortaa', 50) then
+        if Commander.Queue(self, self.units.aaLand, 3) or Commander.Queue(self, self.units.fighter, 3) then
+            Commander.Note(self, 'antiaereo para escoltar o experimental')
+        end
+    end
     Commander.Command(self, squad, exps, 'attack', target)
     if table.getn(others) > 0 then
         for _, u in ipairs(others) do u.CPNoMicro = true end
         pcall(IssueClearCommands, others)
         pcall(IssueGuard, others, exps[1])
     end
+    return true
+end
+
+-- a formation: tanks and bots in front, artillery shooting from behind, anti-air in the middle
+-- covering the front line
+function Commander.Formation(self, squad, members, target, center)
+    local c = Categories()
+    local front, arty, aa = {}, {}, {}
+    for _, u in ipairs(members) do
+        if Is(c.indirect, u) and not Is(c.experimental, u) then table.insert(arty, u)
+        elseif Is(c.antiair, u) and not Is(c.experimental, u) and Power(u) < 1 then table.insert(aa, u)
+        else table.insert(front, u) end
+    end
+    if table.getn(front) < 3 or (table.getn(arty) == 0 and table.getn(aa) == 0) then return false end
+    if squad then Commander.Command(self, squad, front, 'attack', target) else Order(front, 'attack', target) end
+    if table.getn(arty) > 0 then
+        -- artillery stops at its range from the target, behind the front line
+        local from = center or self.home
+        Order(arty, 'attack', Toward(target, from, 32))
+    end
+    if table.getn(aa) > 0 then
+        for _, u in ipairs(aa) do u.CPNoMicro = true end
+        pcall(IssueClearCommands, aa)
+        pcall(IssueGuard, aa, front[1])
+    end
+    return true
+end
+
+-- a very large army splits and hits two places far apart at the same time
+function Commander.TwoFronts(self, squad, power, target, center)
+    local members = squad.members
+    local n = table.getn(members)
+    if n < Commander.MinUnits(self) * 3 then return false end
+    local second = Commander.PickTarget(self, squad, power * 0.5, { avoid = target })
+    if not second or Dist(second, target) < 200 then return false end
+    local a, b = {}, {}
+    for i, u in ipairs(members) do
+        if math.mod(i, 2) == 0 then table.insert(b, u) else table.insert(a, u) end
+    end
+    for _, u in ipairs(b) do u.CPNoMicro = true end
+    if not Commander.Formation(self, squad, a, target, center) then Commander.Command(self, squad, a, 'attack', target) end
+    if not Commander.Formation(self, false, b, second, center) then Order(b, 'attack', second) end
+    squad.second = second
+    self.tally.fronts = self.tally.fronts + 1
+    Commander.Note(self, 'ataque em duas frentes')
     return true
 end
 
@@ -1467,6 +1597,10 @@ function Commander.Lead(self, squad, threatPos, threatPower)
                 squad.target = threatPos
                 Commander.Command(self, squad, members, 'attack', threatPos)
                 Log(self.brain, squad.name .. ' defends')
+                if squad.name == 'main' then
+                    self.tally.defended = self.tally.defended + 1
+                    Commander.Note(self, 'defendendo um ataque')
+                end
             end
             return
         end
@@ -1498,10 +1632,19 @@ function Commander.Lead(self, squad, threatPos, threatPower)
             squad.target = false
             Commander.Command(self, squad, members, 'move', Commander.SafeSpot(self, center))
             Log(self.brain, squad.name .. ' retreats')
+            if squad.name == 'main' then
+                self.tally.retreats = self.tally.retreats + 1
+                Commander.Note(self, 'recuou para as torres')
+            end
             return
         end
         local won = squad.target and Dist(center, squad.target) < 30 and Commander.Danger(self, squad.target, 45) <= 0.5
         if won or t - (squad.attackSince or t) > 150 then
+            if won and squad.name == 'main' then
+                self.tally.won = self.tally.won + 1
+                Commander.Note(self, 'venceu a luta e destruiu o alvo')
+            end
+            squad.second = false
             ClearTactics(members)
             squad.target = false
             squad.state = 'hold'
@@ -1522,6 +1665,8 @@ function Commander.Lead(self, squad, threatPos, threatPower)
         minUnits = math.max(3, math.floor(minUnits * 0.6))
         self.plan = 'contra-ataque'
     end
+    -- an ally human already fighting: no need to wait for the full army
+    if self.joinPos and squad.name == 'main' then minUnits = math.max(3, math.floor(minUnits * 0.6)) end
     if count >= minUnits then
         local opts = { water = water }
         if squad.name == 'raid' and self.squads.main.state == 'attack' and self.squads.main.target then
@@ -1551,7 +1696,19 @@ function Commander.Lead(self, squad, threatPos, threatPower)
             squad.attackSince = t
             squad.target = target
             if squad.name == 'main' then
-                if not Commander.Escort(self, squad, target) and not Commander.Pincer(self, squad, center, target) then
+                self.tally.attacks = self.tally.attacks + 1
+                local siege = false
+                for _, cell in Commander.Targets(self) do
+                    if Dist(cell.pos, target) < 30 and cell.extractors > 0 and cell.value <= cell.extractors * 3 + 2 then siege = true break end
+                end
+                if siege then
+                    self.tally.siege = self.tally.siege + 1
+                    Commander.Note(self, 'cercando: atacou extratores longe da base inimiga')
+                else
+                    Commander.Note(self, 'atacou com ' .. count .. ' unidades')
+                end
+                if not Commander.Escort(self, squad, target) and not Commander.TwoFronts(self, squad, power, target, center)
+                    and not Commander.Pincer(self, squad, center, target) and not Commander.Formation(self, squad, members, target, center) then
                     Commander.Command(self, squad, members, 'attack', target)
                 end
             else
@@ -1569,6 +1726,12 @@ function Commander.Lead(self, squad, threatPos, threatPower)
         rally = squad.rally or center
     else
         rally = Commander.Staging(self)
+        -- an enemy army is coming: wait in front of the place it is walking to
+        local pr = self.predicted
+        if squad.name == 'main' and pr and t - pr.at < 45 and not water then
+            rally = Toward(pr.pos, pr.from, 22)
+            self.plan = 'esperando o seu ataque'
+        end
         if water and not Commander.CanReach(self, members, rally, 'sea') then rally = squad.rally or center end
     end
     if squad.state ~= 'hold' or not squad.ordered or not squad.rally or Dist(squad.rally, rally) > 40 then
@@ -1794,7 +1957,14 @@ function Commander.Scout(self)
     if not scout or not Commander.Cooldown(self, 'scout', 75) then return end
     local cells = Commander.Targets(self)
     local goal = false
-    if table.getn(cells) > 0 then
+    -- every other trip: the next expansion area of the map (where the enemy may be growing unseen)
+    local exps = Markers().expansion
+    self.scoutTrips = (self.scoutTrips or 0) + 1
+    if table.getn(exps) > 0 and math.mod(self.scoutTrips, 2) == 0 then
+        self.scoutIdx = math.mod(self.scoutIdx or 0, table.getn(exps)) + 1
+        local m = exps[self.scoutIdx]
+        goal = Point(m[1], m[3])
+    elseif table.getn(cells) > 0 then
         goal = cells[Rand(1, table.getn(cells))].pos
     else
         goal = Commander.NearestEnemyStart(self)
@@ -1852,6 +2022,16 @@ function Commander.Counter(self)
     local made = false
     local M = Commander.M(self)
     local st = M and M.style or {}
+    -- what has been killing our units decides first (more than 6 losses of one kind)
+    local lb = self.lossBy
+    if lb.air >= 6 and lb.air >= lb.towers and lb.air >= lb.land then
+        made = Commander.Queue(self, self.units.fighter, 4) or Commander.Queue(self, self.units.aaLand, 4)
+        if made then self.plan = 'perdendo para a aviacao: antiaereo' Commander.Note(self, 'perdia unidades para a aviacao: fez antiaereo') end
+    elseif lb.towers >= 6 and lb.towers >= lb.land then
+        made = Commander.Queue(self, self.units.arty, 3)
+        if made then self.plan = 'perdendo para as torres: artilharia' Commander.Note(self, 'perdia unidades para as torres: fez artilharia') end
+    end
+    if made then return end
     -- an air player: anti-air before the bombers arrive
     local airLimit = 6
     if (st.air or 0) > 0.4 then airLimit = 2 end
@@ -2009,20 +2189,22 @@ end
 
 -- ---------------------------------------------------------------- districts
 -- The game packs the main base into one square. The commander plans districts around it, on good
--- ground: flat and dry, inside its own territory (closer to its home than to anyone else's),
--- spaced out, on land it is not using yet. Each district has a job: bastions face the enemy on
--- the narrow passages and the high ground (towers, anti-air, shield, artillery, a factory),
--- workshops on the flanks make units near the front lines and the expansions (factories,
--- energy), the rear keeps energy and research away from the fighting. Every building gets its
--- own plot (streets between them), towers in front and the rest behind. A few engineers of its
--- own do the work, so the game's builders keep growing the economy.
+-- ground: flat and dry, inside its own territory (closer to its home than to anyone else's, and
+-- away from the districts of allied AIs), spaced out, on land it is not using yet, preferring the
+-- places that held in earlier matches on this map and avoiding the ones that fell. Each district
+-- has a job: bastions face the enemy on the narrow passages and the high ground (with a line of
+-- towers across the passage when it is narrow), workshops on the flanks make units near the front
+-- lines, the rear keeps energy, research and radar away from the fighting, a forge builds
+-- experimentals behind shields, harbors put shipyards on the coast. Every building gets its own
+-- plot (streets between them), towers in front and the rest behind. A few engineers of its own do
+-- the work (one can fly to an island to start a district there); fallen districts are rebuilt.
 
 -- what each district builds, in order: { unit, ahead, sideways } (offsets in map units, turned
--- so "ahead" points at the enemy)
+-- so "ahead" points at the enemy; for harbors, at the water)
 local DISTRICT_PLANS = {
     bastion = {
         { 'tower', 18, -12 }, { 'tower', 18, 12 }, { 'shield', 0, 0 }, { 'aatower', 6, 22 },
-        { 'factory', -24, 0 }, { 'tower', 24, 0 }, { 'artillery', -6, -22 }, { 'energy', -24, 24 }, { 'aatower', 6, -24 },
+        { 'factory', -24, 0 }, { 'tower', 24, 0 }, { 'radar', -14, 26 }, { 'artillery', -6, -22 }, { 'energy', -24, 24 }, { 'aatower', 6, -24 },
     },
     workshop = {
         { 'factory', 0, 0 }, { 'tower', 22, 0 }, { 'energy', -18, 18 }, { 'airfactory', 0, -26 },
@@ -2032,14 +2214,28 @@ local DISTRICT_PLANS = {
         { 'energy', 0, 0 }, { 'research', -20, 0 }, { 'aatower', 14, 10 }, { 'shield', 0, 16 },
         { 'energy', 0, -18 }, { 'radar', -18, 20 }, { 'tower', 18, -14 },
     },
+    forge = {
+        { 'shield', 0, 0 }, { 'aatower', 12, 14 }, { 'expfactory', -6, -20 }, { 'shield', -16, -6 },
+        { 'aatower', 12, -16 }, { 'tower', 24, 0 }, { 'shield', 6, 12 },
+    },
+    harbor = {
+        { 'navalfactory', 24, 0 }, { 'tower', 0, -16 }, { 'aatower', 0, 16 }, { 'shield', -10, 0 },
+        { 'navalfactory', 26, 26 }, { 'tower', 12, 28 },
+    },
 }
-local ROLE_LABEL = { bastion = 'bastiao', workshop = 'oficina', rear = 'retaguarda' }
+-- a narrow passage in front of a bastion gets a line of towers across it
+local CHOKE_LINE = { { 'tower', 34, -18 }, { 'tower', 36, 0 }, { 'tower', 34, 18 } }
+local ROLE_LABEL = { bastion = 'bastiao', workshop = 'oficina', rear = 'retaguarda', forge = 'forja', harbor = 'porto' }
 local COMPASS = { 'leste', 'sudeste', 'sul', 'sudoeste', 'oeste', 'noroeste', 'norte', 'nordeste' }
 
 local function MapSize()
     local ok, w, h = pcall(function() return ScenarioInfo.size[1], ScenarioInfo.size[2] end)
     if ok and w and h then return w, h end
     return 1024, 1024
+end
+
+local function Clock(t)
+    return math.floor(t / 60) .. ':' .. string.format('%02d', math.floor(math.mod(t, 60)))
 end
 
 -- how uneven the ground is around a point (0 = flat); water counts as unusable
@@ -2058,17 +2254,68 @@ local function Roughness(x, z, r)
     return worst
 end
 
+-- the direction of open water next to a dry point (for harbors), or false
+local function WaterSide(x, z)
+    for _, r in { 28, 40 } do
+        for i = 0, 7 do
+            local a = i * 0.785
+            local dx, dz = math.cos(a), math.sin(a)
+            if IsWater(x + dx * r, z + dz * r) and IsWater(x + dx * (r + 14), z + dz * (r + 14)) then return dx, dz end
+        end
+    end
+    return false
+end
+
+-- what the AI did, for the panel (newest first, with the game clock)
+function Commander.Note(self, text)
+    local j = self.journal
+    if j[1] and j[1].text == text then return end
+    table.insert(j, 1, { t = Clock(Now()), text = text })
+    while table.getn(j) > 10 do table.remove(j) end
+end
+
 -- start positions of every other army (allies too: their land is theirs)
-function Commander.OtherHomes(self)
+function Commander.OtherHomes(self, enemiesOnly)
     local out = {}
     for _, b in ArmyBrains do
         local ok, idx = pcall(b.GetArmyIndex, b)
-        if ok and idx ~= self.army and not Civilian(idx) and not Defeated(b) then
+        if ok and idx ~= self.army and not Civilian(idx) and not Defeated(b) and (not enemiesOnly or Enemy(self.army, idx)) then
             local ok2, x, z = pcall(b.GetArmyStartPos, b)
             if ok2 and x then table.insert(out, Point(x, z)) end
         end
     end
     return out
+end
+
+function Commander.EnemyHomes(self)
+    if not self.memo.enemyHomes then self.memo.enemyHomes = Commander.OtherHomes(self, true) end
+    return self.memo.enemyHomes
+end
+
+-- the buildings of a district: its plan plus the tower line when it guards a narrow passage
+local function PlanOf(d)
+    if d.items then return d.items end
+    local list = {}
+    for _, it in ipairs(DISTRICT_PLANS[d.role] or {}) do table.insert(list, it) end
+    if d.choke then
+        for i, it in ipairs(CHOKE_LINE) do table.insert(list, 2 + i, it) end
+    end
+    d.items = list
+    return list
+end
+
+-- the memory of this map: districts that held (+) and fell (-) in earlier matches
+local function MapMemory(key)
+    local M = CPAI.model
+    if not M then return 0 end
+    return math.min(3, (M.held and M.held[key] or 0) * 0.15) - math.min(4, (M.lost and M.lost[key] or 0) * 0.4)
+end
+
+local function RememberPlace(kind, pos, amount)
+    local M = Model()
+    M[kind] = M[kind] or {}
+    local key = CellKey(pos)
+    M[kind][key] = math.min(20, (M[kind][key] or 0) + amount)
 end
 
 -- picks the district sites (keeps the ones already planned, adds new ones)
@@ -2087,9 +2334,27 @@ function Commander.PlanDistricts(self)
     local mine = S.armies[self.army] and S.armies[self.army].structs or {}
     local districts = self.districts or {}
     local hard = self.difficulty >= 3 or CFG.level >= 2
-    local want = hard and 8 or 5
+    local want = hard and 10 or 7
     if table.getn(districts) >= want then return districts end
-    local cands = {}
+    -- districts of allied AIs: their land
+    local claimed = {}
+    for _, ally in Commander.Allies(self) do
+        for _, d in (ally.districts or {}) do table.insert(claimed, d.pos) end
+    end
+    local function free(p, gap)
+        for _, d in districts do if Dist(d.pos, p) < gap then return false end end
+        for _, q in claimed do if Dist(q, p) < gap then return false end end
+        return true
+    end
+    local function own(p, r)
+        if r < 80 * scale then return false end
+        for _, o in others do
+            if Dist(p, o) < Dist(p, home) * 1.25 then return false end
+        end
+        return true
+    end
+    local cands, harbors = {}, {}
+    local naval = self.units.navalfactory
     for _, ring in { 105, 150, 200 } do
         local r = ring * scale
         for step = 0, 17 do
@@ -2097,14 +2362,11 @@ function Commander.PlanDistricts(self)
             local x, z = home[1] + math.cos(a) * r, home[3] + math.sin(a) * r
             if x > 32 and z > 32 and x < W - 32 and z < H - 32 then
                 local p = Point(x, z)
-                -- its own territory: clearly closer to this home than to anyone else's
-                local own = true
-                for _, o in others do
-                    if Dist(p, o) < Dist(p, home) * 1.25 then own = false break end
-                end
-                local rough = own and Roughness(x, z, 22 * scale) or 999
+                local mineHere = own(p, r)
+                local rough = mineHere and Roughness(x, z, 22 * scale) or 999
+                local dx, dz = (x - home[1]) / r, (z - home[3]) / r
+                local key = CellKey(p)
                 if rough < 7 then
-                    local dx, dz = (x - home[1]) / r, (z - home[3]) / r
                     local facing = dx * fx + dz * fz
                     local role = 'workshop'
                     if facing > 0.45 then role = 'bastion' elseif facing < -0.35 then role = 'rear' end
@@ -2113,10 +2375,12 @@ function Commander.PlanDistricts(self)
                     for _, st in ipairs(mine) do
                         if Dist(st.pos, p) < 40 then used = used + 1 end
                     end
-                    local score = 2 - rough * 0.12 - used * 0.35 - (ring - 105) / 300
+                    local score = 2 - rough * 0.12 - used * 0.35 - (ring - 105) / 300 + MapMemory(key)
+                    local corridor = 120
                     if role == 'bastion' then
                         -- a narrow way toward the enemy and high ground make a good wall
-                        score = score + (120 - Corridor(p, fx, fz)) / 120 * 0.9 + math.max(-0.5, math.min(1, HighGround(p) / 8)) * 0.6
+                        corridor = Corridor(p, fx, fz)
+                        score = score + (120 - corridor) / 120 * 0.9 + math.max(-0.5, math.min(1, HighGround(p) / 8)) * 0.6
                     end
                     for _, m in Markers().expansion do
                         if Dist(m, p) < 70 then score = score + 0.5 end
@@ -2124,32 +2388,60 @@ function Commander.PlanDistricts(self)
                     for _, m in Markers().defensive do
                         if Dist(m, p) < 50 and role == 'bastion' then score = score + 0.4 end
                     end
-                    table.insert(cands, { pos = p, role = role, score = score, angle = (math.atan2 or math.atan)(dz, dx) })
+                    table.insert(cands, { pos = p, role = role, score = score, angle = (math.atan2 or math.atan)(dz, dx), choke = corridor < 70 })
+                elseif naval and mineHere and not IsWater(x, z) then
+                    -- the coast: a harbor needs dry ground next to open water
+                    local wx, wz = WaterSide(x, z)
+                    if wx then
+                        table.insert(harbors, { pos = p, role = 'harbor', score = 1 + MapMemory(key) - (ring - 105) / 300, angle = (math.atan2 or math.atan)(dz, dx), wx = wx, wz = wz })
+                    end
                 end
             end
         end
     end
     table.sort(cands, function(a, b) return a.score > b.score end)
-    local roles = { bastion = 0, workshop = 0, rear = 0 }
-    for _, d in districts do roles[d.role] = roles[d.role] + 1 end
-    local limit = { bastion = hard and 4 or 3, workshop = hard and 3 or 2, rear = 1 }
-    for _, c in cands do
-        if table.getn(districts) >= want then break end
-        local free = roles[c.role] < limit[c.role]
-        for _, d in districts do
-            if Dist(d.pos, c.pos) < 85 * scale then free = false break end
-        end
-        if free then
-            local k = math.mod(math.floor((c.angle + 3.1416 + 0.3927) / 0.7854), 8) + 1
-            roles[c.role] = roles[c.role] + 1
-            table.insert(districts, { pos = c.pos, role = c.role, step = 1, tries = 0, fx = fx, fz = fz,
-                name = ROLE_LABEL[c.role] .. ' ' .. COMPASS[k] })
+    table.sort(harbors, function(a, b) return a.score > b.score end)
+    local roles = { bastion = 0, workshop = 0, rear = 0, forge = 0, harbor = 0 }
+    for _, d in districts do roles[d.role] = (roles[d.role] or 0) + 1 end
+    local limit = { bastion = hard and 4 or 3, workshop = hard and 3 or 2, rear = 1, forge = 1, harbor = hard and 2 or 1 }
+    local function add(c, role)
+        local k = math.mod(math.floor((c.angle + 3.1416 + 0.3927) / 0.7854), 8) + 1
+        roles[role] = roles[role] + 1
+        local d = { pos = c.pos, role = role, step = 1, tries = 0, fx = c.wx or fx, fz = c.wz or fz, choke = c.choke,
+            name = ROLE_LABEL[role] .. ' ' .. COMPASS[k] }
+        table.insert(districts, d)
+    end
+    local gap = 85 * scale
+    -- the second place behind the base becomes the forge (experimentals far from the front)
+    local function roleOf(c)
+        if c.role == 'rear' and roles.rear >= limit.rear then return 'forge' end
+        return c.role
+    end
+    -- first one of each job (the best place for it), then the rest by score
+    for _, c in harbors do
+        if roles.harbor >= 1 then break end
+        if free(c.pos, gap) then add(c, 'harbor') end
+    end
+    for _, job in { 'bastion', 'workshop', 'rear', 'forge' } do
+        for _, c in cands do
+            if table.getn(districts) >= want or (roles[job] or 0) >= 1 then break end
+            if roleOf(c) == job and free(c.pos, gap) then add(c, job) end
         end
     end
-    -- bastions first (they protect the rest), then workshops, then the rear
-    local order = { bastion = 1, workshop = 2, rear = 3 }
+    for _, c in harbors do
+        if roles.harbor >= limit.harbor or table.getn(districts) >= want then break end
+        if free(c.pos, gap) then add(c, 'harbor') end
+    end
+    for _, c in cands do
+        if table.getn(districts) >= want then break end
+        local role = roleOf(c)
+        if roles[role] < limit[role] and free(c.pos, gap) then add(c, role) end
+    end
+    -- bastions first (they protect the rest), then workshops, harbors, the rear and the forge
+    local order = { bastion = 1, workshop = 2, harbor = 3, rear = 4, forge = 5 }
     table.sort(districts, function(a, b)
         if order[a.role] ~= order[b.role] then return order[a.role] < order[b.role] end
+        if a.island ~= b.island then return not a.island end
         return Dist(a.pos, home) < Dist(b.pos, home)
     end)
     self.districts = districts
@@ -2189,6 +2481,39 @@ function Commander.Builders(self, want)
     return list
 end
 
+-- how many of our buildings stand around a district
+local function Standing(self, pos, radius)
+    local S = Snapshot()
+    local n = 0
+    for _, st in ipairs(S.armies[self.army] and S.armies[self.army].structs or {}) do
+        if Dist(st.pos, pos) < radius then n = n + 1 end
+    end
+    return n
+end
+
+-- finished districts that were wiped out are rebuilt (and remembered as a bad place); the ones
+-- still standing are remembered as good places for this map
+function Commander.CheckDistricts(self)
+    if not Commander.Cooldown(self, 'districtcheck', 45) then return end
+    for _, d in (self.districts or {}) do
+        local n = table.getn(PlanOf(d))
+        if d.step > n then
+            local standing = Standing(self, d.pos, 45)
+            if standing < math.max(1, math.floor(n * 0.35)) then
+                if Commander.MobileDanger(self, d.pos, 70) < 3 and (d.rebuilds or 0) < 3 then
+                    d.rebuilds = (d.rebuilds or 0) + 1
+                    d.step, d.tries, d.done = 1, 0, false
+                    self.tally.lost = self.tally.lost + 1
+                    RememberPlace('lost', d.pos, 1)
+                    Commander.Note(self, 'bairro ' .. d.name .. ' caiu: reconstruindo')
+                end
+            else
+                RememberPlace('held', d.pos, 0.25)
+            end
+        end
+    end
+end
+
 function Commander.Districts(self, threatPos)
     if not CFG.build then return end
     local t = Now()
@@ -2196,43 +2521,267 @@ function Commander.Districts(self, threatPos)
     if not self.districts or Commander.Cooldown(self, 'plan', 150) then Commander.PlanDistricts(self) end
     local districts = self.districts or {}
     if table.getn(districts) == 0 then return end
+    Commander.CheckDistricts(self)
     local hard = self.difficulty >= 3 or CFG.level >= 2
     -- one more district open every 1.5 to 2 minutes
     local open = math.min(table.getn(districts), 1 + math.floor((t - 150) / (hard and 80 or 120)))
     local builders = Commander.Builders(self, hard and 4 or 2)
     if table.getn(builders) == 0 then return end
     if Stored(self.brain, 'MASS') < 120 then return end
-    -- each idle builder takes the next building of the least finished open district
+    -- each idle builder takes the next building of the least finished open district it can reach
     for _, eng in ipairs(builders) do
         local okb, building = pcall(eng.IsUnitState, eng, 'Building')
         local oki, idle = pcall(eng.IsIdleState, eng)
-        if not (okb and building) and oki and idle then
+        local ep = eng:GetPosition()
+        if not (okb and building) and oki and idle and not eng.CPFlying then
             local pick = false
-            for i = 1, open do
+            for i = 1, table.getn(districts) do
                 local d = districts[i]
-                local plan = DISTRICT_PLANS[d.role]
-                if d.step <= table.getn(plan) and d.tries < 6 and (not threatPos or Dist(threatPos, d.pos) > 90)
+                local plan = PlanOf(d)
+                -- districts open one by one (an island one as soon as its engineer lands)
+                local isOpen = i <= open or d.island
+                -- an engineer flown to an island only builds there (and only it builds there)
+                local here = (d.island and eng.CPIsland == d.name) or (not d.island and not eng.CPIsland)
+                local ready = d.role ~= 'forge' or t >= 600
+                if isOpen and here and ready and d.step <= table.getn(plan) and d.tries < 6 and (not threatPos or Dist(threatPos, d.pos) > 90)
                     and Commander.MobileDanger(self, d.pos, 60) < 3 then
                     if not pick or d.step < pick.step then pick = d end
                 end
             end
-            if not pick then break end
-            local item = DISTRICT_PLANS[pick.role][pick.step]
-            local id = self.units[item[1]]
-            if not id then
-                pick.step = pick.step + 1
-            else
-                -- the plot: "ahead" toward the enemy, "sideways" across
-                local x = pick.pos[1] + pick.fx * item[2] - pick.fz * item[3]
-                local z = pick.pos[3] + pick.fz * item[2] + pick.fx * item[3]
-                if Commander.Build(self, id, Point(x, z), false, eng) then
+            if pick then
+                local plan = PlanOf(pick)
+                local item = plan[pick.step]
+                local id = self.units[item[1]]
+                if not id then
                     pick.step = pick.step + 1
-                    pick.tries = 0
-                    self.plan = 'construindo o bairro ' .. pick.name
                 else
-                    -- no room there: try the next building next time (and give up on a bad site)
-                    pick.tries = pick.tries + 1
-                    if pick.tries >= 3 then pick.step = pick.step + 1 end
+                    -- the plot: "ahead" toward the enemy (or the water), "sideways" across
+                    local x = pick.pos[1] + pick.fx * item[2] - pick.fz * item[3]
+                    local z = pick.pos[3] + pick.fz * item[2] + pick.fx * item[3]
+                    if Commander.Build(self, id, Point(x, z), false, eng) then
+                        pick.step = pick.step + 1
+                        pick.tries = 0
+                        self.plan = 'construindo o bairro ' .. pick.name
+                        if pick.step == 2 then Commander.Note(self, 'comecou o bairro ' .. pick.name) end
+                    else
+                        -- no room there: try the next building next time (and give up on a bad site)
+                        pick.tries = pick.tries + 1
+                        if pick.tries >= 3 then pick.step = pick.step + 1 end
+                    end
+                end
+                if pick.step > table.getn(plan) and not pick.done then
+                    pick.done = true
+                    self.tally.districts = self.tally.districts + 1
+                    Commander.Note(self, 'bairro ' .. pick.name .. ' pronto')
+                end
+            end
+        end
+    end
+    Commander.IslandHop(self, builders)
+end
+
+-- an island near home that the engineers cannot walk to: one flies there and starts a district
+local function IslandThread(self, eng, tr, landing, d)
+    pcall(IssueClearCommands, { eng })
+    pcall(IssueTransportLoad, { eng }, tr)
+    local waited = 0
+    local function aboard() local ok, a = pcall(eng.IsUnitState, eng, 'Attached') return ok and a end
+    while waited < 40 and Alive(eng) and not aboard() do WaitSeconds(2) waited = waited + 2 end
+    if Alive(eng) and aboard() and Alive(tr) then
+        pcall(IssueTransportUnload, { tr }, landing)
+        waited = 0
+        while waited < 60 and Alive(eng) and aboard() do WaitSeconds(2) waited = waited + 2 end
+    end
+    eng.CPFlying = nil
+    if Alive(eng) and not aboard() and Dist(eng:GetPosition(), landing) < 60 then
+        eng.CPIsland = d.name
+        table.insert(self.districts, d)
+        Commander.Note(self, 'engenheiro levado de aviao para a ilha: bairro ' .. d.name)
+    end
+    tr.CPBusy = nil
+    if Alive(tr) then Order({ tr }, 'move', self.home) end
+end
+
+function Commander.IslandHop(self, builders)
+    if Now() < 420 or table.getn(builders) < 2 or not Commander.Cooldown(self, 'island', 120) then return end
+    for _, d in (self.districts or {}) do if d.island then return end end
+    local tr = false
+    for _, u in ipairs(Commander.List(self, Categories().transport)) do
+        if Ready(u) and not u.CPBusy then tr = u break end
+    end
+    if not tr then
+        if self.units.transport then Commander.Queue(self, self.units.transport, 1) end
+        return
+    end
+    local enemies = Commander.OtherHomes(self, true)
+    local best, bestD = false, 0
+    for _, m in Markers().expansion do
+        local d = Dist(m, self.home)
+        local mine = d < 450
+        for _, e in enemies do if Dist(m, e) < d * 1.2 then mine = false end end
+        if mine and (not best or d < bestD) and Commander.Danger(self, m, 50) < 2
+            and not Commander.CanReach(self, { builders[1] }, m, 'land') then
+            best, bestD = m, d
+        end
+    end
+    if not best then return end
+    local eng = builders[table.getn(builders)]
+    eng.CPFlying = true
+    tr.CPBusy = true
+    local d = { pos = Point(best[1], best[3]), role = 'workshop', step = 1, tries = 0, island = true,
+        fx = 1, fz = 0, name = 'ilha ' .. Clock(Now()) }
+    local enemy = Commander.NearestEnemyStart(self)
+    if enemy then
+        local dd = math.max(1, Dist(d.pos, enemy))
+        d.fx, d.fz = (enemy[1] - d.pos[1]) / dd, (enemy[3] - d.pos[3]) / dd
+    end
+    self.plan = 'levando engenheiro para a ilha'
+    ForkThread(IslandThread, self, eng, tr, Toward(d.pos, self.home, 10), d)
+end
+
+-- ---------------------------------------------------------------- the main base and the economy
+-- shields over the factory blocks (two layers over the big ones), anti-air between the districts,
+-- more factories when mass piles up and generators when energy runs short
+function Commander.BaseShields(self)
+    if not CFG.build or Now() < 240 or not self.units.shield or not Commander.Cooldown(self, 'shields', 60) then return end
+    if Stored(self.brain, 'MASS') < 250 then return end
+    local S = Snapshot()
+    local mine = S.armies[self.army] and S.armies[self.army].structs or {}
+    for _, cl in (self.lastClusters or {}) do
+        if cl.factories >= 2 and Dist(cl.pos, self.home) < 200 then
+            local shields = 0
+            for _, st in ipairs(mine) do
+                if st.kind == 'shield' and Dist(st.pos, cl.pos) < 35 then shields = shields + 1 end
+            end
+            local want = cl.factories >= 4 and 2 or 1
+            if shields < want and Commander.Build(self, self.units.shield, cl.pos) then
+                Commander.Note(self, shields == 0 and 'escudo sobre as fabricas' or 'segunda camada de escudo sobre as fabricas')
+                return
+            end
+        end
+    end
+end
+
+function Commander.AirNet(self)
+    if not CFG.build or not self.units.aatower or not Commander.Cooldown(self, 'airnet', 75) then return end
+    local intel = self.intel or {}
+    if (intel.air or 0) < 6 or Stored(self.brain, 'MASS') < 200 then return end
+    local S = Snapshot()
+    local spots = { self.home }
+    for _, d in (self.districts or {}) do
+        if d.step > 2 and not d.island then table.insert(spots, d.pos) end
+    end
+    -- the place between two of our spots with the least anti-air
+    local worst, worstAA = false, 4
+    for i, a in ipairs(spots) do
+        for j = i + 1, table.getn(spots) do
+            local b = spots[j]
+            if Dist(a, b) < 260 then
+                local mid = Point((a[1] + b[1]) / 2, (a[3] + b[3]) / 2)
+                local aa = SumAround(S, { self.army }, 'aa', mid, 45)
+                if not IsWater(mid[1], mid[3]) and aa < worstAA then worst, worstAA = mid, aa end
+            end
+        end
+    end
+    if worst and Commander.Build(self, self.units.aatower, worst) then
+        Commander.Note(self, 'rede antiaerea entre os bairros')
+    end
+end
+
+function Commander.Economy(self)
+    if not CFG.build or Now() < 300 or not Commander.Cooldown(self, 'economy', 45) then return end
+    local mass = Stored(self.brain, 'MASS')
+    local energy = Stored(self.brain, 'ENERGY')
+    local enemy = Commander.NearestEnemyStart(self)
+    local behind = enemy and Toward(self.home, enemy, -35) or self.home
+    if energy < 150 and self.units.energy and mass >= 100 then
+        if Commander.Build(self, self.units.energy, behind) then Commander.Note(self, 'faltou energia: mais geradores') end
+        return
+    end
+    if mass > 1200 then
+        -- mass piling up: one more factory, in a workshop if there is one
+        local spot = false
+        for _, d in (self.districts or {}) do
+            if d.role == 'workshop' and d.step > 2 and not d.island then spot = d.pos break end
+        end
+        local id = self.units.factory
+        if (self.intel.air or 0) > (self.intel.land or 0) and self.units.airfactory then id = self.units.airfactory end
+        if Commander.Build(self, id, spot or (enemy and Toward(self.home, enemy, 40)) or self.home) then
+            Commander.Note(self, 'massa sobrando: mais uma fabrica')
+        end
+    end
+end
+
+-- ---------------------------------------------------------------- reading the enemy
+-- an enemy army massing and walking toward our places: the army waits where it is going to hit
+function Commander.Foresee(self)
+    local S = Snapshot()
+    local t = Now()
+    local cells = {}
+    for _, idx in ipairs(self.enemies) do
+        for _, m in ipairs(S.armies[idx] and S.armies[idx].mobile or {}) do
+            if not m.air and not m.engineer and not m.naval then
+                local key = CellKey(m.pos)
+                local c = cells[key]
+                if not c then c = { pos = m.pos, power = 0 } cells[key] = c end
+                c.power = c.power + m.p
+            end
+        end
+    end
+    -- the strongest group (neighbouring cells count together)
+    local best, bestP = false, 0
+    for _, c in cells do
+        local p = 0
+        for _, o in cells do if Dist(o.pos, c.pos) < 75 then p = p + o.power end end
+        if p > bestP then best, bestP = c, p end
+    end
+    local mainP = PowerOf(self.squads.main.members)
+    if not best or bestP < math.max(6, mainP * 0.4) then
+        self.watch = false
+        return
+    end
+    -- our nearest place to that group
+    local spots = { self.home }
+    for _, cl in (self.lastClusters or {}) do table.insert(spots, cl.pos) end
+    for _, d in (self.districts or {}) do if d.step > 1 then table.insert(spots, d.pos) end end
+    local near, nearD = self.home, Dist(best.pos, self.home)
+    for _, p in spots do
+        local d = Dist(best.pos, p)
+        if d < nearD then near, nearD = p, d end
+    end
+    local w = self.watch
+    if w and t - w.t >= 6 and nearD < 300 and w.d - nearD >= 20 and Dist(w.target, near) < 80 then
+        if not self.predicted or Dist(self.predicted.pos, near) > 40 then
+            Commander.Note(self, 'viu um exercito vindo: esperando na frente dele')
+        end
+        self.predicted = { pos = near, from = best.pos, at = t, power = bestP }
+    end
+    if not w or t - w.t >= 6 then self.watch = { d = nearD, t = t, target = near } end
+end
+
+-- humans on our side attacking: we hit the same place
+function Commander.HumanPush(self)
+    self.joinPos = false
+    local S = Snapshot()
+    for idx, A in S.armies do
+        if A.human and Allied(self.army, idx) then
+            local cells = {}
+            for _, m in ipairs(A.mobile) do
+                if not m.air and not m.engineer then
+                    local key = CellKey(m.pos)
+                    local c = cells[key]
+                    if not c then c = { pos = m.pos, power = 0 } cells[key] = c end
+                    c.power = c.power + m.p
+                end
+            end
+            for _, cell in Commander.Targets(self) do
+                local p = 0
+                for _, c in cells do if Dist(c.pos, cell.pos) < 70 then p = p + c.power end end
+                if p >= 6 then
+                    if not self.joinPos then Commander.Note(self, 'atacando junto com o aliado humano') end
+                    self.joinPos = cell.pos
+                    self.joinPower = p
+                    return
                 end
             end
         end
@@ -2362,10 +2911,37 @@ function Commander.DistrictSummary(self)
     local done, total, current = 0, 0, false
     for _, d in (self.districts or {}) do
         total = total + 1
-        local n = table.getn(DISTRICT_PLANS[d.role])
+        local n = table.getn(PlanOf(d))
         if d.step > n then done = done + 1 elseif not current then current = d.name .. ' ' .. (d.step - 1) .. '/' .. n end
     end
     return { done = done, total = total, current = current or '' }
+end
+
+function Commander.JournalLines(self, n)
+    local out = {}
+    for i = 1, math.min(n, table.getn(self.journal)) do
+        local e = self.journal[i]
+        table.insert(out, e.t .. '  ' .. e.text)
+    end
+    return out
+end
+
+-- what the panel's small map shows (positions in 0..1 of the map)
+function Commander.MiniMap(self)
+    local W, H = MapSize()
+    local function at(p) return p and { math.floor(p[1] / W * 1000) / 1000, math.floor(p[3] / H * 1000) / 1000 } or false end
+    local list = {}
+    for _, d in (self.districts or {}) do
+        local q = at(d.pos)
+        table.insert(list, { q[1], q[2], d.role, d.step > table.getn(PlanOf(d)) })
+    end
+    local main = self.squads.main
+    return {
+        army = self.army, home = at(self.home), districts = list,
+        target = main.state == 'attack' and at(main.target) or false, second = main.state == 'attack' and at(main.second) or false,
+        predicted = self.predicted and Now() - self.predicted.at < 45 and at(self.predicted.pos) or false,
+        join = at(self.joinPos),
+    }
 end
 
 function Commander.Publish(self)
@@ -2394,6 +2970,9 @@ function Commander.Publish(self)
         intel = { air = math.floor(self.intel.air), land = math.floor(self.intel.land), naval = math.floor(self.intel.naval) },
         dangers = dangers,
         districts = Commander.DistrictSummary(self),
+        journal = Commander.JournalLines(self, 5),
+        tally = self.tally,
+        mini = Commander.MiniMap(self),
         time = Now(),
     }
     if Commander.M(self) then entry.learned = CPAIModelSummary() end
@@ -2453,6 +3032,8 @@ function Commander.Step(self)
     Commander.Recruit(self)
     Commander.Collect(self)
     Commander.AssignGuard(self)
+    Commander.Foresee(self)
+    Commander.HumanPush(self)
     local clusters = Commander.Clusters(self)
     self.lastClusters = clusters
     local ex = 0
@@ -2487,6 +3068,9 @@ function Commander.Step(self)
     Commander.Counter(self)
     Commander.Bases(self, clusters, threatKey)
     Commander.Districts(self, threatPos)
+    Commander.BaseShields(self)
+    Commander.AirNet(self)
+    Commander.Economy(self)
     Commander.Research(self)
     Commander.Repair(self, threatPos)
     Commander.Adapt(self)

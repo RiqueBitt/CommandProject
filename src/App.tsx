@@ -88,7 +88,7 @@ export default function App() {
           try {
             await api.buildAi(loadAi(), ai.enabled);
             await refresh();
-            toast("info", t("IA mais esperta atualizada para a versão {version}: bairros em volta da base e base com ruas.", { version: AI_VERSION }));
+            toast("info", t("IA mais esperta atualizada para a versão {version}.", { version: AI_VERSION }));
           } catch (e) {
             toast("error", t("Não deu para atualizar a IA mais esperta: {error}. Abra o Hub de mods e monte de novo.", { error: errorText(e) }));
           }

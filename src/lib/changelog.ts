@@ -6,6 +6,17 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.56.0",
+    title: "IA estrategista: formações, duas frentes, cerco, previsão de ataque e mapinha no painel",
+    items: [
+      { icon: "account_tree", title: "Bairros com função", text: "Além de bastiões, oficinas e retaguarda, a IA faz uma forja para experimentais atrás de escudos (depois dos 10 minutos) e portos com estaleiros na costa. Bastião numa passagem estreita ganha uma linha de três torres atravessando a passagem. Bairro destruído é reconstruído, e o mapa lembra entre partidas onde os bairros aguentaram e onde caíram.", page: "mods" },
+      { icon: "shield", title: "Base que se protege e economia que se ajusta", text: "Escudos sobre os blocos de fábricas (dois nos maiores), antiaéreo espalhado entre a base e os bairros quando o inimigo tem aviação, mais uma fábrica quando a massa sobra e geradores quando falta energia. Com ilhas por perto, um engenheiro vai de avião começar um bairro lá.", page: "mods" },
+      { icon: "groups", title: "Exército organizado", text: "Formação no ataque: tanques na frente, artilharia atirando de trás e antiaéreo escoltando a linha de frente. Exército grande ataca em duas frentes ao mesmo tempo. Cerco: prefere os extratores longe da base inimiga antes do ataque final. O exército se junta na frente do bastião e recua para trás das torres dele. Experimental sai com escolta antiaérea.", page: "mods" },
+      { icon: "visibility", title: "Lê o jogo", text: "Vê um exército inimigo se juntando e andando para um dos seus lugares e espera na frente dele. Sabe o que está matando as unidades dela (aviação, torres ou tropas) e responde com antiaéreo ou artilharia. O batedor passa pelas áreas de expansão do mapa. IAs aliadas dividem o território, atacam junto com o aliado humano e vão ajudar quando ele é atacado.", page: "mods" },
+      { icon: "map", title: "Painel com mapinha, placar e diário", text: "O painel da IA (F4) ganhou um mapinha com a casa e os bairros de cada IA, onde o exército está atacando e onde ela espera o seu ataque, o placar da partida (ataques, vitórias, recuos, defesas, cercos, bairros prontos e perdidos) e um diário com o que ela fez, com o horário.", page: "mods" },
+    ],
+  },
+  {
     version: "0.55.0",
     title: "IA que ocupa o território: bairros em volta da base e base com ruas",
     items: [

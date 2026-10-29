@@ -30,6 +30,11 @@ local C_ACCENT = 'FF4FC3F7'
 local C_WARN = 'FFF2B33D'
 
 local panel = false
+local mini = false
+local dots = {}
+local MINI = 180
+local MAX_DOTS = 80
+local AI_COLORS = { 'FFE5534B', 'FF7BD88F', 'FFC78BFF', 'FFF2B33D', 'FF5AA9E6', 'FFFF8FAB', 'FF9BE7FF', 'FFEEEEEE' }
 local tab = false
 local lines = {}
 local status = false
@@ -102,8 +107,55 @@ local function Rows()
             table.insert(rows, { '  Bairros: ' .. ai.districts.done .. '/' .. ai.districts.total .. ' prontos'
                 .. (ai.districts.current ~= '' and ('   construindo ' .. ai.districts.current) or ''), C_FAINT })
         end
+        local T = ai.tally
+        if T then
+            table.insert(rows, { '  Placar: ataques ' .. T.attacks .. ' (vencidos ' .. T.won .. ')   recuos ' .. T.retreats .. '   defesas ' .. T.defended
+                .. '   cercos ' .. T.siege .. '   duas frentes ' .. T.fronts .. '   ajudas ' .. T.helped
+                .. '   bairros ' .. T.districts .. ' (perdidos ' .. T.lost .. ')', C_FAINT })
+        end
+        if ai.journal and table.getn(ai.journal) > 0 then
+            table.insert(rows, { '  Diario:', C_FAINT })
+            for i = 1, math.min(4, table.getn(ai.journal)) do
+                table.insert(rows, { '    ' .. ai.journal[i], C_FAINT })
+            end
+        end
     end
     return rows
+end
+
+-- the dots of the small map (positions arrive as 0..1 of the map)
+local function DrawMini()
+    if not mini then return end
+    local used = 0
+    local function dot(p, size, color)
+        if not p or used >= MAX_DOTS then return end
+        used = used + 1
+        local d = dots[used]
+        d:SetSolidColor(color)
+        d.Width:Set(Px(size))
+        d.Height:Set(Px(size))
+        LayoutHelpers.AtLeftTopIn(d, mini, p[1] * (MINI - 8) + 4 - size / 2, p[2] * (MINI - 8) + 4 - size / 2)
+        d:Show()
+    end
+    local armies = {}
+    for army, _ in (status or {}) do table.insert(armies, army) end
+    table.sort(armies)
+    for k, army in ipairs(armies) do
+        local m = status[army].mini
+        if m then
+            local color = AI_COLORS[math.mod(k - 1, 8) + 1]
+            for _, d in (m.districts or {}) do
+                dot({ d[1], d[2] }, d[4] and 7 or 5, d[4] and color or '88' .. string.sub(color, 3))
+            end
+            dot(m.home, 10, color)
+            dot(m.target, 8, 'FFFF2840')
+            dot(m.second, 8, 'FFFF2840')
+            dot(m.predicted, 11, 'FFFFD166')
+            dot(m.join, 8, 'FF4FC3F7')
+        end
+    end
+    for i = used + 1, MAX_DOTS do dots[i]:Hide() end
+    CPAIPanelMiniDots = used -- for the tests
 end
 
 local function Refresh()
@@ -120,7 +172,8 @@ local function Refresh()
             t:Hide()
         end
     end
-    panel.Height:Set(Px(48 + n * 17 + 12))
+    panel.Height:Set(Px(math.max(48 + n * 17 + 12, 48 + MINI + 26)))
+    pcall(DrawMini)
     dirty = false
 end
 
@@ -129,7 +182,7 @@ local function CreatePanel()
     panel = Bitmap(frame)
     panel:SetSolidColor(C_PANEL)
     panel.Depth:Set(frame:GetTopmostDepth() + 95)
-    panel.Width:Set(Px(560))
+    panel.Width:Set(Px(760))
     panel.Height:Set(Px(120))
     LayoutHelpers.AtLeftTopIn(panel, frame, 44, 90)
     panel:DisableHitTest()
@@ -167,6 +220,22 @@ local function CreatePanel()
             return false
         end
     end
+
+    -- the small map: each AI's home and districts, where its army attacks and where it expects you
+    mini = Bitmap(panel)
+    mini:SetSolidColor('FF0A1118')
+    mini.Width:Set(Px(MINI))
+    mini.Height:Set(Px(MINI))
+    LayoutHelpers.AtRightTopIn(mini, panel, 10, 48)
+    mini:DisableHitTest()
+    for i = 1, MAX_DOTS do
+        local d = Bitmap(mini)
+        d:DisableHitTest()
+        d:Hide()
+        dots[i] = d
+    end
+    local legend = MakeText(panel, 'casa  bairros  ataque  espera voce', 10, C_FAINT)
+    LayoutHelpers.AtRightTopIn(legend, panel, 14, 52 + MINI)
 
     for i = 1, MAX_LINES do
         local t = MakeText(panel, '', 12, C_TEXT)
@@ -271,7 +340,7 @@ local function SendMemory()
     pcall(function()
         SimCallback({ Func = 'CPAIMemory', Args = {
             games = memory.games, style = memory.style, firstAttack = memory.firstAttack,
-            route = map.route, hit = map.hit, expand = map.expand,
+            route = map.route, hit = map.hit, expand = map.expand, held = map.held, lost = map.lost,
         } })
     end)
 end
@@ -304,6 +373,9 @@ local function SaveMemory(current)
         route = TopCells(Blend(old.route, current.route, 0.5), 16),
         hit = TopCells(Blend(old.hit, current.hit, 0.5), 16),
         expand = TopCells(Blend(old.expand, current.expand, 0.5), 16),
+        -- the districts of the AI that held and the ones that fell on this map
+        held = TopCells(Blend(old.held, current.held, 0.6), 16),
+        lost = TopCells(Blend(old.lost, current.lost, 0.6), 16),
     }
     saved.maps = maps
     pcall(function() Prefs.SetToCurrentProfile('CPAIMemory', saved) end)
