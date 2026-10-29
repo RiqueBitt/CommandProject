@@ -193,6 +193,8 @@ while now < maxTime do
     end
     now = now + 1
     step()
+    -- o jogador 1 destrói 20 unidades de uma vez (primeiro sangue e massacre)
+    if now == 25 then ArmyBrains[1].kills = 20 end
     if now == 5 then
         -- tropas do jogador 1 (e do time dele) num ponto
         for i = 1, 5 do local u = newUnit('uul0101', 1, 256, 256) end

@@ -1,6 +1,7 @@
 //! HUD das partidas no estilo da tela inicial: cada textura da HUD é redesenhada no mesmo tamanho
-//! e formato (o jogo continua montando tudo no mesmo lugar), com vidro escuro, borda neon fina na
-//! cor escolhida e botões que acendem na cor ao passar o mouse.
+//! e formato (o jogo continua montando tudo no mesmo lugar): vidro grafite com listras leves (sem o
+//! azul do jogo), faixa na cor escolhida em cima dos painéis, colchetes acesos nos cantos, borda
+//! apagada nos lados e botões que se enchem da cor ao passar o mouse e quando ativos.
 //!
 //! O formato de cada peça vem do canal alfa da textura original (cantos chanfrados, abas, encaixes
 //! ficam iguais). Painéis montados em pedaços (`_l`/`_c`/`_r`, `_tl`/`_t`/... ) só ganham borda nos
@@ -140,6 +141,8 @@ fn mix(a: f32, b: f32, t: f32) -> f32 {
 
 /// Redesenha uma textura da HUD (mesmo tamanho). `background` = painel (vidro escuro);
 /// senão botão/aba/barra (acende na cor).
+// os laços por coluna leem várias tabelas pela mesma posição (x, y)
+#[allow(clippy::needless_range_loop)]
 pub fn restyle(img: &Rgba, key: &str, siblings: &HashSet<String>, accent: [u8; 3], background: bool) -> Rgba {
     let (w, h) = (img.width as usize, img.height as usize);
     let mut out = img.clone();
@@ -169,6 +172,35 @@ pub fn restyle(img: &Rgba, key: &str, siblings: &HashSet<String>, accent: [u8; 3
                 let i = (y * w + x) * 4;
                 for (c, a) in acc.iter().enumerate() {
                     out.pixels[i + c] = (a * (0.65 + 0.45 * g) + 40.0 * g).min(255.0) as u8;
+                }
+            }
+        }
+        return out;
+    }
+    // textura de borda suave (sombra, degradê atrás de textos e filas): só vira grafite, sem
+    // linhas nem cantos (a borda viraria um halo)
+    // (um vidro translúcido por igual não é suave: a transparência dele não varia)
+    let soft = {
+        let mut alphas: Vec<u8> = img.pixels.chunks_exact(4).map(|p| p[3]).filter(|a| *a > 20).collect();
+        if alphas.len() < 16 {
+            false
+        } else {
+            alphas.sort_unstable();
+            let median = alphas[alphas.len() / 2] as i32;
+            let near = alphas.iter().filter(|a| (**a as i32 - median).abs() <= 16).count();
+            near * 100 < alphas.len() * 45
+        }
+    };
+    if soft {
+        for y in 0..h {
+            let g = y as f32 / (h.max(2) - 1) as f32;
+            for x in 0..w {
+                let i = (y * w + x) * 4;
+                let lum = (img.pixels[i] as f32 * 0.3 + img.pixels[i + 1] as f32 * 0.59 + img.pixels[i + 2] as f32 * 0.11) / 255.0;
+                let base = [mix(30.0, 12.0, g), mix(33.0, 13.0, g), mix(39.0, 17.0, g)];
+                let lift = if state == State::Hover || state == State::Active { 0.25 } else { 0.0 };
+                for k in 0..3 {
+                    out.pixels[i + k] = (mix(base[k], acc[k], lift) + lum * 20.0).clamp(0.0, 255.0) as u8;
                 }
             }
         }
@@ -213,48 +245,67 @@ pub fn restyle(img: &Rgba, key: &str, siblings: &HashSet<String>, accent: [u8; 3
         }
         d
     };
-    // brilho do botão por estado
-    let (tint, line, glow) = match (background, state) {
-        (true, _) => (0.06, 1.0, 0.0),
-        (false, State::Normal) => (0.14, 0.9, 0.0),
-        (false, State::Hover) => (0.38, 1.0, 0.25),
-        (false, State::Active) => (0.5, 1.0, 0.35),
-        (false, State::Disabled) => (0.0, 0.35, 0.0),
+    // topo visível de cada coluna (a faixa de cima segue os chanfros do formato)
+    let top_y: Vec<usize> = (0..w).map(|x| (0..h).find(|&y| alpha(x, y) >= 0.35).unwrap_or(h)).collect();
+    // cantos com colchete (onde dois lados com borda se encontram)
+    let arm = if background { (w.min(h) as f32 * 0.5).clamp(8.0, 26.0) } else { (w.min(h) as f32 * 0.32).clamp(4.0, 12.0) };
+    let bracket = |x: usize, y: usize| -> bool {
+        let (fx, fy) = (x as f32, y as f32);
+        let (rx, ry) = ((w - 1 - x) as f32, (h - 1 - y) as f32);
+        (bl && bt && fx < arm && fy < arm) || (br && bt && rx < arm && fy < arm) || (bl && bb && fx < arm && ry < arm) || (br && bb && rx < arm && ry < arm)
     };
-    let gradient = !(nine && background) && h >= 8;
+    let white = [235.0f32, 242.0, 250.0];
+    let dim = [acc[0] * 0.38 + 18.0, acc[1] * 0.38 + 20.0, acc[2] * 0.38 + 24.0];
     for y in 0..h {
-        // vidro: um pouco mais claro em cima
-        let g = if gradient { 1.0 - y as f32 / (h - 1) as f32 } else { 0.5 };
-        let base = [mix(9.0, 24.0, g), mix(13.0, 33.0, g), mix(19.0, 44.0, g)];
+        let g = if h >= 8 && !(nine && background) { y as f32 / (h - 1) as f32 } else { 0.5 };
+        // vidro grafite (sem o azul do jogo): mais claro em cima
+        let glass = [mix(31.0, 13.0, g), mix(34.0, 14.0, g), mix(40.0, 18.0, g)];
         for x in 0..w {
             let i = (y * w + x) * 4;
             let a = img.pixels[i + 3] as f32 / 255.0;
             if a <= 0.02 {
                 continue;
             }
-            // o relevo original, bem de leve
-            let lum = (img.pixels[i] as f32 * 0.3 + img.pixels[i + 1] as f32 * 0.59 + img.pixels[i + 2] as f32 * 0.11) / 255.0;
-            let detail = (lum - 0.35) * 18.0;
             let d = edge_dist(x, y);
+            let from_top = y as f32 - top_y[x] as f32;
+            let top_bar = bt && from_top < 3.5;
+            let corner = d < 2.0 && bracket(x, y);
+            // listras diagonais bem leves nos painéis
+            let stripe = if background && (x + y) % 8 == 0 { 5.0 } else { 0.0 };
             let mut c = [0f32; 3];
             for k in 0..3 {
-                let fill = mix(base[k], acc[k], tint) + detail;
-                let fill = if state == State::Disabled && !background { mix(fill, 60.0, 0.5) } else { fill };
-                c[k] = if d < 1.5 {
-                    // a linha neon
-                    mix(fill, acc[k].max(fill), line)
-                } else if d < 3.0 && line > 0.5 {
-                    // brilho logo depois da linha
-                    mix(fill, acc[k], 0.22 + glow)
+                let fill = match (background, state) {
+                    (true, _) => glass[k] + stripe + if bt && from_top < 10.0 { acc[k] * 0.10 * (1.0 - from_top / 10.0) } else { 0.0 },
+                    (false, State::Normal) => glass[k] + 6.0,
+                    (false, State::Hover) => mix(glass[k], acc[k], 0.22 + 0.25 * g),
+                    (false, State::Active) => mix(acc[k] * 0.55, acc[k] * 0.95, 1.0 - g) + 10.0,
+                    (false, State::Disabled) => mix(glass[k], 40.0, 0.4),
+                };
+                let border = match (background, state) {
+                    (false, State::Disabled) => 70.0,
+                    (false, State::Hover) => mix(acc[k], white[k], 0.25),
+                    (false, State::Active) => mix(acc[k], white[k], 0.55),
+                    _ => dim[k],
+                };
+                c[k] = if corner && state != State::Disabled {
+                    // colchete aceso nos cantos
+                    mix(acc[k], white[k], 0.2)
+                } else if background && top_bar {
+                    // faixa na cor em cima dos painéis
+                    mix(acc[k], white[k], if from_top < 1.0 { 0.25 } else { 0.0 })
+                } else if d < 1.5 {
+                    border
+                } else if d < 3.0 && !background && state != State::Normal && state != State::Disabled {
+                    mix(fill, acc[k], 0.3)
                 } else {
-                    fill + acc[k] * glow * 0.15
+                    fill
                 };
             }
             out.pixels[i] = c[0].clamp(0.0, 255.0) as u8;
             out.pixels[i + 1] = c[1].clamp(0.0, 255.0) as u8;
             out.pixels[i + 2] = c[2].clamp(0.0, 255.0) as u8;
-            // vidro um pouco translúcido nos painéis (a linha fica cheia)
-            let na = if background && d >= 1.5 { a * 0.9 } else { a };
+            // vidro um pouco translúcido nos painéis (linhas e cantos cheios)
+            let na = if background && d >= 1.5 && !top_bar && !corner { a * 0.92 } else { a };
             out.pixels[i + 3] = (na * 255.0).round().clamp(0.0, 255.0) as u8;
         }
     }
@@ -312,6 +363,42 @@ mod tests {
     }
 
     #[test]
+    fn glass_is_graphite_not_blue() {
+        let img = solid(64, 32, [40, 90, 160, 255]);
+        let out = restyle(&img, "/textures/ui/common/pc/ingame/hud/top_bg.dds", &HashSet::new(), [43, 140, 255], true);
+        let p = &out.pixels[(16 * 64 + 32) * 4..(16 * 64 + 32) * 4 + 3];
+        // o meio do painel é cinza escuro: azul quase igual ao vermelho
+        assert!((p[2] as i32 - p[0] as i32) < 12 && p[2] < 60, "{p:?}");
+    }
+
+    #[test]
+    fn active_button_is_filled_with_the_color() {
+        let img = solid(40, 20, [40, 90, 160, 255]);
+        let out = restyle(&img, "/x/top_btn_w.dds", &HashSet::new(), [255, 40, 40], false);
+        let p = &out.pixels[(10 * 40 + 20) * 4..(10 * 40 + 20) * 4 + 3];
+        assert!(p[0] > 150 && p[1] < 80, "{p:?}");
+    }
+
+    #[test]
+    fn soft_shadow_gets_no_outline() {
+        // degradê de transparência (sombra atrás de texto): só vira grafite
+        let mut img = solid(32, 32, [0, 0, 0, 255]);
+        for y in 0..32 {
+            for x in 0..32 {
+                img.pixels[(y * 32 + x) * 4 + 3] = (x * 8) as u8;
+            }
+        }
+        let out = restyle(&img, "/x/info_bg.dds", &HashSet::new(), [255, 0, 0], true);
+        for y in 0..32 {
+            for x in 0..32 {
+                let i = (y * 32 + x) * 4;
+                assert_eq!(out.pixels[i + 3], img.pixels[i + 3]);
+                assert!(out.pixels[i] < 90, "linha vermelha em {x},{y}");
+            }
+        }
+    }
+
+    #[test]
     fn transparent_shape_is_kept() {
         let mut img = solid(16, 16, [40, 90, 160, 255]);
         for y in 0..16 {
@@ -321,8 +408,10 @@ mod tests {
         }
         let out = restyle(&img, "/x/tab_u.dds", &HashSet::new(), [255, 0, 0], false);
         assert_eq!(out.pixels[3], 0);
-        // a borda segue o formato: a primeira coluna visível é linha
-        assert!(out.pixels[(8 * 16 + 4) * 4] > 200);
+        // a borda segue o formato: a primeira coluna visível é linha (mais vermelha que o meio)
+        assert!(out.pixels[(8 * 16 + 4) * 4] > out.pixels[(8 * 16 + 10) * 4] + 40);
+        // e o canto de cima dela é colchete aceso
+        assert!(out.pixels[4 * 4] > 200);
     }
 }
 

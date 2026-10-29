@@ -361,10 +361,13 @@ local function UpdatePoints()
     end
 end
 
-local function PointsHeld(team)
+-- points of a team; weighted = the golden point (see GoldenPoints) counts 3
+local function PointsHeld(team, weighted)
     local n = 0
     for _, p in Points do
-        if p.owner == team then n = n + 1 end
+        if p.owner == team then
+            if weighted and p.gold then n = n + 3 else n = n + 1 end
+        end
     end
     return n
 end
@@ -433,6 +436,89 @@ local function AIToPoints()
     end
 end
 
+------------------------------------------------------------------------------------ fun (every minigame)
+
+-- first blood and massacres: the first army to destroy an enemy and whoever destroys 15 or more
+-- units in 10 seconds get announced and a bonus
+local function Streaks()
+    local last, first = {}, false
+    for _, b in Players do last[b:GetArmyIndex()] = 0 end
+    while not Over do
+        WaitSeconds(10)
+        for _, b in Players do
+            if Alive(b) then
+                local i = b:GetArmyIndex()
+                local k = (b:GetArmyStat('Enemies_Killed', 0).Value or 0)
+                local d = k - (last[i] or 0)
+                last[i] = k
+                local name = b.Nickname or b.Name
+                if d > 0 and not first then
+                    first = true
+                    b:GiveResource('MASS', 200)
+                    Say(LOCF('<LOC CP_MG_FIRST>FIRST BLOOD: %s (+200 mass)', name), TeamColor(TeamOf[i]), 20, 5, 'centertop')
+                    Sound('UI_Announcement_Open')
+                end
+                if d >= 15 then
+                    b:GiveResource('MASS', 100 + 10 * d)
+                    b:GiveResource('ENERGY', 500 + 50 * d)
+                    Say(LOCF('<LOC CP_MG_STREAK>MASSACRE! %s destroyed %d units in 10 seconds', name, d), TeamColor(TeamOf[i]), 22, 5, 'centertop')
+                    Sound('UI_Announcement_Open')
+                end
+            end
+        end
+    end
+end
+
+-- golden point (modes with several points): now and then one point counts 3 times for a minute
+local function GoldenPoints(every, duration)
+    WaitSeconds(every)
+    while not Over do
+        if table.getn(Points) >= 2 then
+            local p = Points[Random(1, table.getn(Points))]
+            p.gold = true
+            local old = p.arrow
+            p.arrow = Arrow(p.x, p.z, 9)
+            Say(LOCF('<LOC CP_MG_GOLD>GOLDEN POINT: %s counts triple for %d seconds!', p.name, duration), 'fff2b33d', 22, 6, 'centertop')
+            Sound('UI_Announcement_Open')
+            WaitSeconds(duration)
+            p.gold = nil
+            if p.arrow then pcall(function() p.arrow:Destroy() end) end
+            p.arrow = old
+            if Over then return end
+            Say(LOCF('<LOC CP_MG_GOLD_END>Point %s is back to normal', p.name), 'ffb8c7d6', 16, 4, 'centertop')
+        end
+        WaitSeconds(every)
+    end
+end
+
+-- help for whoever is far behind: every 2 minutes the last team (with less than half of the
+-- leader's score) gets a few land units at its base
+local function Comeback()
+    while not Over do
+        WaitSeconds(120)
+        local best, worst = nil, nil
+        for _, t in Teams do
+            local alive = false
+            for _, b in t.brains do if Alive(b) then alive = true end end
+            if alive then
+                if not best or t.score > best.score then best = t end
+                if not worst or t.score < worst.score then worst = t end
+            end
+        end
+        if best and worst and best ~= worst and best.score > 0 and worst.score < best.score * 0.5 then
+            for _, b in worst.brains do
+                if Alive(b) then
+                    local f = b:GetFactionIndex()
+                    if f < 1 or f > 3 then f = 1 end
+                    local x, z = StartPos(b)
+                    for k = 1, 3 do Spawn(b, Pick(LAND[f]), x + 8 * k, z + 8) end
+                end
+            end
+            Say(LOCF('<LOC CP_MG_HELP>Reinforcements for %s, who is falling behind!', TeamName(worst)), TeamColor(worst), 18, 5, 'centertop')
+        end
+    end
+end
+
 ------------------------------------------------------------------------------------ modes
 
 local function Intro(title, goal, win)
@@ -462,7 +548,7 @@ local function Domination()
         tick = tick + 1
         UpdatePoints()
         for _, t in Teams do
-            t.score = t.score + PointsHeld(t)
+            t.score = t.score + PointsHeld(t, true)
             local pct = t.score / target
             for _, mark in { 0.5, 0.8, 0.9 } do
                 local key = t.id .. ':' .. mark
@@ -506,13 +592,13 @@ local function TotalWar()
         UpdatePoints()
         if math.mod(tick, 10) == 0 then
             for _, t in Teams do
-                local n = PointsHeld(t)
+                local n = PointsHeld(t, true)
                 if n > 0 then GiveAll(t, 15 * n, 75 * n, 0) end
             end
         end
         if math.mod(tick, 60) == 0 then
             for _, t in Teams do
-                local n = PointsHeld(t)
+                local n = PointsHeld(t, true)
                 if n > 0 then GiveAll(t, 0, 0, n) end
             end
         end
@@ -549,7 +635,7 @@ local function Supreme()
                     local gained = (now - kills[i]) * 0.5 + carry[i]
                     kills[i] = now
                     -- the points: 1 research each 20 s per point
-                    if math.mod(tick, 20) == 0 then gained = gained + PointsHeld(TeamOf[i]) end
+                    if math.mod(tick, 20) == 0 then gained = gained + PointsHeld(TeamOf[i], true) end
                     local whole = math.floor(gained)
                     carry[i] = gained - whole
                     if whole > 0 then
@@ -848,7 +934,9 @@ local function Arena()
     end
 end
 
--- Rei da Colina: one hill, held without a break for CPHold seconds; it moves every CPMove seconds
+-- Rei da Colina: one hill; every second a team holds it alone counts, and the time adds up (taking
+-- the hill from someone does not erase their time). The first team to CPHold seconds is the king:
+-- every other army is destroyed. The hill moves every CPMove seconds (warned 30 s before).
 local function KingOfTheHill()
     local hold = N('CPHold', 180, 30, 1800)
     local move = N('CPMove', 240, 0, 3600)
@@ -856,49 +944,69 @@ local function KingOfTheHill()
     MakePointsAt({ spots[1] })
     local hill = Points[1]
     Intro(LOC('<LOC CP_MG_KOTH_TITLE>KING OF THE HILL'),
-        LOC('<LOC CP_MG_KOTH_GOAL>One hill (the arrow). Stand alone on it for 5 seconds to take it.'),
-        LOCF('<LOC CP_MG_KOTH_WIN>Hold it for %d seconds in a row to win. The hill moves from time to time.', hold))
-    local held, tick, spot = 0, 0, 1
-    local owner = nil
+        LOC('<LOC CP_MG_KOTH_GOAL>One hill (the arrow). Stand alone on it for 5 seconds to take it: while it is yours, your clock runs and it pays resources.'),
+        LOCF('<LOC CP_MG_KOTH_WIN>The first team to add up %d seconds on the hill is the king: every other army is destroyed.', hold))
+    local tick, spot = 0, 1
+    local marks, fight = {}, false
     while not Over do
         WaitSeconds(1)
         tick = tick + 1
         UpdatePoints()
-        if hill.owner ~= owner then
-            owner = hill.owner
-            held = 0
-        end
-        -- contested: the clock stops
+        local owner = hill.owner
         local on = TeamsOn(hill)
-        if owner and table.getn(on) == 1 and on[1] == owner then held = held + 1 end
-        if owner and table.getn(on) == 0 then held = held + 1 end
-        for _, t in Teams do
-            if t == owner and held > t.score then t.score = held end
-        end
-        if owner then
-            Extra = LOCF('<LOC CP_MG_KOTH_EXTRA>%s holds the hill: %d s left', TeamName(owner), math.max(0, hold - held))
-            if held == hold - 30 then Say(LOCF('<LOC CP_MG_KOTH_NEAR>%s: 30 seconds to win!', TeamName(owner)), TeamColor(owner), 20, 5, 'centertop') Sound('UI_Announcement_Open') end
-            if held >= hold then
+        local contested = table.getn(on) > 1
+        if owner and not contested and (table.getn(on) == 0 or on[1] == owner) then
+            fight = false
+            owner.score = owner.score + 1
+            -- the hill pays whoever holds it
+            if math.mod(owner.score, 5) == 0 then GiveAll(owner, 15, 75, 0) end
+            for _, mark in { 0.5, 0.75, 0.9 } do
+                local key = owner.id .. ':' .. mark
+                if owner.score >= hold * mark and not marks[key] then
+                    marks[key] = true
+                    Say(LOCF('<LOC CP_MG_KOTH_PCT>%s has %d%% of the hill time: %d s to be king!', TeamName(owner), math.floor(mark * 100), hold - owner.score), TeamColor(owner), 20, 6, 'centertop')
+                    Sound('UI_Announcement_Open')
+                end
+            end
+            local left = hold - owner.score
+            if left <= 10 and left > 0 then
+                Say(tostring(left), TeamColor(owner), 44, 1, 'center')
+                Sound('UI_MFD_checklist')
+            end
+            Extra = LOCF('<LOC CP_MG_KOTH_EXTRA>%s holds the hill: %d s left', TeamName(owner), math.max(0, left))
+            if owner.score >= hold then
                 local mine = MyTeam()
                 if mine then Stats.score = math.floor(mine.score) end
-                Win(owner)
+                Win(owner, LOCF('<LOC CP_MG_KOTH_KING>%s is the KING OF THE HILL! Every other army is destroyed.', TeamName(owner)))
                 break
+            end
+        elseif contested then
+            Extra = LOC('<LOC CP_MG_KOTH_FIGHT>Fight on the hill: the clock stopped')
+            if not fight then
+                fight = true
+                Say(LOC('<LOC CP_MG_KOTH_FIGHT>Fight on the hill: the clock stopped'), 'ffff6a5a', 18, 4, 'centertop')
             end
         else
             Extra = LOC('<LOC CP_MG_KOTH_FREE>The hill is free')
         end
-        if move > 0 and math.mod(tick, move) == 0 and table.getn(spots) > 1 then
-            spot = math.mod(spot, table.getn(spots)) + 1
-            hill.x, hill.z = spots[spot][1], spots[spot][2]
-            hill.owner, hill.taking, hill.progress = nil, nil, 0
-            if hill.arrow then pcall(function() hill.arrow:Destroy() end) end
-            hill.arrow = Arrow(hill.x, hill.z, 5)
-            for _, brain in Players do Vision(brain, hill.x, hill.z, hill.r + 6) end
-            Say(LOC('<LOC CP_MG_KOTH_MOVED>The hill moved! Follow the arrow'), 'ffffd27a', 22, 6, 'centertop')
-            Sound('UI_Announcement_Open')
+        if move > 0 and table.getn(spots) > 1 then
+            local phase = math.mod(tick, move)
+            if phase == move - 30 then
+                Say(LOC('<LOC CP_MG_KOTH_SOON>The hill moves in 30 seconds!'), 'ffffd27a', 20, 5, 'centertop')
+            end
+            if phase == 0 then
+                spot = math.mod(spot, table.getn(spots)) + 1
+                hill.x, hill.z = spots[spot][1], spots[spot][2]
+                hill.owner, hill.taking, hill.progress = nil, nil, 0
+                if hill.arrow then pcall(function() hill.arrow:Destroy() end) end
+                hill.arrow = Arrow(hill.x, hill.z, 5)
+                for _, brain in Players do Vision(brain, hill.x, hill.z, hill.r + 6) end
+                Say(LOC('<LOC CP_MG_KOTH_MOVED>The hill moved! Follow the arrow'), 'ffffd27a', 22, 6, 'centertop')
+                Sound('UI_Announcement_Open')
+            end
         end
-        if math.mod(tick, 2) == 0 then Board(LOC('<LOC CP_MG_KOTH_BOARD>Longest hold (s)')) end
-        if math.mod(tick, 30) == 0 then AIToPoints() end
+        if math.mod(tick, 2) == 0 then Board(LOCF('<LOC CP_MG_KOTH_BOARD>Time on the hill (goal %d s)', hold)) end
+        if math.mod(tick, 20) == 0 then AIToPoints() end
         local mine = MyTeam()
         if mine then Stats.score = math.floor(mine.score) end
     end
@@ -928,7 +1036,7 @@ local function Escort()
         end
     end
     local tick = 0
-    local lost = {}
+    local lost, danger = {}, {}
     while not Over do
         WaitSeconds(1)
         tick = tick + 1
@@ -946,6 +1054,11 @@ local function Escort()
                 else
                     table.insert(alive, t)
                     t.score = math.floor(100 * u:GetHealth() / u:GetMaxHealth())
+                    if t.score < 30 and not danger[t.id] then
+                        danger[t.id] = true
+                        Say(LOCF('<LOC CP_MG_VIP_DANGER>The VIP of %s is in danger!', TeamName(t)), TeamColor(t), 20, 5, 'centertop')
+                        Sound('UI_Announcement_Open')
+                    end
                 end
             end
         end
@@ -1033,7 +1146,7 @@ local function Treasure()
         LOCF('<LOC CP_MG_TREASURE_WIN>Reach a crate first. The first team to collect %d wins.', target))
     local w, h = MapSize()
     local crates = {}
-    local tick = 0
+    local tick, made = 0, 0
     while not Over do
         WaitSeconds(1)
         tick = tick + 1
@@ -1041,9 +1154,15 @@ local function Treasure()
             for tries = 1, 20 do
                 local x, z = Random(40, math.floor(w) - 40), Random(40, math.floor(h) - 40)
                 if not IsWater(x, z) then
-                    table.insert(crates, { x = x, z = z, r = 10, arrow = Arrow(x, z, 4) })
+                    made = made + 1
+                    local gold = math.mod(made, 4) == 0
+                    table.insert(crates, { x = x, z = z, r = 10, gold = gold, arrow = Arrow(x, z, gold and 8 or 4) })
                     for _, brain in Players do Vision(brain, x, z, 16) end
-                    Say(LOC('<LOC CP_MG_TREASURE_NEW>A new crate appeared! Follow the arrow'), 'ffffd27a', 20, 5, 'centertop')
+                    if gold then
+                        Say(LOC('<LOC CP_MG_TREASURE_GOLD>A GOLDEN crate appeared: it counts double!'), 'fff2b33d', 22, 6, 'centertop')
+                    else
+                        Say(LOC('<LOC CP_MG_TREASURE_NEW>A new crate appeared! Follow the arrow'), 'ffffd27a', 20, 5, 'centertop')
+                    end
                     Sound('UI_Announcement_Open')
                     break
                 end
@@ -1054,7 +1173,7 @@ local function Treasure()
             local on = TeamsOn(c)
             if table.getn(on) == 1 then
                 local t = on[1]
-                t.score = t.score + 1
+                t.score = t.score + (c.gold and 2 or 1)
                 table.remove(crates, i)
                 if c.arrow then pcall(function() c.arrow:Destroy() end) end
                 -- the prize
@@ -1292,6 +1411,10 @@ function Start(scenarioInfo)
     if Opts.CPEvents == '1' then ForkThread(Events) end
     if not run then return end
     ForkThread(WatchResult)
+    -- o que deixa todos os minigames mais vivos
+    ForkThread(Streaks)
+    if Mode == 'domination' or Mode == 'total' or Mode == 'supreme' then ForkThread(GoldenPoints, N('CPGoldEvery', 150, 30, 3600), 60) end
+    if Mode == 'domination' or Mode == 'koth' or Mode == 'race' or Mode == 'treasure' then ForkThread(Comeback) end
     -- (no pcall around it: a thread cannot wait inside a pcall in this Lua)
     ForkThread(function()
         WaitSeconds(1)

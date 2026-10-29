@@ -78,7 +78,9 @@ local function CPBoardDraw(data)
         text:SetColor(l[2] or 'ffe6eef5')
         text:Show()
     end
+    -- as linhas que sobraram de um placar maior (um time saiu): vazias e escondidas
     for i = table.getn(lines) + 1, table.getn(bg.texts) do
+        bg.texts[i]:SetText('')
         bg.texts[i]:Hide()
     end
     bg.Height:Set(12 + table.getn(lines) * 19)

@@ -623,6 +623,12 @@ async fn launch_inner(app: AppHandle, state: State<'_, AppState>, big: Option<cp
             Ok(_) => {}
             Err(e) => eprintln!("pedidos do jogo não lidos: {e}"),
         }
+        // mods de teste do clima de versões antigas: nevasca em toda partida
+        match ws.disable_dev_mods() {
+            Ok(p) if !p.is_empty() => eprintln!("mods de teste do clima desligados nos perfis: {}", p.join(", ")),
+            Ok(_) => {}
+            Err(e) => eprintln!("mods de teste do clima não desligados: {e}"),
+        }
         // pedidos de continuação de antes desta abertura não valem mais
         if let Err(e) = ws.skip_launch_request() {
             eprintln!("pedido de continuação do jogo não lido: {e}");

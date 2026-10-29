@@ -24,7 +24,7 @@ pub const ARCHIVE: &str = "zz_cp_zzy_tela_inicial.scd";
 /// O nome de antes (até a 0.50): as Texturas HD ficavam por cima da HUD nova.
 pub const OLD_ARCHIVE: &str = "zz_cp_tela_inicial.scd";
 /// Muda quando o visual muda (o launcher remonta).
-pub const STYLE_VERSION: &str = "1.7.0";
+pub const STYLE_VERSION: &str = "1.8.0";
 pub const SETTINGS_FILE: &str = "start-screen.json";
 /// Pasta (nos dados do launcher) com o logo e o vídeo do jogador.
 pub const USER_DIR: &str = "start-screen";

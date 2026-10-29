@@ -6,6 +6,16 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.52.0",
+    title: "HUD nova, sem nevasca e minigames melhores",
+    items: [
+      { icon: "palette", title: "HUD nova de verdade", text: "A HUD das partidas foi redesenhada do zero: vidro grafite (sem o azul do jogo) com listras leves, faixa na sua cor em cima dos painéis, colchetes acesos nos cantos e botões que se enchem da cor ao passar o mouse e quando ativos. Sombras e degradês ficam escuros, sem contorno. O menu da partida segue o mesmo visual.", page: "home" },
+      { icon: "ac_unit", title: "Sem nevasca nas partidas normais", text: "Um mod de teste do clima de versões antigas (cp clima teste) punha nevasca em toda partida, mesmo criada pelo jogo. O launcher agora desliga esse mod sozinho em todos os perfis.", page: "home" },
+      { icon: "flag", title: "Rei da Colina: o tempo soma", text: "O tempo na colina agora soma (perder a colina não zera o seu tempo): o primeiro time a chegar na meta vira o rei e todos os outros exércitos são destruídos. A colina paga recursos a quem a segura, há avisos em 50, 75 e 90%, contagem regressiva nos 10 segundos finais e aviso 30 segundos antes de ela mudar de lugar. O placar não mostra mais linhas antigas.", page: "home" },
+      { icon: "celebration", title: "Minigames mais divertidos", text: "Em todos os modos: Primeiro sangue e Massacre (bônus para quem destrói 15 unidades em 10 segundos). Dominação, Guerra Total e Projeto Supremo ganham o Ponto Dourado (vale o triplo por 1 minuto). Quem fica muito para trás recebe reforços. Escolta avisa quando um VIP está em perigo, e Caça ao Tesouro tem caixas douradas que valem dobrado.", page: "home" },
+    ],
+  },
+  {
     version: "0.51.0",
     title: "Partida grande no jogo com clima e todos os mapas",
     items: [

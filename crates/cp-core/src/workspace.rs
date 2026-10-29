@@ -534,6 +534,30 @@ impl Workspace {
         Ok(Some(GameLaunch { action: req.action, spec: Some(spec), join: String::new(), map_name: map.name.clone() }))
     }
 
+    /// Desliga, em todos os perfis, os mods de teste do clima que ficaram de versões de
+    /// desenvolvimento (`cp-clima-teste` põe nevasca em toda partida, mesmo sem clima escolhido).
+    /// Devolve os perfis em que algum foi desligado.
+    pub fn disable_dev_mods(&mut self) -> Result<Vec<String>> {
+        const DEV: &[&str] = &["cp-clima-teste", "cp-clima-modelos-teste"];
+        let mut done = Vec::new();
+        let profiles: Vec<(String, Vec<String>)> = self
+            .profiles
+            .set
+            .profiles
+            .iter()
+            .map(|p| (p.id.clone(), p.mods.iter().filter(|m| m.enabled && DEV.contains(&m.id.as_str())).map(|m| m.id.clone()).collect()))
+            .collect();
+        for (profile, ids) in profiles {
+            for id in &ids {
+                self.profiles.set_enabled(&profile, id, false)?;
+            }
+            if !ids.is_empty() {
+                done.push(profile);
+            }
+        }
+        Ok(done)
+    }
+
     /// Marca o pedido que está no `Game.prefs` como visto (ao abrir o jogo): só os feitos nesta
     /// abertura valem quando ele fechar.
     pub fn skip_launch_request(&mut self) -> Result<()> {
