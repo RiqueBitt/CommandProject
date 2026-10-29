@@ -98,6 +98,10 @@ local function Rows()
         if table.getn(air) > 0 then table.insert(rows, { '  ' .. table.concat(air, '   '), C_TEXT }) end
         table.insert(rows, { '  Comandante: ' .. ai.acu .. '   Ve no inimigo: aviacao ' .. ai.intel.air .. ', terra ' .. ai.intel.land .. ', mar ' .. ai.intel.naval
             .. '   Zonas de perigo: ' .. (ai.dangers or 0), C_FAINT })
+        if ai.districts and ai.districts.total > 0 then
+            table.insert(rows, { '  Bairros: ' .. ai.districts.done .. '/' .. ai.districts.total .. ' prontos'
+                .. (ai.districts.current ~= '' and ('   construindo ' .. ai.districts.current) or ''), C_FAINT })
+        end
     end
     return rows
 end

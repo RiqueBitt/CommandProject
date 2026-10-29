@@ -1,6 +1,6 @@
 import { Fragment, lazy, Suspense, useEffect, useRef } from "react";
 import { locale, setLang, t, tr, useLang } from "./lib/i18n";
-import { FP_VERSION, loadFirstPerson } from "./components/dialogs";
+import { AI_VERSION, FP_VERSION, loadAi, loadFirstPerson } from "./components/dialogs";
 import { FEATURES } from "./lib/features";
 import { CommandPalette, Rail, SystemBar } from "./components/Shell";
 import { Toasts } from "./components/ui";
@@ -80,6 +80,17 @@ export default function App() {
             toast("info", t("Primeira Pessoa atualizada para a versão {version}.", { version: FP_VERSION }));
           } catch (e) {
             toast("error", t("Não deu para atualizar a Primeira Pessoa: {error}. Abra o Hub de mods e clique em Atualizar.", { error: errorText(e) }));
+          }
+        }
+        // IA mais esperta montada por um launcher antigo: monta de novo com as opções salvas
+        const ai = (await api.listMods()).find((m) => m.manifest.id === "cp-ia-esperta");
+        if (ai && ai.manifest.version !== AI_VERSION) {
+          try {
+            await api.buildAi(loadAi(), ai.enabled);
+            await refresh();
+            toast("info", t("IA mais esperta atualizada para a versão {version}: bairros em volta da base e base com ruas.", { version: AI_VERSION }));
+          } catch (e) {
+            toast("error", t("Não deu para atualizar a IA mais esperta: {error}. Abra o Hub de mods e monte de novo.", { error: errorText(e) }));
           }
         }
         // cópia de segurança automática dos projetos (local, de tempos em tempos)

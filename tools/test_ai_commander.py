@@ -737,7 +737,60 @@ def review_fixes():
           f"erros repetidos: o painel mostra o erro e que a IA original assumiu ({st.error if st else None})")
 
 
+def districts():
+    """Bairros em volta da base principal: bastiões virados para o inimigo em chão bom, prédios
+    espalhados em lotes, engenheiros próprios e nada onde o terreno é ruim ou há perigo."""
+    s = Scenario(build="true", counter="false", adaptive="false", air="false", team="false")
+    new = s.new
+    s.lua.execute("ScenarioInfo = { size = { 1024, 1024 } }")
+    s.lua.execute("ArmyBrains[1].start = { 300, 300 } ArmyBrains[2].start = { 800, 800 }")
+    s.lua.execute("CPAI.commanders[1].home = { 300, 0, 300 }")
+    # a rough, broken hill west of the base: no district there
+    for i in range(12):
+        s.lua.execute(f"table.insert(World.hills, {{ {130 + (i % 4) * 14}, {260 + (i // 4) * 30}, 9, {i * 9 % 40} }})")
+    new(1, "STRUCTURE FACTORY", 300, 300, 0, {"canBuild": {"uul0002": True}})
+    engs = [new(1, "ENGINEER MOBILE LAND", 305 + i, 300, 0) for i in range(4)]
+    new(2, "STRUCTURE FACTORY", 800, 800, 0)
+    s.W.time = 160
+    s.step(times=1)
+    c = s.g.CPAI.commanders[1]
+    ds = list(c.districts.values()) if c.districts else []
+    check(len(ds) >= 4, f"planeja vários bairros em volta da base ({len(ds)})")
+    roles = [d.role for d in ds]
+    check("bastion" in roles and "workshop" in roles, f"bastiões e oficinas ({roles})")
+    far = all(((d.pos[1] - 300) ** 2 + (d.pos[3] - 300) ** 2) ** 0.5 > 90 for d in ds)
+    check(far, "bairros fora da base principal (não amontoa)")
+    gaps = min((((a.pos[1] - b.pos[1]) ** 2 + (a.pos[3] - b.pos[3]) ** 2) ** 0.5 for i, a in enumerate(ds) for b in ds[i + 1:]), default=999)
+    check(gaps >= 80, f"bairros espaçados entre si ({gaps:.0f})")
+    rough = [d for d in ds if 110 <= d.pos[1] <= 200 and 240 <= d.pos[3] <= 360]
+    check(not rough, "nenhum bairro no morro irregular")
+    first = ds[0]
+    toward = (first.pos[1] - 300) + (first.pos[3] - 300) > 0
+    check(first.role == "bastion" and toward, "o primeiro bairro é um bastião virado para o inimigo")
+    check(sum(1 for e in engs if e.CPBuilder) >= 2, "engenheiros próprios para os bairros")
+    s.step(times=8)
+    built = list(s.W.built.values())
+    out = [b for b in built if ((b.x - 300) ** 2 + (b.z - 300) ** 2) ** 0.5 > 70]
+    check(len(out) >= 3, f"constrói nos bairros ({len(out)} prédios fora da base)")
+    ids = {b.id for b in out}
+    check("uub0101" in ids and ("uub0202" in ids or "uub0102" in ids), f"torres e escudo/antiaéreo no bastião ({sorted(ids)})")
+    close = min((((a.x - b.x) ** 2 + (a.z - b.z) ** 2) ** 0.5 for i, a in enumerate(out) for b in out[i + 1:]), default=999)
+    check(close >= 8, f"prédios do bairro em lotes separados ({close:.0f})")
+    panel = c.lua_panel if False else s.lua.eval("CPAI.status[1] and CPAI.status[1].districts")
+    check(panel is not None and panel.total >= 4, "o painel mostra os bairros")
+    # perigo perto de um bairro: não manda engenheiro para lá
+    d0 = ds[0]
+    for i in range(6):
+        new(2, "MOBILE LAND", d0.pos[1] + i, d0.pos[3], 5)
+    before = len(list(s.W.built.values()))
+    step0 = d0.step
+    s.step(times=3)
+    check(d0.step == step0, "não constrói no bairro com inimigos por perto")
+    check(not s.W.warn, f"sem erros ({s.W.warn})")
+
+
 def main() -> int:
+    districts()
     panel()
     terrain_losses_research()
     player_model()

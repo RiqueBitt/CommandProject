@@ -93,6 +93,10 @@ pub struct AiBuild {
     pub skipped: Vec<String>,
 }
 
+/// Versão do mod da IA: muda quando o comandante ou os ajustes mudam (o launcher monta de novo
+/// sozinho, com as opções salvas, quando a cópia instalada é de outra versão).
+pub const MOD_VERSION: &str = "2.0.0";
+
 const COMMANDER_LUA: &str = include_str!("aimod_commander.lua");
 const PANEL_LUA: &str = include_str!("aimod_panel.lua");
 
@@ -208,6 +212,58 @@ fn naval_factory_builder(id: &str, max: u32, extractors: u32, priority: u32) -> 
 ",
         cond(1),
         cond(2)
+    )
+}
+
+/// Gabarito de base mais espaçoso: o do jogo põe todos os prédios num quadrado de 60 × 60 (um
+/// lugar a cada 2 unidades, sem espaço entre as fábricas). Este espalha os lugares num disco,
+/// do centro para fora, a cada `pitch` unidades: entre dois prédios sobra uma rua. No fim, uma
+/// faixa mais apertada para a base nunca ficar sem lugar.
+pub fn roomy_base_lua(brutal: bool) -> String {
+    let (radius, pitch) = if brutal { (92, 10) } else { (80, 10) };
+    format!(
+        "
+-- CommandProject AI: a roomier base (streets between the buildings, growing from the centre)
+do
+    pcall(function()
+        local R, P, R2 = {radius}, {pitch}, {outer}
+        local function d2(a) return a[1] * a[1] + a[2] * a[2] end
+        local function sorted(spots)
+            table.sort(spots, function(a, b)
+                local da, db = d2(a), d2(b)
+                if da ~= db then return da < db end
+                if a[1] ~= b[1] then return a[1] < b[1] end
+                return a[2] < b[2]
+            end)
+            return spots
+        end
+        local wide, tight = {{}}, {{}}
+        for x = -R, R, P do
+            for z = -R, R, P do
+                if x * x + z * z <= R * R then table.insert(wide, {{ x, z, 0 }}) end
+            end
+        end
+        for x = -R2, R2, 4 do
+            for z = -R2, R2, 4 do
+                local r = x * x + z * z
+                if r > R * R and r <= R2 * R2 then table.insert(tight, {{ x, z, 0 }}) end
+            end
+        end
+        for t = 1, table.getn(BaseTemplates) do
+            local old = BaseTemplates[t]
+            if type(old) == 'table' and type(old[1]) == 'table' and type(old[1][1]) == 'string' then
+                local new = {{ old[1] }}
+                for _, s in ipairs(sorted(wide)) do table.insert(new, s) end
+                for _, s in ipairs(sorted(tight)) do table.insert(new, s) end
+                BaseTemplates[t] = new
+            end
+        end
+    end)
+end
+",
+        radius = radius,
+        pitch = pitch,
+        outer = radius + 24
     )
 }
 
@@ -327,7 +383,12 @@ fn edits(o: &AiOptions) -> Vec<FileEdit> {
     }
 
     if o.economy {
-        let engineers = if brutal { "6" } else { "4" };
+        // os bairros (com o comandante construindo) usam engenheiros próprios: a base ganha mais
+        let engineers = match (brutal, o.build && o.commander) {
+            (true, true) => "8",
+            (true, false) | (false, true) => "6",
+            (false, false) => "4",
+        };
         add(
             "lua/AI/skirmish/BaseBlueprints/SAIBaseBlueprint_Default.bp",
             vec![
@@ -371,6 +432,13 @@ fn edits(o: &AiOptions) -> Vec<FileEdit> {
                 "GetEconomyStored('RESEARCH') > researchBp.COST",
                 "GetEconomyStored('RESEARCH') >= researchBp.COST",
             )],
+        );
+    }
+
+    if o.build {
+        add(
+            "lua/AI/skirmish/BaseTemplates.lua",
+            vec![("base com ruas: prédios espalhados".into(), Op::Append(roomy_base_lua(brutal)))],
         );
     }
 
@@ -529,6 +597,16 @@ pub fn build(sources: &[PathBuf], opts: &AiOptions, dest: &Path) -> Result<AiBui
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn roomy_base_template() {
+        let files = edits(&AiOptions::default());
+        let f = files.iter().find(|f| f.path.ends_with("BaseTemplates.lua")).expect("gabarito da base");
+        assert!(matches!(&f.ops[0].1, Op::Append(code) if code.contains("BaseTemplates[t] = new") && code.contains("R, P, R2 = 80, 10, 104")));
+        assert!(roomy_base_lua(true).contains("R, P, R2 = 92, 10, 116"));
+        let off = edits(&AiOptions { build: false, ..Default::default() });
+        assert!(off.iter().all(|f| !f.path.ends_with("BaseTemplates.lua")));
+    }
 
     #[test]
     fn replace_rules() {

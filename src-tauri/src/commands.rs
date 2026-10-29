@@ -1778,7 +1778,7 @@ pub async fn build_ai(state: State<'_, AppState>, opts: cp_core::aimod::AiOption
                 (opts.air, "aviação estratégica"),
                 (opts.micro, "microgestão e pinça"),
                 (opts.counter, "reconhecimento e contra-ataque"),
-                (opts.build, "defesa reativa e postos avançados"),
+                (opts.build, "bairros em volta da base, base com ruas e defesa reativa"),
                 (opts.team, "IAs aliadas em equipe"),
                 (opts.adaptive, "dificuldade adaptativa"),
                 (opts.learn, "aprende o seu jeito de jogar"),
@@ -1800,6 +1800,7 @@ pub async fn build_ai(state: State<'_, AppState>, opts: cp_core::aimod::AiOption
         let panel = if opts.commander && opts.panel { format!(" Painel no jogo: tecla {}.", opts.panel_key) } else { String::new() };
         let import = ImportOptions {
             id: Some("cp-ia-esperta".into()),
+            version: Some(cp_core::aimod::MOD_VERSION.into()),
             name: Some(if opts.level >= 2 { "IA mais esperta (brutal)".into() } else { "IA mais esperta".into() }),
             category: Some(Category::Gameplay),
             description: Some(format!(

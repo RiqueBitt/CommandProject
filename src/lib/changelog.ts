@@ -6,6 +6,16 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.55.0",
+    title: "IA que ocupa o território: bairros em volta da base e base com ruas",
+    items: [
+      { icon: "domain", title: "Bairros em volta da base principal", text: "Na Partida, a IA não fica mais com uma base só e uma secundária: planeja de 5 a 8 bairros em volta da base principal e constrói um por um. Bastiões virados para o inimigo (torres, antiaéreo, escudo, artilharia e uma fábrica), oficinas nos lados (fábricas de terra e ar, energia) e uma retaguarda com energia, pesquisa e radar.", page: "mods" },
+      { icon: "terrain", title: "Escolhe o terreno", text: "Cada bairro vai para chão plano e seco, dentro do território da própria IA (mais perto da casa dela que da de qualquer outro), onde ela ainda não construiu nada. Os bastiões preferem passagens estreitas e terreno alto na direção do inimigo, e os bairros perto das expansões e dos pontos de defesa do mapa ganham prioridade. Não constrói onde há inimigos por perto.", page: "mods" },
+      { icon: "grid_view", title: "Base com ruas", text: "A base principal e as expansões do jogo deixavam todos os prédios grudados num quadrado de 60 × 60. Agora a base cresce do centro para fora com uma rua entre os prédios, ocupando uma área cerca de 5 vezes maior: as fábricas ficam espalhadas e as unidades saem sem engarrafar.", page: "mods" },
+      { icon: "engineering", title: "Engenheiros próprios e painel", text: "A IA separa alguns engenheiros só para os bairros (e pede mais às fábricas), então a economia do jogo continua crescendo ao mesmo tempo. O painel da IA (F4) mostra quantos bairros estão prontos e qual está sendo construído. O mod da IA é montado de novo sozinho ao abrir o launcher.", page: "mods" },
+    ],
+  },
+  {
     version: "0.54.0",
     title: "Editor de mapas: pincéis sem travar, copiar e colar, simetria, peças e Raio-X",
     items: [

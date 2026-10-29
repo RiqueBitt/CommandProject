@@ -163,7 +163,7 @@ const AI_ROWS: { key: AiToggle; icon: string; label: string; hint: string; needs
   { key: "air", icon: "flight", label: "Aviação estratégica", hint: "Caças pela superioridade aérea e escoltando o exército, bombardeiros em alvos sem antiaéreo, gunships apoiando o ataque.", needsCommander: true },
   { key: "micro", icon: "my_location", label: "Microgestão", hint: "Foco de fogo na unidade inimiga mais fraca, artilharia atrás da linha de frente, ataque em pinça, escolta de experimentais.", needsCommander: true },
   { key: "counter", icon: "radar", label: "Reconhecimento e contra-ataque", hint: "Batedores olham o que você constrói e as fábricas respondem: antiaéreo contra aviões, artilharia contra torres, navios contra frota.", needsCommander: true },
-  { key: "build", icon: "domain", label: "Defesa reativa e mini-bases", hint: "Torres e antiaéreo onde uma expansão é atacada, posto avançado com fábrica perto da frente, escudo sobre a base econômica.", needsCommander: true },
+  { key: "build", icon: "domain", label: "Bairros, defesa e base espaçosa", hint: "Bairros em volta da base principal em chão bom (bastiões com torres virados para o inimigo, oficinas com fábricas, retaguarda com energia e pesquisa), prédios com ruas entre eles, torres onde uma expansão é atacada e posto avançado perto da frente.", needsCommander: true },
   { key: "raids", icon: "bolt", label: "Ataques-relâmpago e distração", hint: "Unidades rápidas atacam extratores sem defesa e, durante o ataque principal, um ponto longe dele.", needsCommander: true },
   { key: "team", icon: "groups", label: "IAs aliadas em equipe", hint: "Em 2v2 ou mais, atacam o mesmo alvo juntas e ajudam o aliado atacado.", needsCommander: true },
   { key: "learn", icon: "school", label: "Aprende o seu jeito de jogar", hint: "A IA observa o seu estilo (rush, defensivo, aéreo, naval, saque, economia, experimentais), quando você ataca, por onde passa e o que ataca, e se adapta: emboscada na sua rota, torres onde você costuma bater, guarda contra saques, produção contra o seu exército, contra-ataque depois de você atacar. Jogando sozinho, lembra entre partidas (no Game.prefs do jogo, por mapa).", needsCommander: true },
@@ -391,6 +391,8 @@ export function OptimizeModal({ onClose }: { onClose: () => void }) {
 const FP_KEY = "cp-fp";
 /** versão do mod montado por esta versão do launcher (igual a `firstperson::MOD_VERSION`) */
 export const FP_VERSION = "1.2.0";
+/** a mesma de cp_core::aimod::MOD_VERSION */
+export const AI_VERSION = "2.0.0";
 export const FP_DEFAULT: FirstPersonOptions = { key: "F5", hud: true, drive: true, firstZoom: 14, thirdZoom: 38 };
 const FP_KEYS = ["F5", "F6", "F7", "F8", "F11", "Home", "Insert"];
 
