@@ -6,6 +6,18 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.54.0",
+    title: "Editor de mapas: pincéis sem travar, copiar e colar, simetria, peças e Raio-X",
+    items: [
+      { icon: "speed", title: "Pincéis sem travar", text: "O pincel de relevo e o pincel de textura do chão não travam mais ao começar a pintar: cada pincelada refaz só a área pintada (antes refazia o mapa inteiro), a prévia 3D atualiza no máximo uma vez por quadro e o que é caro (texturas automáticas, imagens 2D) espera o fim do traço.", page: "create" },
+      { icon: "widgets", title: "Peças, decoração natural e prévia da IA", text: "Peças prontas para colocar com um clique (expansões, platô com massa, cratera, desfiladeiro, lago com ilha) e as suas, guardadas a partir da seleção. Decorar Natural põe árvores no chão plano e pedras nas encostas. A camada Marcadores da IA mostra antes de gerar onde a IA vai andar, expandir e lutar, e o Raio-X aponta a massa disputada entre bases rivais.", page: "create" },
+      { icon: "content_paste", title: "Copiar, colar e simetria na hora", text: "Ctrl+C e Ctrl+V copiam bases, massa, formas e decorações e colam onde o mouse está, até em outro mapa. Aplicar simetria (Ctrl+M) repete o que você já colocou nos outros lados, só onde falta par; a validação avisa o que ficou sem par. Encaixe na grade (N), Selecionar iguais e Inverter seleção.", page: "create" },
+      { icon: "gesture", title: "Rios e serras editáveis ponto a ponto", text: "Selecione um rio, serra, cânion ou caminho e arraste os pontos para mudar o desenho; Alt+clique põe um ponto novo. Botões para suavizar a curva, simplificar e inverter o sentido.", page: "create" },
+      { icon: "grid_view", title: "Bases e decorações em modelos prontos", text: "Distribuir bases coloca as bases em círculo, nos cantos, frente a frente ou lado a lado, com a simetria e os times certos e o chão aplainado. Decorações em Fileira (cercas, muros) e Preencher área, e Tirar só o modelo escolhido.", page: "create" },
+      { icon: "query_stats", title: "Raio-X e camada de construção", text: "O Raio-X compara o seu mapa com os mapas competitivos (chão plano, níveis, paredões, massa por jogador e onde ela fica) e diz o que fazer. A camada Construção mostra onde cabe prédio, onde só passa e os paredões, com curvas de nível. Exporta o relevo e o mapa em PNG e liga/desliga os marcadores da IA.", page: "create" },
+    ],
+  },
+  {
     version: "0.53.0",
     title: "Gerador de mundos no estilo dos mapas competitivos",
     items: [

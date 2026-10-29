@@ -2633,6 +2633,8 @@ export function reliefImage(g: Grid, H: Float32Array, water: number, hasWater: b
   const s = g.size, w = s + 1, step = g.grid / s;
   let lo = Infinity, hi = -Infinity;
   for (const v of H) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  // mapa quase plano: o "alto" é relativo a um desnível mínimo (senão o chão liso vira neve)
+  hi = Math.max(hi, Math.max(lo, hasWater ? water : lo) + 90);
   const cv = document.createElement("canvas");
   cv.width = cv.height = px;
   const ctx = cv.getContext("2d")!;

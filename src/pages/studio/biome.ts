@@ -154,6 +154,30 @@ export function paintT(base: Float32Array, size: number, grid: number, paint?: P
   return out;
 }
 
+/**
+ * Refaz `t` só no retângulo de vértices [i0..i1] × [j0..j1] (pincel de textura): o mesmo que
+ * paintT(base, …, combinePaint(world, user)) dá nesses pontos, sem passar pelo mapa inteiro.
+ * `deck` marca os vértices do tabuleiro das pontes (t = 5).
+ */
+export function paintTRegion(out: Float32Array, base: Float32Array, size: number, grid: number, world: PaintLayer | null, user: PaintLayer,
+  i0: number, j0: number, i1: number, j1: number, deck?: Uint8Array | null) {
+  const w = size + 1, step = grid / size, n = user.n, pw = n + 1;
+  const wn = world?.n ?? 0, ww = wn + 1;
+  const hasWorld = !!world && world.power.some((v) => v);
+  for (let j = Math.max(0, j0); j <= Math.min(size, j1); j++) for (let i = Math.max(0, i0); i <= Math.min(size, i1); i++) {
+    const k = j * w + i;
+    if (deck && deck[k]) { out[k] = 5; continue; }
+    const pi = Math.min(n, Math.round(((i * step) / grid) * n)), pj = Math.min(n, Math.round(((j * step) / grid) * n)), pk = pj * pw + pi;
+    let role = user.role[pk], pow = user.power[pk];
+    if (!pow && hasWorld) {
+      const wk = Math.min(wn, Math.round((pj / n) * wn)) * ww + Math.min(wn, Math.round((pi / n) * wn));
+      role = world!.role[wk]; pow = world!.power[wk];
+    }
+    const b = base[k], f = pow / 255;
+    out[k] = f > 0 ? Math.min(3.999, b + (role - b) * f) : b;
+  }
+}
+
 /** muda a resolução de uma camada do pincel (vizinho mais perto) */
 export function resamplePaint(p: PaintLayer, n: number): PaintLayer {
   if (p.n === n) return p;

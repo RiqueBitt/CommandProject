@@ -31,7 +31,7 @@ interface Props {
   /** áreas onde as decorações do terreno serão retiradas */
   cuts?: [number, number, number][];
   /** objetos selecionados: círculos amarelos [x, z, raio] */
-  highlights?: [number, number, number][];
+  highlights?: ([number, number, number] | [number, number, number, string])[];
   /** recebe uma função que tira uma foto da vista (miniatura do projeto) */
   snapshotRef?: { current: (() => string | null) | null };
   /** câmera livre: o botão esquerdo gira em vez de editar */
@@ -46,6 +46,9 @@ interface Props {
   sky?: [number, number, number] | null;
   /** passagem das tropas por vértice: 0 livre, 1 íngreme/água, 2 bloqueado à mão, 3 liberado à mão */
   pass?: Uint8Array | null;
+  /** só estas faixas de linhas (de vértices, [primeira, última]) mudaram desde as alturas anteriores
+   *  — o pincel de relevo manda isso para a prévia não refazer o chão inteiro a cada pincelada */
+  dirtyRows?: [number, number][] | null;
   onPointer: (type: "down" | "move" | "up", p: Pt | null) => void;
   /** pedido de câmera (o número muda a cada pedido): jogo, passeio, de cima ou livre */
   cameraRequest?: { mode: "game" | "tour" | "top" | "free"; n: number } | null;
@@ -68,6 +71,8 @@ export interface GroundTextures {
   uniform?: boolean;
   /** posição de cada vértice na cadeia praia(0)→chão(1)→terra(2)→rocha(3)→topo(4), como no jogo */
   t?: Float32Array | null;
+  /** só estas faixas de linhas de `t` mudaram (pincel de textura): refaz só a mistura delas */
+  dirty?: [number, number][] | null;
   /** paisagem em volta do mapa (como no jogo): largura e altura das montanhas */
   ring?: { margin: number; rise: number; water: number | null; layer?: RingLayer | null; rev?: number } | null;
 }
@@ -78,7 +83,7 @@ export default function MapView3D(props: Props) {
   const live = useRef(props);
   live.current = props;
   const api = useRef<{
-    setHeights: () => void;
+    setHeights: (rows?: [number, number][] | null) => void;
     setTexture: (url: string | null) => void;
     setMarkers: () => void;
     setDecor: () => void;
@@ -149,6 +154,9 @@ export default function MapView3D(props: Props) {
     geo.setAttribute("splat", new THREE.BufferAttribute(splat, 4));
     geo.setAttribute("splatB", new THREE.BufferAttribute(splatB, 1));
     geo.setAttribute("splatC", new THREE.BufferAttribute(splatC, 1));
+    // normais calculadas direto da grade (bem mais rápido que computeVertexNormals a cada pincelada)
+    const nrm = new Float32Array(w * w * 3);
+    geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0, vertexColors: true });
     // chão com texturas: 4 camadas misturadas por vértice (praia, chão, rocha, topo), em dois
@@ -373,7 +381,11 @@ if (uGround > 0.5) {
         }
         lastRingOnly = rk;
         lastRingRev = g?.ring?.rev;
-        if (groundU.uGround.value > 0.5) scheduleHeights();
+        if (groundU.uGround.value > 0.5) {
+          // pincel de textura: o relevo é o mesmo, só a mistura de algumas linhas mudou
+          if (g?.dirty?.length && lastHeights === live.current.heights && lastExag === exag()) scheduleSplat(g.dirty);
+          else scheduleHeights();
+        }
         return;
       }
       groundKey = key;
@@ -400,9 +412,54 @@ if (uGround > 0.5) {
       return out.setRGB(0.32 + t * 0.4, 0.45 + t * 0.25, 0.27 + t * 0.32);
     };
 
-    const setHeights = () => {
+    /** alturas, exagero e paleta da última atualização completa (para saber se dá para ir por partes) */
+    let lastHeights: Float32Array | null = null, lastExag = -1, lastPal: unknown = undefined, lastPass: unknown = undefined;
+    const ATTRS = ["position", "color", "splat", "splatB", "splatC", "normal"] as const;
+    /** manda para a placa de vídeo só as linhas que mudaram (ou tudo, com `rows` nulo) */
+    const upload = (names: readonly string[], rows: [number, number][] | null) => {
+      for (const nm of names) {
+        const a = geo.attributes[nm] as THREE.BufferAttribute;
+        a.clearUpdateRanges();
+        if (rows) for (const [j0, j1] of rows) a.addUpdateRange(j0 * w * a.itemSize, (j1 - j0 + 1) * w * a.itemSize);
+        a.needsUpdate = true;
+      }
+    };
+    /** junta faixas que se tocam e limita à grade */
+    const mergeRows = (rows: [number, number][]) => {
+      const r = rows.map(([a, b]) => [Math.max(0, Math.min(a, b)), Math.min(size, Math.max(a, b))] as [number, number]).sort((x, y) => x[0] - y[0]);
+      const out: [number, number][] = [];
+      for (const q of r) { const l = out[out.length - 1]; if (l && q[0] <= l[1] + 1) l[1] = Math.max(l[1], q[1]); else out.push([q[0], q[1]]); }
+      return out;
+    };
+    const setNormals = (e: number, rows: [number, number][] | null) => {
+      const H = live.current.heights, k2 = (e / (2 * step));
+      for (const [j0, j1] of rows ?? [[0, size] as [number, number]]) for (let j = j0; j <= j1; j++) {
+        const up = Math.max(0, j - 1) * w, dn = Math.min(size, j + 1) * w, row = j * w;
+        for (let i = 0; i <= size; i++) {
+          const nx = -(H[row + Math.min(size, i + 1)] - H[row + Math.max(0, i - 1)]) * k2, nz = -(H[dn + i] - H[up + i]) * k2;
+          const inv = 1 / Math.sqrt(nx * nx + 1 + nz * nz), o = (row + i) * 3;
+          nrm[o] = nx * inv; nrm[o + 1] = inv; nrm[o + 2] = nz * inv;
+        }
+      }
+    };
+    /** mistura das texturas (t do pincel de textura) nas linhas pedidas; false = não há t */
+    const writeSplat = (rows: [number, number][]) => {
+      const gt = live.current.ground?.t;
+      if (!gt || gt.length !== w * w) return false;
+      for (const [j0, j1] of rows) for (let k = j0 * w; k < (j1 + 1) * w; k++) {
+        const tv = gt[k], wt = (r: number) => Math.max(0, 1 - Math.abs(tv - r));
+        if (tv > 4.5) { splat[k * 4] = splat[k * 4 + 1] = splat[k * 4 + 2] = splat[k * 4 + 3] = 0; splatB[k] = 0; splatC[k] = 1; }
+        else { splat[k * 4] = wt(0); splat[k * 4 + 1] = wt(1); splat[k * 4 + 2] = wt(3); splat[k * 4 + 3] = wt(4); splatB[k] = wt(2); splatC[k] = 0; }
+      }
+      return true;
+    };
+
+    const setHeights = (rowsIn: [number, number][] | null = null) => {
       const { heights, waterLevel } = live.current;
       const e = exag();
+      // por partes só se nada além das alturas dessas linhas mudou
+      const rows = rowsIn && lastHeights && lastExag === e && lastPal === live.current.palette && lastPass === live.current.pass ? mergeRows(rowsIn) : null;
+      lastHeights = heights; lastExag = e; lastPal = live.current.palette; lastPass = live.current.pass;
       let lo = Infinity, hi = -Infinity;
       for (let k = 0; k < heights.length; k++) { lo = Math.min(lo, heights[k]); hi = Math.max(hi, heights[k]); }
       const c = new THREE.Color();
@@ -412,7 +469,7 @@ if (uGround > 0.5) {
       const wet = waterLevel > 0.5;
       const base = Math.max(lo, wet ? waterLevel : lo);
       const gtFast = textured && !!live.current.ground?.t && live.current.ground.t.length === w * w;
-      for (let k = 0; k < w * w; k++) {
+      for (const [r0, r1] of rows ?? [[0, size] as [number, number]]) for (let k = r0 * w; k < (r1 + 1) * w; k++) {
         pos[k * 3 + 1] = heights[k] * e;
         if (pal) {
           const i = k % w, j = (k - i) / w;
@@ -451,12 +508,8 @@ if (uGround > 0.5) {
         else if (pc === 3) c.setRGB(c.r * 0.45, c.g * 0.6 + 0.45, c.b * 0.45);
         col.set([c.r, c.g, c.b], k * 3);
       }
-      geo.attributes.splat.needsUpdate = true;
-      geo.attributes.splatB.needsUpdate = true;
-      geo.attributes.splatC.needsUpdate = true;
-      geo.attributes.position.needsUpdate = true;
-      geo.attributes.color.needsUpdate = true;
-      geo.computeVertexNormals();
+      setNormals(e, rows);
+      upload(ATTRS, rows);
       geo.computeBoundingSphere();
       geo.computeBoundingBox();
       // saia: borda superior acompanha o relevo, a inferior desce até o chão
@@ -482,9 +535,32 @@ if (uGround > 0.5) {
     let heightsTimer = 0;
     // várias mudanças no mesmo quadro (pincel, pintura) viram uma atualização só
     let heightsFrame = 0;
-    const scheduleHeights = () => {
+    // linhas pendentes (null = tudo): pinceladas no mesmo quadro somam as faixas
+    let pendingRows: [number, number][] | null = [];
+    const scheduleHeights = (rows: [number, number][] | null = null) => {
+      pendingRows = rows && pendingRows ? [...pendingRows, ...rows] : null;
       if (heightsFrame) return;
-      heightsFrame = requestAnimationFrame(() => { heightsFrame = 0; setHeights(); invalidate(); });
+      heightsFrame = requestAnimationFrame(() => {
+        heightsFrame = 0;
+        const r = pendingRows;
+        pendingRows = [];
+        setHeights(r && r.length ? r : null);
+        invalidate();
+      });
+    };
+    // pincel de textura: só a mistura das linhas pintadas muda
+    let splatRows: [number, number][] = [];
+    let splatFrame = 0;
+    const scheduleSplat = (rows: [number, number][]) => {
+      splatRows.push(...rows);
+      if (splatFrame) return;
+      splatFrame = requestAnimationFrame(() => {
+        splatFrame = 0;
+        const r = mergeRows(splatRows);
+        splatRows = [];
+        if (heightsFrame) return; // a atualização completa já vem neste quadro
+        if (writeSplat(r)) { upload(["splat", "splatB", "splatC"], r); invalidate(); } else scheduleHeights();
+      });
     };
 
     const label = (text: string, color: string) => {
@@ -670,13 +746,14 @@ if (uGround > 0.5) {
         m.geometry.dispose();
         (m.material as THREE.Material).dispose();
       }
-      for (const [x, z, r] of live.current.highlights ?? []) {
-        const pts = new Float32Array(48 * 3);
-        for (let i = 0; i < 48; i++) {
-          const a = (i / 48) * Math.PI * 2, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+      for (const [x, z, r, color] of live.current.highlights ?? []) {
+        // círculos pequenos (marcadores da IA) com menos pontos
+        const n = r < 12 ? 16 : 48, pts = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
           pts.set([px, hAt(Math.max(0, Math.min(grid, px)), Math.max(0, Math.min(grid, pz))) + 2, pz], i * 3);
         }
-        const l = new THREE.LineLoop(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(pts, 3)), new THREE.LineBasicMaterial({ color: 0xffd166, depthTest: false, transparent: true }));
+        const l = new THREE.LineLoop(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(pts, 3)), new THREE.LineBasicMaterial({ color: color ?? 0xffd166, depthTest: false, transparent: true }));
         l.renderOrder = 8;
         hiGroup.add(l);
       }
@@ -905,7 +982,7 @@ if (uGround > 0.5) {
     };
   }, [props.size, props.grid, ctxGen]);
 
-  useEffect(() => { api.current?.setHeights(); }, [props.heights, props.waterLevel, props.exaggeration, props.palette, props.pass]);
+  useEffect(() => { api.current?.setHeights(props.dirtyRows ?? null); }, [props.heights, props.waterLevel, props.exaggeration, props.palette, props.pass]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { api.current?.setTexture(props.texture); }, [props.texture]);
   useEffect(() => { api.current?.setGround(); }, [props.ground]);
   useEffect(() => { api.current?.setSky(); }, [props.sky]);

@@ -107,6 +107,8 @@ export interface MapDoc {
   nav: string | null;
   /** passagem feita pelo gerador (por baixo da pintada à mão) */
   worldNav: string | null;
+  /** marcadores para a IA (caminhos, expansões, defesa) ao gerar; ausente = sim */
+  aiMarkers?: boolean;
 }
 
 /** Textura de chão importada: `asset` é o PNG guardado no projeto; `slug` dá o caminho no jogo. */
