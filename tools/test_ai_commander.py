@@ -814,7 +814,7 @@ def districts_plus():
     s.lua.execute("ArmyBrains[1].start = { 300, 300 } ArmyBrains[2].start = { 800, 800 }")
     s.lua.execute("CPAI.commanders[1].home = { 300, 0, 300 }")
     # mar a oeste (x < 180) e um cânion estreito na direção do inimigo (paredes baixas)
-    s.lua.execute("World.sea = function(x, z) return x < 180 end")
+    s.lua.execute("World.sea = function(x, z) return x < 180 or x > 640 end")
     s.lua.execute("""World.terrain = function(x, z)
         local dx, dz = x - 300, z - 300
         local along = (dx + dz) / 1.4142
@@ -1298,6 +1298,51 @@ def tactics_more():
     check(not s.W.warn, f"sem erros ({s.W.warn})")
 
 
+def acu_and_navy():
+    """O comandante (ACU) não fica longe da base: volta e um engenheiro assume a obra; marinha só
+    quando o mar importa."""
+    s = Scenario(micro="false", air="false", build="true", counter="true", adaptive="false", team="false")
+    new = s.new
+    s.W.time = 400
+    new(1, "STRUCTURE FACTORY", 50, 50, 0, {"canBuild": {"uul0002": True, "uus0102": True}})
+    acu = new(1, "COMMAND MOBILE LAND ENGINEER", 300, 300, 8)
+    eng = new(1, "ENGINEER MOBILE LAND", 60, 60, 0)
+    new(2, "STRUCTURE FACTORY", 450, 450, 0)
+    s.step()
+    o = s.last(acu)
+    check(o is not None and o.kind == "move" and ((o.pos[1] - 50) ** 2 + (o.pos[3] - 50) ** 2) ** 0.5 < 40, "comandante longe da base volta para perto dela")
+    e = s.last(eng)
+    check(e is not None and e.kind == "move" and abs(e.pos[1] - 300) < 30, "um engenheiro vai fazer a obra no lugar dele")
+    c = s.g.CPAI.commanders[1]
+    for _ in range(3):
+        acu.x, acu.z = 320, 320
+        s.lua.execute("CPAI.commanders[1].cooldowns.aculeash = 0")
+        s.step()
+    check(c.acuKept, "depois de duas vezes o comandante sai das obras do jogo e fica em casa")
+    j = [str(x.text) for x in c.journal.values()]
+    check(any("comandante longe da base" in x for x in j), "diário explica")
+    # sem navio inimigo visto: nada de frota
+    ids = [q.id for q in s.W.factoryQueue.values()]
+    check("uus0102" not in ids, f"não faz navios sem ver a marinha inimiga ({ids})")
+    # o mapa seco: sem porto, mesmo com a personalidade naval
+    s2 = Scenario(build="true", counter="false", adaptive="false", air="false", team="false", personality="naval")
+    s2.lua.execute("ScenarioInfo = { size = { 1024, 1024 } }")
+    s2.lua.execute("ArmyBrains[1].start = { 300, 300 } ArmyBrains[2].start = { 800, 800 }")
+    s2.lua.execute("CPAI.commanders[1].home = { 300, 0, 300 }")
+    s2.lua.execute("World.sea = function(x, z) return x < 140 end")
+    s2.new(1, "STRUCTURE FACTORY", 300, 300, 0)
+    for i in range(3):
+        s2.new(1, "ENGINEER MOBILE LAND", 305 + i, 300, 0)
+    s2.new(2, "STRUCTURE FACTORY", 800, 800, 0)
+    s2.W.time = 160
+    s2.step(times=2)
+    c2 = s2.g.CPAI.commanders[1]
+    roles = [d.role for d in c2.districts.values()]
+    check("harbor" not in roles, f"pouca água: sem porto ({roles})")
+    check(c2.personalityKey == "balanced", f"personalidade naval vira equilibrada com pouca água ({c2.personalityKey})")
+    check(not s.W.warn and not s2.W.warn, f"sem erros ({s.W.warn} {s2.W.warn})")
+
+
 def panel_plus():
     """O painel mostra o placar, o diário e o mapinha com bairros, ataque e previsão."""
     lua = LuaRuntime(unpack_returned_tuples=True)
@@ -1342,6 +1387,7 @@ def main() -> int:
     islands_team_scout()
     alsyper()
     tactics_more()
+    acu_and_navy()
     panel_plus()
     districts()
     panel()

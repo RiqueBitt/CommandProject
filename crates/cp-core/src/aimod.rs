@@ -114,7 +114,7 @@ pub struct AiBuild {
 
 /// Versão do mod da IA: muda quando o comandante ou os ajustes mudam (o launcher monta de novo
 /// sozinho, com as opções salvas, quando a cópia instalada é de outra versão).
-pub const MOD_VERSION: &str = "2.2.0";
+pub const MOD_VERSION: &str = "2.3.0";
 
 const COMMANDER_LUA: &str = include_str!("aimod_commander.lua");
 const PANEL_LUA: &str = include_str!("aimod_panel.lua");
@@ -173,6 +173,9 @@ enum Op {
     InsertBeforeEnd { function: String, line: String },
     /// acrescenta no fim se o arquivo ainda não tiver `marker`
     AppendOnce { marker: String, code: String },
+    /// tira `ids` da lista de quem constrói (BuilderIds) nas obras do jogo que têm algum dos
+    /// textos de `only_if` (todas, se vazio); obra que ficaria sem ninguém fica como está
+    StripBuilders { ids: Vec<String>, only_if: Vec<String> },
 }
 
 struct FileEdit {
@@ -193,11 +196,12 @@ const NAVAL_UNITS_OFF: &str = "ResourceType = 'NavalUnits',
             MassPercent = 0,
             EnergyCap = -1,
             EnergyPercent = 0,";
+// uma parte pequena do orçamento: navios quando há mar, sem tirar a economia do exército
 const NAVAL_UNITS_ON: &str = "ResourceType = 'NavalUnits',
-            MassCap = 200,
-            MassPercent = 0.08,
-            EnergyCap = 500,
-            EnergyPercent = 0.08,";
+            MassCap = 120,
+            MassPercent = 0.04,
+            EnergyCap = 300,
+            EnergyPercent = 0.04,";
 
 fn naval_factory_builder(id: &str, max: u32, extractors: u32, priority: u32) -> String {
     let cond = |faction: u32| {
@@ -219,9 +223,7 @@ fn naval_factory_builder(id: &str, max: u32, extractors: u32, priority: u32) -> 
     AnnounceFail = false,
     BlueprintId = '{id}',
     BuilderIds = {{
-        'uul0001',
         'uul0002',
-        'ucl0001',
         'ucl0002',
     }},
     Conditions = {{
@@ -385,9 +387,8 @@ fn edits(o: &AiOptions) -> Vec<FileEdit> {
                 (
                     "estaleiros para todos os tipos de IA".into(),
                     Op::Append(format!(
-                        "-- CommandProject AI: every archetype builds shipyards when its base is next to water\n{}{}",
-                        naval_factory_builder("CP - Need Naval Factory", 1, 4, 1010),
-                        naval_factory_builder("CP - Need Naval Factory - 2", 2, 8, 960),
+                        "-- CommandProject AI: every archetype builds a shipyard when its base is next to water\n{}",
+                        naval_factory_builder("CP - Need Naval Factory", 1, 6, 900),
                     )),
                 ),
             ],
@@ -465,6 +466,23 @@ fn edits(o: &AiOptions) -> Vec<FileEdit> {
                 "GetEconomyStored('RESEARCH') >= researchBp.COST",
             )],
         );
+    }
+
+    if o.commander || o.economy {
+        // o comandante (ACU) não vai mais construir extratores, estaleiros e defesas longe da
+        // base (onde morria): os engenheiros fazem essas obras; ele continua no começo da partida
+        let acus: Vec<String> = ["uul0001", "ucl0001", "uil0001"].iter().map(|s| s.to_string()).collect();
+        let far: Vec<String> = ["BuildLocation = 'MassPoint'", "BuildLocation = 'NavalMarker'", "BuildLocation = 'DefensivePoint'"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        for path in [
+            "lua/AI/skirmish/EngineerBuilders/SAIEngineerBuilders_Economy.bp",
+            "lua/AI/skirmish/EngineerBuilders/SAIEngineerBuilders_Defense.bp",
+            "lua/AI/skirmish/EngineerBuilders/SAIEngineerBuilders_ExperimentalStructures.bp",
+        ] {
+            add(path, vec![("comandante não constrói longe da base".into(), Op::StripBuilders { ids: acus.clone(), only_if: far.clone() })]);
+        }
     }
 
     if o.build {
@@ -547,6 +565,50 @@ fn resolve(sources: &[PathBuf], path: &str) -> Result<(String, String)> {
     Ok((path.to_string(), latin1(&raw)))
 }
 
+/// Tira construtores das obras (blocos `SkirmishEngineerBlueprint`). Devolve o texto e quantas
+/// obras mudaram.
+fn strip_builders(text: &str, ids: &[String], only_if: &[String]) -> (String, usize) {
+    const HEAD: &str = "SkirmishEngineerBlueprint {";
+    let mut out = String::with_capacity(text.len());
+    let mut changed = 0;
+    let mut rest = text;
+    while let Some(start) = rest.find(HEAD) {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + HEAD.len()..];
+        let end = after.find(HEAD).map(|i| start + HEAD.len() + i).unwrap_or(rest.len());
+        let block = &rest[start..end];
+        let wanted = only_if.is_empty() || only_if.iter().any(|w| block.contains(w.as_str()));
+        let is_id = |line: &str| ids.iter().any(|id| line.trim() == format!("'{id}',"));
+        if wanted && block.lines().any(is_id) {
+            // as linhas de BuilderIds que sobram: só muda se ainda fica alguém para construir
+            let ids_start = block.find("BuilderIds = {");
+            let ids_end = ids_start.and_then(|i| block[i..].find('}').map(|j| i + j));
+            if let (Some(a), Some(b)) = (ids_start, ids_end) {
+                let list = &block[a..b];
+                let keep = list.lines().skip(1).filter(|l| !l.trim().is_empty() && !is_id(l)).count();
+                if keep > 0 {
+                    let mut new_block = String::with_capacity(block.len());
+                    new_block.push_str(&block[..a]);
+                    for piece in list.split_inclusive('\n') {
+                        if !is_id(piece) {
+                            new_block.push_str(piece);
+                        }
+                    }
+                    new_block.push_str(&block[b..]);
+                    out.push_str(&new_block);
+                    changed += 1;
+                    rest = &rest[end..];
+                    continue;
+                }
+            }
+        }
+        out.push_str(block);
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    (out, changed)
+}
+
 fn apply(text: &str, ops: &[(String, Op)], skipped: &mut Vec<String>) -> (String, usize) {
     let mut out = text.to_string();
     let mut applied = 0;
@@ -587,6 +649,15 @@ fn apply(text: &str, ops: &[(String, Op)], skipped: &mut Vec<String>) -> (String
                 out.push('\n');
                 out.push_str(code);
                 applied += 1;
+            }
+            Op::StripBuilders { ids, only_if } => {
+                let (text, changed) = strip_builders(&out, ids, only_if);
+                if changed == 0 {
+                    skipped.push(what.clone());
+                } else {
+                    out = text;
+                    applied += 1;
+                }
             }
         }
     }
@@ -639,6 +710,26 @@ mod tests {
         }
         assert!(commander_lua(&AiOptions { level: 3, ..Default::default() }).contains("level = 3,"));
         assert!(!panel_lua(&AiOptions::default()).contains("@KEY@"));
+    }
+
+    #[test]
+    fn acu_off_far_jobs() {
+        let text = "SkirmishEngineerBlueprint {\r\n    BlueprintId = 'a',\r\n    BuilderIds = {\r\n        'uul0001',\r\n        'uul0002',\r\n    },\r\n    BuildLocation = 'MassPoint',\r\n}\r\n\r\nSkirmishEngineerBlueprint {\r\n    BlueprintId = 'b',\r\n    BuilderIds = {\r\n        'uul0001',\r\n        'uul0002',\r\n    },\r\n    BuildLocation = 'Base',\r\n}\r\nSkirmishEngineerBlueprint {\r\n    BlueprintId = 'c',\r\n    BuilderIds = {\r\n        'uul0001',\r\n    },\r\n    BuildLocation = 'MassPoint',\r\n}\r\n";
+        let ids = vec!["uul0001".to_string()];
+        let (out, n) = strip_builders(text, &ids, &["BuildLocation = 'MassPoint'".to_string()]);
+        assert_eq!(n, 1);
+        let a = &out[..out.find("'b'").unwrap()];
+        assert!(!a.contains("'uul0001'") && a.contains("'uul0002',\r\n    },"));
+        // a obra na base continua com o comandante; a que ficaria sem ninguém também
+        let b = &out[out.find("'b'").unwrap()..out.find("'c'").unwrap()];
+        assert!(b.contains("'uul0001'"));
+        assert!(out[out.find("'c'").unwrap()..].contains("'uul0001'"));
+        // todo o resto igual
+        assert_eq!(out.len(), text.len() - "        'uul0001',\r\n".len());
+        // o naval só manda engenheiros
+        let files = edits(&AiOptions::default());
+        let naval = files.iter().find(|f| f.path.ends_with("Factories_NavalFocus.bp")).unwrap();
+        assert!(naval.ops.iter().any(|(_, op)| matches!(op, Op::Append(c) if c.contains("'uul0002'") && !c.contains("'uul0001'"))));
     }
 
     #[test]

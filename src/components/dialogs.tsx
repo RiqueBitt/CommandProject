@@ -428,7 +428,7 @@ const FP_KEY = "cp-fp";
 /** versão do mod montado por esta versão do launcher (igual a `firstperson::MOD_VERSION`) */
 export const FP_VERSION = "1.2.0";
 /** a mesma de cp_core::aimod::MOD_VERSION */
-export const AI_VERSION = "2.2.0";
+export const AI_VERSION = "2.3.0";
 export const FP_DEFAULT: FirstPersonOptions = { key: "F5", hud: true, drive: true, firstZoom: 14, thirdZoom: 38 };
 const FP_KEYS = ["F5", "F6", "F7", "F8", "F11", "Home", "Insert"];
 

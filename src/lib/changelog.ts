@@ -6,6 +6,14 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.58.0",
+    title: "IA: comandante seguro e marinha na medida",
+    items: [
+      { icon: "shield_person", title: "Comandante (ACU) protegido", text: "As obras do jogo mandavam o comandante construir extratores, defesas e estaleiros longe da base, onde ele morria. Agora essas obras ficam só com os engenheiros. Se mesmo assim o comandante passar de 100 unidades da base, ele volta e um engenheiro termina a obra no lugar dele; a fábrica faz um engenheiro novo se não houver nenhum livre. Depois de duas vezes, o comandante sai das obras do jogo e fica guardando a base. A estratégia Pressão com o comandante agora só o leva até a frente da base.", page: "mods" },
+      { icon: "sailing", title: "Menos navios", text: "Só um estaleiro por base e metade do orçamento naval. Navios contra-atacando só quando os batedores viram uma marinha inimiga, e só o suficiente para enfrentá-la. Porto só em mapa com bastante água (ou numa IA que aprendeu a usar o mar). Com pouca água, a personalidade naval vira equilibrada e a estratégia Domínio naval quase não aparece.", page: "mods" },
+    ],
+  },
+  {
     version: "0.57.0",
     title: "Alsyper Adaptador: a IA que evolui com você e com o mapa",
     items: [

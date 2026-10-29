@@ -2155,7 +2155,8 @@ function Commander.Counter(self)
             if made then self.plan = 'artilharia contra defesas' end
         end
     end
-    if not made and (intel.naval > 10 / Commander.Gene(self, 'naval') or (st.naval or 0) > 0.5) and PowerOf(self.squads.fleet.members) < math.max(intel.naval, 10) * Commander.Gene(self, 'naval') then
+    -- ships only against a navy it has actually seen, and only enough to match it
+    if not made and intel.naval > 10 and PowerOf(self.squads.fleet.members) < intel.naval * math.min(1.2, Commander.Gene(self, 'naval')) then
         made = Commander.Queue(self, self.units.ship, 2)
         if made then self.plan = 'reforco naval' end
     end
@@ -2175,7 +2176,7 @@ end
 function Commander.Engineer(self, near, urgent)
     local best, bestD, busyBest, busyD = false, 0, false, 0
     for _, e in ipairs(Commander.List(self, Categories().engineer)) do
-        if Ready(e) then
+        if Ready(e) and not (e.CPJob and e.CPJob > Now()) then
             local okb, building = pcall(e.IsUnitState, e, 'Building')
             if not (okb and building) then
                 local d = Dist(e:GetPosition(), near)
@@ -2323,8 +2324,7 @@ local DISTRICT_PLANS = {
         { 'aatower', 12, -16 }, { 'tower', 24, 0 }, { 'shield', 6, 12 },
     },
     harbor = {
-        { 'navalfactory', 24, 0 }, { 'tower', 0, -16 }, { 'aatower', 0, 16 }, { 'shield', -10, 0 },
-        { 'navalfactory', 26, 26 }, { 'tower', 12, 28 },
+        { 'navalfactory', 24, 0 }, { 'tower', 0, -16 }, { 'aatower', 0, 16 }, { 'shield', -10, 0 }, { 'tower', 12, 28 },
     },
 }
 -- a narrow passage in front of a bastion gets a line of towers across it
@@ -2460,7 +2460,9 @@ function Commander.PlanDistricts(self)
         return true
     end
     local cands, harbors = {}, {}
-    local naval = self.units.navalfactory
+    -- a harbor only where the sea matters: much water on the map or a navy-minded AI
+    local water = CPAI.WaterShare and CPAI.WaterShare() or 0
+    local naval = self.units.navalfactory and (water > 0.35 or Commander.Gene(self, 'naval') >= 1.15) and self.units.navalfactory
     for _, ring in { 105, 150, 200 } do
         local r = ring * scale
         for step = 0, 17 do
@@ -2509,7 +2511,7 @@ function Commander.PlanDistricts(self)
     table.sort(harbors, function(a, b) return a.score > b.score end)
     local roles = { bastion = 0, workshop = 0, rear = 0, forge = 0, harbor = 0, inner = 0 }
     for _, d in districts do roles[d.role] = (roles[d.role] or 0) + 1 end
-    local limit = { bastion = hard and 4 or 3, workshop = hard and 3 or 2, rear = 1, forge = 1, harbor = hard and 2 or 1 }
+    local limit = { bastion = hard and 4 or 3, workshop = hard and 3 or 2, rear = 1, forge = 1, harbor = 1 }
     local function add(c, role)
         local k = math.mod(math.floor((c.angle + 3.1416 + 0.3927) / 0.7854), 8) + 1
         roles[role] = roles[role] + 1
@@ -2652,7 +2654,7 @@ function Commander.Districts(self, threatPos)
         local okb, building = pcall(eng.IsUnitState, eng, 'Building')
         local oki, idle = pcall(eng.IsIdleState, eng)
         local ep = eng:GetPosition()
-        if not (okb and building) and oki and idle and not eng.CPFlying then
+        if not (okb and building) and oki and idle and not eng.CPFlying and not (eng.CPJob and eng.CPJob > t) then
             local pick = false
             for i = 1, table.getn(districts) do
                 local d = districts[i]
@@ -2956,11 +2958,52 @@ function Commander.Repair(self, threatPos)
 end
 
 -- ---------------------------------------------------------------- the ACU
+-- how far from home the ACU may go (inside the base with streets, plus a little)
+local ACU_LEASH = 100
+
+-- the game's own builders sometimes send the ACU to build an expansion far away, where it dies:
+-- it comes back and an engineer takes the job (finishes what was started, or the factories make
+-- one); after doing it twice the ACU stops taking jobs from the game and guards home
+function Commander.AcuLeash(self, acu, pos, threatPos)
+    if self.acuFleeing or Dist(pos, self.home) <= ACU_LEASH then return false end
+    -- helping against an attack at home is allowed
+    if self.acuDefending and threatPos and Dist(threatPos, self.home) < 90 then return false end
+    if not Commander.Cooldown(self, 'aculeash', 6) then return true end
+    local job = false
+    local okf, focus = pcall(function() return acu:GetFocusUnit() end)
+    if okf and focus and Alive(focus) and focus ~= acu then job = focus end
+    pcall(IssueClearCommands, { acu })
+    Order({ acu }, 'move', Toward(self.home, pos, 25))
+    local eng = Commander.Engineer(self, pos, true)
+    if eng then
+        pcall(IssueClearCommands, { eng })
+        if job then pcall(IssueRepair, { eng }, job) else Order({ eng }, 'move', pos) end
+        -- busy with the ACU's job for a while (no other order takes it)
+        eng.CPJob = Now() + 60
+    elseif self.units.engineer then
+        Commander.Queue(self, self.units.engineer, 1)
+    end
+    self.acuStrays = (self.acuStrays or 0) + 1
+    if self.acuStrays >= 2 and not self.acuKept then
+        -- out of the game's builder pool: it stays home for good
+        self.acuKept = true
+        if not self.acuPlatoon then
+            local ok, p = pcall(self.brain.MakePlatoon, self.brain, '', '')
+            self.acuPlatoon = ok and p or false
+        end
+        if self.acuPlatoon then pcall(self.brain.AssignUnitsToPlatoon, self.brain, self.acuPlatoon, { acu }, 'Support', 'None') end
+    end
+    Commander.Note(self, 'comandante longe da base: voltou e um engenheiro assumiu a obra')
+    self.plan = 'protegendo o comandante'
+    return true
+end
+
 function Commander.LeadAcu(self, threatPos, threatPower)
     local acu = Commander.List(self, Categories().acu)[1]
     if not acu or not Ready(acu) then return end
     local f = HealthFraction(acu)
     local pos = acu:GetPosition()
+    if Commander.AcuLeash(self, acu, pos, threatPos) then return end
     local danger = Commander.MobileDanger(self, pos, 40) + SumAround(Snapshot(), self.enemies, 'towers', pos, 40)
     if self.acuFleeing then
         if f > 0.7 or (danger <= 0 and Dist(pos, self.home) < 30) then
@@ -3080,6 +3123,8 @@ local function WaterShare()
     return CPAI.waterShare
 end
 
+CPAI.WaterShare = WaterShare
+
 function Commander.Adapter(self)
     if not self.genes then Commander.InitGenes(self) end
     if not Commander.Cooldown(self, 'alsyper', 20) then return end
@@ -3118,8 +3163,15 @@ function Commander.Adapter(self)
     if not self.mapRead then
         self.mapRead = true
         local w = WaterShare()
-        if w > 0.35 then Commander.Shift(self, 'naval', 0.2, 'mapa com muita agua') Commander.Shift(self, 'air', 0.1, nil) end
-        if w < 0.05 then Commander.Shift(self, 'naval', -0.3, 'mapa sem mar') end
+        if w > 0.45 then Commander.Shift(self, 'naval', 0.1, 'mapa com muita agua') Commander.Shift(self, 'air', 0.1, nil) end
+        if w < 0.2 then Commander.Shift(self, 'naval', -0.3, 'pouca agua no mapa: a marinha fica pequena') end
+        -- the naval personality on a map with little water plays balanced
+        if self.personalityKey == 'naval' and w < 0.3 then
+            self.personalityKey = 'balanced'
+            self.P = PERSONALITIES.balanced
+            self.ratio = Commander.BaseRatio(self)
+            Commander.Note(self, 'pouca agua: trocou a personalidade naval pela equilibrada')
+        end
         local W, H = MapSize()
         if math.min(W, H) >= 1500 then Commander.Shift(self, 'expansion', 0.15, 'mapa grande') end
     end
@@ -3479,7 +3531,7 @@ function Commander.Steal(self)
     end
     local builders = {}
     for _, e in ipairs(Commander.List(self, Categories().engineer)) do
-        if e.CPBuilder and not e.CPIsland and Ready(e) then table.insert(builders, e) end
+        if e.CPBuilder and not e.CPIsland and Ready(e) and not (e.CPJob and e.CPJob > Now()) then table.insert(builders, e) end
     end
     local eng = builders[1] or Commander.Engineer(self, spot, false)
     if not eng then return end
@@ -3549,7 +3601,7 @@ local STRATEGIES = {
     { id = 'turtle', label = 'Defesa fortificada', when = function(c) return (c.adaptive > 0 or c.tally.lost > 1) and 1.3 or Commander.Gene(c, 'defense') * 0.5 end, genes = { defense = 0.3, aggression = -0.1 } },
     { id = 'experimental', label = 'Investimento em experimentais', when = function(c) return Now() > 900 and Commander.Gene(c, 'tech') or 0.1 end, genes = { tech = 0.3 } },
     { id = 'acupush', label = 'Pressao com o comandante', when = function(c) return Now() < 420 and c.personalityKey ~= 'defensive' and 0.9 or 0 end, genes = { aggression = 0.1 } },
-    { id = 'naval', label = 'Dominio naval', when = function(c) return WaterShare() > 0.3 and Commander.Gene(c, 'naval') * 1.1 or 0 end, genes = { naval = 0.3 } },
+    { id = 'naval', label = 'Dominio naval', when = function(c) return WaterShare() > 0.45 and Commander.Gene(c, 'naval') * 0.8 or 0 end, genes = { naval = 0.15 } },
     { id = 'simultaneous', label = 'Ataques simultaneos', when = function(c) return table.getn(c.squads.main.members) >= Commander.MinUnits(c) * 2.5 and 1.2 or 0.2 end, genes = { aggression = 0.1 } },
     { id = 'ecopressure', label = 'Pressao economica', when = function(c) return Commander.Gene(c, 'harass') * 0.8 + ((c.enemyExtractors or 0) > (c.extractors or 0) + 4 and 0.5 or 0) end, genes = { harass = 0.25 } },
     { id = 'focus', label = 'Fogo concentrado', when = function(c) return CFG.micro and 0.6 or 0 end, genes = {} },
@@ -3649,9 +3701,11 @@ function Commander.AcuPush(self)
     local main = self.squads.main
     if not acu or not Ready(acu) or self.acuFleeing or HealthFraction(acu) < 0.75 then return false end
     if main.state == 'attack' and main.target and Commander.Cooldown(self, 'acupush', 20) then
-        Order({ acu }, 'attack', main.target)
+        -- the ACU holds the front edge of the base (it never leaves with the army)
+        local spot = Toward(self.home, main.target, math.min(ACU_LEASH - 30, Dist(self.home, main.target) * 0.3))
+        Order({ acu }, 'attack', spot)
         self.acuPushing = true
-        Commander.Note(self, 'comandante avancando junto com o exercito')
+        Commander.Note(self, 'comandante segurando a frente da base enquanto o exercito ataca')
         return true
     end
     return false
