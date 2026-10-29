@@ -65,6 +65,7 @@ function Sound(t) return t end
 DEFAULTS = {
     "LEVEL": "1", "RAIDS": "true", "PERSONALITY": "balanced", "AIR": "true", "MICRO": "true",
     "BUILD": "true", "COUNTER": "true", "TEAM": "true", "ADAPTIVE": "true", "STATUS": "true", "LEARN": "true",
+    "AGGRESSION": "1", "DISTRICTS": "1", "AIRBIAS": "1", "NAVALBIAS": "1", "TIPS": "false", "CHAT": "false",
 }
 
 
@@ -423,9 +424,10 @@ def air_acu_counter_bases():
     new(1, "STRUCTURE MASSEXTRACTION", 205, 205, 0)
     eng = new(1, "ENGINEER MOBILE LAND", 60, 60, 0)
     new(1, "ENGINEER MOBILE LAND", 62, 60, 0)
-    # enemy: air force and an undefended extractor field
+    # enemy: air force (seen by a scout of ours) and an undefended extractor field
     for i in range(12):
         new(2, "MOBILE AIR", 400 + i, 400, 3, {"air": 0})
+    new(1, "STRUCTURE RADAR", 390, 390, 0)
     new(2, "STRUCTURE MASSEXTRACTION", 300, 120, 0)
     # our air force
     fighters = [new(1, "MOBILE AIR FIGHTER ANTIAIR", 50 + i, 50, 0, {"air": 6}) for i in range(4)]
@@ -768,7 +770,7 @@ def districts():
     s.W.time = 160
     s.step(times=1)
     c = s.g.CPAI.commanders[1]
-    ds = list(c.districts.values()) if c.districts else []
+    ds = [d for d in (c.districts.values() if c.districts else []) if d.role != "inner"]
     check(len(ds) >= 4, f"planeja vários bairros em volta da base ({len(ds)})")
     roles = [d.role for d in ds]
     check("bastion" in roles and "workshop" in roles, f"bastiões e oficinas ({roles})")
@@ -1098,6 +1100,204 @@ def islands_team_scout():
     check((100, 400) in goals or (400, 100) in goals, f"batedor varre as expansões ({sorted(goals)})")
 
 
+def alsyper():
+    """Alsyper Adaptador: genes que começam do que aprendeu, mudam com o que vê e voltam para a
+    memória; reconhecimento no começo e o que a IA acredita; estratégias."""
+    s = Scenario(build="true", counter="true", adaptive="false", air="true", team="false", tips="true", chat="true")
+    new = s.new
+    s.lua.execute("CPAIReceiveMemory({ games = 4, style = {}, genes = { aggression = 1.6, air = 1.5, naval = 0.4 }, results = { 1, 1, 1 } })")
+    new(1, "STRUCTURE FACTORY", 50, 50, 0, {"canBuild": {"uua0101": True, "uul0101": True, "uul0002": True}})
+    for i in range(3):
+        new(1, "ENGINEER MOBILE LAND", 60 + i, 60, 0)
+    new(2, "STRUCTURE FACTORY", 450, 450, 0)
+    s.W.time = 60
+    s.step(times=2)
+    c = s.g.CPAI.commanders[1]
+    check(c.genes is not None and c.genes.aggression > 1.2 and c.genes.air > 1.15, f"genes começam do que aprendeu ({c.genes.aggression:.2f}, {c.genes.air:.2f})")
+    check(c.generation == 5, f"geração conta as partidas ({c.generation})")
+    check(s.g.CPAI.strength > 1.1, "o jogador venceu as últimas: a IA fica mais forte")
+    ids = [q.id for q in s.W.factoryQueue.values()]
+    j = [str(x.text) for x in c.journal.values()]
+    check(any("batedores" in x for x in j), "sem ver o mapa: avisa no diário e manda batedor")
+    check("uua0101" in ids or "uul0101" in ids, f"pede um avião/unidade para reconhecer ({ids})")
+    check(c.belief is None or len(list(c.belief.values())) == 0, "ainda não acredita em nada que não viu")
+    # um batedor chega na base inimiga
+    plane = new(1, "MOBILE AIR SCOUT", 445, 448, 0)
+    for i in range(6):
+        new(2, "MOBILE AIR", 440 + i, 452, 3, {"air": 0})
+    s.lua.execute("CPAI.snap = nil")
+    s.step()
+    check(c.seenAt is not None and c.seenAt is not False, "viu a base inimiga com o batedor")
+    b = list(c.belief.values())[0]
+    check(b.factories >= 1 and b.air > 5, f"agora sabe das fábricas e da aviação ({b.factories}, {b.air:.0f})")
+    j = [str(x.text) for x in c.journal.values()]
+    check(any("viu a base inimiga" in x for x in j), "diário conta o que o batedor viu")
+    # o que acontece na partida muda os genes
+    before = c.genes.aggression
+    c.tally.retreats = c.tally.retreats + 3
+    s.lua.execute("CPAI.commanders[1].cooldowns.alsyper = 0")
+    s.step()
+    check(c.genes.aggression < before, "ataques falhando: menos agressão")
+    j = [str(x.text) for x in c.journal.values()]
+    check(any(x.startswith("Alsyper") for x in j), "diário explica cada mudança do Alsyper")
+    check(c.strategy is not None and c.strategyLabel, f"escolhe uma estratégia ({c.strategyLabel})")
+    mem = s.lua.eval("CPAIModelMemory()")
+    check(mem.genes is None or mem.genes.aggression is not None, "os genes vão para a memória")
+    summ = s.lua.eval("CPAI.status[1] and CPAI.status[1].alsyper")
+    check(summ is not None and "agressao" in str(summ.genes), "painel recebe os genes")
+    check(not s.W.warn, f"sem erros ({s.W.warn})")
+
+    # fim de partida: o jogador perdeu → resultado vai para a memória (a próxima IA ajusta a força)
+    s.lua.execute("ArmyBrains[2].IsDefeated = function() return true end CPAI.result = nil")
+    s.W.time = 400
+    s.step()
+    res = s.lua.eval("Sync.CPAIResult")
+    check(res is not None and res.result == -1, "fim de partida: a IA venceu e isso vai para a memória")
+
+
+def tactics_more():
+    """Pesquisa com plano, corrida de experimental, hora certa, emboscada, isca, extratores
+    tomados, destroços, patrulha aérea, antinuclear, conversor, veteranos, engenheiros e ACU."""
+    s = Scenario(build="true", counter="false", adaptive="false", air="true", team="false", personality="airborne")
+    new = s.new
+    s.lua.execute("ArmyBrains[1].SkirmishAISystem.ResearchNeeds = {}")
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    s.W.time = 100
+    s.step(times=2)
+    needs = list(s.lua.eval("ArmyBrains[1].SkirmishAISystem.ResearchNeeds").values())
+    check(any(str(n).startswith("UA") for n in needs), f"pesquisa com plano (aérea: {needs[:4]})")
+
+    # corrida de experimental: viu a fábrica, exército forte → ataca ela
+    s = Scenario(micro="false", air="false", build="false", counter="false", adaptive="false", team="false")
+    new = s.new
+    s.W.time = 600
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    army = [new(1, "MOBILE LAND", 60 + i, 60, 3) for i in range(14)]
+    new(2, "STRUCTURE FACTORY", 450, 450, 0)
+    for i in range(3):
+        new(2, "STRUCTURE DEFENSE", 448 + i, 452, 2)
+    new(2, "STRUCTURE FACTORY EXPERIMENTALFACTORY", 300, 380, 0)
+    new(2, "STRUCTURE MASSEXTRACTION", 120, 420, 0)
+    new(1, "MOBILE LAND", 300, 375, 1)
+    s.step(times=3)
+    c = s.g.CPAI.commanders[1]
+    check(c.expStrike, "viu a fábrica de experimental e decidiu atacar")
+    o = s.last(army[0])
+    check(o is not None and o.pos and abs(o.pos[1] - 300) < 30 and abs(o.pos[3] - 380) < 30, "ataca a fábrica de experimental antes de ficar pronta")
+
+    # hora certa: o exército inimigo acabou de perder muito
+    s = Scenario(micro="false", air="false", build="false", counter="false", adaptive="false", team="false")
+    new = s.new
+    s.W.time = 300
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    foes = [new(2, "MOBILE LAND", 440 + i, 440, 3) for i in range(10)]
+    new(2, "STRUCTURE FACTORY", 450, 450, 0)
+    s.step()
+    for u in foes[:7]:
+        u.dead = True
+    s.lua.execute("CPAI.snap = nil")
+    s.step()
+    c = s.g.CPAI.commanders[1]
+    check(c.window and c.window > s.W.time, "percebe a hora certa de atacar")
+    r1 = s.lua.eval("CPAI.commanders[1].ratio")
+    check(s.lua.eval("CPAI.commanders[1].window") is not None, "janela de ataque aberta")
+
+    # emboscada no caminho que o jogador usa
+    s = Scenario(micro="false", air="false", build="false", counter="false", adaptive="false", team="false")
+    new = s.new
+    s.W.time = 300
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    army = [new(1, "MOBILE LAND", 60 + i, 60, 3) for i in range(20)]
+    new(2, "STRUCTURE FACTORY", 450, 450, 0)
+    for i in range(12):
+        new(2, "STRUCTURE DEFENSE", 445 + i, 445, 20)
+    s.lua.execute("local M = CPAI.model M.humans = 1 M.route['3:3'] = 20 ArmyBrains[2].BrainType = 'Human'")
+    s.step(times=2)
+    c = s.g.CPAI.commanders[1]
+    amb = list(c.squads.ambush.units.values())
+    check(len(amb) == 4, f"separa 4 unidades para a emboscada ({len(amb)})")
+    for i in range(4):
+        new(2, "MOBILE LAND", 172 + i, 172, 2)
+    s.lua.execute("CPAI.snap = nil")
+    s.step()
+    o = s.last(amb[0]) if amb else None
+    check(o is not None and o.kind == "attack" and abs(o.pos[1] - 175) < 30, "a emboscada ataca quem passa")
+
+    # isca, extratores tomados e destroços
+    s = Scenario(micro="false", air="false", build="true", counter="false", adaptive="false", team="false")
+    new = s.new
+    s.W.time = 500
+    s.lua.execute("World.wrecks = { 'w1', 'w2' } function Rect(a, b, c, d) return { a, b, c, d } end function GetReclaimablesInRect(r) return World.wrecks end function IssueReclaim(u, w) World.reclaimed = (World.reclaimed or 0) + 1 end")
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    army = [new(1, "MOBILE LAND", 60 + i, 60, 3) for i in range(20)]
+    raiders = [new(1, "MOBILE LAND", 62 + i, 62, 1, {"speed": 6}) for i in range(3)]
+    for i in range(3):
+        new(1, "ENGINEER MOBILE LAND", 52 + i, 52, 0)
+    new(2, "STRUCTURE FACTORY", 450, 450, 0)
+    for i in range(12):
+        new(2, "STRUCTURE DEFENSE", 445 + i, 445, 20)
+    for i in range(4):
+        new(2, "STRUCTURE DEFENSE", 300 + i, 300, 3)
+    mines = [new(2, "STRUCTURE MASSEXTRACTION", 302 + i * 4, 305, 0) for i in range(2)]
+    new(2, "STRUCTURE", 80, 450, 0)
+    new(2, "STRUCTURE DEFENSE", 82, 452, 3)
+    s.step(times=2)
+    c = s.g.CPAI.commanders[1]
+    j = [str(x.text) for x in c.journal.values()]
+    check(any("isca" in x for x in j), "isca: os rápidos atacam longe antes do ataque principal")
+    s.step(times=3)
+    main = c.squads.main
+    if main.state == "attack":
+        for u in s.W.units.values():
+            if u.army == 2 and 290 < u.x < 320 and 290 < u.z < 320:
+                u.dead = True
+        for u in army:
+            u.x, u.z = 305, 302
+        s.lua.execute("CPAI.snap = nil")
+        s.step(times=2)
+    check(len(list((c.stealSpots or {}).values())) >= 1 or c.tally.won >= 1, "lembra os extratores do lugar tomado")
+    check((s.W.reclaimed or 0) >= 1, f"recolhe os destroços depois da luta ({s.W.reclaimed})")
+    s.lua.execute("CPAI.commanders[1].cooldowns.steal = 0 CPAI.snap = nil")
+    s.step(times=2)
+    built = [b.id for b in s.W.built.values()]
+    check("uub0701" in built, f"constrói um extrator no lugar tomado ({built})")
+
+    # veteranos voltam mais cedo; engenheiros fogem
+    s = Scenario(micro="false", air="false", build="true", counter="false", adaptive="false", team="false")
+    new = s.new
+    s.W.time = 300
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    vet = new(1, "MOBILE LAND", 60, 60, 3, {"hp": 130})
+    s.lua.execute("World.units[2].VeteranLevel = 3")
+    eng = new(1, "ENGINEER MOBILE LAND", 200, 200, 0)
+    for i in range(3):
+        new(2, "MOBILE LAND", 205 + i, 205, 2)
+    s.step(times=2)
+    check(vet.CPWounded is not None and vet.CPWounded is not False, "veterano ferido volta para casa mais cedo")
+    if eng.CPBuilder:
+        check(eng.CPFleeing, "engenheiro foge dos inimigos")
+    check(not s.W.warn, f"sem erros ({s.W.warn})")
+
+    # antinuclear quando o jogador tem míssil; patrulha aérea
+    s = Scenario(micro="false", air="true", build="true", counter="false", adaptive="false", team="false")
+    new = s.new
+    s.lua.execute("function IssuePatrol(u, p) World.patrols = (World.patrols or 0) + 1 end")
+    s.W.time = 700
+    new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    for i in range(3):
+        new(1, "ENGINEER MOBILE LAND", 52 + i, 52, 0)
+    fighters = [new(1, "MOBILE AIR FIGHTER ANTIAIR", 50 + i, 50, 0, {"air": 6}) for i in range(3)]
+    s.lua.execute("CPAI.commanders[1].districts = { { pos = { 150, 0, 60 }, role = 'workshop', step = 5, tries = 0, fx = 1, fz = 0, name = 'teste' } } CPAI.commanders[1].cooldowns.plan = 9999")
+    new(2, "STRUCTURE FACTORY", 450, 450, 0)
+    new(2, "STRUCTURE NUKE", 440, 440, 0)
+    s.lua.execute("local M = CPAI.model M.humans = 1 ArmyBrains[2].BrainType = 'Human'")
+    s.step(times=8)
+    built = [b.id for b in s.W.built.values()]
+    check("uub0203" in built, f"defesa antinuclear contra o míssil do jogador ({built})")
+    check((s.W.patrols or 0) >= 2, "caças patrulham entre a base e os bairros")
+    check(not s.W.warn, f"sem erros ({s.W.warn})")
+
+
 def panel_plus():
     """O painel mostra o placar, o diário e o mapinha com bairros, ataque e previsão."""
     lua = LuaRuntime(unpack_returned_tuples=True)
@@ -1111,19 +1311,37 @@ def panel_plus():
         districts = { done = 2, total = 6, current = 'bastiao norte 3/9' },
         tally = { attacks = 3, won = 2, retreats = 1, defended = 1, districts = 2, lost = 0, fronts = 1, siege = 1, helped = 0 },
         journal = { '10:02  bairro bastiao norte pronto', '9:40  atacou com 12 unidades' },
-        mini = { army = 2, home = { 0.2, 0.2 }, districts = { { 0.3, 0.3, 'bastion', true }, { 0.1, 0.3, 'rear', false } }, target = { 0.8, 0.8 }, predicted = { 0.4, 0.4 } } } }""")
+        mini = { army = 2, home = { 0.2, 0.2 }, districts = { { 0.3, 0.3, 'bastion', true }, { 0.1, 0.3, 'rear', false } }, target = { 0.8, 0.8 }, predicted = { 0.4, 0.4 } },
+        alsyper = { generation = 7, strategy = 'Supremacia aerea + Fogo concentrado', genes = 'agressao 120%  aviacao 150%', last = 'mais aviacao: voce usa muita aviacao', seen = 'viu a sua base ha 30 s', window = false },
+        tip = { pos = { 300, 0, 300 }, at = { 0.3, 0.3 }, eta = 25, n = 12 },
+        said = { n = 1, text = 'La vou eu.' } } }""")
     lua.execute("CPAIPanelInit() UI.time = 5 CPAIPanelPoll() CPAIPanelToggle() CPAIPanelPoll()")
     texts = " | ".join(str(t.text) for t in g.UI.texts.values() if t.text)
     check("Placar: ataques 3 (vencidos 2)" in texts, "painel: placar da partida")
     check("bairro bastiao norte pronto" in texts, "painel: diário")
     check("Bairros: 2/6" in texts, "painel: bairros")
-    check((g.CPAIPanelMiniDots or 0) == 5, f"painel: mapinha com casa, bairros, ataque e previsão ({g.CPAIPanelMiniDots})")
+    check((g.CPAIPanelMiniDots or 0) == 6, f"painel: mapinha com casa, bairros, ataque, previsão e a dica ({g.CPAIPanelMiniDots})")
+    check("Alsyper Adaptador - geracao 7" in texts and "Supremacia aerea" in texts, "painel: Alsyper com a estratégia e os genes")
+    check("Dica:" in str(g.UI_LastTip) and "25 s" in str(g.UI_LastTip), f"modo treino: dica na tela ({g.UI_LastTip})")
+    check(str(g.UI_LastSaid) == "La vou eu.", "mensagem da IA na tela")
+
+    # resultado da partida vai para a memória (com os genes)
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.execute(UI_HARNESS)
+    code = PANEL.replace("@KEY@", "F4").replace("@PANEL@", "true").replace("@LEARN@", "true")
+    lua.execute(moho_to_lua(code))
+    lua.execute("UI.prefs.CPAIMemory = { games = 2, style = {}, maps = {} } CPAIPanelInit() UI.time = 30")
+    lua.execute("Sync.CPAIResult = { result = 1, genes = { aggression = 1.4 } } CPAIPanelPoll()")
+    mem = lua.eval("UI.prefs.CPAIMemory")
+    check(mem.results is not None and list(mem.results.values()) == [1] and mem.genes.aggression > 0.5, "painel guarda o resultado e os genes da partida")
 
 
 def main() -> int:
     districts_plus()
     army_plus()
     islands_team_scout()
+    alsyper()
+    tactics_more()
     panel_plus()
     districts()
     panel()

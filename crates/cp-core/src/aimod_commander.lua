@@ -36,6 +36,12 @@ local CFG = {
     adaptive = @ADAPTIVE@,
     status = @STATUS@,
     learn = @LEARN@,
+    aggression = @AGGRESSION@,
+    districts = @DISTRICTS@,
+    airbias = @AIRBIAS@,
+    navalbias = @NAVALBIAS@,
+    tips = @TIPS@,
+    chat = @CHAT@,
 }
 local CP_DEBUG = false
 
@@ -47,8 +53,11 @@ local PERSONALITIES = {
     raider = { label = 'Saqueadora', ratio = 1.35, size = 1.0, raid = 10, towers = 0.8, pincer = true, air = 1.0 },
     naval = { label = 'Naval', ratio = 1.3, size = 1.0, raid = 4, towers = 1.0, pincer = true, air = 0.8, fleet = 0.6 },
     airborne = { label = 'Aerea', ratio = 1.3, size = 1.1, raid = 4, towers = 1.0, pincer = false, air = 1.6 },
+    engineer = { label = 'Engenheira', ratio = 1.5, size = 1.2, raid = 3, towers = 2.0, pincer = false, air = 1.0, expand = 1.4 },
+    blitz = { label = 'Relampago', ratio = 1.05, size = 0.6, raid = 8, towers = 0.5, pincer = true, air = 1.0 },
+    titan = { label = 'Experimental', ratio = 1.45, size = 1.2, raid = 2, towers = 1.2, pincer = false, air = 1.0, tech = 1.6 },
 }
-local PERSONALITY_ORDER = { 'balanced', 'aggressive', 'defensive', 'raider', 'naval', 'airborne' }
+local PERSONALITY_ORDER = { 'balanced', 'aggressive', 'defensive', 'raider', 'naval', 'airborne', 'engineer', 'blitz', 'titan' }
 
 -- unit ids per faction (1 UEF, 2 Cybran, 3 Illuminate) for counters and buildings
 local UNITS = {
@@ -102,6 +111,7 @@ local function Categories()
         engineerAny = Cat('ENGINEER'),
         nuke = Cat('NUKE STRUCTURE'),
         shield = Cat('SHIELD STRUCTURE'),
+        expfactory = Cat('EXPERIMENTALFACTORY'),
         radar = Cat('RADAR STRUCTURE'),
     }
     return CAT
@@ -364,6 +374,8 @@ local function Snapshot()
                     if Is(c.extractor, u) then
                         kind = 'extractor'
                         A.extractors = A.extractors + 1
+                    elseif Is(c.expfactory, u) then
+                        kind = 'expfactory'
                     elseif Is(c.factory, u) then
                         kind = 'factory'
                     elseif Is(c.artillery, u) or Is(c.indirect, u) then
@@ -589,6 +601,18 @@ function CPAIReceiveMemory(data)
     M.prior = prior
     for _, k in ipairs(STYLE_KEYS) do M.style[k] = math.max(M.style[k] or 0, prior[k]) end
     M.games = type(data.games) == 'number' and data.games or 0
+    -- the Alsyper genes learned so far (this map first, then in general) and the record against
+    -- the player: each human win makes the next AI a little stronger
+    if type(data.genes) == 'table' then CPAI.genesPrior = data.genes end
+    CPAI.generation = M.games
+    if type(data.results) == 'table' then
+        local sum = 0
+        for _, r in ipairs(data.results) do if type(r) == 'number' then sum = sum + r end end
+        CPAI.strength = math.max(0.7, math.min(1.5, 1 + sum * 0.06))
+    end
+    for _, cmd in CPAI.commanders do
+        if cmd.genes and Now() < 60 then cmd.genes = nil end
+    end
     if type(data.firstAttack) == 'number' and data.firstAttack > 0 then M.expectedAttack = data.firstAttack end
     for _, name in { 'route', 'hit', 'expand', 'held', 'lost' } do
         M[name] = M[name] or {}
@@ -793,6 +817,7 @@ function CPAIModelMemory()
         firstAttack = M.firstAttack and math.floor(M.firstAttack) or false,
         route = Top(M.route, 12), hit = Top(M.hit, 12), expand = Top(M.expand, 12),
         held = Top(M.held or {}, 12), lost = Top(M.lost or {}, 12),
+        genes = CPAI.GenesAverage and CPAI.GenesAverage() or nil,
     }
 end
 
@@ -844,7 +869,7 @@ function Commander.New(brain, home)
         squads = {
             main = Squad('main'), raid = Squad('raid'), fleet = Squad('fleet'), drop = Squad('drop'),
             fighters = Squad('fighters'), bombers = Squad('bombers'), gunships = Squad('gunships'),
-            scouts = Squad('scouts'), guard = Squad('guard'),
+            scouts = Squad('scouts'), guard = Squad('guard'), ambush = Squad('ambush'),
         },
         platoon = false,
         difficulty = brain.DifficultyLevel or 2,
@@ -879,6 +904,15 @@ function Commander.BaseRatio(self)
     if self.difficulty <= 1 then r = r - 0.2 end
     if CFG.level >= 2 then r = r + 0.15 end
     return r
+end
+
+-- how much stronger than the target the army must be: the personality, the adaptive mode, the
+-- Alsyper aggression gene and the right-moment window
+function Commander.Ratio(self)
+    local r = self.ratio * (1.3 - 0.3 * Commander.Gene(self, 'aggression'))
+    if Commander.InWindow(self) then r = r * 0.8 end
+    r = r - ((CPAI.strength or 1) - 1) * 0.5
+    return math.max(1.0, r)
 end
 
 function Commander.Cooldown(self, key, seconds)
@@ -992,7 +1026,9 @@ function Commander.MinUnits(self)
     n = math.floor(n * self.P.size + 0.5)
     if self.adaptive > 0 then n = n - 2 end
     if self.adaptive < 0 then n = n + 4 end
-    return math.max(4, math.min(n, 34))
+    n = n * (0.6 + 0.4 * Commander.Gene(self, 'patience'))
+    if Commander.InWindow(self) then n = n * 0.75 end
+    return math.max(4, math.min(math.floor(n + 0.5), 34))
 end
 
 function Commander.Platoon(self)
@@ -1106,7 +1142,7 @@ function Commander.Recruit(self)
     end
     for _, u in ipairs(Commander.List(self, c.army)) do
         if not u.CPSquad and Ready(u) then
-            if CFG.raids and raidCount < self.P.raid and Speed(u) >= 4 and not Is(c.experimental, u) and not Is(c.indirect, u) then
+            if CFG.raids and raidCount < self.P.raid * Commander.Gene(self, 'harass') and Speed(u) >= 4 and not Is(c.experimental, u) and not Is(c.indirect, u) then
                 raidCount = raidCount + 1
                 add('raid', u)
             else
@@ -1154,7 +1190,7 @@ function Commander.Members(self, squad)
             local f = HealthFraction(u)
             if u.CPWounded then
                 if f > 0.5 or t - u.CPWounded > 75 then u.CPWounded = nil end
-            elseif f < 0.3 and not Is(exp, u) and squad.name ~= 'drop' then
+            elseif (f < 0.3 or (f < 0.5 and CPVeteran(u) >= 2)) and not Is(exp, u) and squad.name ~= 'drop' then
                 u.CPWounded = t
                 table.insert(hurt, u)
             end
@@ -1250,10 +1286,13 @@ function Commander.Targets(self)
             local key = math.floor(s.pos[1] / 40) .. ':' .. math.floor(s.pos[3] / 40)
             local cell = cells[key]
             if not cell then
-                cell = { pos = s.pos, value = 0, extractors = 0, artillery = 0 }
+                cell = { pos = s.pos, value = 0, extractors = 0, artillery = 0, shields = {}, mines = {} }
                 cells[key] = cell
             end
+            if s.kind == 'shield' then table.insert(cell.shields, s.u) end
+            if s.kind == 'expfactory' then cell.value = cell.value + 6 end
             if s.kind == 'extractor' then
+                table.insert(cell.mines, s.pos)
                 cell.value = cell.value + 3
                 cell.extractors = cell.extractors + 1
             elseif s.kind == 'factory' then
@@ -1364,7 +1403,7 @@ function Commander.PickTarget(self, squad, power, opts)
     opts = opts or {}
     local best, bestScore, bestRisk = false, 0, 0
     local origin = squad.center or Centroid(squad.members) or self.home
-    local ratio = opts.ratio or self.ratio
+    local ratio = opts.ratio or Commander.Ratio(self)
     local layer = opts.water and 'sea' or 'land'
     local M = Commander.M(self)
     -- the most promising first, so the (cached) path checks stop early
@@ -1392,6 +1431,8 @@ function Commander.PickTarget(self, squad, power, opts)
                 end
                 -- an ally human attacking there: go together
                 if self.joinPos and Dist(self.joinPos, cell.pos) < 90 then score = score * 2.5 end
+                -- the experimental factory the scouts saw: before it finishes
+                if self.expStrike and Dist(self.expStrike, cell.pos) < 60 then score = score * 4 end
                 if squad.name == 'raid' then
                     -- raiders only go where little can shoot back
                     if risk > (opts.raidRisk or 1) or cell.extractors == 0 then score = 0 end
@@ -1516,11 +1557,28 @@ function Commander.Formation(self, squad, members, target, center)
     end
     if table.getn(front) < 3 or (table.getn(arty) == 0 and table.getn(aa) == 0) then return false end
     if squad then Commander.Command(self, squad, front, 'attack', target) else Order(front, 'attack', target) end
+    -- a shield over the target: the artillery hits the shield generator first
+    local shield = false
+    for _, cell in Commander.Targets(self) do
+        if Dist(cell.pos, target) < 40 then
+            for _, sh in ipairs(cell.shields or {}) do if Alive(sh) then shield = sh break end end
+        end
+        if shield then break end
+    end
     if table.getn(arty) > 0 then
         -- artillery stops at its range from the target, behind the front line
         local from = center or self.home
-        Order(arty, 'attack', Toward(target, from, 32))
+        if shield then
+            for _, u in ipairs(arty) do u.CPNoMicro = true end
+            pcall(IssueClearCommands, arty)
+            pcall(IssueAttack, arty, shield)
+            Order(arty, 'attack', target, true)
+            Commander.Note(self, 'artilharia derrubando o escudo antes do ataque')
+        else
+            Order(arty, 'attack', Toward(target, from, 32))
+        end
     end
+    self.breakShield = shield and target or false
     if table.getn(aa) > 0 then
         for _, u in ipairs(aa) do u.CPNoMicro = true end
         pcall(IssueClearCommands, aa)
@@ -1635,6 +1693,7 @@ function Commander.Lead(self, squad, threatPos, threatPower)
             if squad.name == 'main' then
                 self.tally.retreats = self.tally.retreats + 1
                 Commander.Note(self, 'recuou para as torres')
+                Commander.Say(self, 'Bem jogado. Volto mais forte.')
             end
             return
         end
@@ -1643,6 +1702,10 @@ function Commander.Lead(self, squad, threatPos, threatPower)
             if won and squad.name == 'main' then
                 self.tally.won = self.tally.won + 1
                 Commander.Note(self, 'venceu a luta e destruiu o alvo')
+                Commander.Say(self, 'Essa foi minha.')
+                self.stealSpots = self.stealSpots or {}
+                for _, mp in ipairs(squad.mines or {}) do table.insert(self.stealSpots, mp) end
+                Commander.Reclaim(self, squad.target)
             end
             squad.second = false
             ClearTactics(members)
@@ -1692,10 +1755,19 @@ function Commander.Lead(self, squad, threatPos, threatPower)
             if squad.state == 'gather' and center and Spread(members, center) > 35 and t < (squad.gatherUntil or 0) then
                 return
             end
+            if squad.name == 'main' and squad.state ~= 'gather' and Commander.Decoy(self, squad, target) then return end
             squad.state = 'attack'
             squad.attackSince = t
             squad.target = target
+            -- the enemy extractors there: ours once the place is taken
+            squad.mines = {}
+            for _, cell in Commander.Targets(self) do
+                if Dist(cell.pos, target) < 40 then
+                    for _, mp in ipairs(cell.mines or {}) do table.insert(squad.mines, mp) end
+                end
+            end
             if squad.name == 'main' then
+                Commander.Say(self, ({ 'La vou eu.', 'Vi uma brecha na sua defesa.', 'Prepare-se.', 'Agora e a minha vez.' })[math.mod(self.tally.attacks, 4) + 1])
                 self.tally.attacks = self.tally.attacks + 1
                 local siege = false
                 for _, cell in Commander.Targets(self) do
@@ -1711,6 +1783,9 @@ function Commander.Lead(self, squad, threatPos, threatPower)
                     and not Commander.Pincer(self, squad, center, target) and not Commander.Formation(self, squad, members, target, center) then
                     Commander.Command(self, squad, members, 'attack', target)
                 end
+            elseif water then
+                -- the fleet also keeps a formation (cruisers covering, long range behind)
+                if not Commander.Formation(self, squad, members, target, center) then Commander.Command(self, squad, members, 'attack', target) end
             else
                 Commander.Command(self, squad, members, 'attack', target)
             end
@@ -1877,7 +1952,11 @@ function Commander.LeadAir(self, threatPos)
         end
         local goal = best or (main.state == 'attack' and mainCenter) or threatPos or self.home
         local sq = self.squads.fighters
-        if not sq.goal or Dist(sq.goal, goal) > 30 then
+        if not best and main.state ~= 'attack' and not threatPos then
+            -- nothing to hunt: patrol between the base and the districts (air control)
+            if sq.state ~= 'patrol' then Commander.AirPatrol(self, fighters) end
+            sq.goal = false
+        elseif not sq.goal or Dist(sq.goal, goal) > 30 then
             sq.goal = goal
             sq.state = best and 'attack' or 'cover'
             Commander.Command(self, sq, fighters, 'attack', goal)
@@ -1898,6 +1977,12 @@ function Commander.LeadAir(self, threatPos)
                 end
             end
         end
+        -- the target is gone: that was a good weak spot, come back to it later
+        if sq.target and not stillThere then
+            self.bombSpots = self.bombSpots or {}
+            table.insert(self.bombSpots, 1, sq.target)
+            while table.getn(self.bombSpots) > 4 do table.remove(self.bombSpots) end
+        end
         local stale = not sq.target or not stillThere or t - (sq.since or 0) > 60
             or Commander.AntiAir(self, sq.target, 40) > AirPowerOf(fighters) + table.getn(bombers) * 2
         if stale then
@@ -1905,6 +1990,9 @@ function Commander.LeadAir(self, threatPos)
             for _, cell in Commander.Targets(self) do
                 local aa = Commander.AntiAir(self, cell.pos, 45)
                 local score = (cell.value + cell.artillery * 2) / (1 + aa * 2) / (1 + Dist(self.home, cell.pos) / 600)
+                -- routine: the weak spots that worked before; and the shield over the army's target
+                for _, bs in (self.bombSpots or {}) do if Dist(bs, cell.pos) < 60 and aa < 2 then score = score * 2 end end
+                if self.breakShield and Dist(self.breakShield, cell.pos) < 40 and table.getn(cell.shields or {}) > 0 then score = score * 3 end
                 if score > bestScore then best, bestScore = cell.pos, score end
             end
             if best and bestScore > 0.4 then
@@ -1954,7 +2042,7 @@ end
 -- ---------------------------------------------------------------- scouting and counters
 function Commander.Scout(self)
     local scout = self.squads.scouts.members[1] or self.squads.fighters.members[1]
-    if not scout or not Commander.Cooldown(self, 'scout', 75) then return end
+    if not scout or not Commander.Cooldown(self, 'scout', 75 / Commander.Gene(self, 'scouting')) then return end
     local cells = Commander.Targets(self)
     local goal = false
     -- every other trip: the next expansion area of the map (where the enemy may be growing unseen)
@@ -1975,8 +2063,20 @@ function Commander.Scout(self)
     end
 end
 
--- what the enemy has, by kind
+-- the match has no fog of war: the AI sees everything like everyone else
+local function FullVision()
+    local ok, fog = pcall(function() return ScenarioInfo.Options.FogOfWar end)
+    return ok and fog == 'none'
+end
+
+-- what the enemy has, by kind: what its scouts and units have seen (like a player), or everything
+-- when the map is fully visible
 function Commander.Intel(self)
+    if not FullVision() and self.belief then
+        local b = Commander.Believed(self)
+        self.intel = { air = b.air, land = b.land, naval = b.naval, towers = b.towers }
+        return self.intel
+    end
     local S = Snapshot()
     local intel = { air = 0, land = 0, naval = 0, towers = 0 }
     for _, idx in ipairs(self.enemies) do
@@ -2040,8 +2140,9 @@ function Commander.Counter(self)
         made = Commander.Queue(self, self.units.bomber, 2)
         if made then self.plan = 'contra o experimental' end
     end
-    if not made and intel.air > airLimit and myAA < intel.air * ((st.air or 0) > 0.4 and 1.1 or 0.8) then
-        made = Commander.Queue(self, self.units.fighter, 3) or Commander.Queue(self, self.units.aaLand, 3)
+    local airN = math.max(2, math.floor(3 * Commander.Gene(self, 'air') + 0.5))
+    if not made and intel.air > airLimit / Commander.Gene(self, 'air') and myAA < intel.air * ((st.air or 0) > 0.4 and 1.1 or 0.8) * Commander.Gene(self, 'air') then
+        made = Commander.Queue(self, self.units.fighter, airN) or Commander.Queue(self, self.units.aaLand, airN)
         if made then self.plan = 'contra-ataque aereo' end
     end
     if not made and (intel.towers > 40 or (st.turtle or 0) > 0.5) then
@@ -2054,7 +2155,7 @@ function Commander.Counter(self)
             if made then self.plan = 'artilharia contra defesas' end
         end
     end
-    if not made and (intel.naval > 10 or (st.naval or 0) > 0.5) and PowerOf(self.squads.fleet.members) < math.max(intel.naval, 10) then
+    if not made and (intel.naval > 10 / Commander.Gene(self, 'naval') or (st.naval or 0) > 0.5) and PowerOf(self.squads.fleet.members) < math.max(intel.naval, 10) * Commander.Gene(self, 'naval') then
         made = Commander.Queue(self, self.units.ship, 2)
         if made then self.plan = 'reforco naval' end
     end
@@ -2146,7 +2247,8 @@ function Commander.Bases(self, clusters, threatKey)
             end
         end
     end
-    if threatKey and clusters[threatKey] and mass >= 200 / self.P.towers and Commander.Cooldown(self, 'tower', 40 / self.P.towers) then
+    local towersGene = self.P.towers * Commander.Gene(self, 'defense')
+    if threatKey and clusters[threatKey] and mass >= 200 / towersGene and Commander.Cooldown(self, 'tower', 40 / towersGene) then
         local cl = clusters[threatKey]
         local airUnits = 0
         local S = Snapshot()
@@ -2214,6 +2316,8 @@ local DISTRICT_PLANS = {
         { 'energy', 0, 0 }, { 'research', -20, 0 }, { 'aatower', 14, 10 }, { 'shield', 0, 16 },
         { 'energy', 0, -18 }, { 'radar', -18, 20 }, { 'tower', 18, -14 },
     },
+    -- second line between a bastion and the main base (defense in depth)
+    inner = { { 'tower', 10, -10 }, { 'tower', 10, 10 }, { 'aatower', 0, 0 }, { 'shield', -10, 0 } },
     forge = {
         { 'shield', 0, 0 }, { 'aatower', 12, 14 }, { 'expfactory', -6, -20 }, { 'shield', -16, -6 },
         { 'aatower', 12, -16 }, { 'tower', 24, 0 }, { 'shield', 6, 12 },
@@ -2225,7 +2329,7 @@ local DISTRICT_PLANS = {
 }
 -- a narrow passage in front of a bastion gets a line of towers across it
 local CHOKE_LINE = { { 'tower', 34, -18 }, { 'tower', 36, 0 }, { 'tower', 34, 18 } }
-local ROLE_LABEL = { bastion = 'bastiao', workshop = 'oficina', rear = 'retaguarda', forge = 'forja', harbor = 'porto' }
+local ROLE_LABEL = { bastion = 'bastiao', workshop = 'oficina', rear = 'retaguarda', forge = 'forja', harbor = 'porto', inner = 'segunda linha' }
 local COMPASS = { 'leste', 'sudeste', 'sul', 'sudoeste', 'oeste', 'noroeste', 'norte', 'nordeste' }
 
 local function MapSize()
@@ -2334,8 +2438,10 @@ function Commander.PlanDistricts(self)
     local mine = S.armies[self.army] and S.armies[self.army].structs or {}
     local districts = self.districts or {}
     local hard = self.difficulty >= 3 or CFG.level >= 2
-    local want = hard and 10 or 7
-    if table.getn(districts) >= want then return districts end
+    local want = (hard and 10 or 7) + math.floor((Commander.Gene(self, 'expansion') - 1) * 4 + 0.5)
+    local planned = 0
+    for _, d in districts do if d.role ~= 'inner' then planned = planned + 1 end end
+    if planned >= want then return districts end
     -- districts of allied AIs: their land
     local claimed = {}
     for _, ally in Commander.Allies(self) do
@@ -2401,7 +2507,7 @@ function Commander.PlanDistricts(self)
     end
     table.sort(cands, function(a, b) return a.score > b.score end)
     table.sort(harbors, function(a, b) return a.score > b.score end)
-    local roles = { bastion = 0, workshop = 0, rear = 0, forge = 0, harbor = 0 }
+    local roles = { bastion = 0, workshop = 0, rear = 0, forge = 0, harbor = 0, inner = 0 }
     for _, d in districts do roles[d.role] = (roles[d.role] or 0) + 1 end
     local limit = { bastion = hard and 4 or 3, workshop = hard and 3 or 2, rear = 1, forge = 1, harbor = hard and 2 or 1 }
     local function add(c, role)
@@ -2437,8 +2543,20 @@ function Commander.PlanDistricts(self)
         local role = roleOf(c)
         if roles[role] < limit[role] and free(c.pos, gap) then add(c, role) end
     end
+    -- a second line of towers between each bastion and home (defense in depth)
+    for _, b in districts do
+        if b.role == 'bastion' and not b.inner and not b.island then
+            local p = Toward(home, b.pos, Dist(home, b.pos) * 0.55)
+            local ok = not IsWater(p[1], p[3])
+            for _, d in districts do if d ~= b and Dist(d.pos, p) < 40 then ok = false end end
+            if ok then
+                b.inner = true
+                table.insert(districts, { pos = p, role = 'inner', step = 1, tries = 0, fx = b.fx, fz = b.fz, name = 'segunda linha ' .. string.sub(b.name, 9) })
+            end
+        end
+    end
     -- bastions first (they protect the rest), then workshops, harbors, the rear and the forge
-    local order = { bastion = 1, workshop = 2, harbor = 3, rear = 4, forge = 5 }
+    local order = { bastion = 1, inner = 2, workshop = 3, harbor = 4, rear = 5, forge = 6 }
     table.sort(districts, function(a, b)
         if order[a.role] ~= order[b.role] then return order[a.role] < order[b.role] end
         if a.island ~= b.island then return not a.island end
@@ -2517,15 +2635,16 @@ end
 function Commander.Districts(self, threatPos)
     if not CFG.build then return end
     local t = Now()
-    if t < 150 then return end
+    local start = Commander.Strategy(self, 'fastland') and 100 or 150
+    if t < start then return end
     if not self.districts or Commander.Cooldown(self, 'plan', 150) then Commander.PlanDistricts(self) end
     local districts = self.districts or {}
     if table.getn(districts) == 0 then return end
     Commander.CheckDistricts(self)
     local hard = self.difficulty >= 3 or CFG.level >= 2
     -- one more district open every 1.5 to 2 minutes
-    local open = math.min(table.getn(districts), 1 + math.floor((t - 150) / (hard and 80 or 120)))
-    local builders = Commander.Builders(self, hard and 4 or 2)
+    local open = math.min(table.getn(districts), 1 + math.floor((t - 150) / ((hard and 80 or 120) / Commander.Gene(self, 'expansion'))))
+    local builders = Commander.Builders(self, (hard and 4 or 2) + ((Commander.Strategy(self, 'fastland') or Commander.Strategy(self, 'territory')) and 1 or 0))
     if table.getn(builders) == 0 then return end
     if Stored(self.brain, 'MASS') < 120 then return end
     -- each idle builder takes the next building of the least finished open district it can reach
@@ -2542,7 +2661,7 @@ function Commander.Districts(self, threatPos)
                 local isOpen = i <= open or d.island
                 -- an engineer flown to an island only builds there (and only it builds there)
                 local here = (d.island and eng.CPIsland == d.name) or (not d.island and not eng.CPIsland)
-                local ready = d.role ~= 'forge' or t >= 600
+                local ready = d.role ~= 'forge' or t >= 600 / Commander.Gene(self, 'tech') or self.forgeNow
                 if isOpen and here and ready and d.step <= table.getn(plan) and d.tries < 6 and (not threatPos or Dist(threatPos, d.pos) > 90)
                     and Commander.MobileDanger(self, d.pos, 60) < 3 then
                     if not pick or d.step < pick.step then pick = d end
@@ -2558,7 +2677,10 @@ function Commander.Districts(self, threatPos)
                     -- the plot: "ahead" toward the enemy (or the water), "sideways" across
                     local x = pick.pos[1] + pick.fx * item[2] - pick.fz * item[3]
                     local z = pick.pos[3] + pick.fz * item[2] + pick.fx * item[3]
-                    if Commander.Build(self, id, Point(x, z), false, eng) then
+                    local plot = Point(x, z)
+                    -- long range artillery goes to the highest ground around its plot
+                    if item[1] == 'artillery' then local ok, hs = pcall(HighSpot, plot) if ok and hs then plot = hs end end
+                    if Commander.Build(self, id, plot, false, eng) then
                         pick.step = pick.step + 1
                         pick.tries = 0
                         self.plan = 'construindo o bairro ' .. pick.name
@@ -2867,6 +2989,688 @@ function Commander.LeadAcu(self, threatPos, threatPower)
     end
 end
 
+-- ---------------------------------------------------------------- the Alsyper Adapter
+-- The center of the AI. A set of "genes" (how aggressive, how patient, how much it expands,
+-- defends, scouts, raids, goes for tech, uses the air force and the navy) moves the whole
+-- commander. They start from what the earlier matches taught (per map and in general, with a
+-- small mutation every match: the AI evolves), and keep moving during the match with what it
+-- sees: how its attacks end, what kills its units, the human's style, the map, its economy
+-- against the enemy's and the districts it loses. Every change is written in the journal with
+-- its reason.
+local GENES = { 'aggression', 'patience', 'expansion', 'defense', 'scouting', 'harass', 'tech', 'air', 'naval' }
+local GENE_LABEL = {
+    aggression = 'agressao', patience = 'paciencia', expansion = 'expansao', defense = 'defesa', scouting = 'reconhecimento',
+    harass = 'saques', tech = 'tecnologia', air = 'aviacao', naval = 'marinha',
+}
+
+local function ClampGene(v)
+    if v < 0.3 then return 0.3 end
+    if v > 1.8 then return 1.8 end
+    return v
+end
+
+-- genes at the start of the match: the launcher's sliders, the personality, what earlier
+-- matches taught, then a small mutation
+function Commander.InitGenes(self)
+    local g = {}
+    for _, k in ipairs(GENES) do g[k] = 1 end
+    local P = self.P
+    g.aggression = 1 + (1.35 - (P.ratio or 1.35)) * 1.5
+    g.patience = P.size or 1
+    g.defense = P.towers or 1
+    g.harass = (P.raid or 5) / 5
+    g.air = P.air or 1
+    g.naval = (P.fleet and 1.3) or 1
+    g.tech = P.tech or 1
+    g.expansion = P.expand or 1
+    local prior = CPAI.genesPrior
+    local learned = 0
+    if type(prior) == 'table' then
+        for _, k in ipairs(GENES) do
+            if type(prior[k]) == 'number' then
+                g[k] = g[k] * 0.4 + prior[k] * 0.6
+                learned = learned + 1
+            end
+        end
+    end
+    -- the player's sliders in the launcher
+    g.aggression = g.aggression * CFG.aggression
+    g.expansion = g.expansion * CFG.districts
+    g.air = g.air * CFG.airbias
+    g.naval = g.naval * CFG.navalbias
+    -- mutation: every match tries something a little different (kept when it works)
+    for _, k in ipairs(GENES) do
+        local r = (Rand(0, 1000) / 1000 - 0.5) * 0.16
+        g[k] = ClampGene(g[k] * (1 + r))
+    end
+    self.genes = g
+    self.generation = (CPAI.generation or 0) + 1
+    self.adapterLog = learned > 0 and 'comecou do que aprendeu nas partidas anteriores' or 'primeira partida: comecou do zero'
+    Commander.Note(self, 'Alsyper geracao ' .. self.generation .. ': ' .. self.adapterLog)
+end
+
+function Commander.Gene(self, k)
+    return self.genes and self.genes[k] or 1
+end
+
+-- moves a gene and writes why
+function Commander.Shift(self, k, amount, why)
+    if not self.genes then return end
+    local old = self.genes[k]
+    self.genes[k] = ClampGene(old + amount)
+    if math.abs(self.genes[k] - old) >= 0.01 and why then
+        local dir = amount > 0 and 'mais ' or 'menos '
+        Commander.Note(self, 'Alsyper: ' .. dir .. GENE_LABEL[k] .. ' (' .. why .. ')')
+        self.adapterLog = dir .. GENE_LABEL[k] .. ': ' .. why
+    end
+end
+
+-- how much of the map is water (sampled once)
+local function WaterShare()
+    if CPAI.waterShare then return CPAI.waterShare end
+    local W, H = MapSize()
+    local n, wet = 0, 0
+    for i = 1, 12 do
+        for j = 1, 12 do
+            n = n + 1
+            if IsWater(W * (i - 0.5) / 12, H * (j - 0.5) / 12) then wet = wet + 1 end
+        end
+    end
+    CPAI.waterShare = wet / math.max(1, n)
+    return CPAI.waterShare
+end
+
+function Commander.Adapter(self)
+    if not self.genes then Commander.InitGenes(self) end
+    if not Commander.Cooldown(self, 'alsyper', 20) then return end
+    local T, last = self.tally, self.lastTally or {}
+    local won = T.won - (last.won or 0)
+    local lost = T.retreats - (last.retreats or 0)
+    local fell = T.lost - (last.lost or 0)
+    self.lastTally = { won = T.won, retreats = T.retreats, lost = T.lost }
+    -- 1. how its attacks end
+    if lost > won then
+        Commander.Shift(self, 'aggression', -0.06, 'os ataques estao falhando')
+        Commander.Shift(self, 'patience', 0.06, 'juntar mais tropas antes de atacar')
+    elseif won > 0 and lost == 0 then
+        Commander.Shift(self, 'aggression', 0.05, 'os ataques estao dando certo')
+        Commander.Shift(self, 'patience', -0.04, nil)
+    end
+    -- 2. what kills its units
+    local lb = self.lossBy
+    if lb.air >= 5 and lb.air > lb.land then Commander.Shift(self, 'air', 0.06, 'perdendo unidades para a aviacao') end
+    if lb.towers >= 5 and lb.towers > lb.land then Commander.Shift(self, 'tech', 0.04, 'torres demais: artilharia e pesquisa') end
+    -- 3. districts that fall
+    if fell > 0 then Commander.Shift(self, 'defense', 0.08 * fell, 'perdeu bairros') end
+    -- 4. the human's style (only what it has seen with its own scouts)
+    local M = Commander.M(self)
+    if M and self.seenAt then
+        local st = M.style
+        if (st.rush or 0) > 0.5 then Commander.Shift(self, 'defense', 0.04, 'voce ataca cedo') end
+        if (st.turtle or 0) > 0.5 then Commander.Shift(self, 'tech', 0.04, 'voce se fecha em torres') Commander.Shift(self, 'expansion', 0.03, nil) end
+        if (st.air or 0) > 0.4 then Commander.Shift(self, 'air', 0.05, 'voce usa muita aviacao') end
+        if (st.naval or 0) > 0.4 then Commander.Shift(self, 'naval', 0.05, 'voce usa o mar') end
+        if (st.eco or 0) > 0.5 then Commander.Shift(self, 'harass', 0.05, 'voce expande muito: saquear') end
+        if (st.tech or 0) > 0.4 then Commander.Shift(self, 'aggression', 0.03, 'voce vai para experimentais: atacar antes') end
+        if (st.raider or 0) > 0.5 then Commander.Shift(self, 'defense', 0.03, 'voce saqueia os extratores') end
+    end
+    -- 5. the map
+    if not self.mapRead then
+        self.mapRead = true
+        local w = WaterShare()
+        if w > 0.35 then Commander.Shift(self, 'naval', 0.2, 'mapa com muita agua') Commander.Shift(self, 'air', 0.1, nil) end
+        if w < 0.05 then Commander.Shift(self, 'naval', -0.3, 'mapa sem mar') end
+        local W, H = MapSize()
+        if math.min(W, H) >= 1500 then Commander.Shift(self, 'expansion', 0.15, 'mapa grande') end
+    end
+    -- 6. economy against the enemy's
+    local S = Snapshot()
+    local theirs, n = 0, 0
+    for _, idx in ipairs(self.enemies) do
+        if S.armies[idx] then theirs = theirs + S.armies[idx].extractors n = n + 1 end
+    end
+    if n > 0 and (self.extractors or 0) + 3 < theirs / n then Commander.Shift(self, 'expansion', 0.04, 'economia menor que a sua') end
+    -- 7. a long quiet game: the human is probably growing; go and look
+    if Now() - (self.seenAt or 0) > 240 then Commander.Shift(self, 'scouting', 0.05, 'faz tempo que nao ve voce') end
+end
+
+-- ---------------------------------------------------------------- early scouting and belief
+-- The AI acts like a player that cannot see the whole map: what it believes about each enemy
+-- (army, air force, towers, factories, experimentals) only changes when one of its units sees
+-- it. At the start it sends a fast plane (or a land scout) to each enemy base, and again every
+-- few minutes; without vision it says so in the journal.
+function Commander.Believe(self)
+    local S = Snapshot()
+    local mine = S.armies[self.army]
+    if not mine then return end
+    local eyes = {}
+    for _, m in ipairs(mine.mobile) do table.insert(eyes, m.pos) end
+    for _, st in ipairs(mine.structs) do
+        table.insert(eyes, st.pos)
+    end
+    self.belief = self.belief or {}
+    local t = Now()
+    for _, idx in ipairs(self.enemies) do
+        local A = S.armies[idx]
+        if A then
+            local seen = { air = 0, land = 0, naval = 0, towers = 0, factories = 0, exp = 0, expfactory = false, at = t, home = false }
+            local any = false
+            local function visible(p, r)
+                for _, e in ipairs(eyes) do if Dist(e, p) < r then return true end end
+                return false
+            end
+            for _, m in ipairs(A.mobile) do
+                if not m.engineer and visible(m.pos, 70) then
+                    any = true
+                    if m.air then seen.air = seen.air + m.p + m.ap * 0.5 + 1
+                    elseif m.naval then seen.naval = seen.naval + m.p
+                    else seen.land = seen.land + m.p end
+                    if m.exp then seen.exp = seen.exp + 1 end
+                end
+            end
+            for _, st in ipairs(A.structs) do
+                if visible(st.pos, 80) then
+                    any = true
+                    if st.kind == 'factory' then seen.factories = seen.factories + 1 end
+                    if st.kind == 'expfactory' then seen.expfactory = st.pos end
+                    seen.towers = seen.towers + st.defense
+                end
+            end
+            local ok, x, z = pcall(A.brain.GetArmyStartPos, A.brain)
+            if ok and x and visible(Point(x, z), 90) then seen.home = true end
+            if any then
+                local old = self.belief[idx]
+                -- what was seen now, merged with what it knew (units out of sight are still there)
+                if old then
+                    for _, k in { 'air', 'land', 'naval', 'towers', 'factories', 'exp' } do seen[k] = math.max(seen[k], old[k] * 0.85) end
+                    seen.expfactory = seen.expfactory or old.expfactory
+                    seen.home = seen.home or old.home
+                end
+                if seen.home and not (old and old.home) then
+                    Commander.Note(self, 'batedor viu a base inimiga: ' .. seen.factories .. ' fabrica(s), forca ' .. math.floor(seen.land + seen.air))
+                end
+                self.belief[idx] = seen
+                if seen.home then self.seenAt = t end
+            end
+        end
+    end
+end
+
+-- what the AI believes the enemies have (sum)
+function Commander.Believed(self)
+    local out = { air = 0, land = 0, naval = 0, towers = 0, factories = 0, exp = 0, expfactory = false }
+    for _, b in (self.belief or {}) do
+        for _, k in { 'air', 'land', 'naval', 'towers', 'factories', 'exp' } do out[k] = out[k] + b[k] end
+        out.expfactory = out.expfactory or b.expfactory
+    end
+    return out
+end
+
+function Commander.EarlyScout(self)
+    local t = Now()
+    local every = 240 / Commander.Gene(self, 'scouting')
+    if t < 40 then return end
+    local due = not self.seenAt or t - self.seenAt > every
+    if not due then return end
+    if not self.firstScoutNote then
+        self.firstScoutNote = true
+        Commander.Note(self, 'nao ve o mapa inteiro: mandando batedores para ver o seu progresso')
+    end
+    local scout = self.squads.scouts.members[1] or self.squads.fighters.members[1] or self.squads.raid.members[1]
+    if not scout then
+        if Commander.Cooldown(self, 'scoutplane', 60) then
+            if not (Commander.Queue(self, self.units.fighter, 1)) then Commander.Queue(self, self.units.tank, 1) end
+        end
+        return
+    end
+    if not Commander.Cooldown(self, 'earlyscout', 30) then return end
+    -- every enemy base, one after the other, then home
+    local homes = Commander.EnemyHomes(self)
+    if table.getn(homes) == 0 then return end
+    self.scoutTurn = math.mod(self.scoutTurn or 0, table.getn(homes)) + 1
+    local goal = homes[self.scoutTurn]
+    pcall(IssueClearCommands, { scout })
+    Order({ scout }, 'move', goal)
+    Order({ scout }, 'move', self.home, true)
+    self.plan = 'reconhecendo a base inimiga'
+end
+
+-- ---------------------------------------------------------------- research, the ACU and tech
+local RESEARCH = {
+    -- [personality or plan] = { UEF, Cybran, Illuminate }
+    land = { { 'ULB_DAMAGE', 'ULB_HEALTH', 'ULB_RANGE' }, { 'CLB_RATEOFFIRE', 'CLB_HYPERALLOYS', 'CLB_MOVESPEED' }, { 'ILB_DAMAGE', 'ILB_CHROMEHEALTH', 'ILB_RANGE' } },
+    air = { { 'UAB_HEALTH', 'UAU_GUNSHIP', 'UAP_CLUSTERBOMBS' }, { 'CAB_DAMAGE', 'CAU_GUNSHIP', 'CAB_HEALTH' }, { 'IAB_DAMAGE', 'IAU_GUNSHIP', 'IAB_HEALTH' } },
+    defense = { { 'UBB_INCREASEHEALTH', 'UBP_PDUPGRADE', 'UBU_SHIELDGENERATOR' }, { 'CBB_HEALTH', 'CBB_RATEOFFIRE', 'CBU_SHIELDGENERATOR' }, { 'IBB_DAMAGE', 'IBU_SHIELDGENERATOR', 'IBP_SHIELDENERGYSPONGE' } },
+    eco = { { 'UBB_MASSINCOME', 'UBB_ENERGYINCOME', 'UBB_BUILDTIME' }, { 'CBB_BUILDCOST', 'CBB_BUILDTIME', 'CBU_MASSCONVERTOR' }, { 'IBB_MASSINCOME', 'IBB_ENERGYINCOME', 'IBB_RESEARCHRATE' } },
+    tech = { { 'ULU_FATBOY', 'ULU_KINGKRIPTOR', 'UAU_AIRFORTRESS' }, { 'CLU_MEGALITHII', 'CAU_SOULRIPPERII', 'CLU_CREX' }, { 'ILU_UNIVERSALCOLOSSUS', 'IAU_CZAR', 'ILU_URCHINOW' } },
+    acuDefense = { { 'UCB_HEALTH', 'UCB_REGENERATION', 'UCA_HUNKER' }, { 'CCB_HEALTH', 'CCA_HUNKER', 'CCB_MOVESPEED' }, { 'ICB_MOVESPEED', 'ICA_HUNKER', 'ICA_TELEPORT' } },
+    acuAttack = { { 'UCB_DAMAGE', 'UCB_RANGE', 'UCP_AA' }, { 'CCB_RATEOFFIRE', 'CCP_NANOBOTWEAPON', 'CCP_AA' }, { 'ICB_DAMAGE', 'ICB_RANGE', 'ICP_AA' } },
+}
+local PLAN_OF = { balanced = 'land', aggressive = 'land', defensive = 'defense', raider = 'land', naval = 'eco', airborne = 'air',
+    engineer = 'defense', blitz = 'land', titan = 'tech' }
+
+-- puts research at the front of the game's own list (it researches what it needs first)
+function Commander.Want(self, names, why)
+    local sys = self.brain.SkirmishAISystem
+    if not sys or type(sys.ResearchNeeds) ~= 'table' then return false end
+    local added = false
+    for i = table.getn(names), 1, -1 do
+        local n = names[i]
+        if n and not self.needs[n] then
+            self.needs[n] = true
+            table.insert(sys.ResearchNeeds, 1, n)
+            added = true
+        end
+    end
+    if added and why then Commander.Note(self, 'pesquisa: ' .. why) end
+    return added
+end
+
+function Commander.ResearchPlan(self)
+    local t = Now()
+    if t < 30 or not Commander.Cooldown(self, 'researchplan', 60) then return end
+    local f = self.faction
+    if not self.planned then
+        self.planned = true
+        local plan = PLAN_OF[self.personalityKey] or 'land'
+        if Commander.Gene(self, 'air') > 1.3 then plan = 'air' end
+        if Commander.Gene(self, 'tech') > 1.35 then plan = 'tech' end
+        Commander.Want(self, RESEARCH[plan][f], 'plano de ' .. plan)
+        if Commander.Gene(self, 'expansion') > 1.1 then Commander.Want(self, RESEARCH.eco[f], nil) end
+    end
+    -- the ACU: armor while it is being hit, weapons while it fights forward
+    if self.acuFleeing or (self.threatPos and Dist(self.threatPos, self.home) < 80) then
+        Commander.Want(self, RESEARCH.acuDefense[f], 'blindagem do comandante')
+    elseif self.acuDefending or (self.squads.main.state == 'attack' and t > 600) then
+        Commander.Want(self, RESEARCH.acuAttack[f], 'armas do comandante')
+    end
+    if Commander.Gene(self, 'defense') > 1.3 then Commander.Want(self, RESEARCH.defense[f], 'defesas mais fortes') end
+    if t > 900 and Commander.Gene(self, 'tech') > 1.05 then Commander.Want(self, RESEARCH.tech[f], 'experimentais') end
+end
+
+-- the experimental race: the enemy is building one (seen by the scouts) -> strike the factory
+-- when strong enough, otherwise rush the forge
+function Commander.ExperimentalRace(self)
+    local b = Commander.Believed(self)
+    if not b.expfactory or not Commander.Cooldown(self, 'exprace', 60) then return end
+    local mine = PowerOf(self.squads.main.members)
+    local there = Commander.Danger(self, b.expfactory, 45)
+    if mine >= there * self.ratio then
+        self.expStrike = b.expfactory
+        Commander.Note(self, 'viu a sua fabrica de experimental: vai destrui-la antes de ficar pronta')
+    else
+        self.expStrike = false
+        self.forgeNow = true
+        Commander.Want(self, RESEARCH.tech[self.faction], nil)
+        Commander.Note(self, 'viu a sua fabrica de experimental: correndo para fazer o dela primeiro')
+    end
+end
+
+-- nukes once it is ahead late in the game; anti-nukes when the human has a launcher
+local NUKE = { 'uub0107', 'ucb0204', 'uib0107' }
+local ANTINUKE = { 'uub0203', 'ucb0204', 'uib0203' }
+function Commander.Nukes(self)
+    if not CFG.build or not Commander.Cooldown(self, 'nukes', 20) then return end
+    local t = Now()
+    local M = Commander.M(self)
+    if M and M.nukes and not self.antiNuke then
+        self.antiNuke = true
+        pcall(self.brain.SkirmishAISystem.ResearchNeed, self.brain.SkirmishAISystem, 'NeedAntiNukes')
+        Commander.Note(self, 'voce tem missil nuclear: defesa antimissil')
+    end
+    if self.antiNuke and Stored(self.brain, 'MASS') > 400 and not self.antiNukeBuilt then
+        if Commander.Build(self, ANTINUKE[self.faction], Toward(self.home, Commander.NearestEnemyStart(self) or self.home, -10)) then self.antiNukeBuilt = true end
+    end
+    if t < 1200 or self.adaptive > 0 or Commander.Gene(self, 'tech') < 0.9 then return end
+    if not self.nukeWanted then
+        self.nukeWanted = true
+        pcall(self.brain.SkirmishAISystem.ResearchNeed, self.brain.SkirmishAISystem, 'NeedNukes')
+        Commander.Note(self, 'pesquisando missil nuclear')
+    end
+    local forge = false
+    for _, d in (self.districts or {}) do if d.role == 'forge' or d.role == 'rear' then forge = d break end end
+    local silos = Commander.List(self, Cat('NUKE STRUCTURE'))
+    if table.getn(silos) == 0 then
+        if Stored(self.brain, 'MASS') > 600 then Commander.Build(self, NUKE[self.faction], (forge and forge.pos) or self.home) end
+        return
+    end
+    -- launch at the most valuable enemy place
+    local best, bestV = false, 0
+    for _, cell in Commander.Targets(self) do
+        if cell.value > bestV then best, bestV = cell.pos, cell.value end
+    end
+    if not best then return end
+    for _, s in ipairs(silos) do
+        pcall(IssueSiloBuildNuke, { s })
+        local ok, ammo = pcall(s.GetNukeSiloAmmoCount, s)
+        if ok and ammo and ammo > 0 and pcall(IssueNuke, { s }, best) then
+            Commander.Note(self, 'lancou um missil nuclear')
+            return
+        end
+    end
+end
+
+-- mass converters when energy piles up and mass is short
+function Commander.Converters(self)
+    if not CFG.build or Now() < 600 or not Commander.Cooldown(self, 'converter', 90) then return end
+    if Stored(self.brain, 'ENERGY') < 2000 or Stored(self.brain, 'MASS') > 150 then return end
+    pcall(self.brain.SkirmishAISystem.ResearchNeed, self.brain.SkirmishAISystem, 'NeedMassConv')
+    local ids = { 'uub0704', 'ucb0704', 'uib0704' }
+    local spot = self.home
+    for _, d in (self.districts or {}) do if d.role == 'rear' then spot = d.pos break end end
+    if Commander.Build(self, ids[self.faction], spot) then Commander.Note(self, 'energia sobrando: conversor de massa') end
+end
+
+-- ---------------------------------------------------------------- timing, ambush and decoys
+-- the right moment: the enemy army just lost a lot, or walked far from home
+function Commander.Timing(self)
+    local S = Snapshot()
+    local t = Now()
+    local power, far = 0, false
+    for _, idx in ipairs(self.enemies) do
+        local A = S.armies[idx]
+        if A then
+            power = power + A.power
+            local ok, x, z = pcall(A.brain.GetArmyStartPos, A.brain)
+            local c = Centroid((function() local l = {} for _, m in ipairs(A.mobile) do if not m.air and not m.engineer and m.u then table.insert(l, m.u) end end return l end)())
+            if ok and x and c and Dist(c, Point(x, z)) > Dist(Point(x, z), self.home) * 0.6 then far = true end
+        end
+    end
+    local hist = self.powerHist or {}
+    table.insert(hist, { t = t, p = power })
+    while hist[1] and t - hist[1].t > 40 do table.remove(hist, 1) end
+    self.powerHist = hist
+    local peak = 0
+    for _, h in ipairs(hist) do peak = math.max(peak, h.p) end
+    local reason = false
+    if peak > 10 and power < peak * 0.6 then reason = 'o seu exercito acabou de perder uma luta' end
+    if far and power > 0 then reason = reason or 'o seu exercito esta longe de casa' end
+    if reason and (not self.window or t > self.window) then
+        self.window = t + 30
+        self.windowWhy = reason
+        Commander.Note(self, 'hora certa de atacar: ' .. reason)
+    end
+end
+
+function Commander.InWindow(self)
+    return self.window and Now() < self.window
+end
+
+-- a few units hide beside the route the human uses (out of sight) and jump on the passing army
+function Commander.Ambush(self)
+    local M = Commander.M(self)
+    local sq = self.squads.ambush
+    if not sq then return end
+    local members = sq.members
+    local main = self.squads.main
+    local spot = M and Hottest(M.route, self.home, 80, 400, 2)
+    if not spot then
+        for _, u in ipairs(sq.units) do u.CPSquad = 'main' end
+        return
+    end
+    -- take a few units from the army while it waits
+    if table.getn(members) < 4 and main.state == 'hold' and table.getn(main.members) > Commander.MinUnits(self) then
+        for i = table.getn(main.members), 1, -1 do
+            local u = main.members[i]
+            if table.getn(sq.units) >= 4 then break end
+            if not Is(Categories().experimental, u) then
+                u.CPSquad = 'ambush'
+                table.insert(sq.units, u)
+                table.remove(main.members, i)
+            end
+        end
+        members = sq.units
+    end
+    if table.getn(members) == 0 then return end
+    local enemy = Commander.NearestEnemyStart(self) or self.home
+    local d = math.max(1, Dist(spot, enemy))
+    local hide = Point(spot[1] - (enemy[3] - spot[3]) / d * 45, spot[3] + (enemy[1] - spot[1]) / d * 45)
+    if IsWater(hide[1], hide[3]) then hide = Point(spot[1] + (enemy[3] - spot[3]) / d * 45, spot[3] - (enemy[1] - spot[1]) / d * 45) end
+    local passing = Commander.MobileDanger(self, spot, 50)
+    if passing >= 3 and passing <= PowerOf(members) * 2.5 then
+        if sq.state ~= 'attack' then
+            sq.state = 'attack'
+            Commander.Command(self, sq, members, 'attack', spot)
+            Commander.Note(self, 'emboscada: atacou o seu exercito no caminho')
+        end
+    elseif sq.state ~= 'hide' or not sq.post or Dist(sq.post, hide) > 20 then
+        sq.state = 'hide'
+        sq.post = hide
+        Commander.Command(self, sq, members, 'move', hide)
+    end
+end
+
+-- before a hard attack, the raiders strike somewhere else first so the defense goes there
+function Commander.Decoy(self, squad, target)
+    local raid = self.squads.raid
+    if squad.name ~= 'main' or table.getn(raid.members) < 2 or not Commander.Cooldown(self, 'decoy', 120) then return false end
+    if Commander.Danger(self, target, 45) < 6 then return false end
+    local far, farD = false, 0
+    for _, cell in Commander.Targets(self) do
+        local d = Dist(cell.pos, target)
+        if d > 180 and d > farD and Commander.CanReach(self, raid.members, cell.pos, 'land') then far, farD = cell.pos, d end
+    end
+    if not far then return false end
+    raid.state = 'attack'
+    raid.target = far
+    raid.attackSince = Now()
+    Commander.Command(self, raid, raid.members, 'attack', far)
+    squad.state = 'gather'
+    squad.gatherUntil = Now() + 12
+    squad.rally = squad.center
+    Commander.Note(self, 'isca: os rapidos atacaram longe antes do ataque principal')
+    return true
+end
+
+-- ---------------------------------------------------------------- economy taken from the enemy
+-- extractors destroyed by the army become ours; wreckage after a big fight is reclaimed
+local EXTRACTOR = { 'uub0701', 'ucb0701', 'uib0701' }
+function Commander.Steal(self)
+    if not CFG.build or not self.stealSpots or table.getn(self.stealSpots) == 0 then return end
+    if not Commander.Cooldown(self, 'steal', 20) then return end
+    local spot = self.stealSpots[1]
+    if Commander.MobileDanger(self, spot, 60) >= 3 then return end
+    local S = Snapshot()
+    -- someone already built there
+    for _, A in S.armies do
+        for _, st in ipairs(A.structs) do
+            if st.kind == 'extractor' and Dist(st.pos, spot) < 4 then table.remove(self.stealSpots, 1) return end
+        end
+    end
+    local builders = {}
+    for _, e in ipairs(Commander.List(self, Categories().engineer)) do
+        if e.CPBuilder and not e.CPIsland and Ready(e) then table.insert(builders, e) end
+    end
+    local eng = builders[1] or Commander.Engineer(self, spot, false)
+    if not eng then return end
+    pcall(IssueClearCommands, { eng })
+    if pcall(self.brain.BuildStructure, self.brain, eng, EXTRACTOR[self.faction], { spot[1], spot[3], 0 }, false) then
+        table.remove(self.stealSpots, 1)
+        Commander.Note(self, 'pegou um extrator seu que foi destruido')
+    end
+end
+
+function Commander.Reclaim(self, pos)
+    if not pos or not Commander.Cooldown(self, 'reclaim', 45) then return end
+    local ok, list = pcall(function() return GetReclaimablesInRect(Rect(pos[1] - 40, pos[3] - 40, pos[1] + 40, pos[3] + 40)) end)
+    if not ok or type(list) ~= 'table' then return end
+    local eng = Commander.Engineer(self, pos, false)
+    if not eng then return end
+    local n = 0
+    for _, w in list do
+        if n >= 6 then break end
+        if pcall(IssueReclaim, { eng }, w) then n = n + 1 end
+    end
+    if n > 0 then Commander.Note(self, 'recolhendo destrocos depois da luta') end
+end
+
+-- ---------------------------------------------------------------- the air force patrols
+function Commander.AirPatrol(self, fighters)
+    if table.getn(fighters) == 0 or not Commander.Cooldown(self, 'patrol', 40) then return end
+    local route = { self.home }
+    for _, d in (self.districts or {}) do
+        if d.step > 2 and table.getn(route) < 5 then table.insert(route, d.pos) end
+    end
+    if table.getn(route) < 2 then return end
+    pcall(IssueClearCommands, fighters)
+    for _, p in ipairs(route) do pcall(IssuePatrol, fighters, p) end
+    self.squads.fighters.state = 'patrol'
+end
+
+-- ---------------------------------------------------------------- tips and talk for the panel
+-- training: what this AI is about to do to you (only the human's enemies, only once per plan)
+function Commander.Tip(self)
+    if not CFG.tips or not self.facesHuman then return false end
+    local main = self.squads.main
+    if main.state ~= 'attack' or not main.target or not main.center then return false end
+    local speed = 3
+    local eta = math.floor(Dist(main.center, main.target) / speed)
+    if eta < 5 then return false end
+    local W, H = MapSize()
+    return { pos = main.target, at = { main.target[1] / W, main.target[3] / H }, eta = eta, n = table.getn(main.members) }
+end
+
+function Commander.Say(self, text)
+    if not CFG.chat or not self.facesHuman then return end
+    self.sayN = (self.sayN or 0) + 1
+    self.said = { n = self.sayN, text = text }
+end
+
+-- ---------------------------------------------------------------- strategies (doctrines)
+-- The Alsyper Adapter keeps two strategies at a time (a main one and a support one), chosen by
+-- what it knows: the map, the human's style, its genes, the economy and how the match is going.
+-- Each strategy nudges the genes and turns on behaviours; changes go to the journal with why.
+local STRATEGIES = {
+    { id = 'fastland', label = 'Expansao terrestre rapida', when = function(c) return Now() < 480 and WaterShare() < 0.3 and 1.2 or 0.2 end, genes = { expansion = 0.25, patience = -0.1 } },
+    { id = 'economy', label = 'Dominio economico', when = function(c) return (c.extractors or 0) < c.enemyExtractors and 1.1 or 0.5 end, genes = { expansion = 0.2, harass = -0.1 } },
+    { id = 'scouting', label = 'Reconhecimento constante', when = function(c) return (Now() - (c.seenAt or -999)) > 180 and 1.2 or 0.3 end, genes = { scouting = 0.3 } },
+    { id = 'combined', label = 'Exercito combinado', when = function(c) return 0.8 end, genes = { patience = 0.05 } },
+    { id = 'airsup', label = 'Supremacia aerea', when = function(c) return (c.intel.air or 0) > 10 and 1.3 or Commander.Gene(c, 'air') * 0.6 end, genes = { air = 0.3 } },
+    { id = 'turtle', label = 'Defesa fortificada', when = function(c) return (c.adaptive > 0 or c.tally.lost > 1) and 1.3 or Commander.Gene(c, 'defense') * 0.5 end, genes = { defense = 0.3, aggression = -0.1 } },
+    { id = 'experimental', label = 'Investimento em experimentais', when = function(c) return Now() > 900 and Commander.Gene(c, 'tech') or 0.1 end, genes = { tech = 0.3 } },
+    { id = 'acupush', label = 'Pressao com o comandante', when = function(c) return Now() < 420 and c.personalityKey ~= 'defensive' and 0.9 or 0 end, genes = { aggression = 0.1 } },
+    { id = 'naval', label = 'Dominio naval', when = function(c) return WaterShare() > 0.3 and Commander.Gene(c, 'naval') * 1.1 or 0 end, genes = { naval = 0.3 } },
+    { id = 'simultaneous', label = 'Ataques simultaneos', when = function(c) return table.getn(c.squads.main.members) >= Commander.MinUnits(c) * 2.5 and 1.2 or 0.2 end, genes = { aggression = 0.1 } },
+    { id = 'ecopressure', label = 'Pressao economica', when = function(c) return Commander.Gene(c, 'harass') * 0.8 + ((c.enemyExtractors or 0) > (c.extractors or 0) + 4 and 0.5 or 0) end, genes = { harass = 0.25 } },
+    { id = 'focus', label = 'Fogo concentrado', when = function(c) return CFG.micro and 0.6 or 0 end, genes = {} },
+    { id = 'veterans', label = 'Veterania das unidades', when = function(c) return Now() > 600 and 0.7 or 0.1 end, genes = { patience = 0.05 } },
+    { id = 'rally', label = 'Pontos de reuniao e patrulhas', when = function(c) return 0.5 end, genes = {} },
+    { id = 'reclaim', label = 'Recuperacao de destrocos', when = function(c) return Stored(c.brain, 'MASS') < 100 and 0.9 or 0.2 end, genes = {} },
+    { id = 'fronts', label = 'Controle de varias frentes', when = function(c) return table.getn(c.districts or {}) >= 4 and 0.9 or 0.2 end, genes = { expansion = 0.05 } },
+    { id = 'antinuke', label = 'Defesa antinuclear', when = function(c) local M = Commander.M(c) return M and M.nukes and 2 or 0 end, genes = { defense = 0.1 } },
+    { id = 'longarty', label = 'Artilharia de longo alcance', when = function(c) return (c.intel.towers or 0) > 30 and 1.2 or 0.2 end, genes = { tech = 0.1 } },
+    { id = 'flanks', label = 'Ataques pelos flancos', when = function(c) return c.P.pincer and 0.7 or 0.2 end, genes = { aggression = 0.05 } },
+    { id = 'territory', label = 'Expansao territorial estrategica', when = function(c) return Now() > 300 and Commander.Gene(c, 'expansion') * 0.8 or 0.3 end, genes = { expansion = 0.15 } },
+    { id = 'balance', label = 'Equilibrio entre massa e energia', when = function(c) return (Stored(c.brain, 'ENERGY') < 200 or Stored(c.brain, 'ENERGY') > 3000) and 1.1 or 0.3 end, genes = {} },
+    { id = 'research', label = 'Pesquisa tecnologica antecipada', when = function(c) return Now() < 600 and Commander.Gene(c, 'tech') * 0.7 or 0.2 end, genes = { tech = 0.15 } },
+    { id = 'engineers', label = 'Protecao de engenheiros', when = function(c) return c.engineerThreat and 1.5 or 0.3 end, genes = { defense = 0.05 } },
+    { id = 'counter', label = 'Contra-ataque especializado', when = function(c) return (c.squads.main.counterUntil or 0) > Now() and 1.5 or 0.4 end, genes = {} },
+    { id = 'team', label = 'Coordenacao de ataques em equipe', when = function(c) return table.getn(Commander.Allies(c)) > 0 and 1.0 or 0 end, genes = {} },
+}
+
+function Commander.Strategy(self, id)
+    return self.strategy and (self.strategy[1] == id or self.strategy[2] == id)
+end
+
+function Commander.ChooseStrategy(self)
+    if not self.genes or not Commander.Cooldown(self, 'strategy', 90) then return end
+    local S = Snapshot()
+    local theirs, n = 0, 0
+    for _, idx in ipairs(self.enemies) do
+        if S.armies[idx] then theirs = theirs + S.armies[idx].extractors n = n + 1 end
+    end
+    self.enemyExtractors = n > 0 and theirs / n or 0
+    local scored = {}
+    for _, st in ipairs(STRATEGIES) do
+        local ok, v = pcall(st.when, self)
+        if ok and type(v) == 'number' and v > 0 then table.insert(scored, { st = st, v = v }) end
+    end
+    table.sort(scored, function(a, b) return a.v > b.v end)
+    local first, second = scored[1] and scored[1].st, scored[2] and scored[2].st
+    if not first then return end
+    local old = self.strategy
+    self.strategy = { first.id, second and second.id or first.id }
+    self.strategyLabel = first.label .. (second and (' + ' .. second.label) or '')
+    if not old or old[1] ~= first.id or old[2] ~= self.strategy[2] then
+        for _, st in { first, second } do
+            if st then for k, v in st.genes do Commander.Shift(self, k, v * 0.3, nil) end end
+        end
+        Commander.Note(self, 'estrategia: ' .. self.strategyLabel)
+    end
+end
+
+-- veterans and units of great value are pulled back earlier (they are worth more alive)
+function CPVeteran(u)
+    local ok, lvl = pcall(function() return u:GetVeteranLevel() end)
+    if ok and type(lvl) == 'number' then return lvl end
+    return u.VeteranLevel or 0
+end
+
+-- engineers building far from home flee from enemies, and a few units come to guard them
+function Commander.ProtectEngineers(self)
+    self.engineerThreat = false
+    local guard = {}
+    for _, e in ipairs(Commander.List(self, Categories().engineer)) do
+        if e.CPBuilder and Ready(e) then
+            local pos = e:GetPosition()
+            local danger = Commander.MobileDanger(self, pos, 45)
+            if danger >= 2 then
+                self.engineerThreat = pos
+                if not e.CPFleeing then
+                    e.CPFleeing = true
+                    pcall(IssueClearCommands, { e })
+                    Order({ e }, 'move', Commander.SafeSpot(self, pos))
+                    Commander.Note(self, 'engenheiro fugindo de inimigos')
+                end
+                table.insert(guard, pos)
+            elseif e.CPFleeing and danger <= 0 then
+                e.CPFleeing = nil
+            end
+        end
+    end
+    local pos = guard[1]
+    if not pos or not Commander.Strategy(self, 'engineers') and self.difficulty < 3 then return end
+    local main = self.squads.main
+    if main.state ~= 'hold' or table.getn(main.members) < 4 or not Commander.Cooldown(self, 'engguard', 30) then return end
+    local n = 0
+    local helpers = {}
+    for _, u in ipairs(main.members) do
+        if n >= 3 then break end
+        table.insert(helpers, u)
+        n = n + 1
+    end
+    Order(helpers, 'attack', pos)
+end
+
+-- the ACU walks with the army early on (pressure), when healthy and the army is attacking
+function Commander.AcuPush(self)
+    if not Commander.Strategy(self, 'acupush') or Now() > 480 then return false end
+    local acu = Commander.List(self, Categories().acu)[1]
+    local main = self.squads.main
+    if not acu or not Ready(acu) or self.acuFleeing or HealthFraction(acu) < 0.75 then return false end
+    if main.state == 'attack' and main.target and Commander.Cooldown(self, 'acupush', 20) then
+        Order({ acu }, 'attack', main.target)
+        self.acuPushing = true
+        Commander.Note(self, 'comandante avancando junto com o exercito')
+        return true
+    end
+    return false
+end
+
+-- the genes of every AI commander in the match, averaged (what goes to memory)
+CPAI.GenesAverage = function()
+    local sum, n = {}, 0
+    for _, cmd in CPAI.commanders do
+        if cmd.genes and cmd.facesHuman then
+            n = n + 1
+            for _, k in ipairs(GENES) do sum[k] = (sum[k] or 0) + cmd.genes[k] end
+        end
+    end
+    if n == 0 then return nil end
+    for k, v in sum do sum[k] = math.floor(v / n * 100 + 0.5) / 100 end
+    return sum
+end
+
 -- ---------------------------------------------------------------- adaptive difficulty
 function Commander.Adapt(self)
     if not CFG.adaptive or not Commander.Cooldown(self, 'adapt', 30) then return end
@@ -2915,6 +3719,16 @@ function Commander.DistrictSummary(self)
         if d.step > n then done = done + 1 elseif not current then current = d.name .. ' ' .. (d.step - 1) .. '/' .. n end
     end
     return { done = done, total = total, current = current or '' }
+end
+
+function Commander.AdapterSummary(self)
+    if not self.genes then return false end
+    local parts = {}
+    for _, k in ipairs(GENES) do table.insert(parts, GENE_LABEL[k] .. ' ' .. math.floor(self.genes[k] * 100 + 0.5) .. '%') end
+    local seen = 'ainda nao viu a sua base'
+    if self.seenAt then seen = 'viu a sua base ha ' .. math.floor(Now() - self.seenAt) .. ' s' end
+    return { generation = self.generation, genes = table.concat(parts, '  '), last = self.adapterLog or '', seen = seen, strategy = self.strategyLabel or '',
+        window = Commander.InWindow(self) and self.windowWhy or false }
 end
 
 function Commander.JournalLines(self, n)
@@ -2973,6 +3787,9 @@ function Commander.Publish(self)
         journal = Commander.JournalLines(self, 5),
         tally = self.tally,
         mini = Commander.MiniMap(self),
+        alsyper = Commander.AdapterSummary(self),
+        tip = Commander.Tip(self),
+        said = self.said,
         time = Now(),
     }
     if Commander.M(self) then entry.learned = CPAIModelSummary() end
@@ -2995,11 +3812,37 @@ local function Report(army, fields)
     entry.time = Now()
 end
 
+-- the end of the match against the human: +1 when the human won, -1 when the AIs won
+local function MatchResult()
+    if CPAI.result then return CPAI.result end
+    local human, humanAlive, foes, foesAlive = false, false, 0, 0
+    for _, b in ArmyBrains do
+        local ok, idx = pcall(b.GetArmyIndex, b)
+        if ok and b.BrainType == 'Human' and not Civilian(idx) then
+            human = idx
+            if not Defeated(b) then humanAlive = true end
+        end
+    end
+    if not human or Now() < 300 then return false end
+    for _, b in ArmyBrains do
+        local ok, idx = pcall(b.GetArmyIndex, b)
+        if ok and b.BrainType ~= 'Human' and not Civilian(idx) and Enemy(human, idx) then
+            foes = foes + 1
+            if not Defeated(b) then foesAlive = foesAlive + 1 end
+        end
+    end
+    if foes == 0 then return false end
+    if not humanAlive then CPAI.result = -1 elseif foesAlive == 0 then CPAI.result = 1 end
+    return CPAI.result
+end
+
 local function SyncThread()
     while true do
         pcall(function()
             if CFG.status and next(CPAI.status) then Sync.CPAIStatus = CPAI.status end
             if CPAI.modelOut and Now() < (CPAI.modelOutUntil or 0) then Sync.CPAIModel = CPAI.modelOut end
+            local r = CFG.learn and MatchResult()
+            if r then Sync.CPAIResult = { result = r, genes = CPAI.GenesAverage and CPAI.GenesAverage() or false } end
         end)
         WaitTicks(1)
     end
@@ -3032,8 +3875,12 @@ function Commander.Step(self)
     Commander.Recruit(self)
     Commander.Collect(self)
     Commander.AssignGuard(self)
+    Commander.Believe(self)
+    Commander.Adapter(self)
+    Commander.ChooseStrategy(self)
     Commander.Foresee(self)
     Commander.HumanPush(self)
+    Commander.Timing(self)
     local clusters = Commander.Clusters(self)
     self.lastClusters = clusters
     local ex = 0
@@ -3063,14 +3910,22 @@ function Commander.Step(self)
     end
     Commander.LeadGuard(self, threatPos)
     if CFG.air then Commander.LeadAir(self, threatPos) end
-    Commander.LeadAcu(self, threatPos, threatPower)
+    if not Commander.AcuPush(self) then Commander.LeadAcu(self, threatPos, threatPower) end
+    Commander.ProtectEngineers(self)
+    Commander.EarlyScout(self)
     Commander.Scout(self)
+    Commander.Ambush(self)
     Commander.Counter(self)
+    Commander.ResearchPlan(self)
+    Commander.ExperimentalRace(self)
     Commander.Bases(self, clusters, threatKey)
     Commander.Districts(self, threatPos)
     Commander.BaseShields(self)
     Commander.AirNet(self)
     Commander.Economy(self)
+    Commander.Nukes(self)
+    Commander.Converters(self)
+    Commander.Steal(self)
     Commander.Research(self)
     Commander.Repair(self, threatPos)
     Commander.Adapt(self)
@@ -3103,6 +3958,7 @@ end
 function Commander.Run(self)
     local period = 4
     if CFG.level >= 2 then period = 3 end
+    if CFG.level >= 3 then period = 2 end
     if self.difficulty <= 1 then period = period + 2 end
     -- many AIs: each one thinks a little less often, and not all on the same tick
     period = period + math.floor(ArmyCount() / 8)

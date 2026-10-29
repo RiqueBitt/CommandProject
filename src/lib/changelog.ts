@@ -6,6 +6,18 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.57.0",
+    title: "Alsyper Adaptador: a IA que evolui com você e com o mapa",
+    items: [
+      { icon: "psychology", title: "Alsyper Adaptador", text: "O centro da IA agora são nove genes (agressão, paciência, expansão, defesa, reconhecimento, saques, tecnologia, aviação e marinha). Eles começam do que ela aprendeu nas partidas anteriores (por mapa e em geral), mudam um pouco a cada partida e se ajustam durante o jogo: ataques que falham, o que mata as unidades dela, o seu estilo, o mapa, a economia e os bairros perdidos. Cada mudança aparece no diário com o motivo. Cada vitória sua deixa a próxima IA um pouco mais forte.", page: "mods" },
+      { icon: "travel_explore", title: "Joga sem ver o mapa, como um jogador", text: "A IA só sabe o que viu: no começo avisa que não vê o mapa inteiro e manda um avião (ou uma unidade rápida) até a sua base, e volta a olhar de tempos em tempos. O que ela pesquisa e produz contra você vem do que os batedores viram. Com o mapa todo revelado, ela vê tudo como você.", page: "mods" },
+      { icon: "strategy", title: "25 estratégias", text: "Escolhe duas estratégias por vez entre 25 (expansão rápida, domínio econômico, supremacia aérea, defesa fortificada, experimentais, pressão com o comandante, domínio naval, ataques simultâneos, pressão econômica, flancos, artilharia de longo alcance, defesa antinuclear, proteção de engenheiros, coordenação em equipe e outras) e troca quando o jogo muda.", page: "mods" },
+      { icon: "swords", title: "Táticas novas", text: "Ataca na hora certa (quando o seu exército acabou de perder ou está longe de casa), emboscada escondida ao lado do caminho que você usa, isca antes do ataque principal, artilharia derrubando escudos primeiro, extratores tomados viram dela, recolhe destroços, caças patrulham entre os bairros, bombardeiros voltam aos seus pontos fracos, veteranos voltam mais cedo para casa, engenheiros fogem de inimigos e o comandante avança com o exército no começo.", page: "mods" },
+      { icon: "science", title: "Pesquisa, experimentais e mísseis", text: "Pesquisa com plano (pela personalidade e pelos genes), melhorias do comandante na hora certa (blindagem quando é atacado, armas quando avança), corrida de experimental (destrói a sua fábrica ou corre para fazer o dela), defesa antinuclear quando você tem míssil, míssil nuclear quando está ganhando no fim do jogo, conversor de massa e segunda linha de torres entre os bastiões e a base.", page: "mods" },
+      { icon: "tune", title: "Novas opções no launcher", text: "Nível Mestre (pensa a cada 2 segundos), personalidades Engenheira, Relâmpago e Experimental, controles do Alsyper (agressividade, bairros, aviação, marinha), modo treino com dicas na tela, a IA falando durante a partida e, no cartão \"O que a IA aprendeu\", os genes e o resultado das últimas partidas.", page: "mods" },
+    ],
+  },
+  {
     version: "0.56.0",
     title: "IA estrategista: formações, duas frentes, cerco, previsão de ataque e mapinha no painel",
     items: [

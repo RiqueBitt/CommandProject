@@ -26,7 +26,8 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AiOptions {
-    /// 1 = esperta, 2 = brutal (mais engenheiros, exército maior e mais paciente)
+    /// 1 = esperta, 2 = brutal (mais engenheiros, exército maior e mais paciente), 3 = mestre
+    /// (tudo do brutal e o comandante pensa a cada 2 s)
     pub level: u8,
     /// navios em mapas com água
     pub naval: bool,
@@ -56,10 +57,22 @@ pub struct AiOptions {
     pub panel_key: String,
     /// lembra o jeito do jogador entre partidas (em `Game.prefs`, jogando sozinho)
     pub learn: bool,
+    /// agressividade (0,5 a 1,5; 1 = a da personalidade): o ponto de partida do Alsyper
+    pub aggression: f32,
+    /// quantos bairros e quão rápido (0,5 a 1,5)
+    pub districts: f32,
+    /// quanto usa aviação (0 a 2)
+    pub air_bias: f32,
+    /// quanto usa o mar (0 a 2)
+    pub naval_bias: f32,
+    /// modo treino: dicas na tela do que a IA vai fazer
+    pub tips: bool,
+    /// a IA fala na tela durante a partida
+    pub chat: bool,
 }
 
 /// Personalidades aceitas (a primeira é o padrão).
-pub const PERSONALITIES: &[&str] = &["mixed", "balanced", "aggressive", "defensive", "raider", "naval", "airborne"];
+pub const PERSONALITIES: &[&str] = &["mixed", "balanced", "aggressive", "defensive", "raider", "naval", "airborne", "engineer", "blitz", "titan"];
 
 impl Default for AiOptions {
     fn default() -> Self {
@@ -79,6 +92,12 @@ impl Default for AiOptions {
             panel: true,
             panel_key: "F4".into(),
             learn: true,
+            aggression: 1.0,
+            districts: 1.0,
+            air_bias: 1.0,
+            naval_bias: 1.0,
+            tips: false,
+            chat: true,
         }
     }
 }
@@ -95,7 +114,7 @@ pub struct AiBuild {
 
 /// Versão do mod da IA: muda quando o comandante ou os ajustes mudam (o launcher monta de novo
 /// sozinho, com as opções salvas, quando a cópia instalada é de outra versão).
-pub const MOD_VERSION: &str = "2.1.0";
+pub const MOD_VERSION: &str = "2.2.0";
 
 const COMMANDER_LUA: &str = include_str!("aimod_commander.lua");
 const PANEL_LUA: &str = include_str!("aimod_panel.lua");
@@ -113,7 +132,7 @@ impl AiOptions {
 pub fn commander_lua(o: &AiOptions) -> String {
     let b = |v: bool| if v { "true" } else { "false" };
     COMMANDER_LUA
-        .replace("@LEVEL@", if o.level >= 2 { "2" } else { "1" })
+        .replace("@LEVEL@", match o.level { 0 | 1 => "1", 2 => "2", _ => "3" })
         .replace("@RAIDS@", b(o.raids))
         .replace("@PERSONALITY@", o.personality_key())
         .replace("@AIR@", b(o.air))
@@ -124,6 +143,18 @@ pub fn commander_lua(o: &AiOptions) -> String {
         .replace("@ADAPTIVE@", b(o.adaptive))
         .replace("@STATUS@", b(o.panel))
         .replace("@LEARN@", b(o.learn))
+        .replace("@AGGRESSION@", &num(o.aggression, 0.5, 1.5))
+        .replace("@DISTRICTS@", &num(o.districts, 0.5, 1.5))
+        .replace("@AIRBIAS@", &num(o.air_bias, 0.0, 2.0))
+        .replace("@NAVALBIAS@", &num(o.naval_bias, 0.0, 2.0))
+        .replace("@TIPS@", b(o.tips))
+        .replace("@CHAT@", b(o.chat))
+}
+
+/// número do controle deslizante, dentro da faixa e com duas casas (texto Lua)
+fn num(v: f32, lo: f32, hi: f32) -> String {
+    let v = if v.is_finite() { v.clamp(lo, hi) } else { 1.0 };
+    format!("{:.2}", v)
 }
 
 /// O script do painel da IA.
@@ -385,6 +416,7 @@ fn edits(o: &AiOptions) -> Vec<FileEdit> {
     if o.economy {
         // os bairros (com o comandante construindo) usam engenheiros próprios: a base ganha mais
         let engineers = match (brutal, o.build && o.commander) {
+            (true, true) if o.level >= 3 => "10",
             (true, true) => "8",
             (true, false) | (false, true) => "6",
             (false, false) => "4",
@@ -599,6 +631,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn commander_placeholders_filled() {
+        for o in [AiOptions::default(), AiOptions { level: 3, aggression: 9.0, air_bias: -1.0, tips: true, chat: false, ..Default::default() }] {
+            let code = commander_lua(&o);
+            assert!(!code.contains('@'), "sobrou marcador no comandante");
+            assert!(code.contains("aggression = 1.50") || o.aggression == 1.0);
+        }
+        assert!(commander_lua(&AiOptions { level: 3, ..Default::default() }).contains("level = 3,"));
+        assert!(!panel_lua(&AiOptions::default()).contains("@KEY@"));
+    }
+
+    #[test]
     fn roomy_base_template() {
         let files = edits(&AiOptions::default());
         let f = files.iter().find(|f| f.path.ends_with("BaseTemplates.lua")).expect("gabarito da base");
@@ -742,6 +785,10 @@ pub struct AiMemoryProfile {
     /// primeiro ataque típico, em segundos de partida
     pub first_attack: Option<f64>,
     pub maps: Vec<AiMapMemory>,
+    /// genes do Alsyper Adaptador aprendidos até agora (agressão, paciência, expansão…)
+    pub genes: Vec<(String, f64)>,
+    /// últimas partidas: 1 = o jogador venceu, -1 = a IA venceu
+    pub results: Vec<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -823,6 +870,19 @@ pub fn memory_from_prefs(text: &str) -> Result<Vec<AiMemoryProfile>> {
                 })
                 .unwrap_or_default();
             maps.sort_by_key(|m| std::cmp::Reverse(m.games));
+            const GENES: [&str; 9] = ["aggression", "patience", "expansion", "defense", "scouting", "harass", "tech", "air", "naval"];
+            let genes: Vec<(String, f64)> = GENES
+                .iter()
+                .filter_map(|k| mem["genes"][*k].as_f64().map(|v| (k.to_string(), v.clamp(0.0, 2.0))))
+                .collect();
+            // a lista do Lua vira objeto {"1": .., "2": ..} ou array
+            let mut results: Vec<(usize, i32)> = match &mem["results"] {
+                serde_json::Value::Array(a) => a.iter().enumerate().filter_map(|(i, v)| v.as_f64().map(|n| (i, n as i32))).collect(),
+                serde_json::Value::Object(o) => o.iter().filter_map(|(k, v)| Some((k.parse::<usize>().ok()?, v.as_f64()? as i32))).collect(),
+                _ => Vec::new(),
+            };
+            results.sort_by_key(|r| r.0);
+            let results: Vec<i32> = results.into_iter().map(|r| r.1.signum()).collect();
             out.push(AiMemoryProfile {
                 name: p["Name"].as_str().unwrap_or("perfil").to_string(),
                 current: current.map(|c| c.to_string() == *key).unwrap_or(false),
@@ -830,6 +890,8 @@ pub fn memory_from_prefs(text: &str) -> Result<Vec<AiMemoryProfile>> {
                 style,
                 first_attack: mem["firstAttack"].as_f64().filter(|v| *v > 0.0),
                 maps,
+                genes,
+                results,
             });
         }
     }
@@ -861,7 +923,7 @@ mod memory_tests {
 
     #[test]
     fn reads_memory_from_prefs() {
-        let text = "profile = {\n    current = 2,\n    profiles = {\n        { Name = 'Outro' },\n        {\n            Name = 'RiqueBitt',\n            CPAIMemory = {\n                games = 3,\n                firstAttack = 250,\n                style = { rush = 0.8, air = 0.35, turtle = 0 },\n                maps = {\n                    ['/maps/sc2_mp_203/sc2_mp_203_scenario.lua'] = {\n                        games = 2,\n                        route = { ['3:4'] = 6.5, ['4:4'] = 2 },\n                        hit = { ['1:1'] = 4 },\n                        expand = {},\n                    },\n                },\n            },\n        },\n    },\n}\noptions = { fidelity = 2 }\n";
+        let text = "profile = {\n    current = 2,\n    profiles = {\n        { Name = 'Outro' },\n        {\n            Name = 'RiqueBitt',\n            CPAIMemory = {\n                games = 3,\n                firstAttack = 250,\n                style = { rush = 0.8, air = 0.35, turtle = 0 },\n                genes = { aggression = 1.3, air = 0.8 },\n                results = { 1, -1, 1 },\n                maps = {\n                    ['/maps/sc2_mp_203/sc2_mp_203_scenario.lua'] = {\n                        games = 2,\n                        route = { ['3:4'] = 6.5, ['4:4'] = 2 },\n                        hit = { ['1:1'] = 4 },\n                        expand = {},\n                    },\n                },\n            },\n        },\n    },\n}\noptions = { fidelity = 2 }\n";
         let p = memory_from_prefs(text).unwrap();
         assert_eq!(p.len(), 1);
         let m = &p[0];
@@ -872,6 +934,8 @@ mod memory_tests {
         assert_eq!(m.style[0], ("rush".to_string(), 0.8));
         assert_eq!(m.maps[0].map, "sc2 mp 203");
         assert_eq!((m.maps[0].games, m.maps[0].routes, m.maps[0].hits), (2, 2, 1));
+        assert_eq!(m.genes, vec![("aggression".to_string(), 1.3), ("air".to_string(), 0.8)]);
+        assert_eq!(m.results, vec![1, -1, 1]);
         // sem memória: lista vazia, sem erro
         assert!(memory_from_prefs("profile = { current = 1, profiles = { { Name = 'x' } } }").unwrap().is_empty());
     }

@@ -161,14 +161,18 @@ export interface OptimizeState {
 }
 export interface CheatOptions { mass: boolean; energy: boolean; research: boolean; unlockAll: boolean; god: boolean; buildSpeed: number; aiToo: boolean; menu: boolean; key: string; tab: boolean }
 /** Mod "IA mais esperta". */
-export type AiPersonality = "mixed" | "balanced" | "aggressive" | "defensive" | "raider" | "naval" | "airborne";
+export type AiPersonality = "mixed" | "balanced" | "aggressive" | "defensive" | "raider" | "naval" | "airborne" | "engineer" | "blitz" | "titan";
 export interface AiOptions {
   level: number; naval: boolean; economy: boolean; commander: boolean; raids: boolean;
   personality: AiPersonality; air: boolean; micro: boolean; build: boolean; counter: boolean;
   team: boolean; adaptive: boolean; panel: boolean; panelKey: string; learn: boolean;
+  /** Alsyper Adaptador: pontos de partida (1 = o da personalidade) */
+  aggression: number; districts: number; airBias: number; navalBias: number;
+  /** modo treino (dicas na tela) e mensagens da IA */
+  tips: boolean; chat: boolean;
 }
 export interface AiMapMemory { map: string; games: number; routes: number; hits: number; expansions: number }
-export interface AiMemoryProfile { name: string; current: boolean; games: number; style: [string, number][]; firstAttack: number | null; maps: AiMapMemory[] }
+export interface AiMemoryProfile { name: string; current: boolean; games: number; style: [string, number][]; firstAttack: number | null; maps: AiMapMemory[]; genes?: [string, number][]; results?: number[] }
 export interface AiMemoryReport { path: string | null; exists: boolean; error: string | null; profiles: AiMemoryProfile[] }
 export interface AiInstall { manifest: Manifest; applied: number; skipped: string[] }
 export interface UiSkinOptions { name: string; adjust: ColorAdjust; prefixes: string[]; exclude: string[]; quality: "fast" | "normal" | "best" }

@@ -18,6 +18,7 @@ local Prefs = import('/lua/user/prefs.lua')
 local memory = false      -- what earlier matches taught (loaded at the start)
 local mapKey = 'default'
 local learnedSaves = 0
+local resultSaved = false
 local memorySent = 0      -- how many times the memory went to the simulation (twice, to be sure)
 local savedSeq = false    -- the last model of this match already kept in Game.prefs
 local STALE = 60          -- seconds of game time without news before an AI leaves the panel
@@ -90,6 +91,13 @@ local function Rows()
     for army, ai in status do
         table.insert(rows, { ai.name .. '  -  ' .. ai.personality .. '  -  ' .. ai.adaptive, C_ACCENT })
         table.insert(rows, { '  Plano: ' .. ai.plan .. '   (ataca com ' .. ai.minUnits .. '+ unidades)', C_TEXT })
+        local X = ai.alsyper
+        if X then
+            table.insert(rows, { '  Alsyper Adaptador - geracao ' .. X.generation .. '   estrategia: ' .. (X.strategy ~= '' and X.strategy or 'escolhendo'), C_WARN })
+            table.insert(rows, { '    ' .. X.genes, C_FAINT })
+            table.insert(rows, { '    ultima mudanca: ' .. (X.last ~= '' and X.last or 'nenhuma') .. '   (' .. X.seen .. ')', C_FAINT })
+            if X.window then table.insert(rows, { '    hora certa de atacar: ' .. X.window, C_WARN }) end
+        end
         if ai.error then table.insert(rows, { '  Erro: ' .. ai.error, C_WARN }) end
         local parts = {}
         for _, p in { SquadText('Exercito', ai.main), SquadText('Guarda', ai.guard), SquadText('Rapidos', ai.raid), SquadText('Frota', ai.fleet), SquadText('Desembarque', ai.drop) } do
@@ -152,6 +160,8 @@ local function DrawMini()
             dot(m.second, 8, 'FFFF2840')
             dot(m.predicted, 11, 'FFFFD166')
             dot(m.join, 8, 'FF4FC3F7')
+            local tip = status[army].tip
+            if tip and tip.at then dot(tip.at, 9, 'FFFF9F1C') end
         end
     end
     for i = used + 1, MAX_DOTS do dots[i]:Hide() end
@@ -341,6 +351,7 @@ local function SendMemory()
         SimCallback({ Func = 'CPAIMemory', Args = {
             games = memory.games, style = memory.style, firstAttack = memory.firstAttack,
             route = map.route, hit = map.hit, expand = map.expand, held = map.held, lost = map.lost,
+            genes = map.genes or memory.genes, results = memory.results,
         } })
     end)
 end
@@ -354,6 +365,9 @@ local function SaveMemory(current)
         games = games,
         style = Blend(memory.style, current.style, keep),
         maps = memory.maps,
+        -- the Alsyper genes evolve across matches (this match counts a little more each time)
+        genes = Blend(memory.genes, current.genes, 0.6),
+        results = memory.results,
     }
     if type(current.firstAttack) == 'number' then
         if type(memory.firstAttack) == 'number' then
@@ -376,6 +390,7 @@ local function SaveMemory(current)
         -- the districts of the AI that held and the ones that fell on this map
         held = TopCells(Blend(old.held, current.held, 0.6), 16),
         lost = TopCells(Blend(old.lost, current.lost, 0.6), 16),
+        genes = Blend(old.genes, current.genes, 0.5),
     }
     saved.maps = maps
     pcall(function() Prefs.SetToCurrentProfile('CPAIMemory', saved) end)
@@ -407,6 +422,33 @@ local function GameTime()
     local ok, t = pcall(GetGameTimeSeconds)
     if ok and type(t) == 'number' then return t end
     return 0
+end
+
+-- what the AIs say (chat) and the training tips go to the top of the screen, once each
+local spoken, tipped = {}, {}
+function CPAIAnnounce()
+    for army, ai in status do
+        local said = ai.said
+        if said and said.n ~= spoken[army] then
+            spoken[army] = said.n
+            pcall(function()
+                import('/lua/ui/game/textdisplay.lua').PrintToScreen({ text = ai.name .. ': ' .. said.text, size = 15, color = 'ffffd166', duration = 4, location = 'centertop' })
+            end)
+            UI_LastSaid = said.text
+        end
+        local tip = ai.tip
+        local key = tip and (math.floor(tip.pos[1] / 60) .. ':' .. math.floor(tip.pos[3] / 60)) or false
+        if key and key ~= tipped[army] then
+            tipped[army] = key
+            local text = 'Dica: ' .. ai.name .. ' vai atacar perto do ponto laranja do mapinha (F4) em uns ' .. tip.eta .. ' s com ' .. tip.n .. ' unidades'
+            pcall(function()
+                import('/lua/ui/game/textdisplay.lua').PrintToScreen({ text = text, size = 14, color = 'ffff9f1c', duration = 6, location = 'centertop' })
+            end)
+            UI_LastTip = text
+        elseif not key then
+            tipped[army] = false
+        end
+    end
 end
 
 -- every frame: read what the simulation sent on the last beat. (On PC the game never calls the
@@ -442,6 +484,25 @@ local function Poll()
             end
         end
     end
+    if LEARN and memory and not resultSaved then
+        local r = false
+        pcall(function() r = Sync.CPAIResult end)
+        if r and type(r.result) == 'number' then
+            resultSaved = true
+            local list = type(memory.results) == 'table' and memory.results or {}
+            table.insert(list, r.result)
+            while table.getn(list) > 5 do table.remove(list, 1) end
+            memory.results = list
+            -- on top of what was last saved this match (not the memory loaded at the start)
+            local cur = false
+            pcall(function() cur = Prefs.GetFromCurrentProfile('CPAIMemory') end)
+            if type(cur) ~= 'table' then cur = memory end
+            cur.results = list
+            if type(r.genes) == 'table' then cur.genes = Blend(cur.genes, r.genes, 0.6) end
+            pcall(function() Prefs.SetToCurrentProfile('CPAIMemory', cur) end)
+            pcall(SavePreferences)
+        end
+    end
     if LEARN then
         local m = false
         pcall(function() m = Sync.CPAIModel end)
@@ -450,6 +511,7 @@ local function Poll()
             pcall(SaveMemory, m)
         end
     end
+    if status then pcall(CPAIAnnounce) end
     if dirty then pcall(Refresh) end
 end
 CPAIPanelPoll = Poll -- for the tests

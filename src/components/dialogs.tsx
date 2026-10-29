@@ -155,9 +155,9 @@ export function CheatsModal({ installed, onClose }: { installed: boolean; onClos
 const AI_DEFAULT: AiOptions = {
   level: 1, naval: true, economy: true, commander: true, raids: true, personality: "mixed",
   air: true, micro: true, build: true, counter: true, team: true, adaptive: true, panel: true, panelKey: "F4",
-  learn: true,
+  learn: true, aggression: 1, districts: 1, airBias: 1, navalBias: 1, tips: false, chat: true,
 };
-type AiToggle = "naval" | "economy" | "commander" | "raids" | "air" | "micro" | "build" | "counter" | "team" | "adaptive" | "panel" | "learn";
+type AiToggle = "naval" | "economy" | "commander" | "raids" | "air" | "micro" | "build" | "counter" | "team" | "adaptive" | "panel" | "learn" | "tips" | "chat";
 const AI_ROWS: { key: AiToggle; icon: string; label: string; hint: string; needsCommander?: boolean }[] = [
   { key: "commander", icon: "military_tech", label: "Comandante estratégico", hint: "Junta o exército antes de atacar, só ataca com vantagem, escolhe extratores e fábricas, defende as expansões, recua quando perde, manda feridos para casa e embosca no caminho da base." },
   { key: "air", icon: "flight", label: "Aviação estratégica", hint: "Caças pela superioridade aérea e escoltando o exército, bombardeiros em alvos sem antiaéreo, gunships apoiando o ataque.", needsCommander: true },
@@ -168,6 +168,8 @@ const AI_ROWS: { key: AiToggle; icon: string; label: string; hint: string; needs
   { key: "team", icon: "groups", label: "IAs aliadas em equipe", hint: "Em 2v2 ou mais, atacam o mesmo alvo juntas e ajudam o aliado atacado.", needsCommander: true },
   { key: "learn", icon: "school", label: "Aprende o seu jeito de jogar", hint: "A IA observa o seu estilo (rush, defensivo, aéreo, naval, saque, economia, experimentais), quando você ataca, por onde passa e o que ataca, e se adapta: emboscada na sua rota, torres onde você costuma bater, guarda contra saques, produção contra o seu exército, contra-ataque depois de você atacar. Jogando sozinho, lembra entre partidas (no Game.prefs do jogo, por mapa).", needsCommander: true },
   { key: "adaptive", icon: "tune", label: "Dificuldade adaptativa", hint: "Se você estiver ganhando fácil, a IA pressiona mais e recebe um reforço pequeno; se estiver perdendo feio, ela segura um pouco.", needsCommander: true },
+  { key: "tips", icon: "lightbulb", label: "Modo treino", hint: "Dicas na tela do que a IA vai fazer (\"vai atacar perto do ponto laranja em 25 s\"), para aprender a jogar contra ela.", needsCommander: true },
+  { key: "chat", icon: "chat", label: "A IA fala durante a partida", hint: "Mensagens curtas na tela quando ela ataca, vence ou recua.", needsCommander: true },
   { key: "panel", icon: "monitoring", label: "Painel \"o que a IA está pensando\"", hint: "Mostra no jogo o plano de cada IA: personalidade, alvo, exército, aviação e comandante. Só aparece jogando sozinho.", needsCommander: true },
   { key: "naval", icon: "sailing", label: "Navios em mapas com água", hint: "Todo tipo de IA constrói estaleiro quando há mar perto; a IA naval ganha quando a água separa os jogadores; corrige os navios que nunca eram produzidos." },
   { key: "economy", icon: "factory", label: "Economia e mini-bases", hint: "Mais engenheiros, expansões espalhadas pelo mapa mais cedo e em paralelo, mais extratores ao mesmo tempo, pesquisa sem atraso." },
@@ -180,6 +182,15 @@ const AI_PERSONALITIES: { key: AiPersonality; label: string; hint: string }[] = 
   { key: "raider", label: "Saqueadora", hint: "muitos ataques-relâmpago em extratores" },
   { key: "naval", label: "Naval", hint: "frota sai mais cedo (Illuminate vira equilibrada)" },
   { key: "airborne", label: "Aérea", hint: "aviação mais agressiva" },
+  { key: "engineer", label: "Engenheira", hint: "muitos bairros e torres, cresce pelo mapa" },
+  { key: "blitz", label: "Relâmpago", hint: "ataca muito cedo e sem parar, com exércitos menores" },
+  { key: "titan", label: "Experimental", hint: "economia para experimentais, forja mais cedo" },
+];
+const AI_SLIDERS: { key: "aggression" | "districts" | "airBias" | "navalBias"; label: string; min: number; max: number; hint: string }[] = [
+  { key: "aggression", label: "Agressividade", min: 0.5, max: 1.5, hint: "quanto de vantagem ela espera antes de atacar" },
+  { key: "districts", label: "Bairros", min: 0.5, max: 1.5, hint: "quantos bairros e quão rápido ela cresce pelo mapa" },
+  { key: "airBias", label: "Aviação", min: 0, max: 2, hint: "quanto ela usa aviões" },
+  { key: "navalBias", label: "Marinha", min: 0, max: 2, hint: "quanto ela usa navios (em mapas com água)" },
 ];
 
 export function loadAi(): AiOptions {
@@ -217,6 +228,7 @@ export function AiModal({ installed, onClose }: { installed: boolean; onClose: (
           <div className="seg" role="group" aria-label={t("Nível da IA")}>
             <button type="button" className="btn" aria-pressed={o.level === 1} onClick={() => set({ level: 1 })}>{t("Esperta")}</button>
             <button type="button" className="btn" aria-pressed={o.level === 2} onClick={() => set({ level: 2 })}>{t("Brutal")}</button>
+            <button type="button" className="btn" aria-pressed={o.level === 3} onClick={() => set({ level: 3 })}>{t("Mestre")}</button>
           </div>
         </Field>
         <Field label={t("Personalidade")} hint={t(AI_PERSONALITIES.find((p) => p.key === o.personality)?.hint ?? "")}>
@@ -239,6 +251,19 @@ export function AiModal({ installed, onClose }: { installed: boolean; onClose: (
             );
           })}
         </div>
+        {o.commander && (
+          <Field label={t("Alsyper Adaptador")} hint={t("O ponto de partida da IA. Depois ela se adapta sozinha a você e ao mapa durante a partida e entre partidas (o painel F4 mostra os genes e cada mudança).")}>
+            <div className="col" style={{ gap: 6 }}>
+              {AI_SLIDERS.map((sl) => (
+                <label key={sl.key} className="range" title={t(sl.hint)} style={{ gridTemplateColumns: "110px 1fr 46px" }}>
+                  <span>{t(sl.label)}</span>
+                  <input type="range" min={sl.min} max={sl.max} step={0.05} value={o[sl.key]} onChange={(e) => set({ [sl.key]: Number(e.target.value) } as Partial<AiOptions>)} />
+                  <output>{Math.round(o[sl.key] * 100)}%</output>
+                </label>
+              ))}
+            </div>
+          </Field>
+        )}
         {o.commander && o.panel && (
           <Field label={t("Tecla do painel")} hint={t('Também abre pelo botão "IA" na borda esquerda da tela. Use uma tecla diferente da do menu de trapaças.')}>
             <div className="seg" role="group" aria-label={t("Tecla do painel")}>
@@ -264,6 +289,11 @@ export function AiModal({ installed, onClose }: { installed: boolean; onClose: (
 const STYLE_LABEL: Record<string, string> = {
   rush: "Rush (ataca cedo)", turtle: "Defensivo (muitas torres)", air: "Aéreo", naval: "Naval",
   raider: "Saqueador", eco: "Econômico (muitas expansões)", tech: "Experimentais",
+};
+
+const GENE_LABEL: Record<string, string> = {
+  aggression: "agressão", patience: "paciência", expansion: "expansão", defense: "defesa", scouting: "reconhecimento",
+  harass: "saques", tech: "tecnologia", air: "aviação", naval: "marinha",
 };
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -293,6 +323,12 @@ export function AiMemoryCard() {
               </div>
             ))}
           </div>
+          {!!profile.genes?.length && (
+            <div className="small faint">{t("Alsyper Adaptador: {list}", { list: profile.genes.map(([k, v]) => `${GENE_LABEL[k] ? t(GENE_LABEL[k]) : k} ${Math.round(v * 100)}%`).join(" · ") })}</div>
+          )}
+          {!!profile.results?.length && (
+            <div className="small faint">{t("Últimas partidas: {list}", { list: profile.results.map((r) => (r > 0 ? t("você venceu") : t("a IA venceu"))).join(", ") })}</div>
+          )}
           {profile.maps.length > 0 && (
             <div className="small faint">{t("Mapas: {list}", { list: profile.maps.slice(0, 4).map((m) => t("{map} ({games}× · {routes} rotas, {hits} pontos que você ataca)", { map: m.map, games: m.games, routes: m.routes, hits: m.hits })).join(" · ") })}</div>
           )}
@@ -392,7 +428,7 @@ const FP_KEY = "cp-fp";
 /** versão do mod montado por esta versão do launcher (igual a `firstperson::MOD_VERSION`) */
 export const FP_VERSION = "1.2.0";
 /** a mesma de cp_core::aimod::MOD_VERSION */
-export const AI_VERSION = "2.1.0";
+export const AI_VERSION = "2.2.0";
 export const FP_DEFAULT: FirstPersonOptions = { key: "F5", hud: true, drive: true, firstZoom: 14, thirdZoom: 38 };
 const FP_KEYS = ["F5", "F6", "F7", "F8", "F11", "Home", "Insert"];
 

@@ -1782,6 +1782,9 @@ pub async fn build_ai(state: State<'_, AppState>, opts: cp_core::aimod::AiOption
                 (opts.team, "IAs aliadas em equipe"),
                 (opts.adaptive, "dificuldade adaptativa"),
                 (opts.learn, "aprende o seu jeito de jogar"),
+                (true, "Alsyper Adaptador (genes que evoluem com você e com o mapa, 25 estratégias, reconhecimento como um jogador)"),
+                (opts.tips, "modo treino"),
+                (opts.chat, "a IA fala na tela"),
             ] {
                 if on {
                     list.push(what);
@@ -1795,13 +1798,20 @@ pub async fn build_ai(state: State<'_, AppState>, opts: cp_core::aimod::AiOption
             "raider" => "saqueadora",
             "naval" => "naval",
             "airborne" => "aérea",
+            "engineer" => "engenheira",
+            "blitz" => "relâmpago",
+            "titan" => "experimental",
             _ => "personalidades misturadas",
         };
         let panel = if opts.commander && opts.panel { format!(" Painel no jogo: tecla {}.", opts.panel_key) } else { String::new() };
         let import = ImportOptions {
             id: Some("cp-ia-esperta".into()),
             version: Some(cp_core::aimod::MOD_VERSION.into()),
-            name: Some(if opts.level >= 2 { "IA mais esperta (brutal)".into() } else { "IA mais esperta".into() }),
+            name: Some(match opts.level {
+                0 | 1 => "IA mais esperta".into(),
+                2 => "IA mais esperta (brutal)".into(),
+                _ => "IA mais esperta (mestre)".into(),
+            }),
             category: Some(Category::Gameplay),
             description: Some(format!(
                 "{}; {personality}. Vale para todas as dificuldades da IA em escaramuça.{panel} {} ajustes aplicados.",
