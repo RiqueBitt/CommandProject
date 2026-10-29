@@ -212,6 +212,11 @@ def main():
         assert "maps/SC2_CPSCULPT/SC2_CPSCULPT.hfield.win.bdf" in names3, names3
         assert save.count("'Mass X") == 2, "massa manual nos marcadores"
         assert res3["extraMass"] == 2, res3
+        # marcadores da IA (caminhos, expansões, defesa, encontro, combate), como nos mapas feitos à mão
+        assert res3.get("aiMarkers", 0) > 20, res3
+        for kind in ("Land Path Node", "Air Path Node", "Rally Point", "Defensive Point", "Combat Zone"):
+            assert f"STRING( '{kind}' )" in save, f"marcador da IA {kind}"
+        assert "['graph'] = STRING( 'DefaultLand' )" in save
         assert any("sculpted heightfield: 5" in l for l in log3), log3
         assert any("ruggedized" in l for l in log3), log3
         print("escultura + massa manual ok:", res3["mass"], "massa automática +", res3["extraMass"], "manual")

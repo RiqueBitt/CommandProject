@@ -747,6 +747,19 @@ def _hooks(sm, spec, state):
                 extra += sm.mass_marker(f"Mass X{i:02d}", px, pz, t.y(px, pz))
             if spec.get("extra_mass"):
                 emit("progress", message=f"pontos de massa manuais: {len(spec['extra_mass'])}")
+            # marcadores da IA (caminhos, expansões, defesa, encontro, combate), como os mapas
+            # competitivos feitos à mão: a IA do jogo anda e se expande melhor com eles
+            if spec.get("ai_markers", True):
+                try:
+                    import cp_aimarkers as ai
+                    spawns = ai.positions(blob, "Blank Marker")
+                    mass = ai.positions(blob + extra, "Mass")
+                    text, count = ai.markers(t.y, t.dry, t.grid, spawns, mass)
+                    extra += text
+                    state["ai_markers"] = count
+                    emit("progress", message=f"marcadores da IA: {sum(count.values())} ({len(count)} tipos)")
+                except Exception as e:  # noqa: BLE001 — o mapa sai mesmo sem eles
+                    state["warnings"].append(f"marcadores da IA não gerados: {e}")
         return orig_save(blob + extra, n_armies, area)
 
     orig_pack = sm.package_patched
@@ -1159,6 +1172,8 @@ def cmd_build(inp):
     res["spawns"] = {str(k): list(v) for k, v in (res.get("spawns") or {}).items()}
     res["warnings"] = state["warnings"]
     res["extraMass"] = len(spec.get("extra_mass") or [])
+    if state.get("ai_markers"):
+        res["aiMarkers"] = sum(state["ai_markers"].values())
     res["propsAdded"], res["propsRemoved"] = state.get("props", (0, 0))
     res["reskinned"] = len(spec.get("reskin") or {})
     res["scenarioId"] = spec["scenario_id"]

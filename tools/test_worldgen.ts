@@ -149,5 +149,39 @@ for (const [mode, links, sym, players] of [["bases", "none", "rot2", 2], ["bases
   check(a.heights.every((v, i) => v === b.heights[i]), `mar e ilhas determinístico (${mode})`);
   console.log("mar e ilhas", mode, links, "mar", (wet * 100).toFixed(0) + "%", "bases juntas", reach);
 }
+// estilo competitivo (medido nos mapas feitos à mão do pack BDFTM): platôs em degraus, moldura e
+// massa espalhada; 8 jogadores com rios passando entre as bases
+import { stats } from "./measure_worldgen.ts";
+import { frameWidth } from "../src/pages/create/worldgen.ts";
+{
+  const N = 256, gg = { size: N, grid: 1024 }, dn = new Float32Array((N + 1) * (N + 1)).fill(40);
+  for (const id of ["plateaus", "arena", "canyonlands", "tworivers"]) {
+    const p = WORLD_PRESETS.find((x) => x.id === id)!;
+    const water = p.over.rivers ? 30 : 0;
+    const wg = newWorld({ ...p.over, seed: 4242, players: 8, symmetry: "rot2" });
+    const a = generateWorld(gg, dn, water, water > 0, wg, cat);
+    const st = stats(a.heights, N, 1024, water, a.spawns, a.mass);
+    check(st.flat > 0.45 && st.levels >= 3, `${id}: platôs em níveis (plano ${st.flat}, níveis ${st.levels})`);
+    check(a.mass.length >= 60, `${id}: massa espalhada (${a.mass.length} pontos)`);
+    const m = walkMask(gg, a.heights, water, water > 0);
+    const d0 = walkDistances(gg, m, a.spawns[0]);
+    check(a.spawns.every((s2) => distAt(gg, d0, s2) >= 0), `${id}: bases alcançáveis com os degraus`);
+    const lost = a.mass.filter((q) => distAt(gg, d0, q) < 0).length;
+    check(lost === 0, `${id}: massa alcançável (${lost} fora)`);
+    if (wg.edge === "frame") {
+      const F = frameWidth(1024);
+      check(a.mass.every((q) => Math.min(q[0], q[1], 1024 - q[0], 1024 - q[1]) > F), `${id}: massa dentro da moldura`);
+    }
+    if (id === "tworivers") check(a.features.filter((f) => f.kind === "river").length >= 2, `${id}: os rios passam entre as 8 bases`);
+    const ops = symmetryOps("rot2", 1024);
+    let maxd = 0;
+    for (let j = 0; j <= N; j += 2) for (let i = 0; i <= N; i += 2) {
+      const [x, z] = ops[1].pt([i * 4, j * 4]);
+      maxd = Math.max(maxd, Math.abs(a.heights[j * (N + 1) + i] - a.heights[Math.round(z / 4) * (N + 1) + Math.round(x / 4)]));
+    }
+    check(maxd < 0.01, `${id}: relevo simétrico (dif ${maxd.toFixed(3)})`);
+    console.log("competitivo", id, JSON.stringify({ flat: st.flat, steep: st.steep, levels: st.levels, mass: a.mass.length }));
+  }
+}
 console.log(fails ? `${fails} falha(s)` : "worldgen: tudo certo");
 process.exit(fails ? 1 : 0);

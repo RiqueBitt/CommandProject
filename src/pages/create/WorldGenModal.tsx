@@ -42,7 +42,7 @@ function downsample(g: Grid, H: Float32Array, to: number): [Grid, Float32Array] 
   return [{ size: to, grid: g.grid }, out];
 }
 
-const SLIDERS: { group: string; icon: string; items: { key: keyof WorldGen; label: string; min: number; max: number; step?: number; fmt?: (v: number) => string; water?: boolean }[] }[] = [
+const SLIDERS: { group: string; icon: string; items: { key: keyof WorldGen; label: string; min: number; max: number; step?: number; fmt?: (v: number) => string; water?: boolean; def?: number }[] }[] = [
   { group: "Relevo", icon: "terrain", items: [
     { key: "blend", label: "Relevo novo", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
     { key: "elevation", label: "Altura da terra", min: 4, max: 60 },
@@ -50,6 +50,8 @@ const SLIDERS: { group: string; icon: string; items: { key: keyof WorldGen; labe
     { key: "scale", label: "Largura das ondas", min: 100, max: 500, step: 10 },
     { key: "detail", label: "Detalhe fino do chão", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
     { key: "smooth", label: "Suavidade (montanhas e margens)", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: "terraces", label: "Degraus (platôs em níveis)", min: 0, max: 1, step: 0.05, fmt: (v) => (v > 0 ? `${Math.round(v * 100)}%` : "sem") },
+    { key: "terraceStep", label: "Altura de cada degrau", min: 8, max: 30, def: 14 },
   ] },
   { group: "Montanhas", icon: "landscape", items: [
     { key: "mountains", label: "Montanhas", min: 0, max: 10 },
@@ -79,7 +81,8 @@ const SLIDERS: { group: string; icon: string; items: { key: keyof WorldGen; labe
     { key: "farms", label: "Plantações (no bioma temperado)", min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
   ] },
   { group: "Estratégia", icon: "flag", items: [
-    { key: "expansions", label: "Expansões por jogador", min: 0, max: 4 },
+    { key: "expansions", label: "Expansões por jogador (massa em grupos)", min: 0, max: 4 },
+    { key: "massSpread", label: "Massa solta por jogador (massa espalhada)", min: 2, max: 20, def: 9 },
     { key: "obstacles", label: "Paredões (gargalos)", min: 0, max: 8 },
   ] },
 ];
@@ -306,7 +309,7 @@ export default function WorldGenModal(props: Props) {
             <section key={g.group} className="wg-group">
               <h4><Icon name={g.icon} size={17} /> {t(g.group)}</h4>
               {g.items.map((it) => {
-                const v = (wg[it.key] as number | undefined) ?? 0;
+                const v = (wg[it.key] as number | undefined) ?? it.def ?? 0;
                 const off = it.water && !hasWater;
                 return (
                   <label key={it.key} className={`range ${off ? "off" : ""}`} title={off ? t("Precisa de um terreno com água") : undefined}>
@@ -327,6 +330,7 @@ export default function WorldGenModal(props: Props) {
                   <option value="none">{t("Abertas")}</option>
                   <option value="mountains">{t("Cercadas por montanhas")}</option>
                   <option value="rugged">{t("Borda rochosa (intransponível)")}</option>
+                  <option value="frame">{t("Moldura (área de jogo cercada por um abismo)")}</option>
                   <option value="water" disabled={!hasWater}>{t("Mar em volta")}{hasWater ? "" : t(" (precisa de água)")}</option>
                 </select>
               </label>
@@ -334,6 +338,12 @@ export default function WorldGenModal(props: Props) {
                 <select className="select" value={wg.resources ?? "generated"} onChange={(e) => set("resources", e.target.value as WorldGen["resources"])}>
                   <option value="generated">{t("Gerada aqui (simétrica, editável)")}</option>
                   <option value="auto">{t("Automática do toolkit")}</option>
+                </select>
+              </label>
+              <label className="field"><span className="label">{t("Distribuição da massa")}</span>
+                <select className="select" value={wg.massLayout ?? "clusters"} disabled={wg.resources === "auto"} onChange={(e) => set("massLayout", e.target.value as WorldGen["massLayout"])}>
+                  <option value="clusters">{t("Em grupos nas expansões")}</option>
+                  <option value="scattered">{t("Espalhada pelo mapa (estilo competitivo)")}</option>
                 </select>
               </label>
               <label className="field"><span className="label">{t("Economia")}</span>

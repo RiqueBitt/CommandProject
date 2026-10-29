@@ -473,6 +473,60 @@ export function cleanShores(g: Grid, H: Float32Array, water: number) {
   return H;
 }
 
+/** Degraus: cada altura vai para o platô do nível dela, e a subida para o próximo nível fica
+ *  num paredão curto (a parte final de cada degrau). Só depende da altura (a simetria fica), a beira
+ *  da água fica como está e uma passada leve tira o serrilhado dos paredões. Medido nos mapas
+ *  competitivos feitos à mão: uns 2/3 do mapa plano, em 3 a 6 níveis. */
+export function terraceRelief(g: Grid, H: Float32Array, amount: number, stepH: number, water: number, hasWater: boolean) {
+  const a = Math.max(0, Math.min(1, amount)), st = Math.max(4, stepH);
+  if (a <= 0) return H;
+  let lo = Infinity;
+  for (const v of H) lo = Math.min(lo, v);
+  const ref = hasWater ? water + 1.5 : lo;
+  const wall = 0.2;
+  const s = g.size, w = s + 1, step = g.grid / s;
+  // os degraus seguem a forma grande do relevo (o relevo borrado): platôs largos com borda limpa,
+  // em vez de um paredão em cada ondinha; um pouco do detalhe fino volta por cima
+  const L = H.slice(), tmp = new Float32Array(H.length);
+  const R = Math.max(1, Math.round(26 / step));
+  for (let pass = 0; pass < 2; pass++) {
+    for (let j = 0; j <= s; j++) {
+      let acc = 0;
+      for (let i = -R; i <= R; i++) acc += L[j * w + Math.max(0, Math.min(s, i))];
+      for (let i = 0; i <= s; i++) {
+        tmp[j * w + i] = acc / (2 * R + 1);
+        acc += L[j * w + Math.min(s, i + R + 1)] - L[j * w + Math.max(0, i - R)];
+      }
+    }
+    for (let i = 0; i <= s; i++) {
+      let acc = 0;
+      for (let j = -R; j <= R; j++) acc += tmp[Math.max(0, Math.min(s, j)) * w + i];
+      for (let j = 0; j <= s; j++) {
+        L[j * w + i] = acc / (2 * R + 1);
+        acc += tmp[Math.min(s, j + R + 1) * w + i] - tmp[Math.max(0, j - R) * w + i];
+      }
+    }
+  }
+  for (let k = 0; k < H.length; k++) {
+    const y = H[k];
+    if (hasWater && y < water + 1.5) continue;
+    const v = (L[k] - ref) / st, fl = Math.floor(v), fr = v - fl;
+    let q = ref + (fl + smooth(1 - wall, 1, fr)) * st + (y - L[k]) * 0.12;
+    if (hasWater) q = Math.max(q, water + 1.5);
+    H[k] = lerp(y, q, a);
+  }
+  // uma passada leve só nos paredões (o plano dos platôs fica)
+  const out = H.slice();
+  for (let j = 1; j < s; j++) for (let i = 1; i < s; i++) {
+    const k = j * w + i;
+    const d = Math.max(Math.abs(H[k + 1] - H[k - 1]), Math.abs(H[k + w] - H[k - w]));
+    if (d < st * 0.3) continue;
+    out[k] = lerp(H[k], (H[k - 1] + H[k + 1] + H[k - w] + H[k + w]) / 4, 0.35);
+  }
+  H.set(out);
+  return H;
+}
+
 /** Suaviza o relevo (montanhas e morros sem pontas), mais nas partes íngremes. */
 export function softenRelief(g: Grid, H: Float32Array, amount: number) {
   const s = g.size, w = s + 1;
@@ -515,8 +569,9 @@ export interface WorldGen {
   rivers: number;
   dunes: number;
   islands: number;
-  /** bordas do mapa */
-  edge: "none" | "mountains" | "water" | "rugged";
+  /** bordas do mapa ("frame" = moldura: a área de jogo é um quadrado cercado por um abismo, como
+   *  nos mapas competitivos feitos à mão) */
+  edge: "none" | "mountains" | "water" | "rugged" | "frame";
   forests: number;
   rocks: number;
   structures: number;
@@ -568,6 +623,16 @@ export interface WorldGen {
   paths?: boolean;
   /** montanhas íngremes bloqueadas para as tropas (mapa de passagem) */
   blockSteep?: boolean;
+  /** degraus (0 a 1): o relevo vira platôs planos em níveis, separados por paredões curtos, com
+   *  rampas onde passam os caminhos (como os mapas competitivos feitos à mão) */
+  terraces?: number;
+  /** altura de cada degrau (padrão 14) */
+  terraceStep?: number;
+  /** massa fora das bases: "clusters" = grupos de 2 a 4 nas expansões; "scattered" = pontos soltos
+   *  espalhados pelo mapa inteiro (como os mapas competitivos) */
+  massLayout?: "clusters" | "scattered";
+  /** "scattered": pontos de massa soltos por jogador (padrão pela economia: 6, 9 ou 13) */
+  massSpread?: number;
   /** cordilheira no eixo da simetria separando os times, com passagens (ausente = só nas partidas grandes) */
   teamWalls?: boolean;
   /** serras curtas entre as bases vizinhas, com um vão no meio (ausente = só nas partidas grandes) */
@@ -596,6 +661,12 @@ export const WORLD_PRESETS: { id: string; label: string; icon: string; desc: str
   { id: "continent", label: "Continente e ilhas", icon: "public", desc: "Uma grande terra no meio do mar, com ilhas em volta ligadas por pontes.", over: { blend: 1, style: "ocean", islandMode: "continent", islandSize: 1, extraIslands: 5, coast: 0.7, seaDepth: 26, links: "bridges", hilliness: 8, scale: 240, mountains: 2, mountainHeight: 50, ridges: 1, hills: 4, plateaus: 1, craters: 0, canyons: 0, lakes: 1, rivers: 2, dunes: 0, islands: 0, edge: "water", forests: 0.6, rocks: 0.3, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 2, farms: 0.4, roads: true, detail: 0.55 } },
   { id: "abyss", label: "Plataformas no abismo", icon: "layers", desc: "Plataformas altas e pontes sobre um abismo (como Shiva Prime).", over: { blend: 1, style: "platforms", platformHeight: 170, abyss: "deep", hilliness: 4, scale: 220, mountains: 6, mountainHeight: 60, ridges: 0, hills: 0, plateaus: 6, craters: 0, canyons: 0, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.25, rocks: 0.5, structures: 4, wrecks: 0.5, biome: "volcanic", settlements: 0, farms: 0, roads: false, detail: 0.5 } },
   { id: "skyforts", label: "Fortalezas suspensas", icon: "fort", desc: "Plataformas verdes com vilas, ligadas por pontes (como Sinorok Rift).", over: { blend: 1, style: "platforms", platformHeight: 140, abyss: "deep", hilliness: 4, scale: 220, mountains: 8, mountainHeight: 60, ridges: 0, hills: 0, plateaus: 8, craters: 0, canyons: 0, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.45, rocks: 0.35, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 2, farms: 0.3, roads: true, detail: 0.5 } },
+  // estilos medidos nos mapas competitivos feitos à mão (pack BDFTM, outono 2026): platôs planos em
+  // 3 a 6 níveis com paredões curtos, área de jogo cercada por moldura e massa solta pelo mapa
+  { id: "plateaus", label: "Platôs em degraus", icon: "stairs", desc: "Platôs planos em vários níveis, paredões curtos e rampas, massa espalhada pelo mapa (estilo competitivo).", over: { blend: 1, style: "natural", hilliness: 16, scale: 230, mountains: 2, mountainHeight: 50, ridges: 2, hills: 4, plateaus: 4, craters: 0, canyons: 1, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "frame", forests: 0.35, rocks: 0.5, structures: 2, wrecks: 0.3, biome: "temperate", settlements: 1, farms: 0.2, roads: true, detail: 0.35, smooth: 0.6, terraces: 0.95, terraceStep: 14, massLayout: "scattered", obstacles: 2 } },
+  { id: "arena", label: "Arena emoldurada", icon: "crop_square", desc: "Quadrado de jogo cercado por um abismo, chão quase plano com muralhas curvas e massa espalhada.", over: { blend: 1, style: "natural", hilliness: 7, scale: 280, mountains: 0, mountainHeight: 40, ridges: 3, hills: 2, plateaus: 2, craters: 0, canyons: 0, lakes: 0, rivers: 0, dunes: 1, islands: 0, edge: "frame", forests: 0.1, rocks: 0.45, structures: 3, wrecks: 0.5, biome: "desert", settlements: 1, farms: 0, roads: true, detail: 0.3, smooth: 0.6, terraces: 0.85, terraceStep: 18, massLayout: "scattered", obstacles: 3 } },
+  { id: "canyonlands", label: "Cânions ramificados", icon: "account_tree", desc: "Planalto cortado por cânions que se ramificam, com degraus nas bordas (como um planeta seco).", over: { blend: 1, style: "natural", hilliness: 12, scale: 200, mountains: 1, mountainHeight: 45, ridges: 1, hills: 3, plateaus: 2, craters: 2, canyons: 5, lakes: 0, rivers: 0, dunes: 0, islands: 0, edge: "frame", forests: 0, rocks: 0.6, structures: 2, wrecks: 0.6, biome: "volcanic", settlements: 0, farms: 0, roads: true, detail: 0.45, smooth: 0.5, terraces: 0.75, terraceStep: 16, massLayout: "scattered" } },
+  { id: "tworivers", label: "Rios gêmeos", icon: "waves", desc: "Dois rios atravessam o mapa entre platôs em degraus; passagens rasas e massa espalhada.", over: { blend: 1, style: "natural", hilliness: 10, scale: 250, mountains: 1, mountainHeight: 40, ridges: 1, hills: 4, plateaus: 2, craters: 0, canyons: 0, lakes: 1, rivers: 2, dunes: 0, islands: 0, edge: "rugged", forests: 0.55, rocks: 0.35, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 2, farms: 0.4, roads: true, detail: 0.4, smooth: 0.6, terraces: 0.7, terraceStep: 12, massLayout: "scattered" } },
   { id: "open", label: "Campo aberto", icon: "grass", desc: "Plano e rápido, poucos obstáculos.", over: { blend: 1, style: "natural", hilliness: 4, scale: 320, mountains: 0, mountainHeight: 40, ridges: 0, hills: 4, plateaus: 1, craters: 0, canyons: 0, lakes: 1, rivers: 0, dunes: 0, islands: 0, edge: "none", forests: 0.35, rocks: 0.2, structures: 2, wrecks: 0.2, biome: "temperate", settlements: 4, farms: 0.85, roads: true, detail: 0.45 } },
 ];
 
@@ -616,6 +687,9 @@ export function symmetriesFor(players: number): Symmetry[] {
 }
 
 // ------------------------------------------------------------------ relevo base
+
+/** Largura da moldura (borda "frame") num mapa de lado G. */
+export const frameWidth = (G: number) => Math.round(Math.min(72, G * 0.065));
 
 /** Relevo base do mundo (antes das formas): mistura o terreno do jogo com o relevo novo. */
 export function baseHeights(g: Grid, donor: Float32Array, water: number, hasWater: boolean, wg: WorldGen): Float32Array {
@@ -692,6 +766,10 @@ export function baseHeights(g: Grid, donor: Float32Array, water: number, hasWate
       y += smooth(150, 10, e) * (45 + 35 * er) * (0.7 + 0.3 * en);
     } else if (wg.edge === "water" && edgy) {
       y = lerp(y, water - 10, smooth(170, 30, e + 30 * en));
+    } else if (wg.edge === "frame") {
+      // moldura: a borda cai num abismo (ou na água) com paredão a pique
+      const F = frameWidth(G);
+      if (e < F + 10) y = lerp(y, ref - 26 + 4 * n(x / 60 + 3, z / 60), smooth(F + 8, F - 6, e));
     }
     const idx = j * w + i;
     out[idx] = Math.max(0, lerp(donor[idx], y, wg.blend));
@@ -759,6 +837,10 @@ export function composeWorld(g: Grid, donor: Float32Array, water: number, hasWat
       if (wg.smooth !== undefined) {
         softenRelief(g, H, wg.smooth);
         if (hasWater) cleanShores(g, H, water);
+        symmetrize(g, H, wg.symmetry);
+      }
+      if ((wg.terraces ?? 0) > 0) {
+        terraceRelief(g, H, wg.terraces ?? 0, wg.terraceStep ?? 14, water, hasWater);
         symmetrize(g, H, wg.symmetry);
       }
     } else symmetrize(g, H, wg.symmetry);
@@ -1174,8 +1256,12 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
     return false;
   };
   /** forma em linha (rio, cordilheira, cânion) com curvas */
+  // distância mínima das linhas (rios, cânions, serras) até as bases: com muitas bases perto umas
+  // das outras ela acompanha o espaço entre elas (o rio passa entre as fileiras de bases)
+  const baseGap = Math.min(...spawns.map((p, i) => Math.min(Infinity, ...spawns.filter((_, j) => j !== i).map((q) => Math.hypot(p[0] - q[0], p[1] - q[1])))));
+  const lineClear = Math.min(130, Number.isFinite(baseGap) ? Math.max(70, baseGap * 0.36) : 130);
   const putLine = (kind: FeatureKind, width: [number, number], h: [number, number], rough: number, len: [number, number], fromEdge: boolean): boolean => {
-    for (let t = 0; t < 60; t++) {
+    for (let t = 0; t < 160; t++) {
       let a: Pt, b: Pt;
       if (fromEdge) {
         const side = Math.floor(r() * 4), pos = 120 + r() * (G - 240);
@@ -1191,7 +1277,7 @@ export function generateWorld(g: Grid, donor: Float32Array, water: number, hasWa
       b = [Math.max(20, Math.min(G - 20, b[0])), Math.max(20, Math.min(G - 20, b[1]))];
       const wdt = lerp(width[0], width[1], r());
       const pts = meander(a, b, 9, wdt * (kind === "river" ? 2.4 : 1.2), r);
-      const tooClose = ops.some((o) => pts.some((q) => nearSpawn(o.pt(q), (crowd ? padR + 30 : 130) + wdt)));
+      const tooClose = ops.some((o) => pts.some((q) => nearSpawn(o.pt(q), (crowd ? padR + 30 : lineClear) + wdt)));
       if (tooClose) continue;
       const seed = Math.floor(r() * 1e6), hh = Math.round(lerp(h[0], h[1], r()));
       const done: Pt[][] = [];
@@ -1532,8 +1618,10 @@ function placeMass(g: Grid, H: Float32Array, water: number, hasWater: boolean, w
   const hAt = (x: number, z: number) => H[Math.max(0, Math.min(s, Math.round(z / step))) * w + Math.max(0, Math.min(s, Math.round(x / step)))];
   const mask = walkMask(g, H, water, hasWater, 6, 2, null);
   const d0 = walkDistances(g, mask, spawns[0]);
+  // com moldura, a massa fica dentro da área de jogo (longe do abismo da borda)
+  const edgeM = wg.edge === "frame" ? frameWidth(G) + 18 : 30;
   const flat = (p: Pt, rad = 12) => {
-    if (p[0] < 30 || p[1] < 30 || p[0] > G - 30 || p[1] > G - 30) return false;
+    if (p[0] < edgeM || p[1] < edgeM || p[0] > G - edgeM || p[1] > G - edgeM) return false;
     const y = hAt(p[0], p[1]);
     if (hasWater && y < water + 3) return false;
     for (const [dx, dz] of [[rad, 0], [-rad, 0], [0, rad], [0, -rad]]) if (Math.abs(hAt(p[0] + dx, p[1] + dz) - y) > rad * 0.35) return false;
@@ -1547,7 +1635,35 @@ function placeMass(g: Grid, H: Float32Array, water: number, hasWater: boolean, w
     return [Math.round(c[0] + Math.cos(a) * 11), Math.round(c[1] + Math.sin(a) * 11)] as Pt;
   }));
   const big = Math.max(0.6, Math.min(1.4, G / 1024));
-  const exp = Math.max(0, Math.min(4, wg.expansions ?? 2));
+  if (wg.massLayout === "scattered") {
+    // pontos soltos pelo mapa inteiro (como nos mapas competitivos feitos à mão: uns 10 por base,
+    // metade a 90–220 da base mais perto), cada um em chão plano e longe dos outros
+    const want = Math.max(1, Math.min(24, wg.massSpread ?? (wg.economy === "poor" ? 6 : wg.economy === "rich" ? 13 : 9)));
+    const gap = 34 * big;
+    for (const sp of canon) {
+      let placed = 0;
+      for (let t = 0; t < 900 && placed < want; t++) {
+        // distâncias variadas: algumas perto (40–120), a maioria no meio do caminho
+        const near = placed < Math.ceil(want / 3);
+        const d = (near ? lerp(40, 120, r()) : lerp(110, 340, r())) * big;
+        const a = r() * Math.PI * 2;
+        const c: Pt = [Math.round(sp[0] + Math.cos(a) * d), Math.round(sp[1] + Math.sin(a) * d)];
+        const own = Math.hypot(c[0] - sp[0], c[1] - sp[1]);
+        const enemy = Math.min(...spawns.filter((x) => x !== sp).map((x) => Math.hypot(c[0] - x[0], c[1] - x[1])));
+        // do lado da própria base ou no meio (nunca colado no inimigo)
+        if (enemy < own * 0.9) continue;
+        if (spawns.some((x) => Math.hypot(c[0] - x[0], c[1] - x[1]) < 40)) continue;
+        const copies = ops.map((o) => o.pt(c));
+        if (copies.some((q, k) => copies.some((q2, k2) => k2 > k && Math.hypot(q[0] - q2[0], q[1] - q2[1]) < gap))) continue;
+        if (copies.some((q) => out.some((x) => Math.hypot(q[0] - x[0], q[1] - x[1]) < gap))) continue;
+        if (!copies.every((q) => flat(q, 8))) continue;
+        for (const q of copies) out.push(q.map((v) => Math.round(v)) as Pt);
+        placed++;
+      }
+      if (placed < want) notes.push("Nem toda a massa solta coube em chão plano perto de uma das bases: complete à mão com a ferramenta Massa.");
+    }
+  }
+  const exp = wg.massLayout === "scattered" ? 0 : Math.max(0, Math.min(4, wg.expansions ?? 2));
   for (const sp of canon) {
     for (let e = 0; e < exp; e++) {
       const contested = exp >= 2 && e === exp - 1;

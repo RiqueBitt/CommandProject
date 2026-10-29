@@ -72,6 +72,10 @@ export function describeWorld(text: string): Described {
   if (mt !== null) { over.mountains = mt; if (mt >= 8) over.mountainHeight = 70; got.push(mt ? `${mt >= 8 ? "muitas " : mt <= 2 ? "poucas " : ""}montanhas` : "sem montanhas"); }
   if (has("plano", "plana", "flat", "planicie", "campo aberto", "open field")) { Object.assign(over, { mountains: 0, ridges: 0, hills: 1, hilliness: 3 }); got.push("terreno plano"); }
   if (has("montanhoso", "acidentado", "mountainous", "rugged")) { Object.assign(over, { hilliness: 14, mountains: Math.max(over.mountains ?? 0, 6), ridges: 3 }); got.push("relevo acidentado"); }
+  // estilo competitivo (como os mapas feitos à mão): platôs em degraus, moldura e massa solta
+  if (has("degrau", "degraus", "terraco", "terracos", "patamar", "patamares", "niveis", "terrace", "terraces", "competitivo", "competitive")) { Object.assign(over, { terraces: 0.9, terraceStep: 14, smooth: 0.6 }); got.push("platôs em degraus"); }
+  if (has("moldura", "emoldurad", "arena", "framed", "frame")) { over.edge = "frame"; got.push("área de jogo cercada por um abismo"); }
+  if (has("massa espalhada", "massa solta", "massas soltas", "scattered mass", "competitivo", "competitive")) { over.massLayout = "scattered"; got.push("massa espalhada pelo mapa"); }
   const lk = amount(["lago", "lagos", "lake", "lakes"], 3, 7, 1);
   if (lk !== null) { over.lakes = lk; got.push(lk ? `${lk >= 7 ? "muitos " : ""}lagos` : "sem lagos"); }
   const rv = amount(["rio", "rios", "river", "rivers"], 2, 5, 1);

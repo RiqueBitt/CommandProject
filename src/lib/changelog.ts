@@ -6,6 +6,16 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.53.0",
+    title: "Gerador de mundos no estilo dos mapas competitivos",
+    items: [
+      { icon: "stairs", title: "Mapas no estilo competitivo", text: "O gerador de mundos aprendeu com 20 mapas competitivos feitos à mão: platôs planos em vários níveis com paredões curtos e rampas onde passam os caminhos (opção Degraus), moldura que cerca a área de jogo com um abismo, e massa solta espalhada pelo mapa inteiro (cerca de 10 por jogador, além das 4 da base).", page: "create" },
+      { icon: "auto_awesome", title: "4 estilos novos", text: "Platôs em degraus, Arena emoldurada, Cânions ramificados e Rios gêmeos. Medidos do mesmo jeito que os mapas feitos à mão: cerca de 2/3 do mapa plano, em 3 a 5 níveis, e uns 100 pontos de massa num mapa de 8 jogadores. Também dá para pedir em Descreva o mapa: \"competitivo\", \"degraus\", \"moldura\", \"massa espalhada\".", page: "create" },
+      { icon: "smart_toy", title: "Marcadores para a IA", text: "Todo mapa montado pelo Estúdio sai com os marcadores que a IA do jogo usa, como nos mapas feitos à mão: caminhos por terra e pelo ar, áreas de expansão nos pontos de massa, pontos de defesa e de encontro, zonas de combate, alvos de ataque e um lugar protegido para experimentais atrás de cada base.", page: "create" },
+      { icon: "waves", title: "Rios com muitos jogadores", text: "Com 8 jogadores ou mais, os rios, cânions e serras não eram criados (não cabiam longe das bases). Agora passam entre as fileiras de bases, como nos mapas feitos à mão.", page: "create" },
+    ],
+  },
+  {
     version: "0.52.0",
     title: "HUD nova, sem nevasca e minigames melhores",
     items: [
