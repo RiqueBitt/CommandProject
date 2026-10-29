@@ -64,15 +64,15 @@ local UNITS = {
     { aaLand = 'uul0105', fighter = 'uua0101', bomber = 'uua0102', arty = 'uul0102', tank = 'uul0101', ship = 'uus0102',
       factory = 'uub0001', tower = 'uub0101', aatower = 'uub0102', shield = 'uub0202',
       airfactory = 'uub0002', energy = 'uub0702', research = 'uub0801', artillery = 'uub0105', radar = 'uub0301', engineer = 'uul0002',
-      navalfactory = 'uub0003', expfactory = 'uub0011', transport = 'uua0901' },
+      navalfactory = 'uub0003', expfactory = 'uub0011', transport = 'uua0901', acu = 'uul0001', pod = 'uum0001', escape = 'UCA_ESCAPEPOD' },
     { aaLand = false, fighter = 'uca0104', bomber = 'uca0104', arty = 'ucl0102', tank = 'ucl0103', ship = 'ucs0103',
       factory = 'ucb0001', tower = 'ucb0101', aatower = 'ucb0102', shield = 'ucb0202',
       airfactory = 'ucb0002', energy = 'ucb0702', research = 'ucb0801', artillery = 'ucb0105', radar = 'ucb0303', engineer = 'ucl0002',
-      navalfactory = 'ucb0003', expfactory = 'ucb0011', transport = false },
+      navalfactory = 'ucb0003', expfactory = 'ucb0011', transport = false, acu = 'ucl0001', pod = 'ucm0001', escape = 'CCA_ESCAPEPOD' },
     { aaLand = 'uil0105', fighter = 'uia0104', bomber = 'uia0104', arty = 'uil0104', tank = 'uil0101', ship = false,
       factory = 'uib0001', tower = 'uib0101', aatower = 'uib0102', shield = 'uib0202',
       airfactory = 'uib0002', energy = 'uib0702', research = 'uib0801', artillery = false, radar = 'uib0301', engineer = 'uil0002',
-      navalfactory = false, expfactory = 'uib0011', transport = false },
+      navalfactory = false, expfactory = 'uib0011', transport = false, acu = 'uil0001', pod = 'uim0001', escape = 'ICA_ESCAPEPOD' },
 }
 
 -- shared by every AI commander in the match (allies coordinate through it)
@@ -94,7 +94,8 @@ local function Categories()
         air = Cat('MOBILE AIR -ENGINEER -TRANSPORTATION'),
         transport = Cat('MOBILE AIR TRANSPORTATION'),
         engineer = Cat('MOBILE ENGINEER -COMMAND'),
-        acu = Cat('COMMAND'),
+        acu = Cat('COMMAND -ESCAPEPOD'),
+        pod = Cat('ESCAPEPOD'),
         mobile = Cat('MOBILE'),
         enemyAir = Cat('AIR'),
         naval = Cat('NAVAL'),
@@ -346,7 +347,7 @@ local function Snapshot()
                     local pos = u:GetPosition()
                     local key = SnapKey(pos[1], pos[3])
                     local isAir = Is(c.enemyAir, u)
-                    local engineer = Is(c.engineerAny, u) and not Is(c.acu, u)
+                    local engineer = Is(c.engineerAny, u) and not Is(c.acu, u) and not Is(c.pod, u)
                     local p = engineer and 0 or Power(u)
                     local ap = AirPower(u)
                     local info = { u = u, pos = pos, p = p, ap = ap, air = isAir,
@@ -2326,10 +2327,17 @@ local DISTRICT_PLANS = {
     harbor = {
         { 'navalfactory', 24, 0 }, { 'tower', 0, -16 }, { 'aatower', 0, 16 }, { 'shield', -10, 0 }, { 'tower', 12, 28 },
     },
+    -- resurrection: a hidden base far from the main one, where the escape pod rebuilds the ACU and
+    -- the army goes on if the main base falls (no radar: nothing that gives it away)
+    refuge = {
+        { 'shield', 0, 0 }, { 'factory', -16, 0 }, { 'tower', 18, -12 }, { 'tower', 18, 12 }, { 'aatower', 8, 20 },
+        { 'aatower', 8, -20 }, { 'energy', -24, 18 }, { 'shield', -14, -16 }, { 'tower', 0, 28 }, { 'tower', 0, -28 },
+        { 'energy', -24, -18 }, { 'airfactory', -34, 0 }, { 'aatower', -18, 30 }, { 'shield', 14, 0 },
+    },
 }
 -- a narrow passage in front of a bastion gets a line of towers across it
 local CHOKE_LINE = { { 'tower', 34, -18 }, { 'tower', 36, 0 }, { 'tower', 34, 18 } }
-local ROLE_LABEL = { bastion = 'bastiao', workshop = 'oficina', rear = 'retaguarda', forge = 'forja', harbor = 'porto', inner = 'segunda linha' }
+local ROLE_LABEL = { bastion = 'bastiao', workshop = 'oficina', rear = 'retaguarda', forge = 'forja', harbor = 'porto', inner = 'segunda linha', refuge = 'ressurreicao' }
 local COMPASS = { 'leste', 'sudeste', 'sul', 'sudoeste', 'oeste', 'noroeste', 'norte', 'nordeste' }
 
 local function MapSize()
@@ -2440,7 +2448,7 @@ function Commander.PlanDistricts(self)
     local hard = self.difficulty >= 3 or CFG.level >= 2
     local want = (hard and 10 or 7) + math.floor((Commander.Gene(self, 'expansion') - 1) * 4 + 0.5)
     local planned = 0
-    for _, d in districts do if d.role ~= 'inner' then planned = planned + 1 end end
+    for _, d in districts do if d.role ~= 'inner' and d.role ~= 'refuge' then planned = planned + 1 end end
     if planned >= want then return districts end
     -- districts of allied AIs: their land
     local claimed = {}
@@ -2558,7 +2566,7 @@ function Commander.PlanDistricts(self)
         end
     end
     -- bastions first (they protect the rest), then workshops, harbors, the rear and the forge
-    local order = { bastion = 1, inner = 2, workshop = 3, harbor = 4, rear = 5, forge = 6 }
+    local order = { bastion = 1, inner = 2, workshop = 3, harbor = 4, rear = 5, forge = 6, refuge = 7 }
     table.sort(districts, function(a, b)
         if order[a.role] ~= order[b.role] then return order[a.role] < order[b.role] end
         if a.island ~= b.island then return not a.island end
@@ -2573,7 +2581,7 @@ function Commander.Builders(self, want)
     local c = Categories()
     local list, free = {}, {}
     for _, e in ipairs(Commander.List(self, c.engineer)) do
-        if Ready(e) then
+        if Ready(e) and not e.CPSleeper then
             if e.CPBuilder then table.insert(list, e) else table.insert(free, e) end
         end
     end
@@ -2642,6 +2650,7 @@ function Commander.Districts(self, threatPos)
     if not self.districts or Commander.Cooldown(self, 'plan', 150) then Commander.PlanDistricts(self) end
     local districts = self.districts or {}
     if table.getn(districts) == 0 then return end
+    Commander.Refuge(self)
     Commander.CheckDistricts(self)
     local hard = self.difficulty >= 3 or CFG.level >= 2
     -- one more district open every 1.5 to 2 minutes
@@ -2660,13 +2669,17 @@ function Commander.Districts(self, threatPos)
                 local d = districts[i]
                 local plan = PlanOf(d)
                 -- districts open one by one (an island one as soon as its engineer lands)
-                local isOpen = i <= open or d.island
+                local isOpen = i <= open or d.island or d.role == 'refuge'
                 -- an engineer flown to an island only builds there (and only it builds there)
                 local here = (d.island and eng.CPIsland == d.name) or (not d.island and not eng.CPIsland)
                 local ready = d.role ~= 'forge' or t >= 600 / Commander.Gene(self, 'tech') or self.forgeNow
                 if isOpen and here and ready and d.step <= table.getn(plan) and d.tries < 6 and (not threatPos or Dist(threatPos, d.pos) > 90)
                     and Commander.MobileDanger(self, d.pos, 60) < 3 then
-                    if not pick or d.step < pick.step then pick = d end
+                    -- without the ACU (or with the main base falling) the resurrection base comes first
+                    local better = not pick or d.step < pick.step
+                    if self.refugeFirst and pick and pick.role == 'refuge' then better = false end
+                    if self.refugeFirst and d.role == 'refuge' then better = true end
+                    if better then pick = d end
                 end
             end
             if pick then
@@ -2763,6 +2776,285 @@ function Commander.IslandHop(self, builders)
     ForkThread(IslandThread, self, eng, tr, Toward(d.pos, self.home, 10), d)
 end
 
+-- ---------------------------------------------------------------- resurrection and hidden builders
+-- A hidden base far from the main one ("ressurreicao"): heavy defenses, a factory and no radar, on
+-- ground the enemy does not walk (away from its routes and from where our units died). The ACU
+-- researches the escape pod and, about to die, ejects it: the pod flies there and builds a new ACU.
+-- A few engineers wait hidden on the map (on land and, with sea on the map, on the water); if the
+-- main base falls they wake up and rebuild (at home when it is clear, or right where they are).
+
+-- a place nobody visits: far from every enemy home (and closer to ours), off the enemy's routes,
+-- away from the places where our units died and from the other hidden spots
+function Commander.HiddenSpot(self, opts)
+    local W, H = MapSize()
+    local home = self.home
+    local scale = math.max(0.6, math.min(1.6, math.min(W, H) / 1024))
+    local enemies = Commander.EnemyHomes(self)
+    local M = CPAI.model
+    local route = M and M.route or {}
+    local best, bestS = false, -1e9
+    local N = 16
+    for i = 1, N do
+        for j = 1, N do
+            local x, z = W * (i - 0.5) / N, H * (j - 0.5) / N
+            local p = Point(x, z)
+            local dh = Dist(p, home)
+            local wet = IsWater(x, z)
+            local ok = dh >= (opts.minHome or 120) * scale and dh <= (opts.maxHome or 600) * scale
+                and x > 24 and z > 24 and x < W - 24 and z < H - 24
+            if opts.water then ok = ok and wet else ok = ok and not wet end
+            local de = 1e9
+            for _, e in enemies do
+                local d = Dist(p, e)
+                if d < de then de = d end
+                if d < dh * 1.3 then ok = false end
+            end
+            for _, q in (opts.avoid or {}) do
+                if q and Dist(p, q) < 90 * scale then ok = false end
+            end
+            local rough = 0
+            if ok and opts.flat then
+                rough = Roughness(x, z, 20 * scale)
+                if rough >= 7 then ok = false end
+            end
+            if ok then
+                local key = CellKey(p)
+                -- the corners and edges of the map are out of the way
+                local edge = math.min(x, z, W - x, H - z)
+                local score = math.min(de, 900) * 0.01 - dh * 0.003 - edge * 0.004 - rough * 0.1
+                    - (route[key] or 0) * 0.4 - (self.kills[key] or 0) * 0.5 + MapMemory(key) * 0.3
+                if Commander.Danger(self, p, 60) > 0 then score = score - 3 end
+                if score > bestS then best, bestS = p, score end
+            end
+        end
+    end
+    return best
+end
+
+local function Researched(brain, name)
+    if not name then return false end
+    local ok, r = pcall(brain.HasResearched, brain, name)
+    return ok and r
+end
+
+-- plans the resurrection base (once, after the first minutes) and asks for the escape pod
+function Commander.Refuge(self)
+    local t = Now()
+    local hard = self.difficulty >= 3 or CFG.level >= 2
+    if t < (hard and 330 or 420) then return end
+    if t >= (hard and 420 or 540) then Commander.Want(self, { self.units.escape }, 'capsula de fuga do comandante') end
+    for _, d in (self.districts or {}) do if d.role == 'refuge' then return end end
+    if not Commander.Cooldown(self, 'refuge', 90) then return end
+    local avoid = {}
+    for _, d in (self.districts or {}) do table.insert(avoid, d.pos) end
+    local spot = Commander.HiddenSpot(self, { flat = true, minHome = 170, maxHome = 520, avoid = avoid })
+    if not spot then return end
+    local fx, fz = 1, 0
+    local enemy = Commander.NearestEnemyStart(self)
+    if enemy then
+        local dd = math.max(1, Dist(spot, enemy))
+        fx, fz = (enemy[1] - spot[1]) / dd, (enemy[3] - spot[3]) / dd
+    end
+    table.insert(self.districts, { pos = spot, role = 'refuge', step = 1, tries = 0, fx = fx, fz = fz, hidden = true, name = 'ressurreicao' })
+    Commander.Note(self, 'planejou a base de ressurreicao, escondida longe da principal')
+end
+
+function Commander.RefugePos(self)
+    for _, d in (self.districts or {}) do
+        if d.role == 'refuge' then return d.pos, d.step > 2 end
+    end
+    return false, false
+end
+
+-- the escape pod ability, as the game's own button does it (without taking the player's selection)
+function Commander.Eject(self, acu)
+    self.hadAcu = true
+    if acu.Ejected or not Researched(self.brain, self.units.escape) then return false end
+    local ok = pcall(function()
+        local bp = acu:GetBlueprint()
+        local pod = CreateUnitAtBone(bp.EscapePod.EscapePodUnitId, acu:GetArmy(), acu, bp.EscapePod.EscapePodAttachBone)
+        acu.Ejected = true
+        pcall(acu.SetCustomName, acu, '')
+        pcall(acu.HideBone, acu, bp.EscapePod.EscapePodAttachBone, true)
+        if acu.DeathWeaponEnabled then
+            acu:SetDeathWeaponEnabled(false)
+        elseif pod then
+            pod:SetDeathWeaponEnabled(false)
+        end
+        acu:Kill()
+    end)
+    if ok then
+        self.refugeFirst = true
+        self.tally.ejected = (self.tally.ejected or 0) + 1
+        Commander.Note(self, 'comandante quase destruido: lancou a capsula de fuga')
+        self.plan = 'capsula de fuga'
+    end
+    return ok
+end
+
+-- the pod flies to the resurrection base (or the safest place) and builds a new ACU there
+function Commander.Pod(self)
+    local pods = Commander.List(self, Categories().pod)
+    local acu = Commander.List(self, Categories().acu)[1]
+    if acu and not Ready(acu) then acu = false end
+    self.podAlive = table.getn(pods) > 0
+    if acu then
+        self.hadAcu = true
+        if self.acuLost then
+            self.acuLost = false
+            self.refugeFirst = false
+            -- reborn far from a home in ruins: it stays at the resurrection base for now
+            if Dist(acu:GetPosition(), self.home) > 100 then self.acuAnchor = acu:GetPosition() end
+            Commander.Note(self, 'comandante reconstruido')
+        end
+        if self.acuAnchor and Standing(self, self.home, 60) >= 5 and Commander.MobileDanger(self, self.home, 80) < 2 then
+            self.acuAnchor = false
+        end
+        return
+    end
+    if not self.acuLost and self.hadAcu then
+        self.acuLost = true
+        self.refugeFirst = true
+        if table.getn(pods) == 0 then
+            Commander.Note(self, 'comandante destruido: a base de ressurreicao e os construtores continuam')
+        end
+    end
+    for _, pod in ipairs(pods) do
+        if Ready(pod) then
+            if not pod.CPPlatoon then
+                pod.CPPlatoon = true
+                local ok, p = pcall(self.brain.MakePlatoon, self.brain, '', '')
+                if ok and p then pcall(self.brain.AssignUnitsToPlatoon, self.brain, p, { pod }, 'Support', 'None') end
+            end
+            local pos = pod:GetPosition()
+            local refuge, ready = Commander.RefugePos(self)
+            local goal = pod.CPGoal
+            if not goal then
+                goal = (ready and refuge) or Commander.HiddenSpot(self, { flat = true, minHome = 0, maxHome = 900 }) or self.home
+                pod.CPGoal = goal
+                pcall(IssueClearCommands, { pod })
+                Order({ pod }, 'move', goal)
+                Commander.Note(self, 'capsula voando para ' .. ((ready and refuge) and 'a base de ressurreicao' or 'um lugar escondido'))
+            end
+            local okb, building = pcall(pod.IsUnitState, pod, 'Building')
+            if Dist(pos, goal) < 30 and Commander.MobileDanger(self, pos, 45) >= 2 and not (okb and building) then
+                -- the hiding place was found: another one
+                pod.CPGoal = Commander.HiddenSpot(self, { flat = true, minHome = 0, maxHome = 900, avoid = { pos } }) or self.home
+                pcall(IssueClearCommands, { pod })
+                Order({ pod }, 'move', pod.CPGoal)
+            elseif Dist(pos, goal) < 20 and not (okb and building) and Commander.Cooldown(self, 'podbuild', 10) then
+                local spot = Toward(goal, self.home, 6)
+                if pcall(IssueBuildMobile, { pod }, spot, self.units.acu, {}) then
+                    self.plan = 'reconstruindo o comandante'
+                    Commander.Note(self, 'capsula reconstruindo o comandante')
+                end
+            end
+        end
+    end
+end
+
+-- engineers hidden on the map; they wake up when the main base falls
+function Commander.Sleepers(self)
+    if not CFG.build then return end
+    local t = Now()
+    local hard = self.difficulty >= 3 or CFG.level >= 2
+    if t < (hard and 300 or 360) or not Commander.Cooldown(self, 'sleepers', 8) then return end
+    local c = Categories()
+    local factories = 0
+    for _, f in ipairs(Commander.List(self, c.factory)) do if Ready(f) then factories = factories + 1 end end
+    local engineers = Commander.List(self, c.engineer)
+    self.sleepers = self.sleepers or {}
+    local S = self.sleepers
+    -- the main base fell (or the ACU is gone with the home in ruins): everybody up
+    local ruined = factories == 0 or (self.acuLost and Standing(self, self.home, 60) < 3)
+    if ruined then
+        local woke = 0
+        for _, slot in S do
+            local e = slot.unit
+            if e and Alive(e) and e.CPSleeper then
+                e.CPSleeper = nil
+                e.CPJob = nil
+                woke = woke + 1
+                local where = (Commander.MobileDanger(self, self.home, 80) < 3 and self.home) or e:GetPosition()
+                Commander.Build(self, self.units.factory, where, true, e)
+            end
+            slot.unit = false
+        end
+        if woke > 0 then
+            self.wokeAt = t
+            self.refugeFirst = true
+            self.tally.woke = (self.tally.woke or 0) + woke
+            Commander.Note(self, 'base destruida: ' .. woke .. ' construtor(es) escondido(s) sairam para reconstruir')
+            self.plan = 'reconstruindo a base'
+        end
+        return
+    end
+    if self.wokeAt and t - self.wokeAt < 180 then return end
+    -- the slots: one on land per difficulty level, one on the water when the map has sea
+    if table.getn(S) == 0 then
+        table.insert(S, { water = false })
+        if hard then table.insert(S, { water = false }) end
+        if CPAI.WaterShare and CPAI.WaterShare() > 0.08 then table.insert(S, { water = true }) end
+    end
+    -- a builder is only put to sleep when the others are enough for the work
+    local awake = 0
+    for _, e in ipairs(engineers) do if Ready(e) and not e.CPSleeper then awake = awake + 1 end end
+    for _, slot in S do
+        local e = slot.unit
+        if e and not Alive(e) then
+            slot.unit, slot.spot = false, false
+            e = false
+            if Commander.Cooldown(self, 'sleeperlost', 60) then Commander.Note(self, 'um construtor escondido foi achado') end
+        end
+        if not e and awake >= 3 then
+            -- the nearest idle engineer that is not doing anything for the commander
+            local pick, pickD = false, 0
+            for _, u in ipairs(engineers) do
+                local oki, idle = pcall(u.IsIdleState, u)
+                if Ready(u) and not u.CPSleeper and not u.CPBuilder and not u.CPIsland and not u.CPFlying
+                    and not (u.CPJob and u.CPJob > t) and oki and idle then
+                    local d = Dist(u:GetPosition(), self.home)
+                    if not pick or d < pickD then pick, pickD = u, d end
+                end
+            end
+            if pick then
+                local avoid = { (Commander.RefugePos(self)) }
+                for _, o in S do if o.spot then table.insert(avoid, o.spot) end end
+                local spot = Commander.HiddenSpot(self, { water = slot.water, minHome = 110, maxHome = 480, avoid = avoid })
+                if spot then
+                    pick.CPSleeper = true
+                    pick.CPJob = t + 1e6
+                    slot.unit, slot.spot = pick, spot
+                    awake = awake - 1
+                    if not self.sleeperPlatoon then
+                        local ok, p = pcall(self.brain.MakePlatoon, self.brain, '', '')
+                        self.sleeperPlatoon = ok and p or false
+                    end
+                    if self.sleeperPlatoon then pcall(self.brain.AssignUnitsToPlatoon, self.brain, self.sleeperPlatoon, { pick }, 'Support', 'None') end
+                    pcall(IssueClearCommands, { pick })
+                    Order({ pick }, 'move', spot)
+                    Commander.Note(self, 'escondeu um construtor ' .. (slot.water and 'na agua' or 'em terra') .. ' para reconstruir a base')
+                elseif slot.water then
+                    slot.water = false
+                end
+            end
+        elseif e then
+            local pos = e:GetPosition()
+            if Commander.MobileDanger(self, pos, 45) >= 2 then
+                -- seen: another hiding place
+                local spot = Commander.HiddenSpot(self, { water = slot.water, minHome = 110, maxHome = 480, avoid = { pos, slot.spot } })
+                if spot then
+                    slot.spot = spot
+                    pcall(IssueClearCommands, { e })
+                    Order({ e }, 'move', spot)
+                end
+            elseif Dist(pos, slot.spot) > 25 and Commander.Cooldown(self, 'sleepermove', 30) then
+                Order({ e }, 'move', slot.spot)
+            end
+        end
+    end
+end
+
 -- ---------------------------------------------------------------- the main base and the economy
 -- shields over the factory blocks (two layers over the big ones), anti-air between the districts,
 -- more factories when mass piles up and generators when energy runs short
@@ -2793,7 +3085,7 @@ function Commander.AirNet(self)
     local S = Snapshot()
     local spots = { self.home }
     for _, d in (self.districts or {}) do
-        if d.step > 2 and not d.island then table.insert(spots, d.pos) end
+        if d.step > 2 and not d.island and not d.hidden then table.insert(spots, d.pos) end
     end
     -- the place between two of our spots with the least anti-air
     local worst, worstAA = false, 4
@@ -2965,7 +3257,7 @@ local ACU_LEASH = 100
 -- it comes back and an engineer takes the job (finishes what was started, or the factories make
 -- one); after doing it twice the ACU stops taking jobs from the game and guards home
 function Commander.AcuLeash(self, acu, pos, threatPos)
-    if self.acuFleeing or Dist(pos, self.home) <= ACU_LEASH then return false end
+    if self.acuFleeing or Dist(pos, self.acuAnchor or self.home) <= ACU_LEASH then return false end
     -- helping against an attack at home is allowed
     if self.acuDefending and threatPos and Dist(threatPos, self.home) < 90 then return false end
     if not Commander.Cooldown(self, 'aculeash', 6) then return true end
@@ -2973,7 +3265,7 @@ function Commander.AcuLeash(self, acu, pos, threatPos)
     local okf, focus = pcall(function() return acu:GetFocusUnit() end)
     if okf and focus and Alive(focus) and focus ~= acu then job = focus end
     pcall(IssueClearCommands, { acu })
-    Order({ acu }, 'move', Toward(self.home, pos, 25))
+    Order({ acu }, 'move', Toward(self.acuAnchor or self.home, pos, 25))
     local eng = Commander.Engineer(self, pos, true)
     if eng then
         pcall(IssueClearCommands, { eng })
@@ -3005,18 +3297,21 @@ function Commander.LeadAcu(self, threatPos, threatPower)
     local pos = acu:GetPosition()
     if Commander.AcuLeash(self, acu, pos, threatPos) then return end
     local danger = Commander.MobileDanger(self, pos, 40) + SumAround(Snapshot(), self.enemies, 'towers', pos, 40)
+    -- about to die: the escape pod goes to the resurrection base
+    if f < 0.22 and danger > 0 and Commander.Eject(self, acu) then return end
+    local base = self.acuAnchor or self.home
     if self.acuFleeing then
-        if f > 0.7 or (danger <= 0 and Dist(pos, self.home) < 30) then
+        if f > 0.7 or (danger <= 0 and Dist(pos, base) < 30) then
             self.acuFleeing = false
-        elseif Dist(pos, self.home) > 20 and Commander.Cooldown(self, 'acuflee', 8) then
-            Order({ acu }, 'move', self.home)
+        elseif Dist(pos, base) > 20 and Commander.Cooldown(self, 'acuflee', 8) then
+            Order({ acu }, 'move', base)
         end
         return
     end
     if (f < 0.4 and danger > 3) or (f < 0.6 and danger > Power(acu) * 1.5) then
         self.acuFleeing = true
         self.plan = 'comandante recuando'
-        Order({ acu }, 'move', self.home)
+        Order({ acu }, 'move', base)
         return
     end
     -- early on, a healthy ACU helps defend the base when the army is not enough
@@ -3561,7 +3856,7 @@ function Commander.AirPatrol(self, fighters)
     if table.getn(fighters) == 0 or not Commander.Cooldown(self, 'patrol', 40) then return end
     local route = { self.home }
     for _, d in (self.districts or {}) do
-        if d.step > 2 and table.getn(route) < 5 then table.insert(route, d.pos) end
+        if d.step > 2 and not d.hidden and table.getn(route) < 5 then table.insert(route, d.pos) end
     end
     if table.getn(route) < 2 then return end
     pcall(IssueClearCommands, fighters)
@@ -3800,8 +4095,11 @@ function Commander.MiniMap(self)
     local function at(p) return p and { math.floor(p[1] / W * 1000) / 1000, math.floor(p[3] / H * 1000) / 1000 } or false end
     local list = {}
     for _, d in (self.districts or {}) do
-        local q = at(d.pos)
-        table.insert(list, { q[1], q[2], d.role, d.step > table.getn(PlanOf(d)) })
+        -- the hidden base stays off the map on the screen
+        if not d.hidden then
+            local q = at(d.pos)
+            table.insert(list, { q[1], q[2], d.role, d.step > table.getn(PlanOf(d)) })
+        end
     end
     local main = self.squads.main
     return {
@@ -3834,7 +4132,7 @@ function Commander.Publish(self)
         main = squad('main'), raid = squad('raid'), fleet = squad('fleet'), drop = squad('drop'),
         fighters = squad('fighters'), bombers = squad('bombers'), gunships = squad('gunships'), guard = squad('guard'),
         minUnits = Commander.MinUnits(self),
-        acu = self.acuFleeing and 'recuando' or (self.acuDefending and 'defendendo' or 'na base'),
+        acu = self.acuLost and (self.podAlive and 'capsula de fuga' or 'destruido') or (self.acuFleeing and 'recuando' or (self.acuDefending and 'defendendo' or 'na base')),
         intel = { air = math.floor(self.intel.air), land = math.floor(self.intel.land), naval = math.floor(self.intel.naval) },
         dangers = dangers,
         districts = Commander.DistrictSummary(self),
@@ -3965,6 +4263,7 @@ function Commander.Step(self)
     Commander.LeadGuard(self, threatPos)
     if CFG.air then Commander.LeadAir(self, threatPos) end
     if not Commander.AcuPush(self) then Commander.LeadAcu(self, threatPos, threatPower) end
+    Commander.Pod(self)
     Commander.ProtectEngineers(self)
     Commander.EarlyScout(self)
     Commander.Scout(self)
@@ -3974,6 +4273,7 @@ function Commander.Step(self)
     Commander.ExperimentalRace(self)
     Commander.Bases(self, clusters, threatKey)
     Commander.Districts(self, threatPos)
+    Commander.Sleepers(self)
     Commander.BaseShields(self)
     Commander.AirNet(self)
     Commander.Economy(self)

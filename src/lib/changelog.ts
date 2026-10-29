@@ -6,6 +6,15 @@ export interface Release { version: string; title: string; items: NewsItem[] }
 
 export const CHANGELOG: Release[] = [
   {
+    version: "0.59.0",
+    title: "IA: bairro Ressurreição e construtores escondidos",
+    items: [
+      { icon: "church", title: "Bairro Ressurreição", text: "Depois dos primeiros minutos, a IA planeja uma base escondida longe da principal: em terra plana, longe dos caminhos que você usa e dos lugares onde ela perdeu unidades, mais perto da casa dela do que da sua. A base é muito fortificada (quatro torres, três antiaéreos, três escudos, fábrica de terra e de aviação), não tem radar e não aparece no mapinha do painel. Se o comandante morrer ou a base principal estiver caindo, essa base passa a ser a prioridade dos construtores, e a fábrica dela continua mandando exército para atacar.", page: "mods" },
+      { icon: "rocket_launch", title: "Cápsula de fuga", text: "A IA pesquisa a cápsula de fuga do comandante. Quando ele está quase destruído e sob ataque, a IA lança a cápsula, que voa até o bairro Ressurreição (ou outro lugar escondido) e constrói um comandante novo lá. O comandante novo fica nessa base até a principal ser reconstruída e estar segura.", page: "mods" },
+      { icon: "engineering", title: "Construtores escondidos", text: "A IA esconde engenheiros pelo mapa: um em terra (dois nos níveis difíceis) e um na água quando o mapa tem mar, longe do inimigo e longe uns dos outros. Se forem achados, mudam de esconderijo. Se a base principal for destruída, eles saem e constroem uma fábrica nova: na base, se ela estiver livre, ou ali mesmo onde estavam escondidos. No modo Supremacia e na Guerra Infinita, a IA continua jogando mesmo sem comandante.", page: "mods" },
+    ],
+  },
+  {
     version: "0.58.0",
     title: "IA: comandante seguro e marinha na medida",
     items: [

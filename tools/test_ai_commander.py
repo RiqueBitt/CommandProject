@@ -209,6 +209,7 @@ local function brainOf(index, kind, start)
         end
         return out
     end
+    function b:HasResearched(n) return World.researched and World.researched[n] or false end
     function b:MakePlatoon() return {} end
     function b:PlatoonExists(p) return p ~= nil end
     function b:AssignUnitsToPlatoon(p, units)
@@ -250,6 +251,17 @@ function IssueTransportUnload(transports, pos)
     end
 end
 function IssueRepair(units, target) World.repaired = target end
+function IssueBuildMobile(units, pos, id, _) World.mobileBuilt = { id = id, x = pos[1], z = pos[3] } end
+function CreateUnitAtBone(id, army, parent, bone)
+    local pod = NewUnit(army, 'ESCAPEPOD COMMAND MOBILE AIR ENGINEER', parent.x, parent.z, 2)
+    pod.blueprintId = id
+    return pod
+end
+UnitMT.__index.GetArmy = function(self) return self.army end
+UnitMT.__index.SetCustomName = function(self, n) end
+UnitMT.__index.HideBone = function(self, b, all) end
+UnitMT.__index.SetDeathWeaponEnabled = function(self, on) self.deathWeapon = on end
+UnitMT.__index.Kill = function(self) self.dead = true end
 
 function Last(u)
     local l = World.orders[u.id]
@@ -1343,6 +1355,82 @@ def acu_and_navy():
     check(not s.W.warn and not s2.W.warn, f"sem erros ({s.W.warn} {s2.W.warn})")
 
 
+def resurrection():
+    """Bairro Ressurreição escondido, cápsula de fuga que reconstrói o comandante e construtores
+    escondidos em terra e na água que reconstroem a base."""
+    s = Scenario(build="true", counter="false", adaptive="false", air="false", team="false")
+    new = s.new
+    s.lua.execute("ScenarioInfo = { size = { 1024, 1024 } }")
+    s.lua.execute("ArmyBrains[1].start = { 300, 300 } ArmyBrains[2].start = { 800, 800 }")
+    s.lua.execute("CPAI.commanders[1].home = { 300, 0, 300 }")
+    s.lua.execute("World.sea = function(x, z) return x < 120 end")
+    s.lua.execute("ArmyBrains[1].SkirmishAISystem.ResearchNeeds = {}")
+    fac = new(1, "STRUCTURE FACTORY", 300, 300, 0, {"canBuild": {"uul0002": True}})
+    engs = [new(1, "ENGINEER MOBILE LAND", 305 + i, 300, 0) for i in range(6)]
+    new(2, "STRUCTURE FACTORY", 800, 800, 0)
+    s.W.time = 560
+    s.step(times=3)
+    c = s.g.CPAI.commanders[1]
+    refuge = [d for d in c.districts.values() if d.role == "refuge"]
+    check(len(refuge) == 1 and refuge[0].hidden, "planeja o bairro Ressurreição (escondido)")
+    if refuge:
+        p = refuge[0].pos
+        dh = ((p[1] - 300) ** 2 + (p[3] - 300) ** 2) ** 0.5
+        de = ((p[1] - 800) ** 2 + (p[3] - 800) ** 2) ** 0.5
+        check(dh >= 170 and de > dh * 1.3, f"longe da base principal e mais longe ainda do inimigo ({p[1]:.0f},{p[3]:.0f})")
+        items = refuge[0]["items"]
+        check(items is None or len(items) >= 12, "muito fortificado")
+    needs = list(s.g.ArmyBrains[1].SkirmishAISystem.ResearchNeeds.values())
+    check("UCA_ESCAPEPOD" in needs, f"pesquisa a cápsula de fuga ({needs})")
+    # construtores escondidos: em terra e na água, longe de tudo
+    sleepers = [e for e in engs if e.CPSleeper]
+    check(len(sleepers) >= 2, f"esconde construtores ({len(sleepers)})")
+    wet = [e for e in sleepers if s.lua.eval(f"World.sea({s.last(e).pos[1]}, {s.last(e).pos[3]})")]
+    check(len(wet) >= 1, "um deles fica escondido na água")
+    check(all(((s.last(e).pos[1] - 800) ** 2 + (s.last(e).pos[3] - 800) ** 2) ** 0.5 > 300 for e in sleepers), "longe do inimigo")
+    # a base cai: eles acordam e reconstroem
+    fac.dead = True
+    s.lua.execute("CPAI.commanders[1].cooldowns.sleepers = 0")
+    before = len(s.W.built)
+    s.step()
+    check(not any(e.CPSleeper for e in sleepers), "base destruída: os construtores escondidos acordam")
+    built = [b.id for b in list(s.W.built.values())[before:]]
+    check("uub0001" in built, f"e fazem uma fábrica nova ({built})")
+    j = [str(x.text) for x in c.journal.values()]
+    check(any("construtor(es) escondido(s)" in x for x in j), "diário explica")
+
+    # a cápsula de fuga: o comandante quase morto é ejetado e a cápsula reconstrói ele na Ressurreição
+    s2 = Scenario(build="true", counter="false", adaptive="false", air="false", team="false")
+    s2.lua.execute("ScenarioInfo = { size = { 1024, 1024 } }")
+    s2.lua.execute("World.researched = { UCA_ESCAPEPOD = true }")
+    s2.new(1, "STRUCTURE FACTORY", 50, 50, 0)
+    acu = s2.new(1, "COMMAND MOBILE LAND ENGINEER", 60, 60, 8, {"hp": 40})
+    acu.bp.EscapePod = s2.lua.table_from({"EscapePodUnitId": "uum0001", "EscapePodAttachBone": "head"})
+    acu.DeathWeaponEnabled = True
+    s2.new(2, "MOBILE LAND", 70, 70, 6)
+    s2.W.time = 700
+    s2.lua.execute("table.insert(CPAI.commanders[1].districts or {}, 1, { pos = { 50, 0, 400 }, role = 'refuge', step = 5, tries = 0, fx = 1, fz = 0, hidden = true, name = 'ressurreicao' })")
+    s2.lua.execute("local c = CPAI.commanders[1] if not c.districts then c.districts = { { pos = { 50, 0, 400 }, role = 'refuge', step = 5, tries = 0, fx = 1, fz = 0, hidden = true, name = 'ressurreicao' } } end c.cooldowns.plan = 9999")
+    s2.step()
+    check(acu.dead, "comandante quase destruído lança a cápsula de fuga")
+    pods = [u for u in s2.W.units.values() if u.cats["ESCAPEPOD"] and not u.dead]
+    check(len(pods) == 1 and acu.deathWeapon is False, "a cápsula sai (e o comandante não explode a própria base)")
+    c2 = s2.g.CPAI.commanders[1]
+    s2.step()
+    if pods:
+        o = s2.last(pods[0])
+        check(o is not None and o.kind == "move" and abs(o.pos[3] - 400) < 30, "a cápsula voa para a base de ressurreição")
+        s2.step()
+        s2.lua.execute("CPAI.commanders[1].cooldowns.podbuild = 0")
+        s2.step()
+        mb = s2.W.mobileBuilt
+        check(mb is not None and mb.id == "uul0001", "e reconstrói o comandante lá")
+    check(c2.acuLost and c2.podAlive, "sabe que está sem comandante (e com a cápsula)")
+    j = [str(x.text) for x in c2.journal.values()]
+    check(any("capsula de fuga" in x for x in j), "diário explica a cápsula")
+    check(not s.W.warn and not s2.W.warn, f"sem erros ({s.W.warn} {s2.W.warn})")
+
+
 def panel_plus():
     """O painel mostra o placar, o diário e o mapinha com bairros, ataque e previsão."""
     lua = LuaRuntime(unpack_returned_tuples=True)
@@ -1388,6 +1476,7 @@ def main() -> int:
     alsyper()
     tactics_more()
     acu_and_navy()
+    resurrection()
     panel_plus()
     districts()
     panel()

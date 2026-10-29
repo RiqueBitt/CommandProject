@@ -114,7 +114,7 @@ pub struct AiBuild {
 
 /// Versão do mod da IA: muda quando o comandante ou os ajustes mudam (o launcher monta de novo
 /// sozinho, com as opções salvas, quando a cópia instalada é de outra versão).
-pub const MOD_VERSION: &str = "2.3.0";
+pub const MOD_VERSION: &str = "2.4.0";
 
 const COMMANDER_LUA: &str = include_str!("aimod_commander.lua");
 const PANEL_LUA: &str = include_str!("aimod_panel.lua");
